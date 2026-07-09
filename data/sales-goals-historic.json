@@ -1,0 +1,11 @@
+{
+  "description": "Objetivos mensuales históricos — facturas retail y entregas SOFIA",
+  "months": {
+    "1": { "label": "Enero", "retail": 146, "sofia": 143 },
+    "2": { "label": "Febrero", "retail": 173, "sofia": 167 },
+    "3": { "label": "Marzo", "retail": 131, "sofia": 129 },
+    "4": { "label": "Abril", "retail": 127, "sofia": 124 },
+    "5": { "label": "Mayo", "retail": 130, "sofia": 127 },
+    "6": { "label": "Junio", "retail": 136, "sofia": 132 }
+  }
+}

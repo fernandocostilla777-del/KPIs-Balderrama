@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Contabilidad | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=12" rel="stylesheet"/>
+</head>
+<body class="dashboard-body" data-page="contabilidad">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Contabilidad</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+<div class="top-bar-actions">
+<span id="lastUpdated" class="top-bar-meta"></span>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<section class="section-panel dashboard-section filters-compact">
+<div class="filters-compact-bar">
+<button type="button" class="filter-pill" id="pillPeriod" aria-expanded="false" aria-controls="drawerPeriod">
+<span class="material-symbols-outlined filter-pill__icon">calendar_month</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Periodo</span>
+<span class="filter-pill__value" id="filterPeriodLabel">—</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" class="filter-pill" id="pillPresets" aria-expanded="false" aria-controls="drawerPresets">
+<span class="material-symbols-outlined filter-pill__icon">bolt</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Rango rápido</span>
+<span class="filter-pill__value" id="filterPresetLabel">Mes actual</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" class="filter-pill" id="pillScope" aria-expanded="false" aria-controls="drawerScope">
+<span class="material-symbols-outlined filter-pill__icon">domain</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Alcance</span>
+<span class="filter-pill__value" id="filterScopeLabel">Consolidado</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" id="btnConsultar" class="btn-glass btn-primary filters-compact__action">Consultar</button>
+</div>
+<div id="drawerPeriod" class="filter-drawer hidden" role="region" aria-label="Fechas del periodo">
+<div class="filter-drawer__inner">
+<div class="filter-row filter-row--compact">
+<label><span class="filter-label">Fecha inicio</span><input type="date" id="fechaInicio" class="filter-input"/></label>
+<label><span class="filter-label">Fecha fin</span><input type="date" id="fechaFin" class="filter-input"/></label>
+</div>
+</div>
+</div>
+<div id="drawerPresets" class="filter-drawer hidden" role="region" aria-label="Rangos rápidos">
+<div class="filter-drawer__inner filter-chips filter-chips--drawer">
+<button type="button" class="chip active" data-preset="mes-actual">Mes actual</button>
+<button type="button" class="chip" data-preset="mes-anterior">Mes anterior</button>
+<button type="button" class="chip" data-preset="ultimos-30">Últimos 30 días</button>
+<button type="button" class="chip" data-preset="acumulado-anio">Acumulado del año</button>
+<button type="button" class="chip" data-preset="anio-actual">Año completo</button>
+<button type="button" class="chip" data-preset="anio-anterior">Año anterior</button>
+<button type="button" class="chip" data-preset="ultimo-trimestre">Último trimestre</button>
+<button type="button" class="chip" data-preset="trimestre-actual">Trimestre actual</button>
+</div>
+</div>
+<div id="drawerScope" class="filter-drawer hidden" role="region" aria-label="Sucursal y área">
+<div class="filter-drawer__inner">
+<div class="filter-row filter-row--compact">
+<label><span class="filter-label">Sucursal</span>
+<select id="filtroSucursal" class="filter-input">
+<option value="todos">Consolidado</option>
+<option value="piso">Piso / Casa</option>
+<option value="foraneos">Foráneos</option>
+<option value="cholula">Cholula</option>
+<option value="zacatelco">Zacatelco</option>
+<option value="flotillas">Flotillas</option>
+<option value="casa">Casa</option>
+<option value="suauto">Su Auto</option>
+<option value="intercambios">Intercambios</option>
+</select>
+</label>
+<label><span class="filter-label">Área de negocio</span>
+<select id="filtroArea" class="filter-input">
+<option value="todos">Todas las áreas</option>
+<option value="autosNuevos">Autos nuevos</option>
+<option value="seminuevos">Seminuevos</option>
+<option value="servicio">Servicio</option>
+<option value="refacciones">Refacciones</option>
+<option value="hyp">Hojalatería y pintura</option>
+<option value="postventa">Postventa</option>
+</select>
+</label>
+</div>
+</div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Estados financieros · CON_CTAS</h3>
+<p class="section-subtitle">Balance al corte y estado de resultados desde pólizas contables (GMOFARRIL)</p>
+</section>
+
+<section class="kpi-grid kpi-grid--eeff">
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Ventas netas</span><span class="material-symbols-outlined kpi-icon">receipt_long</span></div>
+<div id="kpiVentasNetas" class="kpi-value money">—</div>
+<p id="kpiVentasNetasSub" class="kpi-subtitle">Ingresos del periodo</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--green" id="kpiCardUtilidadBruta">
+<div class="kpi-card-head"><span class="kpi-title">Utilidad bruta</span><span class="material-symbols-outlined kpi-icon">savings</span></div>
+<div id="kpiUtilidadBruta" class="kpi-value money">—</div>
+<p id="kpiUtilidadBrutaSub" class="kpi-subtitle">Ventas − costo de ventas</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--violet" id="kpiCardUtilidadOperacion">
+<div class="kpi-card-head"><span class="kpi-title">Utilidad operación</span><span class="material-symbols-outlined kpi-icon">query_stats</span></div>
+<div id="kpiUtilidadOperacion" class="kpi-value money">—</div>
+<p id="kpiUtilidadOperacionSub" class="kpi-subtitle">Utilidad bruta − gastos operación y administración</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--amber" id="kpiCardUtilidadPeriodo">
+<div class="kpi-card-head"><span class="kpi-title">Utilidad del periodo</span><span class="material-symbols-outlined kpi-icon">account_balance_wallet</span></div>
+<div id="kpiUtilidadPeriodo" class="kpi-value money">—</div>
+<p id="kpiUtilidadPeriodoSub" class="kpi-subtitle">Resultado contable neto</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--slate">
+<div class="kpi-card-head"><span class="kpi-title">Activo total</span><span class="material-symbols-outlined kpi-icon">domain</span></div>
+<div id="kpiActivoTotal" class="kpi-value money">—</div>
+<p id="kpiActivoTotalSub" class="kpi-subtitle">Posición al cierre</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Pasivo + capital</span><span class="material-symbols-outlined kpi-icon">balance</span></div>
+<div id="kpiPasivoCapital" class="kpi-value money">—</div>
+<p id="kpiPasivoCapitalSub" class="kpi-subtitle">Financiamiento total</p>
+</div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel table-panel">
+<h3 class="section-title">Balance general</h3>
+<p class="section-subtitle">Saldos al cierre del periodo · grupos CON_CONFBALANCEGENERAL</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
+<tbody id="balanceTable"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Estado de resultados contable</h3>
+<p class="section-subtitle">Movimientos acumulados en el rango seleccionado</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
+<tbody id="resultadoTable"></tbody>
+</table>
+</div>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section" id="sectionVtasmen">
+<h3 class="section-title">Estado de resultados · Ventas autos nuevos</h3>
+<p class="section-subtitle">Estructura plantilla B-Pro VTASMEN · Piso, Foráneos, Suauto, Cholula, Zacatelco y Casa</p>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-vtasmen">
+<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
+<tbody id="vtasmenTable"></tbody>
+</table>
+</div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel table-panel">
+<h3 class="section-title">Desglose ingresos contables</h3>
+<p class="section-subtitle">Cuentas de ventas · prefijos 04xx</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
+<tbody id="ingresosEeffTable"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Ratios financieros</h3>
+<p class="section-subtitle">Indicadores derivados del EEFF</p>
+<div id="ratiosEeff" class="kpi-summary"></div>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<h3 class="section-title">Desglose diario de ventas</h3>
+<p class="section-subtitle">Importe de venta, costo neto y utilidad por día · clic en un día para ver unidades</p>
+<div class="table-scroll table-scroll--daily">
+<table class="data-table data-table--daily data-table--selectable">
+<thead>
+<tr>
+<th>Fecha</th>
+<th class="cell-num">Unidades</th>
+<th class="cell-money">Importe venta</th>
+<th class="cell-money">Costo neto</th>
+<th class="cell-money">Utilidad</th>
+<th class="cell-num">Margen %</th>
+</tr>
+</thead>
+<tbody id="dailySalesTable"></tbody>
+<tfoot id="dailySalesFoot"></tfoot>
+</table>
+</div>
+<div id="dailySalesDetail" class="daily-sales-detail hidden" aria-live="polite"></div>
+</section>
+
+</div>
+</main>
+<script src="/js/shared.js"></script>
+<script src="/js/sidebar.js"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/contabilidad.js?v=9"></script>
+</body>
+</html>

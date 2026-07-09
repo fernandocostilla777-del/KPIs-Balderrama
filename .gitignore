@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+data/sales-goals.json
+scripts/*.txt
+scripts/*.xls
+scripts/*.xlsx
+Thumbs.db

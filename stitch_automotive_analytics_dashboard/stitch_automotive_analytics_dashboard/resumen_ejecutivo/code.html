@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AUTOINTEL | Executive Overview</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-container": "#0f172a",
+                    "tertiary-fixed-dim": "#ffafd3",
+                    "on-error-container": "#ffdad6",
+                    "on-primary-fixed-variant": "#3f465c",
+                    "error": "#ffb4ab",
+                    "outline": "#909097",
+                    "primary-fixed-dim": "#bec6e0",
+                    "primary-fixed": "#dae2fd",
+                    "surface-bright": "#2c3a4c",
+                    "tertiary": "#ffafd3",
+                    "surface-container-highest": "#273647",
+                    "on-secondary": "#00354a",
+                    "on-secondary-container": "#00374d",
+                    "surface-dim": "#051424",
+                    "surface-container-low": "#0d1c2d",
+                    "primary": "#bec6e0",
+                    "inverse-on-surface": "#233143",
+                    "inverse-primary": "#565e74",
+                    "surface": "#051424",
+                    "secondary": "#7bd0ff",
+                    "on-tertiary-container": "#cf5497",
+                    "surface-variant": "#273647",
+                    "tertiary-fixed": "#ffd8e7",
+                    "secondary-fixed-dim": "#7bd0ff",
+                    "on-secondary-fixed": "#001e2c",
+                    "surface-container": "#122131",
+                    "surface-container-lowest": "#010f1f",
+                    "on-background": "#d4e4fa",
+                    "on-primary": "#283044",
+                    "tertiary-container": "#360021",
+                    "on-tertiary-fixed": "#3d0026",
+                    "inverse-surface": "#d4e4fa",
+                    "on-primary-fixed": "#131b2e",
+                    "on-secondary-fixed-variant": "#004c69",
+                    "background": "#051424",
+                    "surface-container-high": "#1c2b3c",
+                    "outline-variant": "#45464d",
+                    "surface-tint": "#bec6e0",
+                    "on-surface-variant": "#c6c6cd",
+                    "on-tertiary": "#620040",
+                    "secondary-container": "#00a6e0",
+                    "on-surface": "#d4e4fa",
+                    "on-tertiary-fixed-variant": "#85145a",
+                    "on-error": "#690005",
+                    "error-container": "#93000a",
+                    "on-primary-container": "#798098",
+                    "secondary-fixed": "#c4e7ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "base": "4px",
+                    "sm": "0.5rem",
+                    "xs": "0.25rem",
+                    "xl": "2.5rem",
+                    "sidebar-width": "260px",
+                    "md": "1rem",
+                    "gutter": "1.5rem",
+                    "margin-edge": "2rem",
+                    "lg": "1.5rem"
+            },
+            "fontFamily": {
+                    "body-md": ["Inter"],
+                    "display-lg": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "label-sm": ["JetBrains Mono"],
+                    "headline-lg-mobile": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "label-md": ["JetBrains Mono"],
+                    "headline-lg": ["Inter"],
+                    "body-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "label-sm": ["10px", {"lineHeight": "14px", "letterSpacing": "0.08em", "fontWeight": "500"}],
+                    "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "600"}],
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #051424;
+            color: #d4e4fa;
+            font-family: 'Inter', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0d1c2d;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #45464d;
+        }
+        .data-card {
+            border: 1px solid #334155;
+            background-color: #122131;
+        }
+        .chart-line-gradient {
+            background: linear-gradient(180deg, rgba(123, 208, 255, 0.1) 0%, rgba(123, 208, 255, 0) 100%);
+        }
+    </style>
+</head>
+<body class="overflow-hidden">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full w-sidebar-width bg-surface border-r border-outline-variant z-50 flex flex-col py-lg">
+<div class="px-lg mb-xl">
+<h1 class="font-headline-md text-headline-md font-bold text-on-surface">AUTOINTEL</h1>
+<p class="font-label-md text-label-md text-on-surface-variant opacity-70">BI Dashboard Suite</p>
+</div>
+<nav class="flex-1 space-y-xs">
+<!-- Active: Overview -->
+<a class="flex items-center gap-md border-l-2 border-secondary bg-surface-container-high text-secondary px-lg py-sm transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Overview</span>
+</a>
+<a class="flex items-center gap-md text-on-surface-variant px-lg py-sm hover:bg-surface-variant hover:text-on-surface transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">bar_chart</span>
+<span class="font-label-md text-label-md">Sales</span>
+</a>
+<a class="flex items-center gap-md text-on-surface-variant px-lg py-sm hover:bg-surface-variant hover:text-on-surface transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">inventory_2</span>
+<span class="font-label-md text-label-md">Inventory</span>
+</a>
+<a class="flex items-center gap-md text-on-surface-variant px-lg py-sm hover:bg-surface-variant hover:text-on-surface transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">handshake</span>
+<span class="font-label-md text-label-md">Post-Sales</span>
+</a>
+</nav>
+<div class="mt-auto pt-lg border-t border-outline-variant mx-lg space-y-xs">
+<button class="w-full bg-secondary text-on-secondary py-sm px-md font-label-md text-label-md rounded-lg mb-md hover:opacity-90 transition-opacity">
+                Generate Report
+            </button>
+<a class="flex items-center gap-md text-on-surface-variant py-sm hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+<a class="flex items-center gap-md text-on-surface-variant py-sm hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined">help_outline</span>
+<span class="font-label-md text-label-md">Support</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-sidebar-width h-screen flex flex-col">
+<!-- TopNavBar -->
+<header class="sticky top-0 z-40 flex justify-between items-center h-12 w-full px-lg bg-surface border-b border-outline-variant">
+<div class="flex items-center gap-lg">
+<span class="font-label-md text-label-md uppercase tracking-widest text-on-surface-variant">Executive Overview</span>
+<div class="relative group">
+<span class="absolute inset-y-0 left-0 pl-3 flex items-center text-outline">
+<span class="material-symbols-outlined text-[18px]">search</span>
+</span>
+<input class="bg-surface-container-low border border-outline-variant rounded-full pl-10 pr-4 py-1 text-body-sm font-body-sm w-64 focus:outline-none focus:border-secondary transition-all" placeholder="Search parameters..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-md">
+<button class="text-on-surface-variant hover:text-on-surface scale-95 active:scale-90 transition-transform">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface scale-95 active:scale-90 transition-transform">
+<span class="material-symbols-outlined">history</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface scale-95 active:scale-90 transition-transform">
+<span class="material-symbols-outlined">download</span>
+</button>
+<div class="h-6 w-[1px] bg-outline-variant mx-sm"></div>
+<div class="flex items-center gap-sm">
+<span class="font-label-md text-label-md hidden md:block">Exec. Analyst</span>
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a senior automotive business analyst in a corporate environment. The image features soft, cool-toned lighting with a shallow depth of field, highlighting the analyst's focused expression against a modern, glass-filled office backdrop. The overall aesthetic is clean, sophisticated, and high-end." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCx8ZDyv5vwL21g7J9ZGDnyvSdS1ZDeZ4Jl9-R0P0OwwqzSv0DIFqRdJuIV4GctpCFIHzFD5K-FsLnOEX-uVOKScS04UpZEQbHb6wm2VgLO3CSUsF09ATte97NsQ0dEHCkbQphT70GhoK9BvYTZshDUhS-LC6eBo0Py7tmBU048z0y3mNw07LT2d3wMLAeK1YSw3BwOGht6Zdvo0qzfoTp5_W2Cl-AE0uaNDaWFCkFQE1hTOgoSiErf"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Dashboard Content -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-lg bg-background">
+<!-- KPI Bento Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mb-gutter">
+<!-- KPI 1: Monthly Sales -->
+<div class="data-card p-lg rounded-xl flex flex-col">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Monthly Sales</span>
+<span class="text-secondary material-symbols-outlined">trending_up</span>
+</div>
+<div class="flex items-baseline gap-sm">
+<span class="font-headline-lg text-headline-lg">12,482</span>
+<span class="font-label-sm text-label-sm text-secondary">+8.4%</span>
+</div>
+<div class="mt-auto pt-md">
+<div class="w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-secondary w-[85%]"></div>
+</div>
+<p class="text-[10px] text-on-surface-variant mt-1">Target: 14,500 units</p>
+</div>
+</div>
+<!-- KPI 2: Revenue vs Target -->
+<div class="data-card p-lg rounded-xl flex flex-col">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Revenue</span>
+<span class="text-tertiary material-symbols-outlined">payments</span>
+</div>
+<div class="flex items-baseline gap-sm">
+<span class="font-headline-lg text-headline-lg">$42.8M</span>
+<span class="font-label-sm text-label-sm text-error">-2.1%</span>
+</div>
+<div class="mt-auto pt-md">
+<div class="w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-[94%]"></div>
+</div>
+<p class="text-[10px] text-on-surface-variant mt-1">94% of monthly goal</p>
+</div>
+</div>
+<!-- KPI 3: Fleet Efficiency -->
+<div class="data-card p-lg rounded-xl flex flex-col">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Fleet Efficiency</span>
+<span class="text-secondary material-symbols-outlined">electric_car</span>
+</div>
+<div class="flex items-baseline gap-sm">
+<span class="font-headline-lg text-headline-lg">92.4%</span>
+<span class="font-label-sm text-label-sm text-secondary">+1.2%</span>
+</div>
+<div class="mt-auto pt-md flex items-center gap-xs">
+<div class="w-2 h-2 rounded-full bg-secondary"></div>
+<p class="text-[10px] text-on-surface-variant">Optimal Performance Range</p>
+</div>
+</div>
+<!-- KPI 4: Customer Satisfaction -->
+<div class="data-card p-lg rounded-xl flex flex-col">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">CSAT Index</span>
+<span class="text-secondary material-symbols-outlined">star_rate</span>
+</div>
+<div class="flex items-baseline gap-sm">
+<span class="font-headline-lg text-headline-lg">4.8</span>
+<span class="font-label-sm text-label-sm text-secondary">Stable</span>
+</div>
+<div class="mt-auto pt-md">
+<div class="flex gap-1">
+<span class="material-symbols-outlined text-[14px] text-secondary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[14px] text-secondary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[14px] text-secondary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[14px] text-secondary" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-[14px] text-secondary" style="font-variation-settings: 'FILL' 0.5;">star_half</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Main Charts Row -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter mb-gutter">
+<!-- Large Line Chart: Sales Trends -->
+<div class="lg:col-span-2 data-card rounded-xl overflow-hidden flex flex-col">
+<div class="px-lg py-sm border-b border-outline-variant flex justify-between items-center bg-surface-container-low">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Sales Trends (12 Months)</span>
+<div class="flex gap-md">
+<div class="flex items-center gap-xs">
+<div class="w-2 h-2 rounded-full bg-secondary"></div>
+<span class="text-[10px] font-label-sm">ICE</span>
+</div>
+<div class="flex items-center gap-xs">
+<div class="w-2 h-2 rounded-full bg-tertiary"></div>
+<span class="text-[10px] font-label-sm">EV</span>
+</div>
+</div>
+</div>
+<div class="flex-1 p-lg relative h-64">
+<!-- Chart Mockup with CSS -->
+<div class="absolute inset-x-lg inset-y-lg flex flex-col justify-between">
+<div class="w-full border-t border-outline-variant opacity-10 h-0"></div>
+<div class="w-full border-t border-outline-variant opacity-10 h-0"></div>
+<div class="w-full border-t border-outline-variant opacity-10 h-0"></div>
+<div class="w-full border-t border-outline-variant opacity-10 h-0"></div>
+<div class="w-full border-t border-outline-variant opacity-10 h-0"></div>
+</div>
+<div class="relative w-full h-full">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 1000 300">
+<path d="M0,250 Q150,230 250,180 T450,150 T650,120 T850,80 T1000,50" fill="none" stroke="#7bd0ff" stroke-width="3"></path>
+<path d="M0,250 Q150,230 250,180 T450,150 T650,120 T850,80 T1000,50 L1000,300 L0,300 Z" fill="url(#grad1)" opacity="0.2"></path>
+<path d="M0,280 Q100,270 200,240 T400,210 T600,160 T800,120 T1000,90" fill="none" stroke="#ffafd3" stroke-width="3"></path>
+<defs>
+<lineargradient id="grad1" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#7bd0ff;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#7bd0ff;stop-opacity:0"></stop>
+</lineargradient>
+</defs>
+</svg>
+</div>
+<div class="flex justify-between mt-sm font-label-sm text-on-surface-variant text-[10px]">
+<span>JAN</span><span>MAR</span><span>MAY</span><span>JUL</span><span>SEP</span><span>NOV</span>
+</div>
+</div>
+</div>
+<!-- Regional Performance Map -->
+<div class="data-card rounded-xl overflow-hidden flex flex-col">
+<div class="px-lg py-sm border-b border-outline-variant bg-surface-container-low">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Regional Market Share</span>
+</div>
+<div class="flex-1 relative bg-surface-container-lowest">
+<div class="absolute inset-0 flex items-center justify-center p-md">
+<div class="w-full h-full rounded-lg bg-cover bg-center opacity-40 grayscale contrast-125" data-alt="A stylized vector world map in deep midnight blue and slate grey, designed for a high-tech data dashboard. Regional hubs are highlighted with glowing cyan pulses. The lighting is low-key, emphasizing a sophisticated, digital corporate aesthetic with clean lines and minimal detail." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD3vKPykLmC1l80Y4NW9q-aXlm9PvlNnKH32Knj1Pwo0ZXMQgXuRkX0YobNtULNQ1gFdRmtLVa9j17fl6QFDNEd8xG-85Ss1E-dP1eSXzJkhqWb-XVD6QMqrgFK5uAcNt4GfTuqV-_5tSNI7V-z1JOoK_JTA-ryFLzxiMKFIMmn34kOJ-fSDc6EbsbdeTFH1C2BhTVe7sLsH2m-RCtX74k6LHBWNnIHLHKhoIL8dpSDsnLom24pnG5b')"></div>
+</div>
+<!-- Hotspot Indicators -->
+<div class="absolute top-1/4 left-1/4 group cursor-pointer">
+<div class="w-4 h-4 bg-secondary rounded-full animate-ping opacity-75"></div>
+<div class="absolute top-0 w-4 h-4 bg-secondary rounded-full border border-white"></div>
+<div class="hidden group-hover:block absolute top-6 left-1/2 -translate-x-1/2 bg-surface-container-high p-sm border border-outline rounded z-10 whitespace-nowrap">
+<p class="text-label-sm font-label-sm">North America: 32%</p>
+</div>
+</div>
+<div class="absolute top-1/3 left-[48%] group cursor-pointer">
+<div class="w-4 h-4 bg-tertiary rounded-full animate-ping opacity-75"></div>
+<div class="absolute top-0 w-4 h-4 bg-tertiary rounded-full border border-white"></div>
+<div class="hidden group-hover:block absolute top-6 left-1/2 -translate-x-1/2 bg-surface-container-high p-sm border border-outline rounded z-10 whitespace-nowrap">
+<p class="text-label-sm font-label-sm">Europe: 28%</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Lower Section: Table & Insights -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter">
+<!-- Top Models Table -->
+<div class="lg:col-span-2 data-card rounded-xl overflow-hidden">
+<div class="px-lg py-sm border-b border-outline-variant flex justify-between items-center bg-surface-container-low">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase">Top Performing Models</span>
+<button class="text-secondary font-label-sm text-label-sm flex items-center gap-xs">
+                            View All <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left font-body-sm text-body-sm">
+<thead class="bg-surface-container-high border-b border-outline-variant">
+<tr>
+<th class="px-lg py-sm font-label-sm text-on-surface-variant">Model Name</th>
+<th class="px-lg py-sm font-label-sm text-on-surface-variant">Units Sold</th>
+<th class="px-lg py-sm font-label-sm text-on-surface-variant">Inventory</th>
+<th class="px-lg py-sm font-label-sm text-on-surface-variant">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<tr class="hover:bg-surface-variant transition-colors">
+<td class="px-lg py-md flex items-center gap-sm">
+<div class="w-10 h-6 bg-surface-container rounded overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A sleek, modern electric sedan in metallic silver, presented in a minimalist studio environment with sharp, professional lighting. The aesthetic is clean and corporate, highlighting the vehicle's aerodynamic profile and high-end automotive design language." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6RMv15Il4LJino0AuLVo_wegyj-9gcwQQ6UG-_U1wTonD2PJuTEoWv3PnMkgRKY5HcQog_KO6q6pEiP2EuIfkrlv2NdY3ftV3wWm4e2i27o37Qq8ERfSxds7AWnMg9HPkc-vrtSrbedgtFQiE4JJEeTr-a23_hp2SlldJkhMEmbwMvfD4Kz0vkfMAY2elWmKFBWhkwUnFZp3Vfl0E_igO8AtmDNNEisiIBBcdhM9tDS2KA2JRXV3B"/>
+</div>
+<span>Solaris EV-X</span>
+</td>
+<td class="px-lg py-md font-label-md">3,120</td>
+<td class="px-lg py-md">145</td>
+<td class="px-lg py-md">
+<span class="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-bold">HIGH DEMAND</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-variant transition-colors">
+<td class="px-lg py-md flex items-center gap-sm">
+<div class="w-10 h-6 bg-surface-container rounded overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A robust, luxury SUV in deep charcoal grey, showcased in a sophisticated dark studio. The lighting emphasizes the car's powerful silhouette and premium chrome accents, reflecting a high-performance, authoritative automotive brand style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDZOGP15NPEkr2l2IoqVuMciFoi0i8-FWgI0Nw08Nf7G7a4MBtwDPSbbY6D5NXio2st0Pwe1yabEBNIxZ-ApynOZld_ufVILBwiA0xiynObmCEje4Wjfchvhd05WPj7XfQEwvL9iJuy8NwyY7TtHi2qJbR4_O97JwAO1kEkGs7VVZABKBp8IKV7xVjJdM3Lvtufnze23MojMPAQzUFUwURu7rcoId0w-bsJ1xdOoRMV4TnsBZuuTCZq"/>
+</div>
+<span>Titan G7 SUV</span>
+</td>
+<td class="px-lg py-md font-label-md">2,845</td>
+<td class="px-lg py-md">412</td>
+<td class="px-lg py-md">
+<span class="px-2 py-0.5 rounded-full bg-outline-variant text-on-surface-variant text-[10px] font-bold">STABLE</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-variant transition-colors">
+<td class="px-lg py-md flex items-center gap-sm">
+<div class="w-10 h-6 bg-surface-container rounded overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A compact city hatchback in vibrant electric blue, captured with dynamic, bright lighting in a modern urban architectural setting. The style is fresh, sleek, and technologically advanced, suitable for a professional automotive intelligence dashboard." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfTmgtjgvhmfkmFoeF26hX30Yll9qZDC6a-4pYxF34gbDTPBiN4Vg43QdA_9EqG4UAYmwh49hf1ZY3_ogGydRraOXpqTjvjVbVpnjtS-hK1xir8dtV7HU2VYa0sHC9RNKt7aG-328yHlGzyNXTXXHKjGhoVs9998cOxZ-1BR6d3nMJ9h47UZ2uv5vHSuP9tLoFKYbsgzzjdOja3O35LdXxAJtxl3kk9Wdb3sU2nF6mcVgye1Qv6_JU"/>
+</div>
+<span>Nebula Compact</span>
+</td>
+<td class="px-lg py-md font-label-md">1,933</td>
+<td class="px-lg py-md">88</td>
+<td class="px-lg py-md">
+<span class="px-2 py-0.5 rounded-full bg-error-container text-on-error-container text-[10px] font-bold">LOW STOCK</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Insights/Atmospheric Component -->
+<div class="data-card rounded-xl p-lg relative overflow-hidden flex flex-col justify-end">
+
+<div class="relative z-10">
+<div class="w-10 h-10 rounded-lg bg-secondary/20 flex items-center justify-center mb-md">
+<span class="material-symbols-outlined text-secondary">psychology</span>
+</div>
+<h3 class="font-headline-md text-headline-md mb-sm">AI Insights</h3>
+<p class="text-body-sm font-body-sm text-on-surface-variant mb-md leading-relaxed">
+                            Market trends suggest a 12% shift towards SUV models in the Northeast region for Q4. Recommend increasing inventory for Titan G7.
+                        </p>
+<button class="flex items-center gap-xs text-secondary font-label-md text-label-md hover:underline">
+                            Read Full Analysis <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Micro-interaction Script -->
+<script>
+        document.querySelectorAll('.data-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                card.style.transform = 'translateY(-2px)';
+                card.style.transition = 'transform 0.2s ease-out';
+                card.classList.add('border-secondary');
+            });
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'translateY(0)';
+                card.classList.remove('border-secondary');
+            });
+        });
+
+        // Simulating some dynamic data updates
+        setInterval(() => {
+            const pings = document.querySelectorAll('.animate-ping');
+            pings.forEach(p => {
+                p.style.opacity = Math.random() > 0.5 ? '0.75' : '0.4';
+            });
+        }, 3000);
+    </script>
+</body></html>

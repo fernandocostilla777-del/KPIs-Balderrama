@@ -1,0 +1,21 @@
+{
+  "name": "kpis-balderrama",
+  "version": "1.0.0",
+  "description": "Dashboard KPIs BALDERRAMA — ventas, contabilidad, inventario y post-venta",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "explore-db": "node scripts/explore-db.js",
+    "test:ventas": "node scripts/test-ventas.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mssql": "^12.7.0"
+  }
+}

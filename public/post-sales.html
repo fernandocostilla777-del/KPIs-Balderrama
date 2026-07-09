@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Post-Venta y Servicio | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=11" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="dashboard-body" data-page="post-sales">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Post-Venta y Servicio</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+<span id="lastUpdated" class="top-bar-meta"></span>
+</header>
+<div class="main-content custom-scrollbar">
+
+<section class="section-panel dashboard-section filters-compact filters-panel">
+<div class="filters-compact-bar">
+<button type="button" class="filter-pill" id="pillPeriod" aria-expanded="false" aria-controls="drawerPeriod">
+<span class="material-symbols-outlined filter-pill__icon">calendar_month</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Periodo</span>
+<span class="filter-pill__value" id="filterPeriodLabel">—</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" class="filter-pill" id="pillPresets" aria-expanded="false" aria-controls="drawerPresets">
+<span class="material-symbols-outlined filter-pill__icon">bolt</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Rango rápido</span>
+<span class="filter-pill__value" id="filterPresetLabel">Mes actual</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" class="filter-pill" id="pillOps" aria-expanded="false" aria-controls="drawerOps">
+<span class="material-symbols-outlined filter-pill__icon">tune</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Criterios</span>
+<span class="filter-pill__value" id="filterOpsLabel">Todos</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" id="btnConsultar" class="btn-glass btn-primary filters-compact__action">Consultar</button>
+</div>
+<div class="filters-header-actions filters-compact-meta">
+<button type="button" id="btnClearFilters" class="btn-glass btn-clear-filters">Limpiar filtros</button>
+<span class="filter-badge" id="filterActiveCount">Sin filtros operativos</span>
+</div>
+<div id="drawerPeriod" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner">
+<div class="filter-row filter-row--compact filter-row-period">
+<label class="filter-field filter-field-date"><span class="filter-label">Desde</span><input type="date" id="fechaInicio" class="filter-input"/></label>
+<label class="filter-field filter-field-date"><span class="filter-label">Hasta</span><input type="date" id="fechaFin" class="filter-input"/></label>
+</div>
+</div>
+</div>
+<div id="drawerPresets" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner filter-chips filter-chips--drawer">
+<button type="button" class="chip" data-preset="mes-actual">Mes actual</button>
+<button type="button" class="chip" data-preset="mes-anterior">Mes anterior</button>
+<button type="button" class="chip" data-preset="ultimos-30">Últimos 30 días</button>
+<button type="button" class="chip" data-preset="acumulado-anio">Acumulado del año</button>
+<button type="button" class="chip" data-preset="anio-anterior">Año anterior</button>
+<button type="button" class="chip" data-preset="ultimo-trimestre">Último trimestre</button>
+<button type="button" class="chip" data-preset="trimestre-actual">Trimestre actual</button>
+</div>
+</div>
+<div id="drawerOps" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner">
+<div class="filter-grid-ops">
+<label class="filter-field"><span class="filter-label">Estatus</span><select id="fStatus" class="filter-select"><option value="">Todos</option></select></label>
+<label class="filter-field"><span class="filter-label">Tipo de orden</span><select id="fTipo" class="filter-select"><option value="">Todos</option></select></label>
+<label class="filter-field"><span class="filter-label">Antigüedad</span><select id="fAntiguedad" class="filter-select"><option value="">Todas</option></select></label>
+<label class="filter-field"><span class="filter-label">Asesor</span><select id="fAsesor" class="filter-select"><option value="">Todos</option></select></label>
+</div>
+<div class="filter-grid-post filter-grid-advanced filter-grid-ops-advanced">
+<label class="filter-span-2"><span class="filter-label">Buscar</span><input id="buscarOrdenes" type="search" placeholder="Orden, cliente, VIN, asesor, factura..." class="filter-input filter-input-wide" autocomplete="off"/></label>
+<label><span class="filter-label">Importe mín.</span><input type="number" id="fImporteMin" class="filter-input" min="0" step="1" placeholder="0"/></label>
+<label><span class="filter-label">Importe máx.</span><input type="number" id="fImporteMax" class="filter-input" min="0" step="1" placeholder="Sin límite"/></label>
+<label class="filter-check"><input type="checkbox" id="fCriticas"/><span>Solo órdenes críticas</span></label>
+<label class="filter-check"><input type="checkbox" id="fPromesa"/><span>Promesa vencida</span></label>
+</div>
+</div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Resumen ejecutivo y finanzas</h3>
+<div class="kpi-summary" id="kpiSummary"></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel table-panel"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
+<div class="section-panel table-panel"><h3 class="section-title">Control de órdenes</h3><p class="section-subtitle">Sin aseguradora · tipo por letra del folio</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Tipo de orden</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody></table></div></div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Antigüedad operativa (abiertas)</h3>
+<p class="section-subtitle">Backlog actual en taller · días desde ingreso a hoy</p>
+<div class="kpi-grid" id="kpiAging"></div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Riesgo y control</h3>
+<div class="kpi-grid" id="kpiRisk"></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel"><h3 class="section-title">Órdenes por estatus</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cStatus"></canvas></div></div></div>
+<div class="section-panel"><h3 class="section-title">Antigüedad de abiertas</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cAging"></canvas></div></div></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel"><h3 class="section-title">Ritmo mensual operativo</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cMonthlyOps"></canvas></div></div></div>
+<div class="section-panel"><h3 class="section-title">Flujo semanal</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cWeekly"></canvas></div></div></div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Estatus por semana de ingreso</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="cStatusWeek"></canvas></div></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel"><h3 class="section-title">Tipo de orden</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cTipo"></canvas></div></div></div>
+<div class="section-panel"><h3 class="section-title">Importe abierto por tipo</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cImporteTipo"></canvas></div></div></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel"><h3 class="section-title">Flujo financiero mensual</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cMonthlyFin"></canvas></div></div></div>
+<div class="section-panel"><h3 class="section-title">Crecimiento mensual facturado</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cGrowth"></canvas></div></div></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel"><h3 class="section-title">Estacionalidad (ticket prom. facturado)</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cSeason"></canvas></div></div></div>
+<div class="section-panel"><h3 class="section-title">Riesgo financiero abierto por antigüedad</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cRiskAging"></canvas></div></div></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel"><h3 class="section-title">Aseguradoras por importe abierto</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cAsegImporte"></canvas></div></div></div>
+<div class="section-panel"><h3 class="section-title">Abiertas por asesor / aseguradora</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cAbiertasAsesor"></canvas></div></div></div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<h3 class="section-title">Órdenes críticas</h3>
+<div class="table-scroll"><table class="data-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Asesor</th><th>Días</th><th>Importe</th><th>Semáforo</th><th>Promesa</th></tr></thead><tbody id="tblCriticas"></tbody></table></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel table-panel"><h3 class="section-title">Productividad por asesor</h3><div class="table-scroll"><table class="data-table"><thead><tr><th>Asesor</th><th>Órdenes</th><th>Facturadas</th><th>Abiertas</th><th>Importe</th></tr></thead><tbody id="tblAsesor"></tbody></table></div></div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<h3 class="section-title">Indicadores financieros mensuales</h3>
+<div class="table-scroll"><table class="data-table"><thead><tr><th>Mes</th><th>Ingresadas</th><th>Facturadas</th><th>Ingresado</th><th>Facturado</th><th>Abierto</th></tr></thead><tbody id="tblFinMes"></tbody></table></div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Detalle operativo</h3>
+<span id="ordersCount" class="top-bar-meta"></span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Orden</th><th>Nombre</th><th>Asesor</th><th>Status</th><th>Tipo</th><th>Semáforo</th>
+<th>Ingreso</th><th>Promesa</th><th>Días</th><th>Importe</th><th>Aseguradora</th><th>Serie</th>
+</tr></thead>
+<tbody id="ordersTable"></tbody>
+</table>
+</div>
+</section>
+
+</div>
+</main>
+<script src="/js/shared.js"></script>
+<script src="/js/postSalesOrderTypes.js"></script>
+<script src="/js/postSalesAnalytics.js"></script>
+<script src="/js/sidebar.js"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/post-sales.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+require('dotenv').config({ override: true });
+const { query } = require('../src/db');
+
+async function main() {
+  const rows = await query(`
+    SELECT TOP 5
+      SER_VEHICULO.VEH_NUMSERIE,
+      SER_VEHICULO.VEH_TIPOAUTO,
+      SER_VEHICULO.VEH_FECREMISION,
+      UNI_CATALOGO.UNC_PRECLISTA,
+      UNI_CATALOGO.UNC_PrecListaPub,
+      SER_VEHICULO.VEH_SIMPPVTA,
+      SER_VEHICULO.VEH_VENTA
+    FROM SER_VEHICULO
+    INNER JOIN UNI_CATACOLOR AS E
+      ON E.COL_CATALOGO = SER_VEHICULO.VEH_CATALOGO
+      AND E.COL_MODELO = SER_VEHICULO.VEH_ANMODELO
+      AND E.COL_TIPO = 'EXTERIOR'
+      AND SER_VEHICULO.VEH_COLOEXTE = E.COL_CLAVE
+    INNER JOIN UNI_CATACOLOR AS I
+      ON I.COL_CATALOGO = SER_VEHICULO.VEH_CATALOGO
+      AND I.COL_MODELO = SER_VEHICULO.VEH_ANMODELO
+      AND I.COL_TIPO = 'INTERIOR'
+      AND SER_VEHICULO.VEH_COLOINTE = I.COL_CLAVE
+    INNER JOIN UNI_CATALOGO
+      ON UNI_CATALOGO.UNC_MODELO = SER_VEHICULO.VEH_ANMODELO
+      AND UNI_CATALOGO.UNC_IDCATALOGO = SER_VEHICULO.VEH_CATALOGO
+    WHERE SER_VEHICULO.VEH_SITUACION IN ('FIS', 'DIS', 'PED', 'PEN', 'SEP', 'DEMO', 'TRAN')
+  `);
+  console.log(JSON.stringify(rows, null, 2));
+  process.exit(0);
+}
+
+main().catch((e) => {
+  console.error(e.message);
+  process.exit(1);
+});

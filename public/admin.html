@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Administración de usuarios | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=13" rel="stylesheet"/>
+</head>
+<body class="dashboard-body" data-page="admin">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Administración de usuarios</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<section class="section-panel dashboard-section">
+<div class="admin-header">
+<div>
+<h2 class="section-title">Usuarios del dashboard</h2>
+<p class="admin-subtitle">Cree y administre cuentas con acceso por rol.</p>
+</div>
+<button type="button" class="btn-glass btn-primary" id="btnNewUser">
+<span class="material-symbols-outlined">person_add</span>
+<span>Nuevo usuario</span>
+</button>
+</div>
+
+<div id="adminMessage" class="admin-message hidden" role="status"></div>
+
+<div class="table-scroll">
+<table class="data-table admin-users-table">
+<thead>
+<tr>
+<th>Usuario</th>
+<th>Rol</th>
+<th>Estado</th>
+<th>Creado</th>
+<th>Acciones</th>
+</tr>
+</thead>
+<tbody id="usersTableBody"></tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section admin-form-panel hidden" id="userFormPanel">
+<h3 class="section-title" id="userFormTitle">Nuevo usuario</h3>
+<form id="userForm" class="admin-form">
+<input type="hidden" id="editUsername" value=""/>
+<label class="admin-field">
+<span>Usuario</span>
+<input type="text" id="formUsername" required autocomplete="off" placeholder="ej. jperez"/>
+</label>
+<label class="admin-field">
+<span>Contraseña</span>
+<input type="password" id="formPassword" autocomplete="new-password" placeholder="Mínimo 8 caracteres"/>
+<p class="admin-hint" id="passwordHint">Obligatoria al crear. Al editar, déjela vacía para no cambiarla.</p>
+</label>
+<label class="admin-field">
+<span>Rol</span>
+<select id="formRole" required></select>
+</label>
+<label class="admin-field admin-field-check hidden" id="activeFieldWrap">
+<span>
+<input type="checkbox" id="formActive" checked/>
+Usuario activo
+</span>
+</label>
+<div class="admin-form-actions">
+<button type="submit" class="btn-glass btn-primary" id="btnSaveUser">Guardar</button>
+<button type="button" class="btn-glass btn-secondary" id="btnCancelUser">Cancelar</button>
+</div>
+</form>
+</section>
+
+</div>
+</main>
+<script src="/js/auth-client.js"></script>
+<script src="/js/shared.js"></script>
+<script src="/js/sidebar.js?v=4"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

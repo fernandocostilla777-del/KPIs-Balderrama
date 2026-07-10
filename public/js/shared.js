@@ -27,7 +27,11 @@ const fmt = {
 };
 
 async function api(path) {
-  const res = await fetch(`/api${path}`);
+  const res = await fetch(`/api${path}`, { credentials: 'same-origin' });
+  if (res.status === 401) {
+    window.location.href = `/login.html?returnUrl=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    throw new Error('Sesión expirada');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || err.error || res.statusText);

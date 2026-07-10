@@ -28,7 +28,7 @@
     const fechaFin = els?.fechaFin?.value;
     if (!fechaInicio || !fechaFin) return;
 
-    const res = await fetch(`/api/ventas/objetivos?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`);
+    const res = await fetch(`/api/ventas/objetivos?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`, { credentials: 'same-origin' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'No se pudieron cargar los objetivos compartidos.');
@@ -80,6 +80,7 @@
     const res = await fetch('/api/ventas/objetivos', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ fechaInicio, fechaFin, retail, sofia }),
     });
     if (!res.ok) {
@@ -801,7 +802,7 @@
     Dashboard.showLoading(true);
 
     try {
-      const response = await fetch(`/api/ventas?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`);
+      const response = await fetch(`/api/ventas?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`, { credentials: 'same-origin' });
       const raw = await response.text();
       let data;
       try {

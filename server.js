@@ -3,11 +3,27 @@ const express = require('express');
 const os = require('os');
 const path = require('path');
 const apiRoutes = require('./src/routes/api');
+const authRoutes = require('./src/routes/auth');
+const { attachSession, requireAuthPage, requireAuthApi } = require('./src/auth/middleware');
+const { isAuthEnabled, readSession } = require('./src/auth/session');
+const { getRole } = require('./src/auth/roles');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const LAN_IP = process.env.LAN_IP || '';
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+const PROTECTED_PAGES = [
+  { route: '/admin.html', file: 'admin.html', pageId: 'admin' },
+  { route: '/', file: 'index.html', pageId: 'overview' },
+  { route: '/sales.html', file: 'sales.html', pageId: 'sales' },
+  { route: '/forecast.html', file: 'forecast.html', pageId: 'forecast' },
+  { route: '/inventory.html', file: 'inventory.html', pageId: 'inventory' },
+  { route: '/contabilidad.html', file: 'contabilidad.html', pageId: 'contabilidad' },
+  { route: '/post-sales.html', file: 'post-sales.html', pageId: 'post-sales' },
+  { route: '/assistant.html', file: 'assistant.html', pageId: 'assistant' },
+];
 
 function getLanAddresses() {
   const nets = os.networkInterfaces();
@@ -29,34 +45,36 @@ function printStartupUrls() {
   getLanAddresses().filter((ip) => ip !== preferred).forEach((ip) => {
     console.log(`  → También:  http://${ip}:${PORT}`);
   });
-  console.log(`  → Sales:    http://${preferred}:${PORT}/sales.html`);
+  console.log(`  → Login:    http://${preferred}:${PORT}/login.html`);
   console.log(`  → API:      http://${preferred}:${PORT}/api/ventas`);
   console.log(`  BD: ${process.env.DB_NAME} @ ${process.env.DB_HOST}`);
+  console.log(`  Auth: ${isAuthEnabled() ? 'activado' : 'desactivado (AUTH_ENABLED=false)'}`);
   console.log('');
   console.log('  Desde otro dispositivo en la misma red, abra la URL "Red LAN".');
   console.log('');
 }
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(attachSession);
 
-app.use('/api', apiRoutes);
-
-app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+app.get('/login.html', (req, res) => {
+  const session = req.session || readSession(req);
+  if (session && isAuthEnabled()) {
+    const home = getRole(session.role)?.homePath || '/';
+    return res.redirect(home);
+  }
+  res.sendFile(path.join(PUBLIC_DIR, 'login.html'));
 });
 
-app.get('/sales.html', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'sales.html'));
-});
+for (const { route, file, pageId } of PROTECTED_PAGES) {
+  app.get(route, requireAuthPage(pageId), (_req, res) => {
+    res.sendFile(path.join(PUBLIC_DIR, file));
+  });
+}
 
-app.get('/forecast.html', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'forecast.html'));
-});
-
-app.get('/assistant.html', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'assistant.html'));
-});
+app.use('/api/auth', authRoutes);
+app.use('/api', requireAuthApi, apiRoutes);
+app.use(express.static(PUBLIC_DIR));
 
 app.use((err, _req, res, _next) => {
   console.error('[API Error]', err.message);

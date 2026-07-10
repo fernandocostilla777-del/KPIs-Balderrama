@@ -8,6 +8,7 @@ const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
 const { getContabilidad } = require('../services/contabilidadService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
+const { isConfigured, runChat, DEFAULT_MODEL } = require('../services/aiAgent');
 
 const router = express.Router();
 
@@ -132,6 +133,46 @@ router.get('/forecast', async (req, res, next) => {
     res.json(await getForecast({ horizon: req.query.horizon }));
   } catch (err) {
     next(err);
+  }
+});
+
+router.get('/ai/status', (_req, res) => {
+  res.json({
+    ok: true,
+    configured: isConfigured(),
+    model: DEFAULT_MODEL,
+    database: process.env.DB_NAME,
+  });
+});
+
+router.post('/ai/chat', async (req, res) => {
+  try {
+    if (!isConfigured()) {
+      return res.status(503).json({
+        error: 'El asistente IA no está configurado. Agrega OPENAI_API_KEY en .env',
+      });
+    }
+
+    const { messages } = req.body || {};
+    if (!Array.isArray(messages) || !messages.length) {
+      return res.status(400).json({ error: 'Se requiere un arreglo messages con al menos un mensaje.' });
+    }
+
+    const sanitized = messages
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content.trim() }))
+      .filter((m) => m.content);
+
+    if (!sanitized.length || sanitized[sanitized.length - 1].role !== 'user') {
+      return res.status(400).json({ error: 'El último mensaje debe ser del usuario.' });
+    }
+
+    const result = await runChat(sanitized);
+    res.json(result);
+  } catch (err) {
+    console.error('[AI Error]', err.message);
+    res.status(500).json({ error: err.message || 'Error en el asistente IA' });
   }
 });
 

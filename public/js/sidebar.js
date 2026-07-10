@@ -6,6 +6,7 @@
     { id: 'inventory', href: '/inventory.html', icon: 'inventory_2', label: 'Inventario' },
     { id: 'contabilidad', href: '/contabilidad.html', icon: 'account_balance', label: 'Contabilidad' },
     { id: 'post-sales', href: '/post-sales.html', icon: 'handshake', label: 'Postventa' },
+    { id: 'assistant', href: '/assistant.html', icon: 'smart_toy', label: 'Asistente IA' },
   ];
   const active = document.body.dataset.page || 'overview';
   const el = document.getElementById('sidebar');

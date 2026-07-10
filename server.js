@@ -54,6 +54,10 @@ app.get('/forecast.html', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'forecast.html'));
 });
 
+app.get('/assistant.html', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'assistant.html'));
+});
+
 app.use((err, _req, res, _next) => {
   console.error('[API Error]', err.message);
   res.status(500).json({ error: 'Error al consultar la base de datos', detail: err.message });

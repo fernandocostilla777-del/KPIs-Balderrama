@@ -3168,3 +3168,191 @@ select.filter-select {
   color: var(--text-secondary);
   font-size: 13px;
 }
+
+/* ── Burbuja flotante Asistente IA ── */
+.ai-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  opacity: 0;
+  transform: translateY(16px) scale(0.92);
+  transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+.ai-fab--visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.ai-fab__trigger {
+  position: relative;
+  flex-shrink: 0;
+  width: 60px;
+  height: 60px;
+  animation: ai-fab-bounce 3s ease-in-out infinite;
+}
+
+.ai-fab__trigger:hover {
+  animation: none;
+}
+
+.ai-fab__btn {
+  position: relative;
+  z-index: 2;
+  width: 60px;
+  height: 60px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #2D5BFF 0%, #9B51E0 100%);
+  color: #fff;
+  box-shadow: 0 8px 28px rgba(45, 91, 255, 0.45), 0 2px 8px rgba(44, 62, 80, 0.12);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.ai-fab__trigger:hover .ai-fab__btn {
+  transform: scale(1.08);
+  box-shadow: 0 12px 36px rgba(45, 91, 255, 0.55);
+}
+
+.ai-fab__btn:active {
+  transform: scale(0.96);
+}
+
+.ai-fab__icon {
+  font-size: 28px;
+  font-variation-settings: 'FILL' 1, 'wght' 500;
+}
+
+.ai-fab__pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 60px;
+  height: 60px;
+  margin-top: -30px;
+  margin-left: -30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(45, 91, 255, 0.4), rgba(155, 81, 224, 0.3));
+  animation: ai-fab-pulse 2.4s ease-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.ai-fab__pulse--delay {
+  animation-delay: 1.2s;
+}
+
+@keyframes ai-fab-pulse {
+  0% { transform: scale(1); opacity: 0.75; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
+@keyframes ai-fab-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.ai-fab__tooltip {
+  position: relative;
+  max-width: 240px;
+  padding: 12px 16px 12px 14px;
+  background: #fff;
+  border-radius: 18px 18px 4px 18px;
+  box-shadow: 0 10px 40px rgba(44, 62, 80, 0.14), 0 2px 8px rgba(44, 62, 80, 0.06);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  cursor: pointer;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  animation: ai-fab-tooltip-in 0.5s ease 0.8s both;
+}
+
+.ai-fab__tooltip--attention {
+  animation: ai-fab-tooltip-wiggle 0.6s ease 0s 2;
+}
+
+.ai-fab__tooltip--hidden {
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+}
+
+.ai-fab__tooltip-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  margin-right: 8px;
+  vertical-align: middle;
+  animation: ai-fab-dot-blink 1.4s ease-in-out infinite;
+}
+
+.ai-fab__tooltip-text {
+  display: inline;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.ai-fab__tooltip-text--out {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@keyframes ai-fab-tooltip-in {
+  from { opacity: 0; transform: translateX(12px) scale(0.95); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes ai-fab-tooltip-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-2deg); }
+  75% { transform: rotate(2deg); }
+}
+
+@keyframes ai-fab-dot-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (max-width: 768px) {
+  .ai-fab {
+    right: 16px;
+    bottom: 16px;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+  }
+
+  .ai-fab__tooltip {
+    max-width: 200px;
+    font-size: 12px;
+    border-radius: 16px 16px 16px 4px;
+  }
+
+  .ai-fab__trigger {
+    width: 54px;
+    height: 54px;
+  }
+
+  .ai-fab__btn {
+    width: 54px;
+    height: 54px;
+  }
+
+  .ai-fab__pulse {
+    width: 54px;
+    height: 54px;
+    margin-top: -27px;
+    margin-left: -27px;
+  }
+}

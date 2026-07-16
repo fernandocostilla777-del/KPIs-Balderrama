@@ -516,9 +516,65 @@ function blocksFromVentasModelo(data) {
   return blocks.filter(Boolean);
 }
 
+function blocksFromVentasPorAuto(data) {
+  const blocks = [];
+  const r = data.resumen;
+  if (!r) return blocks;
+
+  blocks.push(kpiRow('Ventas por auto', [
+    { label: 'Unidades', value: fmtNum(r.totalUnidades), sub: `${fmtNum(r.modelosDistintos)} modelos`, icon: 'directions_car' },
+    { label: 'Venta', value: fmtMoney(r.ventaSubtotal), icon: 'payments' },
+    { label: 'Utilidad', value: fmtMoney(r.utilidad), icon: 'savings' },
+    { label: 'Margen', value: fmtPct(r.margenPct, false), icon: 'percent' },
+  ]));
+
+  if (data.porModelo?.length) {
+    const chart = barChart('Unidades por modelo', data.porModelo.map((m) => ({
+      label: m.modelo,
+      count: m.unidades,
+    })), { horizontal: true });
+    if (chart) blocks.push(chart);
+
+    const table = dataTable(
+      'Desglose por modelo',
+      ['Modelo', 'Unidades', 'Venta', 'Utilidad', 'Margen'],
+      topItems(data.porModelo, 12).map((m) => [
+        m.modelo.length > 35 ? `${m.modelo.slice(0, 35)}…` : m.modelo,
+        fmtNum(m.unidades),
+        fmtMoney(m.ventaSubtotal),
+        fmtMoney(m.utilidad),
+        m.margenPct != null ? fmtPct(m.margenPct, false) : '—',
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (data.unidades?.length) {
+    const table = dataTable(
+      'Detalle por unidad',
+      ['Fecha', 'Modelo', 'Serie', 'Vendedor', 'Venta'],
+      topItems(data.unidades, 10).map((u) => [
+        u.fecha,
+        u.modelo.length > 28 ? `${u.modelo.slice(0, 28)}…` : u.modelo,
+        u.serie,
+        u.vendedor.length > 22 ? `${u.vendedor.slice(0, 22)}…` : u.vendedor,
+        fmtMoney(u.ventaSubtotal),
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (data.nota) {
+    blocks.push(insightCard('info', 'Nota', data.nota));
+  }
+
+  return blocks.filter(Boolean);
+}
+
 const BUILDERS = {
   consultar_ventas_modelo: blocksFromVentasModelo,
   consultar_ventas: blocksFromVentas,
+  consultar_ventas_por_auto: blocksFromVentasPorAuto,
   consultar_resumen_ejecutivo: blocksFromOverview,
   consultar_analytics_ventas: (data) => {
     const blocks = [];

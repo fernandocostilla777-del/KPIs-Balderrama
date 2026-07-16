@@ -10,6 +10,7 @@ const { getGoals } = require('./salesGoals');
 const { loadDailySalesUnits } = require('./ventasNuevosFinanciero');
 const { getVentasPorModelo } = require('./aiVentasModeloService');
 const crmCiclos = require('./crmCiclosService');
+const { getVentasPorAuto } = require('./ventasPorAuto');
 
 const FORBIDDEN_SQL = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE',
@@ -102,6 +103,25 @@ const TOOL_DEFINITIONS = [
         properties: {
           fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD' },
           fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD' },
+        },
+        required: ['fechaInicio', 'fechaFin'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_ventas_por_auto',
+      description: 'Ventas desglosadas por auto/modelo con detalle por unidad: serie VIN, color, vendedor, cliente, fecha, venta, utilidad y margen. Usar cuando pregunten ventas por auto, por modelo, por vehículo o unidades vendidas específicas.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD' },
+          fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD' },
+          modelo: { type: 'string', description: 'Filtro opcional por nombre de modelo (parcial, ej. AVEO, S10, TAHOE)' },
+          serie: { type: 'string', description: 'Filtro opcional por número de serie/VIN (parcial)' },
+          vendedor: { type: 'string', description: 'Filtro opcional por nombre del vendedor (parcial)' },
+          limite: { type: 'number', description: 'Máximo de unidades a devolver (default 50, max 100)' },
         },
         required: ['fechaInicio', 'fechaFin'],
       },
@@ -471,6 +491,9 @@ async function executeTool(name, args = {}) {
       break;
     case 'consultar_ventas':
       result = await getVentas(args);
+      break;
+    case 'consultar_ventas_por_auto':
+      result = await getVentasPorAuto(args);
       break;
     case 'consultar_resumen_ejecutivo':
       result = await getOverview(args);

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Resumen Ejecutivo | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="dashboard-body" data-page="overview">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Resumen Ejecutivo</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+<div class="top-bar-actions">
+<span id="lastUpdated" class="top-bar-meta"></span>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<section class="section-panel dashboard-section filters-compact">
+<div class="filters-compact-bar">
+<button type="button" class="filter-pill" id="pillPeriod" aria-expanded="false" aria-controls="drawerPeriod">
+<span class="material-symbols-outlined filter-pill__icon">calendar_month</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Periodo</span>
+<span class="filter-pill__value" id="filterPeriodLabel">—</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" class="filter-pill" id="pillPresets" aria-expanded="false" aria-controls="drawerPresets">
+<span class="material-symbols-outlined filter-pill__icon">bolt</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Rango rápido</span>
+<span class="filter-pill__value" id="filterPresetLabel">Mes actual</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" id="btnConsultar" class="btn-glass btn-primary filters-compact__action">Consultar</button>
+</div>
+<div id="drawerPeriod" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner">
+<div class="filter-row filter-row--compact">
+<label><span class="filter-label">Fecha inicio</span><input type="date" id="fechaInicio" class="filter-input"/></label>
+<label><span class="filter-label">Fecha fin</span><input type="date" id="fechaFin" class="filter-input"/></label>
+</div>
+</div>
+</div>
+<div id="drawerPresets" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner filter-chips filter-chips--drawer">
+<button type="button" class="chip active" data-preset="mes-actual">Mes actual</button>
+<button type="button" class="chip" data-preset="mes-anterior">Mes anterior</button>
+<button type="button" class="chip" data-preset="ultimos-30">Últimos 30 días</button>
+<button type="button" class="chip" data-preset="acumulado-anio">Acumulado del año</button>
+<button type="button" class="chip" data-preset="anio-actual">Año completo</button>
+<button type="button" class="chip" data-preset="anio-anterior">Año anterior</button>
+<button type="button" class="chip" data-preset="ultimo-trimestre">Último trimestre</button>
+<button type="button" class="chip" data-preset="trimestre-actual">Trimestre actual</button>
+</div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Resumen financiero</h3>
+<p class="section-subtitle">Análisis ejecutivo de ventas · servicio · inventario</p>
+<div class="kpi-summary" id="financialSummary"></div>
+</section>
+<section class="chart-grid-2-1">
+<div class="section-panel">
+<h3 class="section-title">Tendencia de Ventas</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="trendChart"></canvas></div></div>
+</div>
+<div class="section-panel">
+<h3 class="section-title">Ventas por Estado</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="estadoChart"></canvas></div></div>
+</div>
+</section>
+<section class="section-panel table-panel">
+<h3 class="section-title">Modelos principales</h3>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Modelo</th><th>Marca</th><th>Unidades</th><th>Inventario</th><th>Estado</th></tr></thead>
+<tbody id="modelsTable"></tbody>
+</table>
+</div>
+</section>
+</div>
+</main>
+<script src="/js/auth-client.js"></script>
+<script src="/js/shared.js"></script>
+<script src="/js/sidebar.js?v=7"></script>
+<script src="/js/topbar.js?v=3"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/assistant-bubble.js?v=3"></script>
+<script src="/js/overview.js?v=3"></script>
+</body>
+</html>

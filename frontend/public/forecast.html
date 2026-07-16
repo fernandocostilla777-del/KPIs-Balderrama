@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Pronóstico de Ventas | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="dashboard-body" data-page="forecast">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Pronóstico de Ventas</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+<div class="top-bar-actions">
+<label class="filter-label" style="margin:0">Horizonte</label>
+<select id="horizonSelect" class="filter-select">
+<option value="3">3 meses</option>
+<option value="6" selected>6 meses</option>
+<option value="12">12 meses</option>
+</select>
+<button id="btnConsultar" class="btn-glass btn-primary">Actualizar</button>
+<span id="lastUpdated" class="top-bar-meta"></span>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<section class="kpi-grid">
+<div class="kpi-card kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Último mes real</span><span class="material-symbols-outlined kpi-icon">history</span></div>
+<div id="kpiLast" class="kpi-value">—</div>
+<p id="kpiLastLabel" class="kpi-subtitle">Unidades vendidas</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Próximo mes</span><span class="material-symbols-outlined kpi-icon">trending_up</span></div>
+<div id="kpiNext" class="kpi-value">—</div>
+<p id="kpiNextLabel" class="kpi-subtitle">Pronóstico</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title">Total horizonte</span><span class="material-symbols-outlined kpi-icon">calendar_month</span></div>
+<div id="kpiHorizon" class="kpi-value">—</div>
+<p id="kpiHorizonLabel" class="kpi-subtitle">Unidades proyectadas</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--amber">
+<div class="kpi-card-head"><span class="kpi-title">Precisión (MAPE)</span><span class="material-symbols-outlined kpi-icon">verified</span></div>
+<div id="kpiMape" class="kpi-value">—</div>
+<p id="kpiMapeBadge" class="kpi-subtitle">Calidad del ajuste</p>
+<p id="kpiVar" class="kpi-subtitle">vs promedio 12 meses</p>
+<div class="kpi-accent"></div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Histórico vs pronóstico</h3>
+<p id="modelName" class="section-subtitle">Últimos 12 meses + pronóstico</p>
+<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="forecastChart"></canvas></div></div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel">
+<h3 class="section-title">Mix tipo de venta (12m)</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="tipoChart"></canvas></div></div>
+</div>
+<div class="section-panel">
+<h3 class="section-title">Modelos principales (12 meses)</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="modeloChart"></canvas></div></div>
+</div>
+</section>
+
+<section class="chart-grid-2-1">
+<div class="section-panel table-panel">
+<h3 class="section-title">Pronóstico mensual</h3>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Mes</th><th>Unidades</th><th>Rango bajo</th><th>Rango alto</th></tr></thead>
+<tbody id="forecastTable"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel">
+<h3 class="section-title">Notas del modelo</h3>
+<ul id="notesList" class="kpi-subtitle" style="padding-left:18px;line-height:1.7"></ul>
+<p class="kpi-subtitle" style="margin-top:12px">Fuente: <strong id="dataSource">—</strong></p>
+</div>
+</section>
+
+<details class="section-panel table-panel dashboard-section forecast-tech-details">
+<summary class="section-title" style="cursor:pointer">Detalle técnico · mapeo de campos (opcional)</summary>
+<p class="section-subtitle">Referencia Spreadsheet / Colab → SQL GMOFARRIL · no requerido para validación ejecutiva</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Campo origen</th><th>Campo SQL</th><th>Fuente</th><th>Usado en modelo</th></tr></thead>
+<tbody id="mappingTable"></tbody>
+</table>
+</div>
+</details>
+
+</div>
+</main>
+<script src="/js/auth-client.js"></script>
+<script src="/js/shared.js"></script>
+<script src="/js/sidebar.js?v=7"></script>
+<script src="/js/topbar.js?v=3"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/assistant-bubble.js?v=3"></script>
+<script src="/js/forecast.js?v=3"></script>
+</body>
+</html>

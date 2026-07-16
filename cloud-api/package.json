@@ -1,0 +1,17 @@
+{
+  "name": "balderrama-cloud-api",
+  "version": "1.0.0",
+  "description": "API en la nube — sincronización BALDERRAMA (PostgreSQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "init-db": "node scripts/init-db.js"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.16.3"
+  }
+}

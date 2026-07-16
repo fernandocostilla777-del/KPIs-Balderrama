@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Inventario | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="dashboard-body" data-page="inventory">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Gestión de Inventario</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+<div class="top-bar-actions">
+<span id="lastUpdated" class="top-bar-meta"></span>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<nav class="eeff-tabs inventory-main-tabs" id="inventoryMainTabs" aria-label="Tipo de inventario">
+<button type="button" class="eeff-tab active" data-inventory-scope="autos">Autos nuevos</button>
+<button type="button" class="eeff-tab" data-inventory-scope="postventa">Postventa</button>
+</nav>
+
+<div id="panelInventarioAutos">
+
+<section class="kpi-grid" id="autosKpiGrid">
+<button type="button" class="kpi-card kpi-card--blue kpi-card--interactive" id="kpiTotalUnits" data-autos-kpi="total" aria-expanded="false" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Unidades Totales</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
+<div id="sTotal" class="kpi-value">—</div>
+<p class="kpi-subtitle">FIS, DIS, PED, PEN, SEP, DEMO, TRAN</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<button type="button" class="kpi-card kpi-card--green kpi-card--interactive" id="kpiAvailableUnits" data-autos-kpi="available" aria-expanded="false" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Disponibles</span><span class="material-symbols-outlined kpi-icon">check_circle</span></div>
+<div id="sAvail" class="kpi-value">—</div>
+<p id="sAvailSub" class="kpi-subtitle">FIS / DIS / Apartadas (SEP)</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<div class="kpi-card kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Días Prom. Stock</span><span class="material-symbols-outlined kpi-icon">schedule</span></div>
+<div id="sDays" class="kpi-value">—</div>
+<p class="kpi-subtitle">Desde fecha de remisión</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--rose">
+<div class="kpi-card-head"><span class="kpi-title">Unidades envejecidas</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
+<div id="sAlerts" class="kpi-value">—</div>
+<p id="sAlertsSub" class="kpi-subtitle">Físico · 60+ días</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card-anchor" id="kpiPlanPisoWrap">
+<button type="button" class="kpi-card kpi-card--amber kpi-card--interactive" id="kpiPlanPisoCard" aria-haspopup="listbox" aria-expanded="false" aria-controls="planPisoKpiMenu" title="Clic para elegir periodo acumulado">
+<div class="kpi-card-head"><span class="kpi-title">Plan Piso</span><span class="material-symbols-outlined kpi-icon">payments</span></div>
+<div id="sPlanPiso" class="kpi-value money">—</div>
+<p id="sPlanPisoSub" class="kpi-subtitle">Clic para elegir periodo</p>
+<span class="kpi-card-chevron material-symbols-outlined" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<div id="planPisoKpiMenu" class="kpi-period-menu hidden" role="listbox" aria-label="Periodo Plan Piso"></div>
+</div>
+</section>
+
+<div id="autosKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+
+<section class="chart-grid-2-1">
+<div class="section-panel table-panel plan-piso-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Plan Piso</h3>
+<div class="plan-piso-toolbar">
+<label class="filter-label" for="planPisoPeriod">Periodo</label>
+<select id="planPisoPeriod" class="filter-select plan-piso-toolbar__select">
+<option value="all">Todo (acumulado a hoy)</option>
+</select>
+<input id="buscarPlanPiso" type="search" placeholder="Buscar VIN, modelo..." class="filter-input plan-piso-toolbar__search" autocomplete="off"/>
+<span id="planPisoCount" class="top-bar-meta plan-piso-toolbar__count"></span>
+</div>
+</div>
+<p id="planPisoSubtitle" class="section-subtitle plan-piso-subtitle">Acumulado al corte del mes seleccionado (Físico). Intereses = 0.00020778 × importe de remisión × días desde el día 31 hasta el cierre del mes</p>
+<div class="plan-piso-table-wrap">
+<table class="data-table data-table--plan-piso">
+<colgroup>
+<col class="plan-piso-col-vin"/>
+<col class="plan-piso-col-modelo"/>
+<col class="plan-piso-col-days"/>
+<col class="plan-piso-col-days"/>
+<col class="plan-piso-col-money"/>
+<col class="plan-piso-col-money"/>
+</colgroup>
+<thead><tr>
+<th>VIN</th>
+<th>Modelo</th>
+<th class="cell-num">Stock</th>
+<th class="cell-num">Acum.</th>
+<th class="cell-money">Remisión</th>
+<th class="cell-money">Intereses</th>
+</tr></thead>
+<tbody id="planPisoTable"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel">
+<div class="table-header-row" style="margin-bottom:12px">
+<h3 class="section-title" style="margin-bottom:0">Unidades envejecidas</h3>
+<span id="urgentBadge" class="badge-tipo badge-alert"></span>
+</div>
+<p id="ageingPlanPisoTotal" class="section-subtitle">Plan Piso acumulado: —</p>
+<div id="alertsList" class="custom-scrollbar" style="max-height:360px;overflow-y:auto"></div>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Inventario de unidades</h3>
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<input id="buscarInventario" type="search" placeholder="Buscar VIN, modelo, color, ubicación..." class="filter-input" style="min-width:240px;max-width:320px" autocomplete="off"/>
+<span id="tableCount" class="top-bar-meta"></span>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Modelo</th>
+<th>Familia</th>
+<th>Año</th>
+<th>Serie</th>
+<th>Inv.</th>
+<th>Color ext.</th>
+<th>Color int.</th>
+<th>Ubicación</th>
+<th>Situación</th>
+<th>Días stock</th>
+<th>Días aparte</th>
+<th>Apartó</th>
+<th>Status</th>
+</tr></thead>
+<tbody id="inventoryTable"></tbody>
+</table>
+</div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel">
+<h3 class="section-title">Por situación</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="situacionChart"></canvas></div></div>
+</div>
+<div class="section-panel">
+<h3 class="section-title">Por familia</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="familiaChart"></canvas></div></div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Antigüedad por Modelo (días)</h3>
+<div class="chart-card"><div class="chart-wrap" style="height:320px"><canvas id="ageingChart"></canvas></div></div>
+</section>
+
+</div>
+
+<div id="panelInventarioPostventa" class="hidden">
+
+<section class="kpi-grid kpi-grid--eeff" id="kpiPostventaOverview">
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Servicio · Proceso</span><span class="material-symbols-outlined kpi-icon">build</span></div>
+<div id="pvKpiServicio" class="kpi-value money">—</div>
+<p id="pvKpiServicioSub" class="kpi-subtitle">Piezas en taller</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title">Refacciones · Stock</span><span class="material-symbols-outlined kpi-icon">warehouse</span></div>
+<div id="pvKpiRefacciones" class="kpi-value money">—</div>
+<p id="pvKpiRefaccionesSub" class="kpi-subtitle">Partes en almacén</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">HYP · Stock</span><span class="material-symbols-outlined kpi-icon">format_paint</span></div>
+<div id="pvKpiHyp" class="kpi-value money">—</div>
+<p id="pvKpiHypSub" class="kpi-subtitle">Materiales H y P</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--amber">
+<div class="kpi-card-head"><span class="kpi-title">Valor total</span><span class="material-symbols-outlined kpi-icon">payments</span></div>
+<div id="pvKpiTotal" class="kpi-value money">—</div>
+<p class="kpi-subtitle">Proceso + stock refacc. + HYP</p>
+</div>
+</section>
+
+<nav class="eeff-tabs inventory-pv-tabs" id="inventoryPvTabs" aria-label="Áreas Postventa">
+<button type="button" class="eeff-tab active" data-pv-area="servicio">Servicio</button>
+<button type="button" class="eeff-tab" data-pv-area="refacciones">Refacciones</button>
+<button type="button" class="eeff-tab" data-pv-area="hyp">HYP</button>
+</nav>
+
+<section class="section-panel dashboard-section">
+<div class="table-header-row">
+<div>
+<h3 class="section-title" style="margin-bottom:4px" id="pvAreaTitle">Servicio</h3>
+<p class="section-subtitle" id="pvAreaSubtitle" style="margin:0">Piezas en proceso de taller</p>
+</div>
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<input id="buscarPostventaInv" type="search" placeholder="Buscar parte, descripción, almacén..." class="filter-input" style="min-width:240px;max-width:320px" autocomplete="off"/>
+<span id="pvTableCount" class="top-bar-meta"></span>
+</div>
+</div>
+
+<div class="kpi-grid kpi-grid--eeff" style="margin:16px 0">
+<div class="kpi-card kpi-card--eeff kpi-card--slate">
+<div class="kpi-card-head"><span class="kpi-title">Líneas</span></div>
+<div id="pvAreaLineas" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title" id="pvAreaQtyLabel">Existencia</span></div>
+<div id="pvAreaQty" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title" id="pvAreaCostoLabel">Costo</span></div>
+<div id="pvAreaCosto" class="kpi-value money">—</div>
+</div>
+</div>
+
+<div class="chart-grid" style="margin-bottom:18px">
+<div class="section-panel table-panel">
+<h3 class="section-title">Por almacén</h3>
+<div class="table-scroll" style="max-height:260px">
+<table class="data-table">
+<thead><tr><th>Almacén</th><th class="cell-num">Líneas</th><th class="cell-num">Cantidad</th><th class="cell-money">Costo</th></tr></thead>
+<tbody id="pvByAlmacen"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Por grupo</h3>
+<div class="table-scroll" style="max-height:260px">
+<table class="data-table">
+<thead><tr><th>Grupo</th><th class="cell-num">Líneas</th><th class="cell-num">Cantidad</th><th class="cell-money">Costo</th></tr></thead>
+<tbody id="pvByGrupo"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div class="table-scroll" style="max-height:440px">
+<table class="data-table">
+<thead><tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th>Almacén</th>
+<th>Grupo</th>
+<th class="cell-num">Existencia</th>
+<th class="cell-num">Proceso</th>
+<th class="cell-money">Costo prom.</th>
+<th class="cell-money">Costo</th>
+</tr></thead>
+<tbody id="pvDetalleTable"></tbody>
+</table>
+</div>
+</section>
+
+</div>
+
+</div>
+</main>
+<script src="/js/auth-client.js"></script>
+<script src="/js/shared.js"></script>
+<script src="/js/sidebar.js?v=7"></script>
+<script src="/js/topbar.js?v=3"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/assistant-bubble.js?v=3"></script>
+<script src="/js/inventory.js?v=12"></script>
+</body>
+</html>

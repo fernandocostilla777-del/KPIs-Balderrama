@@ -1,0 +1,25 @@
+{
+  "name": "kpis-balderrama-backend",
+  "version": "1.0.0",
+  "description": "API REST — Dashboard KPIs BALDERRAMA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "explore-db": "node scripts/explore-db.js",
+    "test:ventas": "node scripts/test-ventas.js",
+    "test:etl": "node scripts/test-etl-contable.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mssql": "^12.7.0",
+    "openai": "^6.46.0",
+    "xlsx": "^0.18.5"
+  }
+}

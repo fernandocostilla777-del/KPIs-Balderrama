@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Iniciar sesión | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+</head>
+<body class="login-body">
+<main class="login-shell">
+  <section class="login-card">
+    <div class="login-brand">
+      <img src="/img/Imagen2.png" alt="BALDERRAMA" class="login-logo"/>
+    </div>
+
+    <form id="loginForm" class="login-form" autocomplete="on">
+      <label class="login-field">
+        <span>Usuario</span>
+        <input type="text" id="username" name="username" required autocomplete="username" placeholder="admin, direccion, gerencia…"/>
+      </label>
+      <label class="login-field">
+        <span>Contraseña</span>
+        <input type="password" id="password" name="password" required autocomplete="current-password"/>
+      </label>
+      <p id="loginError" class="login-error hidden" role="alert"></p>
+      <button type="submit" class="login-submit" id="btnLogin">
+        <span class="material-symbols-outlined">login</span>
+        <span>Ingresar</span>
+      </button>
+    </form>
+  </section>
+</main>
+<script src="/js/auth-client.js"></script>
+<script src="/js/login.js"></script>
+</body>
+</html>

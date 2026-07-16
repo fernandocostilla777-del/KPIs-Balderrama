@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Seguimiento 360 | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+</head>
+<body class="dashboard-body" data-page="seguimiento">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Seguimiento 360</span>
+<span id="statusBadge" class="top-bar-meta">Listo</span>
+</div>
+<div class="top-bar-actions">
+<span id="crmDbInfo" class="top-bar-meta"></span>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<section class="section-panel dashboard-section">
+<div class="table-header-row" style="margin-bottom:8px">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Vista 360 del cliente</h3>
+</div>
+</div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+<input id="searchInput" type="search" class="filter-input" style="flex:1;min-width:260px;max-width:520px"
+  placeholder="ID CRM, nombre, VIN, teléfono o correo..." autocomplete="off"/>
+<button type="button" id="btnBuscar" class="btn-glass btn-primary">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-4px">search</span>
+Buscar
+</button>
+<span id="searchCount" class="top-bar-meta"></span>
+</div>
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(148,163,184,0.2)">
+<span class="filter-label" style="font-weight:700">Periodo taller:</span>
+<label class="filter-label" style="display:flex;align-items:center;gap:6px">Desde
+<input id="fechaInicioOrdenes" type="date" class="filter-input"/>
+</label>
+<label class="filter-label" style="display:flex;align-items:center;gap:6px">Hasta
+<input id="fechaFinOrdenes" type="date" class="filter-input"/>
+</label>
+<button type="button" id="btnPeriodoOrdenes" class="btn-glass btn-primary">Aplicar</button>
+<span id="periodLabel" class="top-bar-meta">Todo el histórico</span>
+</div>
+<div class="filter-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+<button type="button" class="chip" data-periodo="mes-actual">Mes actual</button>
+<button type="button" class="chip" data-periodo="mes-anterior">Mes anterior</button>
+<button type="button" class="chip" data-periodo="trimestre-actual">Trimestre actual</button>
+<button type="button" class="chip" data-periodo="acumulado-anio">Acumulado del año</button>
+<button type="button" class="chip" data-periodo="anio-actual">Año actual</button>
+<button type="button" class="chip" data-periodo="anio-anterior">Año anterior</button>
+<button type="button" class="chip" data-periodo="todo">Todo el histórico</button>
+</div>
+</section>
+
+<section id="cierresPanel" class="section-panel table-panel dashboard-section hidden">
+<div class="table-header-row">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Clientes cerrados en el periodo</h3>
+<p id="cierresSubtitle" class="section-subtitle" style="margin:0">Órdenes con fecha de cierre en el rango</p>
+</div>
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+<span id="cierresImporte" class="top-bar-meta"></span>
+<span id="cierresCount" class="top-bar-meta"></span>
+</div>
+</div>
+<div class="kpi-grid" style="margin:14px 0">
+<div class="kpi-card kpi-card--violet kpi-card--clickable" data-kpi="cierreOrdenes" data-goto="cierresTableWrap" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Órdenes cerradas</span></div>
+<div id="kCierreOrdenes" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--blue kpi-card--clickable" data-kpi="cierreClientes" data-goto="cierresTableWrap" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Clientes</span></div>
+<div id="kCierreClientes" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--green kpi-card--clickable" data-kpi="cierreCrm" data-goto="cierresChartsWrap" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Con ID CRM</span></div>
+<div id="kCierreCrm" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--rose kpi-card--clickable" data-kpi="cierreImporte" data-goto="cierresChartsWrap" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Importe taller</span></div>
+<div id="kCierreImporte" class="kpi-value money">—</div>
+</div>
+</div>
+<div id="cierresKpiDetail" class="kpi-detail-panel hidden"></div>
+<div id="cierresChartsWrap" class="chart-grid" style="margin-bottom:14px">
+<div class="section-panel">
+<h3 class="section-title">Top 10 clientes por importe</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="chartCierresTop"></canvas></div></div>
+</div>
+<div class="section-panel">
+<h3 class="section-title">Clientes identificados en CRM</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="chartCierresCrm"></canvas></div></div>
+</div>
+</div>
+<div id="cierresTableWrap" class="table-scroll" style="max-height:440px">
+<table class="data-table">
+<thead><tr>
+<th>Cliente</th>
+<th>ID CRM</th>
+<th>Teléfono</th>
+<th class="cell-num">Órdenes</th>
+<th class="cell-money">Importe</th>
+<th>Última actividad</th>
+<th>Modelos / series</th>
+<th></th>
+</tr></thead>
+<tbody id="cierresTable"></tbody>
+</table>
+</div>
+</section>
+
+<div id="searchResultsWrap" class="table-scroll hidden" style="margin-top:16px;max-height:320px">
+<table class="data-table">
+<thead><tr>
+<th>ID CRM</th>
+<th>Nombre</th>
+<th class="cell-num">Leads</th>
+<th class="cell-num">Ciclos</th>
+<th class="cell-num">Solicitudes</th>
+<th class="cell-num">Pruebas</th>
+<th class="cell-num">Compras</th>
+<th>Teléfono</th>
+<th>Correo</th>
+<th>Última actividad</th>
+<th></th>
+</tr></thead>
+<tbody id="searchResults"></tbody>
+</table>
+</div>
+
+<div id="clientPanel" class="hidden">
+
+<section class="section-panel dashboard-section" style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center">
+<div>
+<h3 class="section-title" id="clientName" style="margin-bottom:4px">—</h3>
+<p class="section-subtitle" id="clientMeta" style="margin:0">—</p>
+</div>
+<div id="clientBadges" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+</section>
+
+<section class="kpi-grid">
+<div class="kpi-card kpi-card--amber kpi-card--clickable" data-kpi="leads" data-goto="secLeads" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Leads</span><span class="material-symbols-outlined kpi-icon">campaign</span></div>
+<div id="kLeads" class="kpi-value">—</div>
+<p class="kpi-subtitle">Interesado / entradas de lead</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--blue kpi-card--clickable" data-kpi="ciclos" data-goto="secTimeline" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Ciclos de venta</span><span class="material-symbols-outlined kpi-icon">autorenew</span></div>
+<div id="kCiclos" class="kpi-value">—</div>
+<p class="kpi-subtitle">Ciclos en CRM</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--green kpi-card--clickable" data-kpi="compras" data-goto="secCompras" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Compras</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
+<div id="kCompras" class="kpi-value">—</div>
+<p class="kpi-subtitle">VIN asignado en ciclo (col. T)</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--slate kpi-card--clickable" data-kpi="unidades" data-goto="secUnidades" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Unidades vinculadas</span><span class="material-symbols-outlined kpi-icon">garage</span></div>
+<div id="kUnidadesDistribuidor" class="kpi-value">—</div>
+<p class="kpi-subtitle">A nombre del cliente en el DMS</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--magenta kpi-card--clickable" data-kpi="solicitudes" data-goto="secSolicitudes" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Solicitudes F&amp;I</span><span class="material-symbols-outlined kpi-icon">request_quote</span></div>
+<div id="kSolicitudes" class="kpi-value">—</div>
+<p class="kpi-subtitle">Crédito / financiamiento</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--slate kpi-card--clickable" data-kpi="pruebas" data-goto="secPruebas" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Pruebas de manejo</span><span class="material-symbols-outlined kpi-icon">steering_wheel_heat</span></div>
+<div id="kPruebasManejo" class="kpi-value">—</div>
+<p class="kpi-subtitle">Experiencia previa a la compra</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--violet kpi-card--clickable" data-kpi="ordenes" data-goto="secOrdenes" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Órdenes de servicio</span><span class="material-symbols-outlined kpi-icon">build</span></div>
+<div id="kOrdenes" class="kpi-value">—</div>
+<p class="kpi-subtitle">Postventa por VIN/serie (SQL)</p>
+<div class="kpi-accent"></div>
+</div>
+<div class="kpi-card kpi-card--rose kpi-card--clickable" data-kpi="importeTaller" data-goto="secOrdenes" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Importe generado en taller</span><span class="material-symbols-outlined kpi-icon">payments</span></div>
+<div id="kImporteTaller" class="kpi-value money">—</div>
+<p id="kImporteTallerSub" class="kpi-subtitle">Órdenes no canceladas del periodo</p>
+<div class="kpi-accent"></div>
+</div>
+</section>
+
+<div id="clientKpiDetail" class="kpi-detail-panel hidden"></div>
+
+<section class="chart-grid">
+<div class="section-panel">
+<h3 class="section-title">Actividad del cliente por año</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="chartActividadAnual"></canvas></div></div>
+</div>
+<div id="panelChartTaller" class="section-panel">
+<h3 class="section-title">Importe de taller por año</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="chartTallerAnual"></canvas></div></div>
+</div>
+</section>
+
+<section class="chart-grid">
+<div id="panelChartOrdenesTipo" class="section-panel">
+<h3 class="section-title">Órdenes por tipo de servicio</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="chartOrdenesTipo"></canvas></div></div>
+</div>
+</section>
+
+<section id="secUnidades" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Unidades vinculadas en el distribuidor</h3>
+<span id="unidadesDistribuidorCount" class="top-bar-meta"></span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Serie / VIN</th>
+<th>Modelo</th>
+<th>Año modelo</th>
+<th class="cell-num">Órdenes</th>
+<th>Primera visita</th>
+<th>Última visita</th>
+<th>Origen</th>
+<th>Factura venta</th>
+</tr></thead>
+<tbody id="unidadesDistribuidorTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secCompras" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Compras (unidades)</h3>
+<span id="comprasCount" class="top-bar-meta"></span>
+</div>
+<p class="section-subtitle">VIN del CRM cruzado con SQL: factura de venta (ADE_VTAFI) y órdenes de servicio (SER_ORDEN)</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>VIN (CRM)</th>
+<th>Serie SQL</th>
+<th>Producto</th>
+<th>Modelo SQL</th>
+<th>Factura CRM</th>
+<th>Factura SQL</th>
+<th>Fecha factura</th>
+<th>Vendedor</th>
+<th class="cell-num">Órdenes serv.</th>
+</tr></thead>
+<tbody id="comprasTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secOrdenes" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Órdenes de servicio</h3>
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+<span id="ordenesImporte" class="top-bar-meta"></span>
+<span id="ordenesCount" class="top-bar-meta"></span>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Orden</th>
+<th>Serie</th>
+<th>Modelo</th>
+<th>Ingreso</th>
+<th>Cierre</th>
+<th>Status</th>
+<th>Asesor</th>
+<th>Factura taller</th>
+<th class="cell-money">Importe</th>
+</tr></thead>
+<tbody id="ordenesTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secPruebas" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Pruebas de manejo</h3>
+<span id="pruebasManejoCount" class="top-bar-meta"></span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Fecha</th>
+<th>Hora</th>
+<th>Vehículo</th>
+<th>Tipo</th>
+<th>VIN</th>
+<th>Ejecutivo</th>
+<th>Centro de trabajo</th>
+<th class="cell-num">Km recorridos</th>
+</tr></thead>
+<tbody id="pruebasManejoTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secSolicitudes" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Solicitudes de crédito (F&amp;I)</h3>
+<span id="solicitudesCount" class="top-bar-meta"></span>
+</div>
+<p class="section-subtitle">Solicitudes de financiamiento ligadas al ID CRM (columna "Contacto CRM")</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Fecha</th>
+<th>No.</th>
+<th>Financiera</th>
+<th>Unidad / paquete</th>
+<th>Estatus</th>
+<th>Asesor</th>
+<th>F&amp;I</th>
+<th>Aprobación</th>
+<th>Fecha compra</th>
+<th class="cell-money">Enganche</th>
+</tr></thead>
+<tbody id="solicitudesTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secLeads" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Leads (interesado)</h3>
+<span id="leadsCount" class="top-bar-meta"></span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>Fecha</th>
+<th>Sucursal</th>
+<th>Tipo</th>
+<th>Canal</th>
+<th>Auto de interés</th>
+<th>Resultado</th>
+<th>Ejecutivo</th>
+<th>Cita</th>
+</tr></thead>
+<tbody id="leadsTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secTimeline" class="section-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Línea de tiempo (actividades CRM)</h3>
+<span id="timelineCount" class="top-bar-meta"></span>
+</div>
+<div id="timelineList" class="custom-scrollbar" style="max-height:420px;overflow-y:auto"></div>
+</section>
+
+</div>
+
+<div id="emptyState" class="section-panel dashboard-section" style="text-align:center;padding:48px 24px">
+<span class="material-symbols-outlined" style="font-size:44px;color:#94a3b8">person_search</span>
+<p style="color:#64748b;font-weight:600;margin-top:12px">Busca un cliente para ver su seguimiento 360</p>
+<p style="color:#94a3b8;font-size:13px">Leads → ciclos → solicitud F&amp;I → compra (VIN) → factura → órdenes de servicio</p>
+</div>
+
+</div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="/js/auth-client.js"></script>
+<script src="/js/shared.js"></script>
+<script src="/js/sidebar.js?v=7"></script>
+<script src="/js/topbar.js?v=3"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/assistant-bubble.js?v=3"></script>
+<script src="/js/seguimiento.js?v=16"></script>
+</body>
+</html>

@@ -1,26 +1,67 @@
 # BALDERRAMA Cloud API
 
-API en la nube con **PostgreSQL** para recibir datos del dashboard local, detectar cambios y conservar históricos.
+**Versión intermedia en la nube** — no es el dashboard completo. Solo recibe por API los datos que envía el servidor local y los persiste en **PostgreSQL** (estado actual + histórico de cambios).
+
+No consulta SQL Server GMOFARRIL ni sirve la interfaz web del dashboard.
 
 ## Arquitectura
 
 ```
-Dashboard local (SQL Server GMOFARRIL)
-        │
-        │  cada 30 min → ventas, inventario, contabilidad, CRM/leads (mes en curso)
-        │  inicio del día → postventa
-        │  día 1 del mes → cierre mensual + históricos
-        ▼
-  cloudSync (backend local)
-        │  POST /api/sync/ingest
-        ▼
-  cloud-api (PostgreSQL)
-        ├── sync_entities        (estado actual)
-        ├── sync_entity_history  (versiones anteriores)
-        └── sync_batches         (bitácora de sincronización)
+[OFICINA — fuente operativa]              [RAILWAY — réplica intermedia]
+────────────────────────────              ────────────────────────────────
+SQL Server GMOFARRIL                      PostgreSQL
+SQLite CRM (leads)                              │
+Backend + Frontend (dashboard)                  │
+        │                                       │
+        │  cloudSync (scheduler local)          │
+        │  POST /api/sync/ingest                ▼
+        └──────────────────────────────►  cloud-api
+                                          ├── sync_entities      (último estado)
+                                          ├── sync_entity_history (cambios)
+                                          └── sync_batches       (bitácora)
 ```
 
+**Qué guarda la nube:** únicamente los lotes enviados por el backend local (ventas, inventario, contabilidad, postventa, CRM/leads del mes en curso, según el scheduler).
+
+**Qué NO va a Railway:** `backend/`, `frontend/`, ni conexión directa a GMOFARRIL.
+
+### Frecuencias de envío (desde el backend local)
+
+| Dominio | Frecuencia | Contenido |
+|---------|------------|-----------|
+| Ventas, inventario, contabilidad, CRM | Cada 30 min | Mes en curso |
+| Postventa | Inicio del día | Mes en curso |
+| Todos | Día 1 del mes | Cierre mensual + históricos |
+
 ## Despliegue
+
+### Railway (importante)
+
+**No despliegues la raíz del repositorio (`/`).** El `package.json` raíz arranca backend + frontend para uso local y fallará en Railway (`Cannot find module 'dotenv'`).
+
+En el servicio web de Railway configura:
+
+| Campo | Valor |
+|-------|--------|
+| **Root Directory** | `cloud-api` |
+| **Build Command** | `npm install` |
+| **Start Command** | `npm start` |
+
+Variables mínimas:
+
+| Variable | Valor |
+|----------|--------|
+| `DATABASE_URL` | Referencia al PostgreSQL de Railway |
+| `CLOUD_SYNC_API_KEY` | Clave segura (igual que en backend local) |
+| `CLOUD_AUTO_INIT_DB` | `true` la primera vez |
+
+El backend y frontend **no van en Railway** (requieren SQL Server GMOFARRIL en la red local).
+
+**Guía paso a paso:** [DEPLOY_RAILWAY.md](./DEPLOY_RAILWAY.md)
+
+---
+
+### Pasos generales
 
 1. Crear base PostgreSQL en la nube (Neon, Supabase, Railway, Render, etc.).
 2. Copiar `.env.example` → `.env` y configurar `DATABASE_URL` y `CLOUD_SYNC_API_KEY`.

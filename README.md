@@ -15,7 +15,10 @@ Dashboard ejecutivo conectado a SQL Server (GMOFARRIL): ventas, contabilidad, in
 │   ├── public/       # Páginas, estilos e imágenes
 │   └── server.js     # Puerto 5173 — sirve UI y proxy /api → backend
 │
-└── package.json      # Arranca backend + frontend juntos
+├── cloud-api/        # API en la nube (PostgreSQL) — desplegar en Railway
+│   └── DEPLOY_RAILWAY.md  # Guía de despliegue Railway
+│
+└── package.json      # Arranca backend + frontend juntos (solo local)
 ```
 
 ## Requisitos
@@ -81,12 +84,18 @@ Usuarios piloto (semana 1): **[PILOTO_USUARIOS.md](./PILOTO_USUARIOS.md)**.
 Agenda validación EEFF/PPTO: **[AGENDA_VALIDACION.md](./AGENDA_VALIDACION.md)**.  
 Checklist pre-revisión: **[CHECKLIST_REVISION.md](./CHECKLIST_REVISION.md)**.
 
-## Despliegue en servidor
+## Despliegue en servidor (local)
 
 1. Instalar dependencias: `npm run install:all`
 2. Configurar `backend/.env` (BD, auth, OpenAI)
 3. Ejecutar `npm start` o usar un gestor de procesos (PM2, systemd)
 4. Opcional: poner nginx delante con el frontend en `/` y proxy `/api` al backend
+
+## Despliegue en Railway (nube — solo réplica intermedia)
+
+Guía completa: **[cloud-api/DEPLOY_RAILWAY.md](./cloud-api/DEPLOY_RAILWAY.md)**
+
+Solo se despliega `cloud-api/` + PostgreSQL. El dashboard operativo permanece en la oficina.
 
 ## Notas
 

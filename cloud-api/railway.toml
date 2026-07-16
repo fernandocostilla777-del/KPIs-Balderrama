@@ -1,0 +1,11 @@
+# Railway — usar SOLO este servicio para la API en la nube.
+# Root Directory en Railway debe ser: cloud-api
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

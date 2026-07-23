@@ -10,7 +10,7 @@ const { pushPayload, getCloudConfig, fetchCloudStatus } = require('./cloudSyncCl
 const { getCurrentMonthRange, getMonthRangeForKey } = require('./cloudSyncUtils');
 
 const THIRTY_MIN_MS = 30 * 60 * 1000;
-const INCREMENTAL_DOMAINS = ['ventas', 'inventario', 'contabilidad', 'crm'];
+const INCREMENTAL_DOMAINS = ['overview', 'ventas', 'forecast', 'inventario', 'contabilidad', 'crm'];
 
 const state = {
   enabled: false,
@@ -206,7 +206,7 @@ function startScheduler() {
 
   const intervalMin = Number(process.env.CLOUD_SYNC_INTERVAL_MINUTES || 30);
   console.log(
-    `[cloud-sync] Programado: cada ${intervalMin} min (ventas/inventario/contabilidad/crm)`
+    `[cloud-sync] Programado: cada ${intervalMin} min (overview/ventas/pronóstico/inventario/contabilidad/crm)`
     + ` · postventa ${getDailyHour()}:00`
     + ' · cierre mensual día 1 02:00'
   );

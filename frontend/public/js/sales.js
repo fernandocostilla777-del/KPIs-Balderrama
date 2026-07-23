@@ -5,7 +5,9 @@
 
   let registrosActuales = [];
   let entregasActuales = [];
+  let apartadasActuales = [];
   let activeVentasKpiType = null;
+  let lastYtd = null;
   const charts = {};
   let els = null;
   let chartOptions = null;
@@ -16,6 +18,8 @@
   let goalActualSofia = 0;
   let resumenActual = null;
   let compactFilters = null;
+  let activeSalesTab = 'ventas';
+  let pendingFinanciamiento = null;
 
   const GOAL_STORAGE_KEYS = {
     retail: 'autointel_goal_retail',
@@ -109,9 +113,14 @@
   function setStatus(text, type = 'ready') {
     if (!els?.statusBadge) return;
     els.statusBadge.textContent = text;
-    els.statusBadge.className = 'top-bar-meta';
+    els.statusBadge.className = 'sidebar-status-line';
     if (type === 'loading') els.statusBadge.classList.add('status-loading');
     else if (type === 'error') els.statusBadge.classList.add('status-error');
+    const dot = document.querySelector('[data-status-dot]');
+    if (dot) {
+      dot.classList.toggle('is-loading', type === 'loading');
+      dot.classList.toggle('is-error', type === 'error');
+    }
   }
 
   function setDefaultDates() {
@@ -192,7 +201,223 @@
     setKpiBarFill('retail', ((resumen.totalRetail ?? 0) / total) * 100);
     setKpiBarFill('flotillas', ((resumen.totalFlotillas ?? 0) / total) * 100);
     setKpiBarFill('sofia', ((resumen.totalNotificacionesEntrega ?? 0) / total) * 100);
+    setKpiBarFill('carryOver', goalSofia > 0
+      ? (((resumen.numeradorCobertura ?? 0) + (resumen.unidadesApartadas ?? 0)) / goalSofia) * 100
+      : 0);
     setKpiBarFill('cobertura', goalSofia > 0 ? (numerador / goalSofia) * 100 : 0);
+  }
+
+  function formatCoberturaPct(numerador, goal) {
+    if (!goal || goal <= 0) return null;
+    const pct = (numerador / goal) * 100;
+    if (pct > 999) return '+999.00%';
+    return `${pct.toFixed(2)}%`;
+  }
+
+  async function ensureApartadasInResumen() {
+    if (!resumenActual) return;
+    try {
+      const inv = await Dashboard.api('/inventory?planPisoPeriod=all');
+      const units = Array.isArray(inv?.inventoryTable)
+        ? inv.inventoryTable
+        : (Array.isArray(inv?.units) ? inv.units : []);
+      apartadasActuales = units.filter((u) => u.isApartada || u.situacion === 'SEP');
+      const apartadas = Number(inv?.summary?.availableApartadas ?? apartadasActuales.length ?? 0);
+      resumenActual.unidadesApartadas = apartadas;
+    } catch (err) {
+      console.warn('[Carry over] No se pudieron cargar apartadas:', err.message);
+      if (resumenActual.unidadesApartadas == null) resumenActual.unidadesApartadas = 0;
+      if (!apartadasActuales.length) apartadasActuales = [];
+    }
+  }
+
+  function getCarryOverParts() {
+    const apartadas = Number(resumenActual?.unidadesApartadas ?? apartadasActuales.length ?? 0);
+    const goal = getGoalValue('sofia');
+    const sofia = Number(resumenActual?.totalNotificacionesEntrega ?? 0);
+    const facturadas = Number(resumenActual?.totalUnidadesFacturadas ?? resumenActual?.totalVentas ?? 0);
+    const sinTimbrar = Number(
+      resumenActual?.totalUnidadesFacturadasNoTimbradas
+      ?? Math.max(0, facturadas - sofia)
+    );
+    const numeradorActual = Number(
+      resumenActual?.numeradorCobertura != null
+        ? resumenActual.numeradorCobertura
+        : (sofia + sinTimbrar)
+    );
+    const numeradorSim = numeradorActual + apartadas;
+    return { apartadas, goal, sofia, sinTimbrar, numeradorActual, numeradorSim };
+  }
+
+  function renderCarryOverKpi() {
+    if (!els.kpiCarryOver || !resumenActual) return;
+
+    const { apartadas, goal, sofia, sinTimbrar, numeradorSim } = getCarryOverParts();
+
+    els.kpiCarryOver.textContent = String(apartadas);
+
+    if (els.kpiCarryOverSub) {
+      els.kpiCarryOverSub.textContent = goal
+        ? `${apartadas} apartada${apartadas === 1 ? '' : 's'} SEP · clic para ver sim. cobertura`
+        : `${apartadas} apartada${apartadas === 1 ? '' : 's'} SEP · defina objetivo SOFIA para el %`;
+    }
+
+    setKpiBarFill('carryOver', goal > 0 ? (numeradorSim / goal) * 100 : 0);
+    els.kpiCardCarryOver?.classList.toggle('kpi-card--complete', goal > 0 && numeradorSim >= goal);
+
+    if (!els.panelCarryOver?.classList.contains('hidden')) {
+      renderCarryOverSimPanel();
+      updateCarryOverPanelResumen(apartadasActuales.length);
+    }
+  }
+
+  function renderCarryOverSimPanel() {
+    const { apartadas, goal, sofia, sinTimbrar, numeradorActual, numeradorSim } = getCarryOverParts();
+    const simPct = formatCoberturaPct(numeradorSim, goal);
+    const actualPct = formatCoberturaPct(numeradorActual, goal);
+
+    if (els.carryOverSimPct) {
+      els.carryOverSimPct.textContent = simPct || (goal ? '—' : String(numeradorSim));
+    }
+
+    if (els.carryOverSimFormula) {
+      els.carryOverSimFormula.textContent = goal
+        ? `(${sofia} + ${sinTimbrar} + ${apartadas}) / ${goal} = ${simPct || '—'}`
+        : 'Defina el objetivo SOFIA para calcular el porcentaje';
+    }
+
+    if (els.carryOverSimBreakdown) {
+      els.carryOverSimBreakdown.innerHTML = [
+        `<li><span>SOFIA</span><strong>${sofia}</strong></li>`,
+        `<li><span>Sin timbrar</span><strong>${sinTimbrar}</strong></li>`,
+        `<li><span>Apartadas SEP</span><strong>${apartadas}</strong></li>`,
+        `<li><span>Numerador simulado</span><strong>${numeradorSim}</strong></li>`,
+        `<li><span>Objetivo SOFIA</span><strong>${goal || '—'}</strong></li>`,
+        actualPct
+          ? `<li><span>Cobertura sin apartadas</span><strong>${actualPct}</strong></li>`
+          : '',
+      ].filter(Boolean).join('');
+    }
+  }
+
+  function apartadasRowsHtml(rows, emptyMessage) {
+    if (!rows.length) {
+      return `<tr class="empty-row"><td colspan="8">${emptyMessage || 'No hay unidades apartadas (SEP) en inventario.'}</td></tr>`;
+    }
+    return rows.map((r) => {
+      const serie = r.serie || r.vin || '';
+      const modelo = r.tipoAuto || r.catalogo || r.modelo || '';
+      const anio = r.anModelo || r.anio || '';
+      const color = r.colorExterior || r.color || '';
+      const situacion = r.situacionLabel || r.situacion || 'Apartada';
+      const dias = r.daysApartado ?? '—';
+      const quien = r.apartadoPor || r.usuarioApartado || '—';
+      const previas = Number(r.previas || 0);
+      return `<tr class="row-apartada">
+        <td>${serie}</td><td>${modelo}</td><td>${anio}</td><td>${color}</td>
+        <td><span class="badge-tipo badge-flotilla">${situacion}</span></td>
+        <td class="cell-num">${dias}</td><td>${quien}</td>
+        <td class="cell-num">${previas}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderCarryOverPreview(rows) {
+    if (!els.tablaCarryOverPreviewBody) return;
+    const term = els.buscarCarryOverPreview?.value?.trim();
+    const emptyMessage = term ? 'No hay coincidencias con la búsqueda.' : undefined;
+    els.tablaCarryOverPreviewBody.innerHTML = apartadasRowsHtml(rows, emptyMessage);
+  }
+
+  function filterApartadasRowsByTerm(term, base) {
+    const q = term.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((r) =>
+      [r.serie, r.tipoAuto, r.catalogo, r.anModelo, r.colorExterior, r.situacion, r.situacionLabel, r.apartadoPor, r.usuarioApartado, r.previas]
+        .some((val) => String(val ?? '').toLowerCase().includes(q))
+    );
+  }
+
+  function updateCarryOverPanelResumen(count, filteredCount) {
+    if (!els.carryOverPanelResumen) return;
+    const n = Number(count || 0);
+    const filtered = filteredCount !== undefined ? Number(filteredCount) : null;
+    const meta = els.carryOverPreviewSearchMeta;
+    const { goal, sofia, sinTimbrar, apartadas, numeradorSim } = getCarryOverParts();
+    const simPct = formatCoberturaPct(numeradorSim, goal);
+
+    renderCarryOverSimPanel();
+
+    if (filtered !== null && !Number.isNaN(filtered) && filtered !== n) {
+      els.carryOverPanelResumen.textContent = `${filtered} de ${n} apartada${n === 1 ? '' : 's'} coinciden`;
+      if (meta) {
+        meta.textContent = `${filtered} resultado${filtered === 1 ? '' : 's'}`;
+        meta.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (meta) meta.classList.add('hidden');
+    els.carryOverPanelResumen.textContent = n
+      ? `${n} unidad${n === 1 ? '' : 'es'} apartada${n === 1 ? '' : 's'} · sim. ${(sofia + sinTimbrar + apartadas)} / ${goal || '—'} = ${simPct || numeradorSim}`
+      : 'Sin unidades apartadas (SEP) · el % solo suma SOFIA + sin timbrar';
+  }
+
+  function clearCarryOverPreviewSearch() {
+    if (els.buscarCarryOverPreview) els.buscarCarryOverPreview.value = '';
+    els.carryOverPreviewSearchMeta?.classList.add('hidden');
+  }
+
+  function applyCarryOverPreviewSearch() {
+    const base = apartadasActuales;
+    const term = els.buscarCarryOverPreview?.value || '';
+    const filtered = filterApartadasRowsByTerm(term, base);
+    renderCarryOverPreview(filtered);
+    updateCarryOverPanelResumen(base.length, term.trim() ? filtered.length : undefined);
+  }
+
+  function closeCarryOverPanelUi() {
+    els.panelCarryOver?.classList.add('hidden');
+    els.kpiCardCarryOver?.classList.remove('is-selected', 'is-open');
+    els.kpiCardCarryOver?.setAttribute('aria-expanded', 'false');
+    clearCarryOverPreviewSearch();
+  }
+
+  function setCarryOverPanelOpen(open) {
+    if (!els.panelCarryOver || !els.kpiCardCarryOver) return;
+    const isOpen = Boolean(open);
+    if (isOpen) {
+      closeVentasPanel();
+      els.panelEntregasSofia?.classList.add('hidden');
+      els.kpiCardEntregasSofia?.classList.remove('is-selected');
+      els.kpiCardEntregasSofia?.setAttribute('aria-expanded', 'false');
+      clearSofiaPreviewSearch();
+    }
+    if (!isOpen) {
+      closeCarryOverPanelUi();
+      return;
+    }
+
+    const wasOpen = !els.panelCarryOver.classList.contains('hidden');
+    if (wasOpen) {
+      closeCarryOverPanelUi();
+      return;
+    }
+
+    els.panelCarryOver.classList.remove('hidden');
+    els.kpiCardCarryOver.classList.add('is-selected', 'is-open');
+    els.kpiCardCarryOver.setAttribute('aria-expanded', 'true');
+    clearCarryOverPreviewSearch();
+    renderCarryOverSimPanel();
+    renderCarryOverPreview(apartadasActuales);
+    updateCarryOverPanelResumen(apartadasActuales.length);
+    els.panelCarryOver.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    window.setTimeout(() => els.buscarCarryOverPreview?.focus({ preventScroll: true }), 180);
+  }
+
+  function toggleCarryOverPanel() {
+    const isOpen = !els.panelCarryOver?.classList.contains('hidden');
+    setCarryOverPanelOpen(!isOpen);
   }
 
   function updateTopBarSummary(resumen) {
@@ -250,7 +475,7 @@
     const doughnutStyle = {
       borderWidth: 2,
       borderColor: '#FFFFFF',
-      hoverOffset: 4,
+      hoverOffset: 0,
       borderRadius: 12,
       spacing: 2,
     };
@@ -304,13 +529,11 @@
         responsive: true,
         maintainAspectRatio: false,
         cutout: '72%',
+        // El centro HTML ya muestra % y conteo: el tooltip encima lo tapa (ver solape Avance/%).
+        events: [],
         plugins: {
           legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${ctx.label}: ${Math.round(ctx.parsed * 10) / 10} ${unitLabel}`,
-            },
-          },
+          tooltip: { enabled: false },
         },
       },
     });
@@ -336,6 +559,7 @@
     els.kpiCobertura.textContent = pct > 999 ? '+999.00%' : `${pct.toFixed(2)}%`;
     els.kpiCardCobertura?.classList.toggle('kpi-card--complete', numerador >= goal);
     setKpiBarFill('cobertura', (numerador / goal) * 100);
+    renderCarryOverKpi();
   }
 
   function renderGoalCharts(resumen) {
@@ -459,6 +683,7 @@
 
   function renderYtdChart(comparativoYtd) {
     if (!comparativoYtd) return;
+    lastYtd = comparativoYtd;
     const { anioActual, anioAnterior, corte, totalActual, totalAnterior, variacion, labels, series, mesEnCursoExcluido } = comparativoYtd;
 
     els.ytdLabelActual.textContent = `YTD ${anioActual}`;
@@ -614,6 +839,7 @@
     }
 
     setSofiaPanelOpen(false);
+    closeCarryOverPanelUi();
     const isSame = activeVentasKpiType === type && !els.panelVentasDetalle.classList.contains('hidden');
     if (isSame) {
       closeVentasPanel();
@@ -656,11 +882,13 @@
 
   function entregasRowsHtml(rows, emptyMessage) {
     if (!rows.length) {
-      return `<tr class="empty-row"><td colspan="10">${emptyMessage || 'No hay notificaciones de entrega en el periodo.'}</td></tr>`;
+      return `<tr class="empty-row"><td colspan="11">${emptyMessage || 'No hay notificaciones de entrega en el periodo.'}</td></tr>`;
     }
     return rows.map((row) => `<tr class="row-sofia">
       <td>${row.FECHA_PERIODO ?? row.SOF_FechFact ?? ''}</td><td>${row.SOF_FechAct ?? ''}</td><td>${row.SOF_HoraAct ?? ''}</td>
-      <td>${row.SOF_Factura ?? ''}</td><td>${row.SOF_VIN ?? ''}</td><td>${row.SOF_Pedido ?? ''}</td>
+      <td>${row.SOF_Factura ?? ''}</td><td>${row.SOF_VIN ?? ''}</td>
+      <td class="cell-num">${Number(row.PREVIAS || 0)}</td>
+      <td>${row.SOF_Pedido ?? ''}</td>
       <td>${row.SOF_NoTransaccion ?? ''}</td><td>${row.CLIENTE ?? ''}</td>
       <td><span class="badge-tipo badge-sofia">${row.SOF_Estatus ?? ''}</span></td><td>${row.SOF_CveUSu ?? ''}</td>
     </tr>`).join('');
@@ -710,7 +938,10 @@
   function setSofiaPanelOpen(open) {
     if (!els.panelEntregasSofia || !els.kpiCardEntregasSofia) return;
     const isOpen = Boolean(open);
-    if (isOpen) closeVentasPanel();
+    if (isOpen) {
+      closeVentasPanel();
+      closeCarryOverPanelUi();
+    }
     if (!isOpen) {
       els.panelEntregasSofia.classList.add('hidden');
       els.kpiCardEntregasSofia.classList.remove('is-selected');
@@ -771,7 +1002,7 @@
     const q = term.trim().toLowerCase();
     if (!q) return base;
     return base.filter((row) =>
-      [row.FECHA_PERIODO, row.SOF_FechAct, row.SOF_HoraAct, row.SOF_Factura, row.SOF_VIN, row.SOF_Pedido, row.SOF_NoTransaccion, row.CLIENTE, row.SOF_Estatus, row.SOF_CveUSu]
+      [row.FECHA_PERIODO, row.SOF_FechAct, row.SOF_HoraAct, row.SOF_Factura, row.SOF_VIN, row.PREVIAS, row.SOF_Pedido, row.SOF_NoTransaccion, row.CLIENTE, row.SOF_Estatus, row.SOF_CveUSu]
         .some((val) => String(val ?? '').toLowerCase().includes(q))
     );
   }
@@ -829,9 +1060,10 @@
       els.kpiEntregasSofia.textContent = resumen.totalNotificacionesEntrega ?? 0;
 
       await fetchSharedGoals().catch((err) => console.warn('[Goals]', err.message));
-
+      await ensureApartadasInResumen();
+      renderCarryOverKpi();
       renderCoberturaKpi();
-      renderKpiVisualBars(resumen);
+      renderKpiVisualBars(resumenActual);
       updateTopBarSummary(resumen);
       els.lastUpdated.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`;
 
@@ -844,6 +1076,9 @@
       if (!els.panelEntregasSofia?.classList.contains('hidden')) {
         applySofiaPreviewSearch();
       }
+      if (!els.panelCarryOver?.classList.contains('hidden')) {
+        applyCarryOverPreviewSearch();
+      }
 
       els.btnExportar.disabled = registrosActuales.length === 0;
       els.btnExportarEntregas.disabled = entregasActuales.length === 0;
@@ -852,6 +1087,51 @@
       setStatus(`${resumen.totalVentas} ventas · ${resumen.totalNotificacionesEntrega ?? 0} entregas SOFIA${modo}`);
       Dashboard.updateCompactFilterLabels();
       compactFilters?.closeAll?.();
+
+      if (window.KpiInsights?.apply) {
+        window.KpiInsights.apply('ventas', {
+          fechaInicio,
+          fechaFin,
+          resumen: {
+            totalVentas: resumen.totalVentas,
+            totalRetail: resumen.totalRetail,
+            totalFlotillas: resumen.totalFlotillas,
+            totalNotificacionesEntrega: resumen.totalNotificacionesEntrega,
+            totalEntregasSinPrevias: resumen.totalEntregasSinPrevias,
+            totalUnidadesFacturadasNoTimbradas: resumen.totalUnidadesFacturadasNoTimbradas,
+            numeradorCobertura: resumen.numeradorCobertura,
+            unidadesApartadas: resumen.unidadesApartadas ?? 0,
+          },
+          goals: {
+            retail: getGoalValue('retail'),
+            sofia: getGoalValue('sofia'),
+          },
+          ytd: lastYtd ? {
+            variacion: lastYtd.variacion,
+            totalActual: lastYtd.totalActual,
+            totalAnterior: lastYtd.totalAnterior,
+          } : null,
+        });
+      }
+
+      if (window.FinanciamientoVentas?.load) {
+        pendingFinanciamiento = {
+          fechaInicio,
+          fechaFin,
+          porTipoVentaRetail: resumen.porTipoVentaRetail,
+          registrosVentas: registrosActuales,
+          entregasSofia: entregasActuales,
+        };
+        if (activeSalesTab === 'financiamiento') {
+          await window.FinanciamientoVentas.load(
+            fechaInicio,
+            fechaFin,
+            resumen.porTipoVentaRetail,
+            registrosActuales,
+            entregasActuales,
+          );
+        }
+      }
     } catch (err) {
       console.error('[Sales]', err);
       setStatus(err.message, 'error');
@@ -893,6 +1173,18 @@
       buscarSofiaPreview: document.getElementById('buscarSofiaPreview'),
       sofiaPreviewSearchMeta: document.getElementById('sofiaPreviewSearchMeta'),
       btnCerrarSofiaPanel: document.getElementById('btnCerrarSofiaPanel'),
+      kpiCardCarryOver: document.getElementById('kpiCardCarryOver'),
+      kpiCarryOver: document.getElementById('kpiCarryOver'),
+      kpiCarryOverSub: document.getElementById('kpiCarryOverSub'),
+      panelCarryOver: document.getElementById('panelCarryOver'),
+      carryOverPanelResumen: document.getElementById('carryOverPanelResumen'),
+      carryOverSimPct: document.getElementById('carryOverSimPct'),
+      carryOverSimFormula: document.getElementById('carryOverSimFormula'),
+      carryOverSimBreakdown: document.getElementById('carryOverSimBreakdown'),
+      tablaCarryOverPreviewBody: document.getElementById('tablaCarryOverPreviewBody'),
+      buscarCarryOverPreview: document.getElementById('buscarCarryOverPreview'),
+      carryOverPreviewSearchMeta: document.getElementById('carryOverPreviewSearchMeta'),
+      btnCerrarCarryOverPanel: document.getElementById('btnCerrarCarryOverPanel'),
       ytdSubtitle: document.getElementById('ytdSubtitle'),
       ytdLabelActual: document.getElementById('ytdLabelActual'),
       ytdLabelAnterior: document.getElementById('ytdLabelAnterior'),
@@ -925,9 +1217,69 @@
     }
   }
 
+  function getSalesTabFromUrl() {
+    const hash = String(location.hash || '').replace(/^#/, '').toLowerCase();
+    if (hash === 'financiamiento' || hash === 'financiera' || hash === 'fi') return 'financiamiento';
+    const params = new URLSearchParams(location.search);
+    const tab = String(params.get('tab') || '').toLowerCase();
+    if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
+    return 'ventas';
+  }
+
+  async function switchSalesTab(tab) {
+    const next = tab === 'financiamiento' ? 'financiamiento' : 'ventas';
+    activeSalesTab = next;
+
+    document.querySelectorAll('#salesMainTabs [data-sales-tab]').forEach((btn) => {
+      const on = btn.dataset.salesTab === next;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    const panelVentas = document.getElementById('panelVentasUnidades');
+    const panelFi = document.getElementById('panelVentasFinanciamiento');
+    if (panelVentas) {
+      panelVentas.classList.toggle('hidden', next !== 'ventas');
+      panelVentas.hidden = next !== 'ventas';
+    }
+    if (panelFi) {
+      panelFi.classList.toggle('hidden', next !== 'financiamiento');
+      panelFi.hidden = next !== 'financiamiento';
+    }
+
+    const title = document.querySelector('.top-bar-title');
+    if (title) {
+      title.textContent = next === 'financiamiento' ? 'Financiamiento' : 'Ventas de Unidades';
+    }
+
+    if (next === 'financiamiento') {
+      if (location.hash !== '#financiamiento') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#financiamiento`);
+      }
+      if (pendingFinanciamiento && window.FinanciamientoVentas?.load) {
+        const p = pendingFinanciamiento;
+        await window.FinanciamientoVentas.load(
+          p.fechaInicio,
+          p.fechaFin,
+          p.porTipoVentaRetail,
+          p.registrosVentas,
+          p.entregasSofia,
+        );
+      }
+    } else if (location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi') {
+      history.replaceState(null, '', `${location.pathname}${location.search}`);
+    }
+  }
+
   function bindEvents() {
     document.querySelectorAll('[data-preset]').forEach((btn) => {
       btn.addEventListener('click', () => { applyPreset(btn.dataset.preset); consultar(); });
+    });
+
+    document.getElementById('salesMainTabs')?.addEventListener('click', (e) => {
+      const tab = e.target.closest('[data-sales-tab]');
+      if (!tab) return;
+      switchSalesTab(tab.dataset.salesTab).catch((err) => console.warn('[Sales tabs]', err));
     });
 
     els.btnConsultar.addEventListener('click', consultar);
@@ -938,13 +1290,14 @@
       `ventas_${els.fechaInicio.value}_${els.fechaFin.value}.csv`
     ));
     els.btnExportarEntregas.addEventListener('click', () => downloadCsv(
-      ['FechaFactura', 'FechaRegistro', 'Hora', 'Factura', 'VIN', 'Pedido', 'NoTransaccion', 'Cliente', 'Estatus', 'Usuario'],
-      ['FECHA_PERIODO', 'SOF_FechAct', 'SOF_HoraAct', 'SOF_Factura', 'SOF_VIN', 'SOF_Pedido', 'SOF_NoTransaccion', 'CLIENTE', 'SOF_Estatus', 'SOF_CveUSu'],
+      ['FechaFactura', 'FechaRegistro', 'Hora', 'Factura', 'VIN', 'Previas', 'Pedido', 'NoTransaccion', 'Cliente', 'Estatus', 'Usuario'],
+      ['FECHA_PERIODO', 'SOF_FechAct', 'SOF_HoraAct', 'SOF_Factura', 'SOF_VIN', 'PREVIAS', 'SOF_Pedido', 'SOF_NoTransaccion', 'CLIENTE', 'SOF_Estatus', 'SOF_CveUSu'],
       getSofiaExportRows(),
       `entregas_sofia_${els.fechaInicio.value}_${els.fechaFin.value}.csv`
     ));
     els.buscarVentasPreview?.addEventListener('input', () => applyVentasPreviewSearch());
     els.buscarSofiaPreview?.addEventListener('input', () => applySofiaPreviewSearch());
+    els.buscarCarryOverPreview?.addEventListener('input', () => applyCarryOverPreviewSearch());
 
     bindKpiCard(els.kpiCardRetail, () => setVentasPanelOpen('retail', true));
     bindKpiCard(els.kpiCardFlotillas, () => setVentasPanelOpen('flotilla', true));
@@ -952,6 +1305,9 @@
 
     bindKpiCard(els.kpiCardEntregasSofia, toggleSofiaPanel);
     els.btnCerrarSofiaPanel?.addEventListener('click', () => setSofiaPanelOpen(false));
+
+    bindKpiCard(els.kpiCardCarryOver, toggleCarryOverPanel);
+    els.btnCerrarCarryOverPanel?.addEventListener('click', () => setCarryOverPanelOpen(false));
 
     els.goalRetailInput?.addEventListener('input', () => onGoalInputChange('retail'));
     els.goalRetailInput?.addEventListener('change', () => onGoalInputChange('retail'));
@@ -1001,9 +1357,11 @@
 
       bindElements();
       bindEvents();
+      window.FinanciamientoVentas?.init?.();
       compactFilters = Dashboard.initCompactFilters();
       setDefaultDates();
       Dashboard.setActivePresetChip('mes-actual');
+      await switchSalesTab(getSalesTabFromUrl());
       await consultar();
       window.__salesPageInit = true;
     } catch (err) {
@@ -1011,7 +1369,7 @@
       const badge = document.getElementById('statusBadge');
       if (badge) {
         badge.textContent = err.message;
-        badge.className = 'top-bar-meta status-error';
+        badge.className = 'sidebar-status-line status-error';
       }
     }
   }

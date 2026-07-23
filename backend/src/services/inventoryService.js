@@ -214,6 +214,7 @@ function mapRow(row) {
     daysApartado,
     apartadoPor,
     usuarioApartado: String(row.VEH_CVEUSU || '').trim(),
+    previas: Number(row.PREVIAS || 0) || 0,
   };
 }
 
@@ -241,7 +242,8 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       LTRIM(RTRIM(ISNULL(ap.PER_NOMRAZON, ''))) AS APAR_NOMBRE,
       LTRIM(RTRIM(ISNULL(ap.PER_PATERNO, ''))) AS APAR_PATERNO,
       LTRIM(RTRIM(ISNULL(ap.PER_MATERNO, ''))) AS APAR_MATERNO,
-      ISNULL(rem.IMPORTE_REMISION, 0) AS IMPORTE_REMISION
+      ISNULL(rem.IMPORTE_REMISION, 0) AS IMPORTE_REMISION,
+      ISNULL(prev.PREVIAS, 0) AS PREVIAS
     FROM SER_VEHICULO
     LEFT JOIN (
       SELECT
@@ -256,6 +258,17 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       FROM UNI_VEHDETA vd
       GROUP BY vd.VHD_NOSERIE
     ) rem ON rem.VHD_NOSERIE = SER_VEHICULO.VEH_NUMSERIE
+    LEFT JOIN (
+      SELECT
+        UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) AS SERIE,
+        COUNT(*) AS PREVIAS
+      FROM SER_ORDEN o
+      WHERE LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) = 'S'
+        AND o.ORE_STATUS <> 'C'
+        AND o.ORE_NUMSERIE IS NOT NULL
+        AND LTRIM(RTRIM(o.ORE_NUMSERIE)) <> ''
+      GROUP BY UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE)))
+    ) prev ON prev.SERIE = UPPER(LTRIM(RTRIM(SER_VEHICULO.VEH_NUMSERIE)))
     LEFT JOIN PER_PERSONAS ap
       ON NULLIF(LTRIM(RTRIM(SER_VEHICULO.VEH_PERAPAR)), '') IS NOT NULL
       AND ISNUMERIC(LTRIM(RTRIM(SER_VEHICULO.VEH_PERAPAR))) = 1
@@ -371,6 +384,8 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
   const planPisoTotal = planPisoTable.reduce((s, r) => s + r.intereses, 0);
   const planPisoMonths = buildPlanPisoMonthOptions(units);
   const periodLabel = formatPlanPisoPeriodLabel(period, planPisoMonths);
+  const sinPrevias = units.filter((u) => Number(u.previas || 0) === 0).length;
+  const conPrevias = units.length - sinPrevias;
 
   return {
     summary: {
@@ -383,6 +398,8 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       ageingAlertsCount: ageingAlerts.length,
       ageingAlertsPlanPisoTotal: Math.round(ageingAlertsPlanPisoTotal * 100) / 100,
       bySituacion,
+      sinPrevias,
+      conPrevias,
       planPisoTotal: Math.round(planPisoTotal * 100) / 100,
       planPisoUnits: planPisoTable.length,
       planPisoFactor: PLAN_PISO_FACTOR,

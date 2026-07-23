@@ -65,7 +65,9 @@ async function pushPayload(payload) {
       periodStart: payload.periodStart,
       periodEnd: payload.periodEnd,
       sourceHost: cfg.sourceHost,
-      meta: i === 0 ? payload.meta : { chunk: i + 1, totalChunks: chunks.length },
+      meta: payload.meta
+        ? { ...payload.meta, chunk: i + 1, totalChunks: chunks.length }
+        : { chunk: i + 1, totalChunks: chunks.length },
       records: chunks[i],
     };
     const result = await postJson(`${cfg.baseUrl}/api/sync/ingest`, body, cfg.apiKey);

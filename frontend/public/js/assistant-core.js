@@ -116,6 +116,23 @@ window.AssistantChat = (function () {
       .replace(/"/g, '&quot;');
   }
 
+  async function downloadExportFile(url, filename) {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `No se pudo descargar (${res.status})`);
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename || 'export.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
   function formatMarkdown(text) {
     let html = escapeHtml(text);
     html = html.replace(/^### (.+)$/gm, '</div><h4 class="assistant-md-h4">$1</h4><div>');
@@ -542,6 +559,16 @@ window.AssistantChat = (function () {
         const tools = msg.toolsUsed?.length
           ? `<div class="assistant-tools">${msg.toolsUsed.map((t) => `<span class="assistant-tool-badge">${escapeHtml(t)}</span>`).join('')}</div>`
           : '';
+        const exportsHtml = (!isUser && msg.exports?.length)
+          ? `<div class="assistant-exports">
+              ${msg.exports.map((ex, exIndex) => `
+                <button type="button" class="assistant-export-btn" data-export-url="${escapeHtml(ex.url)}" data-export-name="${escapeHtml(ex.filename || 'export.xlsx')}" data-msg="${msgIndex}" data-ex="${exIndex}">
+                  <span class="material-symbols-outlined">download</span>
+                  <span>${escapeHtml(ex.label || ex.filename || 'Descargar Excel')}</span>
+                  ${ex.rowCount ? `<em>${Number(ex.rowCount).toLocaleString('es-MX')} filas</em>` : ''}
+                </button>`).join('')}
+            </div>`
+          : '';
         const showBlocksInline = !isUser && !expanded;
         const blocks = showBlocksInline ? renderBlocks(msg.blocks, msgIndex) : '';
         const prose = isUser
@@ -556,6 +583,7 @@ window.AssistantChat = (function () {
             <div class="assistant-msg__body">
               ${blocks}
               ${prose}
+              ${exportsHtml}
               ${tools}
             </div>
           </article>`;
@@ -640,6 +668,7 @@ window.AssistantChat = (function () {
           content: data.reply || 'Sin respuesta.',
           blocks: data.blocks || [],
           toolsUsed: data.toolsUsed || [],
+          exports: data.exports || [],
         });
         saveHistory();
       } catch (err) {
@@ -698,7 +727,22 @@ window.AssistantChat = (function () {
       sendMessage(btn.dataset.prompt);
     });
 
-    chatMessages?.addEventListener('click', (e) => {
+    chatMessages?.addEventListener('click', async (e) => {
+      const exportBtn = e.target.closest('[data-export-url]');
+      if (exportBtn) {
+        e.preventDefault();
+        const url = exportBtn.getAttribute('data-export-url');
+        const name = exportBtn.getAttribute('data-export-name') || 'export.xlsx';
+        try {
+          exportBtn.disabled = true;
+          await downloadExportFile(url, name);
+        } catch (err) {
+          window.alert(err?.message || 'No se pudo descargar el Excel.');
+        } finally {
+          exportBtn.disabled = false;
+        }
+        return;
+      }
       const openBtn = e.target.closest('[data-drilldown-key]');
       if (openBtn) {
         toggleDrilldown(openBtn.dataset.drilldownKey);

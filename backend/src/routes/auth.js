@@ -6,6 +6,7 @@ const {
   updateUser,
   deleteUser,
   getAssignableRoles,
+  revealPassword,
 } = require('../auth/users');
 const { ROLES, getRole, canManageUsers } = require('../auth/roles');
 const { requireSession, requireUserManager } = require('../auth/middleware');
@@ -16,6 +17,12 @@ const {
   setSessionCookie,
   clearSessionCookie,
 } = require('../auth/session');
+const {
+  listAlertTypes,
+  getPrefs,
+  updatePrefs,
+  getAlertsForRole,
+} = require('../services/alertsService');
 
 const router = express.Router();
 
@@ -98,6 +105,77 @@ router.delete('/users/:username', requireUserManager, (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/users/:username/password', requireUserManager, (req, res) => {
+  try {
+    const result = revealPassword(req.params.username);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/alerts', requireSession, async (req, res) => {
+  try {
+    const role = req.session.role;
+    const alerts = await getAlertsForRole(role);
+    res.json({
+      role,
+      roleLabel: getRole(role)?.label || role,
+      count: alerts.length,
+      alerts,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'No se pudieron cargar las alertas.' });
+  }
+});
+
+router.get('/alert-types', requireUserManager, (_req, res) => {
+  res.json({ types: listAlertTypes(), roles: getAssignableRoles() });
+});
+
+router.get('/alert-prefs', requireUserManager, (_req, res) => {
+  res.json({
+    types: listAlertTypes(),
+    roles: getAssignableRoles(),
+    byRole: getPrefs(),
+  });
+});
+
+router.put('/alert-prefs', requireUserManager, (req, res) => {
+  try {
+    const byRole = updatePrefs(req.body?.byRole || {});
+    res.json({ ok: true, byRole, types: listAlertTypes() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/admin-expense-proration', requireUserManager, (_req, res) => {
+  try {
+    const {
+      getAdminExpenseProration,
+    } = require('../services/adminExpenseProrationStore');
+    res.json(getAdminExpenseProration());
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'No se pudo cargar el prorrateo.' });
+  }
+});
+
+router.put('/admin-expense-proration', requireUserManager, (req, res) => {
+  try {
+    const {
+      saveAdminExpenseProration,
+      resetAdminExpenseProration,
+    } = require('../services/adminExpenseProrationStore');
+    const result = req.body?.reset
+      ? resetAdminExpenseProration()
+      : saveAdminExpenseProration(req.body?.config || req.body || {});
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message, details: err.details || null });
   }
 });
 

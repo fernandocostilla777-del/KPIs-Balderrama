@@ -1,0 +1,109 @@
+<ion-header [translucent]="true" class="glass-header">
+  <ion-toolbar>
+    <ion-title>Panel de control</ion-title>
+    <ion-buttons slot="end">
+      <ion-button fill="clear" (click)="load()">
+        <ion-icon slot="icon-only" name="refresh-outline"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="liquid-bg page-pad">
+  <ion-refresher slot="fixed" (ionRefresh)="load($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
+  <div *ngIf="loading" class="center-msg">
+    <ion-spinner name="crescent"></ion-spinner>
+  </div>
+
+  <div *ngIf="error && !loading" class="glass-card error-card">{{ error }}</div>
+
+  <ng-container *ngIf="!loading && !error">
+    <section class="glass-card hero-card">
+      <div class="hero-top">
+        <span class="label-upper">Unidades vendidas</span>
+        <span class="badge-trend cobertura-badge" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA">
+          <ion-icon name="pie-chart-outline"></ion-icon>
+          {{ coberturaPct | number:'1.0-1' }}% cobertura
+        </span>
+      </div>
+      <div class="hero-value">{{ ventasUnidades | number }}</div>
+      <div class="progress-track">
+        <div class="progress-fill" [style.width.%]="coberturaBarPct"></div>
+      </div>
+    </section>
+
+    <section class="glass-card">
+      <h3>Resumen financiero</h3>
+      <div class="kpi-grid">
+        <div class="kpi-tile">
+          <span class="kpi-label">Ingreso ventas</span>
+          <strong>{{ formatMoney(ventasIngreso) }}</strong>
+        </div>
+        <div class="kpi-tile">
+          <span class="kpi-label">Margen</span>
+          <strong>{{ ventasMargen }}%</strong>
+        </div>
+        <div class="kpi-tile">
+          <span class="kpi-label">Órdenes taller</span>
+          <strong>{{ servicioOrdenes | number }}</strong>
+        </div>
+        <div class="kpi-tile">
+          <span class="kpi-label">Facturado PV</span>
+          <strong>{{ formatMoney(servicioImporte) }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-card sofia-card">
+      <div class="row-between">
+        <h3>Avance entregas GMMX</h3>
+        <span class="accent">{{ sofiaAvancePct | number:'1.0-1' }}%</span>
+      </div>
+
+      <div class="sofia-body">
+        <div class="sofia-ring" [style.background]="sofiaRingBackground" aria-hidden="true">
+          <div class="sofia-ring-center">
+            <strong>{{ sofiaAvancePct | number:'1.0-1' }}%</strong>
+            <span>{{ sofiaNotificaciones | number }} logradas</span>
+          </div>
+        </div>
+
+        <div class="sofia-meta">
+          <div class="sofia-meta-item">
+            <span class="kpi-label">Notificaciones</span>
+            <strong>{{ sofiaNotificaciones | number }}</strong>
+          </div>
+          <div class="sofia-meta-item">
+            <span class="kpi-label">Objetivo</span>
+            <strong>{{ sofiaObjetivoLabel }}</strong>
+          </div>
+          <div class="sofia-meta-item">
+            <span class="kpi-label">Faltantes</span>
+            <strong>{{ sofiaFaltantesLabel }}</strong>
+          </div>
+          <div class="sofia-meta-item">
+            <span class="kpi-label">Cobertura</span>
+            <strong class="purple">{{ coberturaPct | number:'1.0-1' }}%</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-card">
+      <h3>Inventario</h3>
+      <div class="kpi-grid">
+        <div class="kpi-tile">
+          <span class="kpi-label">Disponibles</span>
+          <strong class="cyan">{{ inventarioUnidades | number }}</strong>
+        </div>
+        <div class="kpi-tile">
+          <span class="kpi-label">Valor</span>
+          <strong class="purple">{{ formatMoney(inventarioValor) }}</strong>
+        </div>
+      </div>
+    </section>
+  </ng-container>
+</ion-content>

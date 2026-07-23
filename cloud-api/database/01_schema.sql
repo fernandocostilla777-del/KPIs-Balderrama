@@ -18,8 +18,11 @@ CREATE TABLE IF NOT EXISTS sync_batches (
   archived_count  INT          NOT NULL DEFAULT 0,
   status          VARCHAR(16)  NOT NULL DEFAULT 'ok',
   error_message   TEXT,
+  meta            JSONB,
   created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE sync_batches ADD COLUMN IF NOT EXISTS meta JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_sync_batches_domain ON sync_batches (domain, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sync_batches_period ON sync_batches (period_key, domain);

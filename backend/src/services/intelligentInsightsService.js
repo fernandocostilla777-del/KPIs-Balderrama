@@ -1,0 +1,1359 @@
+/**
+ * Alertas inteligentes basadas en datos reales de cada módulo.
+ * Objetivo: detectar posibles fallas operativas / comerciales / financieras
+ * y abrir análisis profundo con el asistente IA.
+ */
+
+function round1(n) {
+  return Math.round(Number(n || 0) * 10) / 10;
+}
+
+function daysInclusive(fechaInicio, fechaFin) {
+  if (!fechaInicio || !fechaFin) return null;
+  const a = new Date(`${fechaInicio}T12:00:00`);
+  const b = new Date(`${fechaFin}T12:00:00`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return null;
+  return Math.floor((b - a) / 86400000) + 1;
+}
+
+function expectedPacePct(fechaInicio, fechaFin) {
+  const total = daysInclusive(fechaInicio, fechaFin);
+  if (!total || total <= 0) return null;
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  const start = new Date(`${fechaInicio}T12:00:00`);
+  const end = new Date(`${fechaFin}T12:00:00`);
+  if (today < start) return 0;
+  if (today > end) return 100;
+  const elapsed = Math.floor((today - start) / 86400000) + 1;
+  return round1(Math.min(100, (elapsed / total) * 100));
+}
+
+function chatPrompt(module, title, contextLines, ask) {
+  return [
+    `Eres el analista de BALDERRAMA. Profundiza esta alerta del módulo ${module}.`,
+    `Hallazgo (posible falla operativa/comercial): ${title}`,
+    'Datos reales del sistema / base de datos:',
+    ...contextLines.map((l) => `- ${l}`),
+    ask
+      || 'Identifica causas raíz probables (fallas de proceso, omisiones, cuellos de botella), impacto en la agencia y 3–5 acciones concretas priorizadas. Usa solo los datos dados; no inventes cifras. Responde en español.',
+  ].join('\n');
+}
+
+function push(list, insight) {
+  if (insight?.kpiId) list.push(insight);
+}
+
+/* ───────────────── Ventas ───────────────── */
+
+function buildVentasInsights(payload = {}) {
+  const insights = [];
+  const r = payload.resumen || {};
+  const goals = payload.goals || {};
+  const ytd = payload.ytd || {};
+  const fi = payload.fechaInicio || null;
+  const ff = payload.fechaFin || null;
+  const pace = expectedPacePct(fi, ff);
+
+  const retail = Number(r.totalRetail ?? r.retail ?? 0);
+  const flotillas = Number(r.totalFlotillas ?? r.flotillas ?? 0);
+  const total = Number(r.totalVentas ?? retail + flotillas);
+  const sofia = Number(r.totalNotificacionesEntrega ?? r.sofia ?? 0);
+  const sinTimbrar = Number(r.totalUnidadesFacturadasNoTimbradas ?? r.sinTimbrar ?? 0);
+  const numerador = Number(r.numeradorCobertura ?? (sofia + sinTimbrar));
+  const goalRetail = Number(goals.retail || 0);
+  const goalSofia = Number(goals.sofia || 0);
+
+  if (goalRetail > 0 && pace != null) {
+    const pct = round1((retail / goalRetail) * 100);
+    const gap = round1(pace - pct);
+    if (gap >= 12) {
+      push(insights, {
+        id: 'ventas-ritmo-retail',
+        kpiId: 'kpiCardRetail',
+        module: 'ventas',
+        severity: 'warning',
+        title: 'Retail por debajo del ritmo del periodo',
+        summary: `Llevas ${pct}% del objetivo retail y el calendario exige ~${pace}%.`,
+        analysis:
+          `Con ${retail} unidades retail frente a un objetivo de ${goalRetail}, el avance va `
+          + `${gap} pp atrás del ritmo del periodo ${fi || '—'} a ${ff || '—'}. `
+          + 'Posible falla: pipeline de cierres insuficiente, desvío a flotilla o stock/proceso que frena entregas.',
+        recommendations: [
+          'Priorizar citas y cierres de prospectos calientes en 5–7 días.',
+          'Revisar mix retail vs flotilla e incentivos.',
+          'Definir meta diaria = pendiente ÷ días restantes.',
+          'Usar Seguimiento 360 en leads con prueba sin solicitud/cierre.',
+        ],
+        metrics: { retail, goalRetail, pct, paceExpected: pace, gap },
+        chatPrompt: chatPrompt('Ventas', 'Retail debajo del ritmo', [
+          `Retail: ${retail}`, `Objetivo: ${goalRetail}`, `Avance: ${pct}%`, `Ritmo esperado: ${pace}%`, `Periodo: ${fi} — ${ff}`,
+        ]),
+      });
+    }
+  }
+
+  if (goalSofia > 0 && pace != null) {
+    const pct = round1((sofia / goalSofia) * 100);
+    const gap = round1(pace - pct);
+    if (gap >= 12) {
+      push(insights, {
+        id: 'ventas-ritmo-sofia',
+        kpiId: 'kpiCardEntregasSofia',
+        module: 'ventas',
+        severity: 'warning',
+        title: 'Entregas SOFIA rezagadas vs objetivo',
+        summary: `SOFIA al ${pct}% del objetivo; el ritmo pide ~${pace}%.`,
+        analysis:
+          `Hay ${sofia} notificaciones frente a objetivo ${goalSofia}. `
+          + 'Falla típica: cuellos en facturación, previas, F&I o logística de entrega.',
+        recommendations: [
+          'Cruzar facturas pendientes de entrega y liberar bloqueos F&I.',
+          'No programar entrega sin previas.',
+          'Acelerar unidades facturadas sin timbrar.',
+        ],
+        metrics: { sofia, goalSofia, pct, paceExpected: pace, gap },
+        chatPrompt: chatPrompt('Ventas', 'SOFIA debajo del ritmo', [
+          `SOFIA: ${sofia}`, `Objetivo: ${goalSofia}`, `Avance: ${pct}%`, `Ritmo: ${pace}%`,
+        ]),
+      });
+    }
+  }
+
+  if (goalSofia > 0) {
+    const pctCob = round1((numerador / goalSofia) * 100);
+    if (pctCob < 85) {
+      push(insights, {
+        id: 'ventas-cobertura',
+        kpiId: 'kpiCardCobertura',
+        module: 'ventas',
+        severity: pctCob < 70 ? 'critical' : 'warning',
+        title: 'Cobertura bajo el umbral sano',
+        summary: `Cobertura ${pctCob}% (numerador ${numerador} / objetivo ${goalSofia}).`,
+        analysis:
+          'La cobertura (SOFIA + sin timbrar) vs objetivo no sostiene el plan. Indica embudo de entrega roto o meta desalineada.',
+        recommendations: [
+          'Depurar backlog de facturas no timbradas.',
+          'Alinear agenda de entregas con unidades ya facturadas.',
+          'Validar que el objetivo SOFIA coincida con el plan retail.',
+        ],
+        metrics: { numerador, goalSofia, pctCobertura: pctCob },
+        chatPrompt: chatPrompt('Ventas', 'Cobertura baja', [
+          `Numerador: ${numerador}`, `Objetivo SOFIA: ${goalSofia}`, `Cobertura: ${pctCob}%`,
+        ]),
+      });
+    }
+  }
+
+  const apartadas = Number(r.unidadesApartadas ?? 0);
+  if (goalSofia > 0 && apartadas > 0) {
+    const numeradorSim = numerador + apartadas;
+    const pctSim = round1((numeradorSim / goalSofia) * 100);
+    const pctActual = round1((numerador / goalSofia) * 100);
+    if (pctSim >= 100 && pctActual < 100) {
+      push(insights, {
+        id: 'ventas-carry-over',
+        kpiId: 'kpiCardCarryOver',
+        module: 'ventas',
+        severity: 'info',
+        title: 'Carry over alcanzaría la cobertura',
+        summary: `${apartadas} apartadas: cobertura ${pctActual}% → ${pctSim}% si se facturan.`,
+        analysis:
+          'Hay unidades SEP (apartadas) que, al facturarse, llevarían el numerador de cobertura (SOFIA + sin timbrar) al objetivo o por encima.',
+        recommendations: [
+          'Priorizar facturación/timbrado de unidades apartadas del mes.',
+          'Validar que las apartadas tengan documentación y previas listas.',
+        ],
+        metrics: { apartadas, pctActual, pctSim, numerador, goalSofia },
+        chatPrompt: chatPrompt('Ventas', 'Carry over vs cobertura', [
+          `Apartadas: ${apartadas}`,
+          `Cobertura actual: ${pctActual}%`,
+          `Cobertura si se factura: ${pctSim}%`,
+          `Objetivo SOFIA: ${goalSofia}`,
+        ]),
+      });
+    }
+  }
+
+  if (sinTimbrar >= 5) {
+    push(insights, {
+      id: 'ventas-sin-timbrar',
+      kpiId: 'kpiCardEntregasSofia',
+      module: 'ventas',
+      severity: 'warning',
+      title: 'Backlog de unidades sin timbrar',
+      summary: `${sinTimbrar} unidades facturadas pendientes de timbrado.`,
+      analysis: 'Falla fiscal/operativa: el timbrado pendiente atrasa formalización y puede retrasar SOFIA y cobertura.',
+      recommendations: [
+        'Liberar cola de timbrado con contabilidad/sistemas.',
+        'Separar casos bloqueados por datos fiscales incompletos.',
+      ],
+      metrics: { sinTimbrar },
+      chatPrompt: chatPrompt('Ventas', 'Sin timbrar', [`Unidades sin timbrar: ${sinTimbrar}`]),
+    });
+  }
+
+  const ytdVar = Number(ytd.variacion);
+  if (Number.isFinite(ytdVar) && ytdVar <= -5) {
+    push(insights, {
+      id: 'ventas-ytd',
+      kpiId: 'ytdVariacion',
+      module: 'ventas',
+      severity: ytdVar <= -15 ? 'critical' : 'warning',
+      title: 'Acumulado anual por debajo del año anterior',
+      summary: `Variación YTD ${ytdVar}% vs año previo.`,
+      analysis:
+        `YTD (${ytd.totalActual ?? '—'}) está ${Math.abs(ytdVar)}% debajo del año anterior (${ytd.totalAnterior ?? '—'}). Señal estructural, no solo un mal mes.`,
+      recommendations: [
+        'Comparar gap por canal y modelo.',
+        'Revisar generación de leads vs mismo periodo año previo.',
+        'Ajustar forecast y objetivos restantes con gerencia.',
+      ],
+      metrics: { variacion: ytdVar, totalActual: ytd.totalActual, totalAnterior: ytd.totalAnterior },
+      chatPrompt: chatPrompt('Ventas', 'YTD negativo', [
+        `Variación: ${ytdVar}%`, `YTD actual: ${ytd.totalActual}`, `YTD anterior: ${ytd.totalAnterior}`,
+      ]),
+    });
+  }
+
+  if (total > 0 && flotillas / total >= 0.45) {
+    const pct = round1((flotillas / total) * 100);
+    push(insights, {
+      id: 'ventas-mix-flotilla',
+      kpiId: 'kpiCardFlotillas',
+      module: 'ventas',
+      severity: 'info',
+      title: 'Mix alto de flotilla',
+      summary: `Flotilla representa ${pct}% de las ${total} ventas del periodo.`,
+      analysis: 'Mix elevado de flotilla puede sostener volumen pero comprimir margen y distorsionar objetivos retail.',
+      recommendations: [
+        'Separar P&L retail vs flotilla.',
+        'Cuidar que flotilla no canibalice stock crítico de retail.',
+      ],
+      metrics: { flotillas, total, pct },
+      chatPrompt: chatPrompt('Ventas', 'Mix flotilla alto', [
+        `Flotilla: ${flotillas}`, `Total: ${total}`, `Mix: ${pct}%`,
+      ]),
+    });
+  }
+
+  return insights;
+}
+
+/* ───────────────── Contabilidad ───────────────── */
+
+function buildContabilidadInsights(payload = {}) {
+  const s = payload.summary || payload || {};
+  const ventas = Number(s.ventasTotales ?? s.ventas ?? 0);
+  const utilidadBruta = Number(s.utilidadBruta ?? 0);
+  const utilidadOperacion = Number(s.utilidadOperacion ?? 0);
+  const gastos = Number(s.gastosOperacion ?? 0);
+  const costo = Number(s.costoVentas ?? 0);
+  const margenBruto = Number(s.margenBrutoPct ?? (ventas ? (utilidadBruta / ventas) * 100 : 0));
+  const margenOp = Number(s.margenOperacionPct ?? (ventas ? (utilidadOperacion / ventas) * 100 : 0));
+  const pe = s.puntoEquilibrio != null ? Number(s.puntoEquilibrio) : null;
+  const gastoPct = ventas > 0 ? round1((gastos / ventas) * 100) : null;
+  const list = [];
+
+  if (utilidadOperacion < 0) {
+    push(list, {
+      id: 'conta-utilidad-op',
+      kpiId: 'kpiCardUtilidadOperacion',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Pérdida de operación',
+      summary: `Utilidad de operación negativa (${round1(utilidadOperacion)}).`,
+      analysis:
+        'Falla de rentabilidad operativa: utilidad bruta − gastos 0700 no cubre la estructura. Margen insuficiente o gastos sobredimensionados.',
+      recommendations: [
+        'Desglosar 0700 (nómina, comisiones, plan piso, rentas) y atacar las 3 mayores partidas.',
+        'Revisar margen bruto por área antes de recortar a ciegas.',
+        'Calcular unidades/ticket adicionales para volver a PE.',
+      ],
+      metrics: { utilidadOperacion, margenOp, ventas, gastos },
+      chatPrompt: chatPrompt('Contabilidad', 'Pérdida de operación', [
+        `Ventas: ${ventas}`, `UB: ${utilidadBruta} (${round1(margenBruto)}%)`,
+        `Gastos: ${gastos}`, `UO: ${utilidadOperacion} (${round1(margenOp)}%)`,
+      ], 'Aplica PE y apalancamiento operativo. Plan de 30 días.'),
+    });
+  } else if (margenOp < 5 && ventas > 0) {
+    push(list, {
+      id: 'conta-margen-op-bajo',
+      kpiId: 'kpiCardUtilidadOperacion',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'Margen de operación estrecho',
+      summary: `Margen de operación ${round1(margenOp)}% — poco colchón.`,
+      analysis: 'Margen de operación bajo deja vulnerable a plan piso, comisiones o caídas de volumen.',
+      recommendations: [
+        'Monitorear gastos variables semanalmente.',
+        'Empujar PVAs y postventa para mejorar contribución.',
+      ],
+      metrics: { margenOp, utilidadOperacion, ventas },
+      chatPrompt: chatPrompt('Contabilidad', 'Margen de operación bajo', [
+        `Margen op: ${round1(margenOp)}%`, `UO: ${utilidadOperacion}`, `Ventas: ${ventas}`,
+      ]),
+    });
+  }
+
+  if (margenBruto < 8 && ventas > 0) {
+    push(list, {
+      id: 'conta-margen-bruto',
+      kpiId: 'kpiCardUtilidadBruta',
+      module: 'contabilidad',
+      severity: margenBruto < 0 ? 'critical' : 'warning',
+      title: margenBruto < 0 ? 'Margen bruto negativo' : 'Margen bruto débil',
+      summary: `Margen bruto ${round1(margenBruto)}% (UB ${round1(utilidadBruta)}).`,
+      analysis:
+        'Falla en precio/descuentos/mix/costo: sin margen bruto sano no se recupera con control de gastos 0700.',
+      recommendations: [
+        'Auditar bonificaciones vs utilidad por unidad.',
+        'Revisar mix retail/flotilla y modelos de bajo margen.',
+        'Contrastar costo 0600 vs remisión/plan piso mal clasificado.',
+      ],
+      metrics: { margenBruto, utilidadBruta, costo, ventas },
+      chatPrompt: chatPrompt('Contabilidad', 'Margen bruto débil', [
+        `Ventas: ${ventas}`, `Costo: ${costo}`, `UB: ${utilidadBruta}`, `MB: ${round1(margenBruto)}%`,
+      ]),
+    });
+  }
+
+  if (gastoPct != null && gastoPct >= 28) {
+    push(list, {
+      id: 'conta-gastos-altos',
+      kpiId: 'kpiCardGastosOperacion',
+      module: 'contabilidad',
+      severity: gastoPct >= 40 ? 'critical' : 'warning',
+      title: 'Gastos de operación elevados vs ventas',
+      summary: `Gastos 0700 = ${gastoPct}% de las ventas.`,
+      analysis: 'Estructura de gastos absorbe demasiada venta: falla típica al no ajustar gastos cuando cae el volumen.',
+      recommendations: [
+        'Separar gastos fijos vs variables y ajustar variables al ritmo de ventas.',
+        'Revisar plan piso e intereses en 0700.',
+      ],
+      metrics: { gastos, ventas, gastoPct },
+      chatPrompt: chatPrompt('Contabilidad', 'Gastos altos sobre ventas', [
+        `Gastos: ${gastos}`, `Ventas: ${ventas}`, `Gastos/Ventas: ${gastoPct}%`,
+      ]),
+    });
+  }
+
+  if (pe != null && pe > 0 && ventas > 0 && ventas < pe) {
+    push(list, {
+      id: 'conta-bajo-pe',
+      kpiId: 'kpiCardPuntoEquilibrio',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Ventas por debajo del punto de equilibrio',
+      summary: `Ventas ${round1(ventas)} < PE ${round1(pe)}.`,
+      analysis: 'Con el margen actual no se cubren gastos 0700. Gap operativo real según saldos CON_CTAS.',
+      recommendations: [
+        `Cuantificar gap: ~${round1(pe - ventas)} de ventas (o equivalente en margen).`,
+        'Subir margen (precio/mix) o bajar gastos fijos.',
+      ],
+      metrics: { ventas, puntoEquilibrio: pe, gap: pe - ventas, margenBruto },
+      chatPrompt: chatPrompt('Contabilidad', 'Debajo del PE', [
+        `Ventas: ${ventas}`, `PE: ${pe}`, `Gap: ${round1(pe - ventas)}`, `MB: ${round1(margenBruto)}%`,
+      ]),
+    });
+  } else if (margenBruto <= 0 && pe == null) {
+    push(list, {
+      id: 'conta-pe-no-calculable',
+      kpiId: 'kpiCardPuntoEquilibrio',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'Punto de equilibrio no calculable',
+      summary: 'Margen bruto ≤ 0: no hay PE válido.',
+      analysis: 'Sin margen bruto positivo el PE clásico no aplica: primero recuperar contribución.',
+      recommendations: [
+        'Atacar margen bruto antes que el control fino de fijos.',
+        'Revisar clasificación 0600 vs 0700.',
+      ],
+      metrics: { margenBruto, gastos },
+      chatPrompt: chatPrompt('Contabilidad', 'PE no calculable', [
+        `MB: ${round1(margenBruto)}%`, `Gastos: ${gastos}`,
+      ]),
+    });
+  }
+
+  return list;
+}
+
+/* ───────────────── Overview / Tablero ───────────────── */
+
+function buildOverviewInsights(payload = {}) {
+  const list = [];
+  const fi = payload.fechaInicio;
+  const ff = payload.fechaFin;
+  const f = payload.financial || {};
+  const ops = payload.operaciones || {};
+  const sales = f.sales || {};
+  const service = f.service || {};
+  const inventory = f.inventory || {};
+  const analytics = payload.analytics || payload.salesAnalytics || {};
+  const r = analytics.rentabilidad || {};
+  const fv = analytics.fuerzaVentas || {};
+  const aging = analytics.aging || {};
+
+  const unidades = Number(ops.unidadesVendidas ?? sales.units ?? 0);
+  const sofia = Number(ops.entregasSofia ?? 0);
+  const sinPreviasEnt = Number(ops.entregasSinPrevias ?? 0);
+  const sinTimbrar = Number(ops.sinTimbrar ?? 0);
+  const sinPreviasStock = Number(inventory.sinPrevias ?? 0);
+  const available = Number(inventory.availableUnits ?? 0);
+  const ageing = Number(inventory.ageingAlertsCount ?? 0);
+  const planPiso = Number(inventory.planPisoTotal ?? 0);
+  const avgDays = Number(inventory.avgDaysInventory ?? 0);
+  const pctFact = Number(service.pctFacturado ?? 0);
+  const ingresadas = Number(service.ingresadas ?? 0);
+  const marginPct = Number(sales.marginPct ?? r.margenBrutoPct ?? 0);
+  const bonifPct = Number(r.bonificacionesPctGanancia ?? 0);
+  const regalos = Array.isArray(fv.ranking)
+    ? fv.ranking.filter((v) => v.quadrant === 'regalo').length
+    : Number(fv.regalos ?? 0);
+
+  if (sofia > 0 && sinPreviasEnt / sofia >= 0.08) {
+    const pct = round1((sinPreviasEnt / sofia) * 100);
+    push(list, {
+      id: 'ov-sin-previas-entrega',
+      kpiId: 'ovEntregasSinPrevias',
+      module: 'overview',
+      severity: 'warning',
+      title: 'Entregas SOFIA sin previa en el tablero',
+      summary: `${sinPreviasEnt} de ${sofia} entregas (${pct}%) sin previas.`,
+      analysis: 'Falla de proceso de entrega detectada en datos operativos: se entregan unidades sin órdenes de previa de taller.',
+      recommendations: [
+        'Auditar el flujo previas → SOFIA en Ventas e Inventario.',
+        'Bloquear entregas sin checklist de calidad.',
+      ],
+      metrics: { sinPreviasEnt, sofia, pct },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Entregas sin previa', [
+        `Sin previa: ${sinPreviasEnt}`, `SOFIA: ${sofia}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (sinTimbrar >= 5) {
+    push(list, {
+      id: 'ov-sin-timbrar',
+      kpiId: 'ovEntregasSofia',
+      module: 'overview',
+      severity: 'warning',
+      title: 'Facturas sin timbrar acumuladas',
+      summary: `${sinTimbrar} unidades facturadas sin timbrar en el periodo.`,
+      analysis: 'Falla fiscal/operativa visible en el tablero: el backlog de timbrado retrasa cobertura y entregas.',
+      recommendations: ['Priorizar cola de timbrado con sistemas/contabilidad.'],
+      metrics: { sinTimbrar },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Sin timbrar', [`Sin timbrar: ${sinTimbrar}`, `Periodo: ${fi} — ${ff}`]),
+    });
+  }
+
+  if (available > 0 && sinPreviasStock / available >= 0.25) {
+    const pct = round1((sinPreviasStock / available) * 100);
+    push(list, {
+      id: 'ov-stock-sin-previas',
+      kpiId: 'ovStockSinPrevias',
+      module: 'overview',
+      severity: 'warning',
+      title: 'Inventario sin previas elevado',
+      summary: `${sinPreviasStock} de ${available} disponibles (${pct}%) sin previas.`,
+      analysis: 'Stock listo para venta/entrega sin preparación de taller: riesgo de entregas defectuosas y demoras.',
+      recommendations: [
+        'Programar previas masivas sobre unidades FIS/DIS sin órdenes S.',
+        'Cruzar con módulo Inventario → Sin previas.',
+      ],
+      metrics: { sinPreviasStock, available, pct },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Stock sin previas', [
+        `Sin previas: ${sinPreviasStock}`, `Disponibles: ${available}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (ageing >= 8 || (available > 0 && ageing / available >= 0.15)) {
+    push(list, {
+      id: 'ov-aging',
+      kpiId: 'ovAging',
+      module: 'overview',
+      severity: ageing >= 15 ? 'critical' : 'warning',
+      title: 'Inventario envejecido (60+ días)',
+      summary: `${ageing} unidades con alerta de aging; plan piso ${round1(planPiso)}.`,
+      analysis:
+        'Falla de rotación: unidades físicas +60 días generan interés de plan piso y presionan a vender con descuento.',
+      recommendations: [
+        'Activar plan de liquidación de aging (precio/bono/transferencia).',
+        'Revisar pedido a planta vs sell-through real.',
+      ],
+      metrics: { ageing, planPiso, avgDays, available },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Aging 60+', [
+        `Envejecidas: ${ageing}`, `Plan piso: ${planPiso}`, `Días prom.: ${avgDays}`, `Disponibles: ${available}`,
+      ]),
+    });
+  }
+
+  if (ingresadas >= 10 && pctFact < 55) {
+    push(list, {
+      id: 'ov-taller-fact',
+      kpiId: 'ovFacturacionTaller',
+      module: 'overview',
+      severity: 'warning',
+      title: 'Baja facturación de taller',
+      summary: `Solo ${pctFact}% de ${ingresadas} órdenes facturadas.`,
+      analysis: 'Posible falla de cierre de órdenes: trabajo hecho sin facturar o backlog de taller que no convierte a ingreso.',
+      recommendations: [
+        'Revisar órdenes abiertas antiguas en Postventa.',
+        'Auditar promesas vencidas y críticas +60.',
+      ],
+      metrics: { pctFact, ingresadas },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Baja facturación taller', [
+        `% facturado: ${pctFact}`, `Ingresadas: ${ingresadas}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (unidades >= 5 && marginPct > 0 && marginPct < 8) {
+    push(list, {
+      id: 'ov-margen',
+      kpiId: 'ovUtilidadBruta',
+      module: 'overview',
+      severity: 'warning',
+      title: 'Margen bruto de ventas débil',
+      summary: `Margen ${round1(marginPct)}% sobre ${unidades} unidades.`,
+      analysis: 'La utilidad del tablero sugiere presión de descuentos, mix o costo. Falla comercial de precio/negociación.',
+      recommendations: [
+        'Revisar impacto de bonificaciones en analytics del tablero.',
+        'Comparar asesores alto volumen / bajo margen.',
+      ],
+      metrics: { marginPct, unidades, bonifPct },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Margen débil', [
+        `Margen: ${round1(marginPct)}%`, `Unidades: ${unidades}`, `Bonif % utilidad: ${bonifPct}`,
+      ]),
+    });
+  }
+
+  if (bonifPct >= 25) {
+    push(list, {
+      id: 'ov-bonif',
+      kpiId: 'ovUtilidadBruta',
+      module: 'overview',
+      severity: bonifPct >= 40 ? 'critical' : 'warning',
+      title: 'Descuentos/bonificaciones erosionan utilidad',
+      summary: `Bonificaciones = ${bonifPct}% de la utilidad bruta.`,
+      analysis: 'Falla de disciplina comercial: el descuento se come la ganancia. Suele correlacionar con aging o metas de volumen.',
+      recommendations: [
+        'Tope de descuento por modelo/asesor.',
+        'Cruzar aging al facturar vs bonificación promedio.',
+      ],
+      metrics: { bonifPct },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Bonificaciones altas', [
+        `% bonif/utilidad: ${bonifPct}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (regalos >= 2) {
+    push(list, {
+      id: 'ov-asesores-regalo',
+      kpiId: 'ovUnidades',
+      module: 'overview',
+      severity: 'warning',
+      title: 'Asesores alto volumen · bajo margen',
+      summary: `${regalos} asesor(es) en cuadrante “regalo”.`,
+      analysis: 'Falla de fuerza de ventas: se vende por precio, no por valor. Distorsiona utilidad de la agencia.',
+      recommendations: [
+        'Coaching a asesores “regalo” con meta de margen mínimo.',
+        'Revisar autorización de descuentos.',
+      ],
+      metrics: { regalos },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Asesores regalo', [
+        `Asesores cuadrante regalo: ${regalos}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (aging.estancadosMayorDescuento) {
+    push(list, {
+      id: 'ov-aging-descuento',
+      kpiId: 'ovAging',
+      module: 'overview',
+      severity: 'info',
+      title: 'Estancados salen con más descuento',
+      summary: 'Unidades +60 días al facturar muestran bonificaciones mayores.',
+      analysis: 'Confirmado en analytics: el inventario parado se liquida regalando margen. Costo oculto del aging.',
+      recommendations: [
+        'Prevenir aging (rotación) en lugar de “quemar” precio al final.',
+        'Definir política de descuento máximo por días de stock.',
+      ],
+      metrics: { estancadosMayorDescuento: true },
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Aging + descuento', [
+        'Estancados con mayor descuento: sí', `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  return list;
+}
+
+/* ───────────────── Inventario ───────────────── */
+
+function buildInventoryInsights(payload = {}) {
+  const list = [];
+  const s = payload.summary || {};
+  const total = Number(s.totalUnits ?? 0);
+  const available = Number(s.available ?? s.availableUnits ?? 0);
+  const sinPrevias = Number(s.sinPrevias ?? 0);
+  const avgDays = Number(s.avgDaysAvailable ?? 0);
+  const ageing = Number(s.ageingAlertsCount ?? s.urgentAlerts ?? 0);
+  const planPiso = Number(s.planPisoTotal ?? 0);
+  const planPisoUnits = Number(s.planPisoUnits ?? 0);
+  const pv = payload.postventa || {};
+
+  if (available > 0 && sinPrevias / available >= 0.2) {
+    const pct = round1((sinPrevias / available) * 100);
+    push(list, {
+      id: 'inv-sin-previas',
+      kpiId: 'kpiSinPrevias',
+      module: 'inventory',
+      severity: pct >= 40 ? 'critical' : 'warning',
+      title: 'Muchas unidades disponibles sin previas',
+      summary: `${sinPrevias} de ${available} disponibles (${pct}%) sin órdenes S.`,
+      analysis:
+        'Falla de preparación de inventario: VIN físicos/disponibles sin previa de taller no deberían entrar a flujo de entrega.',
+      recommendations: [
+        'Generar órdenes de previa masivas por prioridad de aging.',
+        'No apartar/entregar sin previas completadas.',
+      ],
+      metrics: { sinPrevias, available, pct },
+      chatPrompt: chatPrompt('Inventario', 'Sin previas en stock', [
+        `Sin previas: ${sinPrevias}`, `Disponibles: ${available}`, `Total: ${total}`,
+      ]),
+    });
+  }
+
+  const entregasSinPrevias = Number(s.entregasSinPreviasSofia ?? payload.entregasSinPreviasSofia ?? 0);
+  const entregasSofia = Number(s.entregasSofiaMes ?? payload.entregasSofiaMes ?? 0);
+  if (entregasSofia > 0 && entregasSinPrevias / entregasSofia >= 0.08) {
+    const pct = round1((entregasSinPrevias / entregasSofia) * 100);
+    push(list, {
+      id: 'inv-entregas-sin-previas',
+      kpiId: 'kpiEntregasSinPrevias',
+      module: 'inventory',
+      severity: 'warning',
+      title: 'Entregas SOFIA sin previa en el mes',
+      summary: `${entregasSinPrevias} de ${entregasSofia} entregas (${pct}%) sin órdenes previas.`,
+      analysis:
+        'Se están entregando unidades reportadas en SOFIA sin previas de taller. Riesgo de calidad y reclamaciones.',
+      recommendations: [
+        'Revisar el listado de entregas sin previa del mes.',
+        'No programar entrega sin checklist de previas.',
+      ],
+      metrics: { entregasSinPrevias, entregasSofia, pct },
+      chatPrompt: chatPrompt('Inventario', 'Entregas SOFIA sin previa', [
+        `Sin previa: ${entregasSinPrevias}`, `SOFIA mes: ${entregasSofia}`, `Proporción: ${pct}%`,
+      ]),
+    });
+  }
+
+  if (ageing >= 5) {
+    push(list, {
+      id: 'inv-aging',
+      kpiId: 'kpiAgeingAlerts',
+      module: 'inventory',
+      severity: ageing >= 12 ? 'critical' : 'warning',
+      title: 'Unidades envejecidas 60+',
+      summary: `${ageing} unidades físicas con 60+ días; intereses asociados al plan piso.`,
+      analysis: 'Falla de rotación de stock: cada día adicional eleva costo financiero (plan piso) y presión de descuento.',
+      recommendations: [
+        'Plan de salida por VIN (transferencia, promo, demo).',
+        'Revisar pedido a planta vs días promedio de stock.',
+      ],
+      metrics: { ageing, planPiso, avgDays },
+      chatPrompt: chatPrompt('Inventario', 'Aging 60+', [
+        `Envejecidas: ${ageing}`, `Plan piso: ${planPiso}`, `Días prom.: ${avgDays}`,
+      ]),
+    });
+  }
+
+  if (avgDays >= 45) {
+    push(list, {
+      id: 'inv-dias',
+      kpiId: 'kpiDaysStock',
+      module: 'inventory',
+      severity: avgDays >= 70 ? 'critical' : 'warning',
+      title: 'Días promedio de stock elevados',
+      summary: `${avgDays} días promedio desde remisión.`,
+      analysis: 'La rotación está lenta según fechas de remisión en SQL. Indica sobre-stock o demanda mal estimada.',
+      recommendations: [
+        'Ajustar forecast y pedido a planta.',
+        'Priorizar modelos con más días en piso.',
+      ],
+      metrics: { avgDays },
+      chatPrompt: chatPrompt('Inventario', 'Días promedio altos', [`Días prom.: ${avgDays}`, `Disponibles: ${available}`]),
+    });
+  }
+
+  if (planPisoUnits >= 3 && planPiso > 0) {
+    push(list, {
+      id: 'inv-plan-piso',
+      kpiId: 'kpiPlanPisoCard',
+      module: 'inventory',
+      severity: 'info',
+      title: 'Carga de plan piso activa',
+      summary: `${planPisoUnits} VIN con intereses acumulados ${round1(planPiso)}.`,
+      analysis: 'Intereses de plan piso (dato Físico) son costo real por no rotar. Revisar si el periodo y VINs coinciden con aging.',
+      recommendations: [
+        'Atacar primero VINs con mayor interés acumulado.',
+        'Validar que no haya unidades “olvidadas” en FIS.',
+      ],
+      metrics: { planPiso, planPisoUnits },
+      chatPrompt: chatPrompt('Inventario', 'Plan piso', [
+        `Intereses: ${planPiso}`, `VIN: ${planPisoUnits}`, `Periodo: ${s.planPisoPeriodLabel || payload.planPisoPeriod || '—'}`,
+      ]),
+    });
+  }
+
+  const pvTotal = Number(pv.totalCosto ?? 0);
+  if (pvTotal > 0 && Number(pv.servicio?.lineas ?? 0) === 0 && Number(pv.refacciones?.lineas ?? 0) > 0) {
+    push(list, {
+      id: 'inv-pv-desbalance',
+      kpiId: 'pvKpiTotal',
+      module: 'inventory',
+      severity: 'info',
+      title: 'Postventa: stock sin proceso de servicio',
+      summary: 'Hay costo en refacciones/HYP pero sin líneas de proceso servicio reportadas.',
+      analysis: 'Posible desbalance o carga incompleta de inventario de postventa en la base.',
+      recommendations: ['Validar sincronización de áreas servicio / refacciones / HYP.'],
+      metrics: { pvTotal },
+      chatPrompt: chatPrompt('Inventario postventa', 'Desbalance áreas', [`Costo total: ${pvTotal}`]),
+    });
+  }
+
+  return list;
+}
+
+/* ───────────────── Forecast ───────────────── */
+
+function buildForecastInsights(payload = {}) {
+  const list = [];
+  const k = payload.kpis || {};
+  const mape = k.mape != null ? Number(k.mape) : null;
+  const varPct = k.variationPct != null ? Number(k.variationPct) : null;
+  const last = Number(k.lastMonthUnits ?? 0);
+  const next = Number(k.nextMonthUnits ?? 0);
+
+  if (mape != null && mape >= 25) {
+    push(list, {
+      id: 'fc-mape',
+      kpiId: 'kpiMape',
+      module: 'forecast',
+      severity: mape >= 40 ? 'critical' : 'warning',
+      title: 'Error de pronóstico elevado (MAPE)',
+      summary: `MAPE ${mape}% — el modelo se desvía mucho de lo real.`,
+      analysis:
+        'Falla de predicción: con MAPE alto, planificar pedido/metas con este forecast puede sobre o sub-stockear. Revisar estacionalidad, flotilla o meses incompletos.',
+      recommendations: [
+        'No usar el horizonte largo para pedido a planta sin ajuste gerencial.',
+        'Revisar si hay meses atípicos (flotilla, cierres) en el histórico SQL.',
+      ],
+      metrics: { mape, last, next },
+      chatPrompt: chatPrompt('Forecast', 'MAPE alto', [
+        `MAPE: ${mape}%`, `Último mes: ${last}`, `Próximo: ${next}`, `Fuente: ${payload.dataSource || 'SQL'}`,
+      ]),
+    });
+  }
+
+  if (varPct != null && varPct <= -15) {
+    push(list, {
+      id: 'fc-caida',
+      kpiId: 'kpiLast',
+      module: 'forecast',
+      severity: 'warning',
+      title: 'Último mes real muy por debajo del promedio',
+      summary: `Variación ${varPct}% vs promedio 12 meses.`,
+      analysis: 'Señal de deterioro comercial reciente en ventas facturadas (SQL). Puede sesgar el forecast a la baja o indicar falla estructural.',
+      recommendations: [
+        'Contrastar con Ventas YTD y leads del CRM.',
+        'Separar retail vs flotilla en el análisis del mes.',
+      ],
+      metrics: { varPct, last },
+      chatPrompt: chatPrompt('Forecast', 'Caída vs promedio 12m', [
+        `Variación: ${varPct}%`, `Último mes: ${last}`,
+      ]),
+    });
+  }
+
+  if (last > 0 && next > 0 && next < last * 0.75) {
+    const drop = round1((1 - next / last) * 100);
+    push(list, {
+      id: 'fc-prox-caida',
+      kpiId: 'kpiNext',
+      module: 'forecast',
+      severity: 'info',
+      title: 'Pronóstico del próximo mes a la baja',
+      summary: `Proyecta ${next} vs ${last} del último real (−${drop}%).`,
+      analysis: 'El modelo anticipa caída. Si no hay plan comercial compensatorio, se materializa menor rotación e inventario parado.',
+      recommendations: [
+        'Definir acciones comerciales del mes entrante antes de aceptar la baja.',
+        'Ajustar pedido a planta al escenario conservador.',
+      ],
+      metrics: { last, next, drop },
+      chatPrompt: chatPrompt('Forecast', 'Próximo mes a la baja', [
+        `Último: ${last}`, `Próximo: ${next}`, `Caída: ${drop}%`,
+      ]),
+    });
+  }
+
+  return list;
+}
+
+/* ───────────────── Postventa ───────────────── */
+
+function buildPostSalesInsights(payload = {}) {
+  const list = [];
+  const s = payload.summary || {};
+  const a = payload.aging || {};
+  const r = payload.risk || {};
+  const fi = payload.fechaInicio;
+  const ff = payload.fechaFin;
+
+  const total = Number(s.totalOrdenes ?? 0);
+  const facturadas = Number(s.facturadas ?? 0);
+  const abiertas = Number(s.abiertas ?? 0);
+  const pctFact = Number(s.pctFacturado ?? 0);
+  const pctImp = Number(s.pctImporteFacturado ?? 0);
+  const riesgo120 = Number(s.riesgo120 ?? 0);
+  const crecimiento = Number(s.crecimientoFacturado ?? 0);
+  const criticas = Number(r.criticas60 ?? 0);
+  const conRefacciones = Number(r.conRefacciones ?? 0);
+  const promesas = Number(r.promesasVencidas ?? 0);
+  const sinPromesa = Number(r.abiertasSinPromesa ?? 0);
+  const b120 = Number(a.b120p ?? 0);
+  const b91 = Number(a.b91_120 ?? 0);
+  const sinImporte = Number(r.sinImporte ?? 0);
+  const sinFecha = Number(r.sinFechaIngreso ?? 0);
+
+  if (total >= 15 && pctFact < 50) {
+    push(list, {
+      id: 'ps-tasa-fact',
+      kpiId: 'psImporteFacturado',
+      module: 'post-sales',
+      severity: pctFact < 35 ? 'critical' : 'warning',
+      title: 'Tasa de facturación de órdenes baja',
+      summary: `${pctFact}% de órdenes facturadas (${facturadas}/${total}).`,
+      analysis:
+        'Falla de cierre de taller: muchas órdenes ingresan y no se facturan. Puede ser trabajo incompleto, falta de refacciones o mala disciplina de cierre.',
+      recommendations: [
+        'Filtrar abiertas +60 y promesas vencidas.',
+        'Reunión diaria de piso: órdenes listas sin factura.',
+      ],
+      metrics: { pctFact, facturadas, total },
+      chatPrompt: chatPrompt('Postventa', 'Tasa facturación baja', [
+        `% órdenes facturadas: ${pctFact}`, `Facturadas: ${facturadas}`, `Total: ${total}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (pctImp > 0 && pctImp < 45 && Number(s.importeIngresado || 0) > 0) {
+    push(list, {
+      id: 'ps-imp-fact',
+      kpiId: 'psTasaFacturacion',
+      module: 'post-sales',
+      severity: 'warning',
+      title: 'Poco importe convertido a factura',
+      summary: `Solo ${pctImp}% del importe ingresado está facturado.`,
+      analysis: 'El dinero potencial del taller no se está formalizando. Falla de facturación o de avance de órdenes de alto ticket.',
+      recommendations: [
+        'Priorizar órdenes abiertas de mayor importe.',
+        'Revisar aseguradoras con mayor backlog.',
+      ],
+      metrics: { pctImp, importeFacturado: s.importeFacturado, importeIngresado: s.importeIngresado },
+      chatPrompt: chatPrompt('Postventa', 'Importe facturado bajo', [
+        `% importe facturado: ${pctImp}`, `Facturado: ${s.importeFacturado}`, `Ingresado: ${s.importeIngresado}`,
+      ]),
+    });
+  }
+
+  // Órdenes abiertas +120: alerta desde la primera (tarjeta de conteo y de riesgo $)
+  if (b120 >= 1 || riesgo120 > 0) {
+    const count = Math.max(b120, riesgo120 > 0 && b120 === 0 ? 1 : b120);
+    const severity = count >= 5 || riesgo120 >= 100000 ? 'critical' : 'warning';
+    const title = count >= 5 || riesgo120 >= 100000
+      ? 'Órdenes abiertas críticas +120 días'
+      : 'Órdenes abiertas con +120 días';
+    const summary = b120 > 0
+      ? `${b120} orden(es) abierta(s) con +120 días · importe en riesgo ${round1(riesgo120)}.`
+      : `Importe en riesgo +120 días: ${round1(riesgo120)} (revisar backlog de abiertas).`;
+    const analysis =
+      'Hay órdenes abiertas envejecidas más de 120 días en el snapshot de taller. '
+      + 'Es una falla de seguimiento: cliente, refacciones, autorización de seguro o cierre/factura pendiente. '
+      + 'Cada día adicional eleva el riesgo de no cobro y mala experiencia.';
+    const recommendations = [
+      'Abrir el listado de órdenes críticas / filtrar antigüedad +120.',
+      'Asignar dueño por orden y fecha compromiso de cierre o factura.',
+      'Cerrar, cancelar con causa documentada o facturar en máximo 7 días.',
+    ];
+    const metrics = { riesgo120, b120, count };
+    const prompt = chatPrompt('Postventa', title, [
+      `Órdenes +120: ${b120}`,
+      `Importe riesgo: ${riesgo120}`,
+      `Abiertas totales: ${abiertas}`,
+      `Periodo consulta: ${fi || '—'} — ${ff || '—'}`,
+    ]);
+
+    push(list, {
+      id: 'ps-aging120',
+      kpiId: 'psAging120',
+      module: 'post-sales',
+      severity,
+      title,
+      summary,
+      analysis,
+      recommendations,
+      metrics,
+      chatPrompt: prompt,
+    });
+    push(list, {
+      id: 'ps-riesgo120',
+      kpiId: 'psRiesgo120',
+      module: 'post-sales',
+      severity,
+      title: riesgo120 > 0 ? 'Riesgo económico en órdenes +120 días' : title,
+      summary,
+      analysis,
+      recommendations,
+      metrics,
+      chatPrompt: prompt,
+    });
+  }
+
+  if (b91 >= 5 && b120 === 0) {
+    push(list, {
+      id: 'ps-aging91',
+      kpiId: 'psAging91',
+      module: 'post-sales',
+      severity: 'info',
+      title: 'Órdenes acercándose a +120 días',
+      summary: `${b91} órdenes en bucket 91–120 días (aún no +120).`,
+      analysis:
+        'Si no se cierran pronto, pasarán a +120 y al riesgo crítico. Es la ventana para prevenir el envejecimiento.',
+      recommendations: [
+        'Priorizar el bucket 91–120 antes de que cruce a +120.',
+        'Revisar promesas y refacciones pendientes de esas órdenes.',
+      ],
+      metrics: { b91 },
+      chatPrompt: chatPrompt('Postventa', 'Bucket 91–120', [
+        `Órdenes 91–120: ${b91}`, `Periodo: ${fi} — ${ff}`,
+      ]),
+    });
+  }
+
+  if (conRefacciones >= 10) {
+    push(list, {
+      id: 'ps-con-refacciones',
+      kpiId: 'psConRefacciones',
+      module: 'post-sales',
+      severity: conRefacciones >= 40 ? 'warning' : 'info',
+      title: 'Órdenes abiertas con refacciones cargadas',
+      summary: `${conRefacciones} abiertas ya tienen líneas de refacciones (RE).`,
+      analysis:
+        'Hay trabajo con partes cargadas en taller. Priorizar surtido, autorización y avance para evitar que se queden abiertas con inventario comprometido.',
+      recommendations: [
+        'Revisar surtido pendiente por asesor.',
+        'Cerrar o facturar órdenes con refacciones completas.',
+      ],
+      metrics: { conRefacciones, criticas },
+      chatPrompt: chatPrompt('Postventa', 'Con refacciones', [
+        `Con refacciones: ${conRefacciones}`,
+        `Abiertas: ${abiertas}`,
+        `Críticas +60: ${criticas}`,
+      ]),
+    });
+  }
+
+  if (promesas >= 5) {
+    push(list, {
+      id: 'ps-promesas',
+      kpiId: 'psPromesasVencidas',
+      module: 'post-sales',
+      severity: 'warning',
+      title: 'Promesas de entrega vencidas',
+      summary: `${promesas} promesas vencidas sin cumplir.`,
+      analysis: 'Falla de compromiso con el cliente: fechas de promesa no se cumplen ni se reprograman en el sistema.',
+      recommendations: [
+        'Actualizar promesas o contactar cliente hoy.',
+        'Medir asesores por % promesas cumplidas.',
+      ],
+      metrics: { promesas },
+      chatPrompt: chatPrompt('Postventa', 'Promesas vencidas', [`Promesas vencidas: ${promesas}`]),
+    });
+  }
+
+  if (abiertas >= 10 && sinPromesa / abiertas >= 0.35) {
+    const pct = round1((sinPromesa / abiertas) * 100);
+    push(list, {
+      id: 'ps-sin-promesa',
+      kpiId: 'psSinPromesa',
+      module: 'post-sales',
+      severity: 'warning',
+      title: 'Abiertas sin fecha promesa',
+      summary: `${sinPromesa} de ${abiertas} abiertas (${pct}%) sin promesa.`,
+      analysis: 'Falla de captura/disciplina: sin promesa no hay control de SLA ni visibilidad para el cliente.',
+      recommendations: ['Obligar captura de promesa al abrir/actualizar la orden.'],
+      metrics: { sinPromesa, abiertas, pct },
+      chatPrompt: chatPrompt('Postventa', 'Sin promesa', [
+        `Sin promesa: ${sinPromesa}`, `Abiertas: ${abiertas}`,
+      ]),
+    });
+  }
+
+  if (s.tieneMesAnterior && crecimiento <= -10) {
+    push(list, {
+      id: 'ps-crecimiento',
+      kpiId: 'psCrecimiento',
+      module: 'post-sales',
+      severity: 'warning',
+      title: 'Caída de facturación vs mes anterior',
+      summary: `Crecimiento ${crecimiento}%.`,
+      analysis: 'La facturación de taller retrocede vs el mes previo en los datos del periodo. Revisar capacidad, mix o cierre de órdenes.',
+      recommendations: [
+        'Comparar volumen ingresado vs facturado mes a mes.',
+        'Revisar si subió el backlog abierto.',
+      ],
+      metrics: { crecimiento },
+      chatPrompt: chatPrompt('Postventa', 'Caída facturado MoM', [
+        `Crecimiento: ${crecimiento}%`, `Facturado: ${s.importeFacturado}`,
+      ]),
+    });
+  }
+
+  if (sinImporte >= 8 || sinFecha >= 5) {
+    push(list, {
+      id: 'ps-calidad-datos',
+      kpiId: 'psSinImporte',
+      module: 'post-sales',
+      severity: 'info',
+      title: 'Calidad de datos de órdenes deficiente',
+      summary: `${sinImporte} sin importe · ${sinFecha} sin fecha ingreso.`,
+      analysis: 'Falla de captura en DMS/SQL: métricas y aging se distorsionan si faltan importe o fecha.',
+      recommendations: [
+        'Corregir órdenes sin fecha/importe en el taller.',
+        'Capacitar captura obligatoria al ingreso.',
+      ],
+      metrics: { sinImporte, sinFecha },
+      chatPrompt: chatPrompt('Postventa', 'Datos incompletos', [
+        `Sin importe: ${sinImporte}`, `Sin fecha: ${sinFecha}`,
+      ]),
+    });
+  }
+
+  return list;
+}
+
+/* ───────────────── Seguimiento 360 ───────────────── */
+
+function buildSeguimientoInsights(payload = {}) {
+  const list = [];
+  const vista = String(payload.vista || '').toLowerCase();
+
+  if (vista === 'vendedor') {
+    const tot = payload.totales || {};
+    const com = payload.comercial || {};
+    const fin = com.financiamiento || {};
+    const pvas = fin.pvas || {};
+    const retorno = com.retornoTaller || {};
+    const libro = Number(com.libroVentas?.unidades ?? com.libroVentas?.sql?.unidades ?? 0);
+    const leads = Number(tot.leads ?? 0);
+    const solicitudes = Number(tot.solicitudes ?? 0);
+    const pruebas = Number(tot.pruebas ?? 0);
+    const contratos = Number(fin.contratos ?? 0);
+    const retornoPct = retorno.tasaRetornoPct != null ? Number(retorno.tasaRetornoPct) : null;
+    const pvaProm = pvas.promedioCantidadPvas != null ? Number(pvas.promedioCantidadPvas) : null;
+    const penetPva = pvas.penetracionPct != null ? Number(pvas.penetracionPct) : null;
+
+    if (leads >= 10 && libro === 0) {
+      push(list, {
+        id: 'seg-vend-sin-cierre',
+        kpiId: 'kVendLibro',
+        module: 'seguimiento',
+        severity: 'warning',
+        title: 'Leads sin unidades vendidas (libro)',
+        summary: `${leads} leads y 0 unidades en ADE_VTAFI en el periodo.`,
+        analysis: 'Falla de conversión del vendedor: hay actividad de entrada sin cierre facturado en el DMS.',
+        recommendations: [
+          'Revisar ciclos abiertos y pruebas sin solicitud.',
+          'Priorizar prospectos calientes del listado del vendedor.',
+        ],
+        metrics: { leads, libro, solicitudes, pruebas },
+        chatPrompt: chatPrompt('Seguimiento 360 · vendedor', 'Leads sin cierre', [
+          `Vendedor: ${payload.vendedor || '—'}`, `Leads: ${leads}`, `Libro: ${libro}`,
+          `Solicitudes: ${solicitudes}`, `Pruebas: ${pruebas}`,
+        ]),
+      });
+    }
+
+    if (pruebas >= 5 && solicitudes === 0) {
+      push(list, {
+        id: 'seg-vend-prueba-sin-fi',
+        kpiId: 'kVendPruebas',
+        module: 'seguimiento',
+        severity: 'warning',
+        title: 'Pruebas de manejo sin solicitudes F&I',
+        summary: `${pruebas} pruebas y 0 solicitudes F&I.`,
+        analysis: 'Falla de embudo: la prueba no se conecta con financiamiento; se pierde oportunidad de cierre y PVAs.',
+        recommendations: [
+          'Protocolo post-prueba: agendar F&I el mismo día.',
+          'Medir conversión prueba → solicitud por asesor.',
+        ],
+        metrics: { pruebas, solicitudes },
+        chatPrompt: chatPrompt('Seguimiento 360 · vendedor', 'Prueba sin F&I', [
+          `Pruebas: ${pruebas}`, `Solicitudes: ${solicitudes}`, `Vendedor: ${payload.vendedor || '—'}`,
+        ]),
+      });
+    }
+
+    if (libro >= 3 && contratos === 0) {
+      push(list, {
+        id: 'seg-vend-sin-fi',
+        kpiId: 'kVendContratos',
+        module: 'seguimiento',
+        severity: 'info',
+        title: 'Ventas sin contratos F&I vinculados',
+        summary: `${libro} unidades vendidas y 0 contratos F&I match.`,
+        analysis: 'Posible falla de colocación F&I o de match asesor/VIN en la base. Se deja margen de financiamiento sobre la mesa.',
+        recommendations: [
+          'Validar match de asesor F&I vs cartera.',
+          'Revisar penetración crédito vs contado.',
+        ],
+        metrics: { libro, contratos },
+        chatPrompt: chatPrompt('Seguimiento 360 · vendedor', 'Sin contratos F&I', [
+          `Libro: ${libro}`, `Contratos: ${contratos}`,
+        ]),
+      });
+    }
+
+    if (contratos >= 3 && ((pvaProm != null && pvaProm < 0.5) || (penetPva != null && penetPva < 30))) {
+      push(list, {
+        id: 'seg-vend-pvas',
+        kpiId: 'kVendPvas',
+        module: 'seguimiento',
+        severity: 'warning',
+        title: 'Baja colocación de PVAs',
+        summary: `Promedio PVAs ${pvaProm ?? '—'} · penetración ${penetPva ?? '—'}%.`,
+        analysis: 'Falla de upselling F&I: los contratos no cargan productos de valor agregado (PVAs).',
+        recommendations: [
+          'Checklist de oferta de PVAs en cada contrato.',
+          'Comparar vs promedio de la agencia.',
+        ],
+        metrics: { pvaProm, penetPva, contratos },
+        chatPrompt: chatPrompt('Seguimiento 360 · vendedor', 'PVAs bajos', [
+          `Promedio PVAs: ${pvaProm}`, `Penetración: ${penetPva}%`, `Contratos: ${contratos}`,
+        ]),
+      });
+    }
+
+    if (retornoPct != null && Number(retorno.clientesConCompra || retorno.vinsCartera || 0) >= 5 && retornoPct < 25) {
+      push(list, {
+        id: 'seg-vend-retorno',
+        kpiId: 'kVendRetorno',
+        module: 'seguimiento',
+        severity: 'warning',
+        title: 'Bajo retorno a taller post-venta',
+        summary: `Tasa de retorno ${retornoPct}%.`,
+        analysis:
+          'Clientes con compra no regresan al taller: falla de retención/postventa (cita de servicio, garantía, CRM).',
+        recommendations: [
+          'Activar campaña de servicio a cartera del vendedor.',
+          'Verificar citas de 1ª revisión al entregar.',
+        ],
+        metrics: { retornoPct, ...retorno },
+        chatPrompt: chatPrompt('Seguimiento 360 · vendedor', 'Retorno taller bajo', [
+          `Retorno: ${retornoPct}%`,
+          `Base: ${retorno.base || '—'}`,
+          `Con taller: ${retorno.clientesConTaller ?? retorno.vinsConTaller}`,
+          `Cartera: ${retorno.clientesConCompra ?? retorno.vinsCartera}`,
+        ]),
+      });
+    }
+  }
+
+  if (vista === 'cierres') {
+    const tot = payload.totales || {};
+    const ordenes = Number(tot.ordenesCerradas ?? 0);
+    const clientes = Number(tot.clientes ?? 0);
+    const conCrm = Number(tot.clientesConIdCrm ?? 0);
+    if (clientes >= 5 && conCrm / clientes < 0.5) {
+      const pct = round1((conCrm / clientes) * 100);
+      push(list, {
+        id: 'seg-cierres-crm',
+        kpiId: 'kCierreCrm',
+        module: 'seguimiento',
+        severity: 'warning',
+        title: 'Cierres de taller sin ID CRM',
+        summary: `Solo ${pct}% de clientes de cierre tienen ID CRM (${conCrm}/${clientes}).`,
+        analysis:
+          'Falla de integración CRM↔taller: no se puede hacer 360 ni medir retorno real si el cierre no trae ID CRM.',
+        recommendations: [
+          'Obligar captura de ID CRM al cerrar orden.',
+          'Depurar clientes “Sin ID CRM” del periodo.',
+        ],
+        metrics: { ordenes, clientes, conCrm, pct },
+        chatPrompt: chatPrompt('Seguimiento 360 · cierres', 'Sin ID CRM', [
+          `Órdenes: ${ordenes}`, `Clientes: ${clientes}`, `Con CRM: ${conCrm}`, `Periodo: ${payload.fechaInicio} — ${payload.fechaFin}`,
+        ]),
+      });
+    }
+  }
+
+  if (vista === 'cliente') {
+    const res = payload.resumen || {};
+    const leads = Number(res.totalLeads ?? 0);
+    const ciclos = Number(res.totalCiclos ?? 0);
+    const compras = Number(res.totalCompras ?? 0);
+    const pruebas = Number(res.totalPruebasManejo ?? 0);
+    const solicitudes = Number(res.totalSolicitudes ?? 0);
+    const ordenes = Number(payload.ordenesCount ?? 0);
+    const abierto = Number(res.importeAbiertoTaller ?? 0);
+
+    if (pruebas > 0 && compras === 0 && solicitudes === 0) {
+      push(list, {
+        id: 'seg-cli-prueba-fria',
+        kpiId: 'kPruebasManejo',
+        module: 'seguimiento',
+        severity: 'info',
+        title: 'Prueba de manejo sin avance F&I/compra',
+        summary: `${pruebas} prueba(s) sin solicitud ni compra registrada.`,
+        analysis: 'Falla de seguimiento individual: el prospecto hizo prueba y el embudo se detuvo.',
+        recommendations: [
+          'Recontactar con oferta y cita F&I.',
+          'Registrar motivo de pérdida en el ciclo.',
+        ],
+        metrics: { pruebas, compras, solicitudes, leads, ciclos },
+        chatPrompt: chatPrompt('Seguimiento 360 · cliente', 'Prueba sin avance', [
+          `Cliente: ${payload.nombre || payload.idContacto || '—'}`,
+          `Pruebas: ${pruebas}`, `Solicitudes: ${solicitudes}`, `Compras: ${compras}`,
+        ]),
+      });
+    }
+
+    if (compras > 0 && ordenes === 0) {
+      push(list, {
+        id: 'seg-cli-sin-taller',
+        kpiId: 'kOrdenes',
+        module: 'seguimiento',
+        severity: 'info',
+        title: 'Compró y no tiene órdenes de servicio',
+        summary: `${compras} compra(s) sin órdenes de taller vinculadas.`,
+        analysis: 'Oportunidad/falla de retención: el cliente no ha sido traído a postventa.',
+        recommendations: [
+          'Agendar 1ª revisión / servicio.',
+          'Verificar que el VIN esté bien vinculado en CRM y SQL.',
+        ],
+        metrics: { compras, ordenes },
+        chatPrompt: chatPrompt('Seguimiento 360 · cliente', 'Sin taller post-compra', [
+          `Compras: ${compras}`, `Órdenes: ${ordenes}`, `Cliente: ${payload.nombre || '—'}`,
+        ]),
+      });
+    }
+
+    if (abierto > 0 && ordenes > 0) {
+      push(list, {
+        id: 'seg-cli-abierto',
+        kpiId: 'kImporteTaller',
+        module: 'seguimiento',
+        severity: 'info',
+        title: 'Importe de taller abierto',
+        summary: `Hay ${round1(abierto)} abierto en órdenes del cliente.`,
+        analysis: 'Órdenes sin cerrar/facturar en la ficha 360: revisar si hay falla de seguimiento de taller para este cliente.',
+        recommendations: ['Revisar órdenes abiertas en la sección de servicio del 360.'],
+        metrics: { abierto, ordenes },
+        chatPrompt: chatPrompt('Seguimiento 360 · cliente', 'Importe abierto', [
+          `Abierto: ${abierto}`, `Órdenes: ${ordenes}`, `Facturado: ${res.importeFacturadoTaller ?? 0}`,
+        ]),
+      });
+    }
+
+    const csi = payload.quejasCsi || {};
+    const totalQuejas = Number(csi.total ?? res.totalQuejas ?? payload.ficha360?.quejasIncidencias ?? 0);
+    if (totalQuejas > 0) {
+      const area = csi.areaPrincipal || res.quejasAreaPrincipal || payload.ficha360?.quejasAreaPrincipal || 'General';
+      const porArea = csi.porArea || {};
+      const areaLines = Object.entries(porArea)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k}: ${v}`)
+        .slice(0, 5);
+      const sample = [...(csi.posventa || []), ...(csi.ventas || [])]
+        .slice(0, 2)
+        .map((q) => `${q.incidencia || 'Incidencia'} → ${q.area || area}`)
+        .join(' | ');
+      push(list, {
+        id: 'seg-cli-quejas-area',
+        kpiId: 'kQuejas',
+        module: 'seguimiento',
+        severity: /factur|financ|garant|hyp|queja/i.test(area) ? 'warning' : 'info',
+        title: `Queja/incidencia orientada a ${area}`,
+        summary: `${totalQuejas} incidencia(s) CSI (${Number(csi.totalPosventa || 0)} posventa · ${Number(csi.totalVentas || 0)} ventas). Área principal: ${area}.`,
+        analysis: [
+          'La alerta interpreta el departamento/área a partir del tipo CSI, la incidencia y el comentario.',
+          areaLines.length ? `Distribución: ${areaLines.join('; ')}.` : '',
+          sample ? `Ejemplos: ${sample}.` : '',
+          'CSI Posventa se vincula por número de orden; CSI Ventas por serie/VIN al ID CRM del perfil.',
+        ].filter(Boolean).join(' '),
+        recommendations: [
+          `Escalar a ${area} con el comentario CSI completo.`,
+          Number(csi.totalPosventa || 0) > 0 ? 'Revisar la orden de taller vinculada y el asesor/técnico.' : null,
+          Number(csi.totalVentas || 0) > 0 ? 'Revisar con el ejecutivo de ventas la experiencia de compra.' : null,
+          'Registrar seguimiento y cierre de la incidencia en CRM.',
+        ].filter(Boolean),
+        metrics: {
+          totalQuejas,
+          posventa: Number(csi.totalPosventa || 0),
+          ventas: Number(csi.totalVentas || 0),
+          areaPrincipal: area,
+        },
+        chatPrompt: chatPrompt('Seguimiento 360 · cliente', 'Quejas CSI por área', [
+          `Cliente: ${payload.nombre || payload.idContacto || '—'}`,
+          `Total: ${totalQuejas}`,
+          `Posventa: ${csi.totalPosventa || 0}`,
+          `Ventas: ${csi.totalVentas || 0}`,
+          `Área principal: ${area}`,
+          ...areaLines,
+        ]),
+      });
+    }
+  }
+
+  return list;
+}
+
+/* ───────────────── Router ───────────────── */
+
+function buildInsights({ module, ...rest } = {}) {
+  const mod = String(module || '').toLowerCase();
+  if (mod === 'ventas' || mod === 'sales') return buildVentasInsights(rest);
+  if (mod === 'contabilidad' || mod === 'eeff' || mod === 'accounting') {
+    return buildContabilidadInsights(rest);
+  }
+  if (mod === 'overview' || mod === 'tablero' || mod === 'index') {
+    return buildOverviewInsights(rest);
+  }
+  if (mod === 'inventory' || mod === 'inventario') return buildInventoryInsights(rest);
+  if (mod === 'forecast' || mod === 'pronostico') return buildForecastInsights(rest);
+  if (mod === 'post-sales' || mod === 'postventa' || mod === 'postsales') {
+    return buildPostSalesInsights(rest);
+  }
+  if (mod === 'seguimiento' || mod === 'crm' || mod === 'crm360') {
+    return buildSeguimientoInsights(rest);
+  }
+  return [];
+}
+
+module.exports = {
+  buildInsights,
+  buildVentasInsights,
+  buildContabilidadInsights,
+  buildOverviewInsights,
+  buildInventoryInsights,
+  buildForecastInsights,
+  buildPostSalesInsights,
+  buildSeguimientoInsights,
+  expectedPacePct,
+};

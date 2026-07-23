@@ -54,6 +54,8 @@ Variables mínimas:
 | `DATABASE_URL` | Referencia al PostgreSQL de Railway |
 | `CLOUD_SYNC_API_KEY` | Clave segura (igual que en backend local) |
 | `CLOUD_AUTO_INIT_DB` | `true` la primera vez |
+| `MOBILE_AUTH_USERS` | Usuarios móviles (`usuario:contraseña:rol`) |
+| `MOBILE_AUTH_SECRET` | Secreto aleatorio de al menos 32 caracteres |
 
 El backend y frontend **no van en Railway** (requieren SQL Server GMOFARRIL en la red local).
 
@@ -90,8 +92,13 @@ CLOUD_SYNC_API_KEY=la-misma-clave-del-cloud
 | GET | `/api/sync/status` | Última sync por dominio (requiere `X-API-Key`) |
 | POST | `/api/sync/ingest` | Recibe lote de registros |
 | GET | `/api/sync/history/:domain` | Histórico de cambios |
+| POST | `/api/auth/login` | Inicio de sesión móvil |
+| GET | `/api/auth/me` | Perfil móvil (Bearer token) |
+| GET | `/api/mobile/overview` | Resumen del periodo (Bearer token) |
+| GET | `/api/mobile/ventas` | Métricas de ventas (Bearer token) |
+| GET | `/api/mobile/inventory` | Inventario sincronizado (Bearer token) |
 
-Header obligatorio: `X-API-Key: <CLOUD_SYNC_API_KEY>`
+Los endpoints `/api/sync/*` usan `X-API-Key`. Los endpoints `/api/mobile/*` usan el token devuelto por `/api/auth/login`; la clave de sincronización nunca debe incluirse en la app.
 
 ## Payload de ingestión
 

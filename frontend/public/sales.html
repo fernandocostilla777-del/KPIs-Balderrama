@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=82" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -17,10 +17,6 @@
 <h1 class="top-bar-title">Ventas de Unidades</h1>
 <p id="topBarSummary" class="top-bar-summary">Consulte un periodo para ver totales</p>
 </div>
-<div class="top-bar-actions">
-<span id="statusBadge" class="top-bar-meta">Listo</span>
-</div>
-<span id="lastUpdated" class="top-bar-meta top-bar-updated"></span>
 </header>
 <div class="main-content custom-scrollbar">
 
@@ -70,6 +66,19 @@
 </div>
 </section>
 
+<nav class="contabilidad-tabs sales-main-tabs" id="salesMainTabs" aria-label="Secciones de ventas">
+<button type="button" class="contabilidad-tab active" data-sales-tab="ventas" aria-controls="panelVentasUnidades" aria-selected="true">
+<span class="material-symbols-outlined" aria-hidden="true">shopping_cart</span>
+Ventas
+</button>
+<button type="button" class="contabilidad-tab" data-sales-tab="financiamiento" aria-controls="panelVentasFinanciamiento" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">account_balance</span>
+Financiamiento
+</button>
+</nav>
+
+<div id="panelVentasUnidades" class="sales-main-panel" data-sales-panel="ventas">
+
 <section class="kpi-grid">
 <div class="kpi-card kpi-card--blue">
 <div class="kpi-card-head"><span class="kpi-title">Total ventas</span><span class="material-symbols-outlined kpi-icon">shopping_cart</span></div>
@@ -91,6 +100,13 @@
 <div id="kpiEntregasSofia" class="kpi-value">0</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="sofia"></span></div>
 </div>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="panelCarryOver" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
+<div class="kpi-card-head"><span class="kpi-title">Carry over para facturar</span><span class="material-symbols-outlined kpi-icon">pending_actions</span></div>
+<div id="kpiCarryOver" class="kpi-value">0</div>
+<p id="kpiCarryOverSub" class="kpi-subtitle">Apartadas SEP · clic para % y detalle</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="carryOver"></span></div>
+</button>
 <div class="kpi-card kpi-card--violet" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Sin timbrar = facturadas − reportadas.">
 <div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
 <div id="kpiCobertura" class="kpi-value">—</div>
@@ -145,17 +161,54 @@
 <div class="table-scroll kpi-detail-table-wrap">
 <table class="data-table">
 <thead><tr>
-<th>Fecha fact.</th><th>Registro</th><th>Hora</th><th>Factura</th><th>VIN</th><th>Pedido</th><th>Transacción</th><th>Cliente</th><th>Estatus</th><th>Usuario</th>
+<th>Fecha fact.</th><th>Registro</th><th>Hora</th><th>Factura</th><th>VIN</th><th class="cell-num">Previas</th><th>Pedido</th><th>Transacción</th><th>Cliente</th><th>Estatus</th><th>Usuario</th>
 </tr></thead>
 <tbody id="tablaEntregasPreviewBody"></tbody>
 </table>
 </div>
 </section>
 
-<section class="chart-grid goal-charts-section" aria-label="Avance vs objetivo">
+<section id="panelCarryOver" class="section-panel dashboard-section kpi-detail-panel hidden" aria-labelledby="kpiCardCarryOver">
+<div class="kpi-detail-header">
+<div>
+<h3 class="section-title" style="margin-bottom:6px">Carry over para facturar</h3>
+<p id="carryOverPanelResumen" class="section-subtitle" style="margin:0">Simulación de cobertura + detalle de apartadas SEP.</p>
+</div>
+<button type="button" id="btnCerrarCarryOverPanel" class="btn-glass btn-icon-close" aria-label="Cerrar detalle carry over">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="carry-over-detail-layout">
+<aside class="carry-over-sim-card" aria-label="Simulación de cobertura">
+<span class="carry-over-sim-label">Sim. cobertura</span>
+<div id="carryOverSimPct" class="carry-over-sim-pct">—</div>
+<p id="carryOverSimFormula" class="carry-over-sim-formula">(SOFIA + sin timbrar + apartadas) / objetivo SOFIA</p>
+<ul id="carryOverSimBreakdown" class="carry-over-sim-breakdown"></ul>
+</aside>
+<div class="carry-over-units-pane">
+<div class="kpi-detail-toolbar">
+<label class="kpi-detail-search" for="buscarCarryOverPreview">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarCarryOverPreview" type="search" placeholder="Buscar serie, modelo, color, quién apartó..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+<span id="carryOverPreviewSearchMeta" class="kpi-detail-search-meta hidden"></span>
+</div>
+<div class="table-scroll kpi-detail-table-wrap">
+<table class="data-table">
+<thead><tr>
+<th>Serie / VIN</th><th>Modelo</th><th>Año</th><th>Color</th><th>Situación</th><th class="cell-num">Días apartado</th><th>Apartó</th><th class="cell-num">Previas</th>
+</tr></thead>
+<tbody id="tablaCarryOverPreviewBody"></tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+
+<section class="chart-grid goal-charts-section" aria-label="Avance de facturas y entregas">
 <div id="goalRetailPanel" class="section-panel goal-chart-panel goal-chart-panel--retail">
 <div class="goal-chart-header">
-<h3 class="section-title goal-chart-title">Avance vs objetivo retail</h3>
+<h3 class="section-title goal-chart-title">AVANCE DE FACTURAS GMMX</h3>
 </div>
 <div class="goal-chart-body">
 <div class="goal-chart-wrap">
@@ -174,12 +227,12 @@
 </div>
 </div>
 <div class="goal-target-control">
-<button type="button" class="goal-step-btn" data-goal-step="retail" data-dir="-1" aria-label="Reducir objetivo retail">−</button>
+<button type="button" class="goal-step-btn" data-goal-step="retail" data-dir="-1" aria-label="Reducir objetivo retail"><span class="material-symbols-outlined" aria-hidden="true">remove</span></button>
 <div class="goal-input-shell">
 <input type="number" id="goalRetailInput" class="goal-input-field" min="1" step="1" placeholder="40" inputmode="numeric" aria-label="Objetivo retail en unidades"/>
 <span class="goal-input-unit">unid.</span>
 </div>
-<button type="button" class="goal-step-btn" data-goal-step="retail" data-dir="1" aria-label="Aumentar objetivo retail">+</button>
+<button type="button" class="goal-step-btn" data-goal-step="retail" data-dir="1" aria-label="Aumentar objetivo retail"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
 </div>
 <div class="goal-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="goalRetailProgressTrack">
 <div id="goalRetailProgress" class="goal-progress-fill"></div>
@@ -189,7 +242,7 @@
 </div>
 <div id="goalSofiaPanel" class="section-panel goal-chart-panel goal-chart-panel--sofia">
 <div class="goal-chart-header">
-<h3 class="section-title goal-chart-title">Avance vs objetivo SOFIA</h3>
+<h3 class="section-title goal-chart-title">AVANCE DE ENTREGAS SOFIA</h3>
 </div>
 <div class="goal-chart-body">
 <div class="goal-chart-wrap">
@@ -208,12 +261,12 @@
 </div>
 </div>
 <div class="goal-target-control">
-<button type="button" class="goal-step-btn" data-goal-step="sofia" data-dir="-1" aria-label="Reducir objetivo SOFIA">−</button>
+<button type="button" class="goal-step-btn" data-goal-step="sofia" data-dir="-1" aria-label="Reducir objetivo SOFIA"><span class="material-symbols-outlined" aria-hidden="true">remove</span></button>
 <div class="goal-input-shell">
 <input type="number" id="goalSofiaInput" class="goal-input-field" min="1" step="1" placeholder="30" inputmode="numeric" aria-label="Objetivo SOFIA en notificaciones"/>
 <span class="goal-input-unit">notif.</span>
 </div>
-<button type="button" class="goal-step-btn" data-goal-step="sofia" data-dir="1" aria-label="Aumentar objetivo SOFIA">+</button>
+<button type="button" class="goal-step-btn" data-goal-step="sofia" data-dir="1" aria-label="Aumentar objetivo SOFIA"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
 </div>
 <div class="goal-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="goalSofiaProgressTrack">
 <div id="goalSofiaProgress" class="goal-progress-fill"></div>
@@ -246,21 +299,6 @@
 </div>
 </section>
 
-<section class="section-panel dashboard-section">
-<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;margin-bottom:20px">
-<div>
-<h3 class="section-title">Comparativo acumulado anual vs año anterior</h3>
-<p id="ytdSubtitle" class="section-subtitle">Ventas acumuladas al corte</p>
-</div>
-<div class="ytd-stats">
-<div><span id="ytdLabelActual" class="ytd-stat-label">YTD actual</span><strong id="ytdTotalActual" class="ytd-stat-value" style="color:#2563eb">0</strong></div>
-<div><span id="ytdLabelAnterior" class="ytd-stat-label">YTD anterior</span><strong id="ytdTotalAnterior" class="ytd-stat-value">0</strong></div>
-<div><span class="ytd-stat-label">Variación</span><strong id="ytdVariacion" class="ytd-stat-value">-</strong></div>
-</div>
-</div>
-<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartYtd"></canvas></div></div>
-</section>
-
 <section class="chart-grid">
 <div class="section-panel">
 <h3 class="section-title">Ventas por departamento</h3>
@@ -289,16 +327,101 @@
 </div>
 </section>
 
+<section class="section-panel dashboard-section">
+<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;margin-bottom:20px">
+<div>
+<h3 class="section-title">Comparativo acumulado anual vs año anterior</h3>
+<p id="ytdSubtitle" class="section-subtitle">Ventas acumuladas al corte</p>
+</div>
+<div class="ytd-stats">
+<div><span id="ytdLabelActual" class="ytd-stat-label">YTD actual</span><strong id="ytdTotalActual" class="ytd-stat-value" style="color:#2563eb">0</strong></div>
+<div><span id="ytdLabelAnterior" class="ytd-stat-label">YTD anterior</span><strong id="ytdTotalAnterior" class="ytd-stat-value">0</strong></div>
+<div><span class="ytd-stat-label">Variación</span><strong id="ytdVariacion" class="ytd-stat-value">-</strong></div>
+</div>
+</div>
+<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartYtd"></canvas></div></div>
+</section>
+
+</div>
+
+<div id="panelVentasFinanciamiento" class="sales-main-panel hidden" data-sales-panel="financiamiento" hidden>
+
+<section id="secFinanciamiento" class="section-panel dashboard-section fi-section" aria-label="Financiamiento">
+<div class="fi-section-header">
+<div>
+<h2 class="section-title" style="margin-bottom:6px">Financiamiento</h2>
+<p id="fiSubtitle" class="section-subtitle" style="margin:0">Penetración GMF sobre entregas SOFIA · contratos F&amp;I y PVA del periodo.</p>
+</div>
+</div>
+
+<div id="fiKpiOperational" class="fi-kpi-root"></div>
+
+<section id="fiKpiDetail" class="kpi-detail-panel kpi-detail-panel--fi hidden" aria-labelledby="fiDetailTitle">
+<div class="kpi-detail-header">
+<div>
+<h3 id="fiDetailTitle" class="section-title" style="margin-bottom:6px">Detalle</h3>
+<div id="fiDetailResumen" class="section-subtitle" style="margin:0"></div>
+</div>
+<button type="button" id="btnCerrarFiDetail" class="btn-glass btn-icon-close" aria-label="Cerrar detalle de financiamiento">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+</section>
+
+<div class="fi-layout">
+<div class="fi-units-pane">
+<div class="kpi-detail-toolbar">
+<label class="kpi-detail-search" for="buscarFiPreview">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarFiPreview" type="search" placeholder="Buscar cliente, VIN, asesor, contrato, PVA..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+<span id="fiPreviewSearchMeta" class="kpi-detail-search-meta hidden"></span>
+</div>
+<div class="table-scroll kpi-detail-table-wrap">
+<table class="data-table">
+<thead><tr>
+<th>Fecha</th><th>Cliente</th><th>Asesor</th><th>Unidad</th><th>VIN</th><th>Contrato</th><th>Tipo / PVA</th><th class="cell-num">Plazo</th><th class="cell-num">Monto</th>
+</tr></thead>
+<tbody id="fiTableBody">
+<tr><td colspan="9" class="empty-row">Consulte un periodo para ver unidades en financiamiento.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<aside class="fi-notes-panel" aria-label="Notas de financiamiento">
+<div class="fi-notes-head">
+<span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span>
+<div>
+<h3 class="section-title" style="margin:0;font-size:15px">Notas</h3>
+<p class="section-subtitle" style="margin:2px 0 0">Se guardan en el servidor y persisten entre sesiones.</p>
+</div>
+</div>
+<textarea id="fiNoteInput" class="fi-note-input filter-input" rows="4" maxlength="4000" placeholder="Escriba una nota operativa (seguimiento, acuerdos, pendientes…)"></textarea>
+<label class="fi-note-scope">
+<input type="checkbox" id="fiNoteScopeGlobal"/>
+<span>Guardar como nota general (no solo este periodo)</span>
+</label>
+<button type="button" id="btnFiSaveNote" class="btn-glass btn-primary">Guardar nota</button>
+<div id="fiNotesList" class="fi-notes-list"></div>
+</aside>
+</div>
+</section>
+
+</div>
+
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js"></script>
+<script src="/js/shared.js?v=5"></script>
 <script src="/js/canales.js"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/sidebar.js?v=8"></script>
+<script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/assistant-bubble.js?v=3"></script>
-<script src="/js/sales.js?v=20"></script>
+<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/assistant-bubble.js?v=4"></script>
+<script src="/js/financiamiento.js?v=15"></script>
+<script src="/js/sales.js?v=31"></script>
 </body>
 </html>

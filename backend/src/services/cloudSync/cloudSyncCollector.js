@@ -1,8 +1,11 @@
 const { getVentas } = require('../ventas');
+const { getOverview } = require('../overviewService');
 const { getInventory } = require('../inventoryService');
 const { getInventoryPostventa } = require('../inventoryPostventaService');
 const { getContabilidad } = require('../contabilidadService');
 const { getPostSales } = require('../postSalesService');
+const { getForecast } = require('../forecastService');
+const { getGoals } = require('../salesGoals');
 const crmCiclos = require('../crmCiclosService');
 const { getCurrentMonthRange, getMonthRangeForKey, serializeRow } = require('./cloudSyncUtils');
 
@@ -76,9 +79,60 @@ function mapPostventaRecords(records, tipo) {
   });
 }
 
+function buildSofiaSnapshot(resumen = {}, goals = {}) {
+  const notificaciones = Number(resumen.totalNotificacionesEntrega || 0);
+  const sinTimbrar = Number(resumen.totalUnidadesFacturadasNoTimbradas || 0);
+  const numeradorCobertura = Number(
+    resumen.numeradorCobertura ?? (notificaciones + sinTimbrar)
+  );
+  const objetivo = Number(goals.sofia || 0);
+  const avancePct = objetivo > 0 ? Math.round((notificaciones / objetivo) * 1000) / 10 : 0;
+  const coberturaPct = objetivo > 0 ? Math.round((numeradorCobertura / objetivo) * 1000) / 10 : 0;
+  return {
+    notificaciones,
+    sinTimbrar,
+    numeradorCobertura,
+    objetivo,
+    avancePct,
+    coberturaPct,
+  };
+}
+
+async function collectOverview({ periodKey, fechaInicio, fechaFin, syncType = 'incremental' } = {}) {
+  const range = resolveRange({ periodKey, fechaInicio, fechaFin });
+  const [data, ventas, goals] = await Promise.all([
+    getOverview({
+      fechaInicio: range.fechaInicio,
+      fechaFin: range.fechaFin,
+    }),
+    getVentas({
+      fechaInicio: range.fechaInicio,
+      fechaFin: range.fechaFin,
+    }),
+    Promise.resolve(getGoals({
+      fechaInicio: range.fechaInicio,
+      fechaFin: range.fechaFin,
+    })),
+  ]);
+  const sofia = buildSofiaSnapshot(ventas.resumen || {}, goals);
+  return {
+    domain: 'overview',
+    syncType,
+    periodKey: range.periodKey,
+    periodStart: range.fechaInicio,
+    periodEnd: range.fechaFin,
+    records: [{ id: range.periodKey, data: { ...data, sofia } }],
+    meta: { periodKey: range.periodKey, sofia, goals, resumen: ventas.resumen || null },
+  };
+}
+
 async function collectVentas({ periodKey, fechaInicio, fechaFin, syncType = 'incremental' } = {}) {
   const range = resolveRange({ periodKey, fechaInicio, fechaFin });
   const data = await getVentas({
+    fechaInicio: range.fechaInicio,
+    fechaFin: range.fechaFin,
+  });
+  const goals = getGoals({
     fechaInicio: range.fechaInicio,
     fechaFin: range.fechaFin,
   });
@@ -92,6 +146,8 @@ async function collectVentas({ periodKey, fechaInicio, fechaFin, syncType = 'inc
     meta: {
       totalRegistros: (data.registros || []).length,
       resumen: data.resumen || null,
+      goals,
+      sofia: buildSofiaSnapshot(data.resumen || {}, goals),
     },
   };
 }
@@ -165,7 +221,31 @@ async function collectPostventa({ periodKey, fechaInicio, fechaFin, syncType = '
     meta: {
       totalPeriodo: (data.records || []).length,
       totalAbiertas: (data.openSnapshot || []).length,
+      facturadas: (data.records || []).filter((row) => String(row.status || '').toUpperCase() === 'I').length,
+      importeFacturado: (data.records || []).reduce(
+        (sum, row) => sum + Number(row.importeFacturado || 0),
+        0
+      ),
+      criticas: (data.openSnapshot || []).filter((row) => row.critica).length,
       mesCurso: data.mesCursoNomenclatura || null,
+    },
+  };
+}
+
+async function collectForecast({ periodKey, fechaInicio, fechaFin, syncType = 'incremental' } = {}) {
+  const range = resolveRange({ periodKey, fechaInicio, fechaFin });
+  const data = await getForecast({ horizon: 6 });
+  return {
+    domain: 'forecast',
+    syncType,
+    periodKey: range.periodKey,
+    periodStart: range.fechaInicio,
+    periodEnd: range.fechaFin,
+    records: [{ id: `${range.periodKey}|6m`, data }],
+    meta: {
+      kpis: data.kpis || null,
+      forecast: data.forecast || [],
+      dataSource: data.dataSource || null,
     },
   };
 }
@@ -176,6 +256,10 @@ async function collectCrm({ periodKey, fechaInicio, fechaFin, syncType = 'increm
     fechaInicio: range.fechaInicio,
     fechaFin: range.fechaFin,
   });
+  const seguimiento = crmCiclos.getSeguimiento360Summary({
+    desde: range.fechaInicio,
+    hasta: range.fechaFin,
+  });
   return {
     domain: 'crm',
     syncType,
@@ -183,15 +267,17 @@ async function collectCrm({ periodKey, fechaInicio, fechaFin, syncType = 'increm
     periodStart: range.fechaInicio,
     periodEnd: range.fechaFin,
     records: exported.records || [],
-    meta: exported.meta || {},
+    meta: { ...(exported.meta || {}), seguimiento },
   };
 }
 
 const COLLECTORS = {
+  overview: collectOverview,
   ventas: collectVentas,
   inventario: collectInventario,
   contabilidad: collectContabilidad,
   postventa: collectPostventa,
+  forecast: collectForecast,
   crm: collectCrm,
 };
 
@@ -202,10 +288,12 @@ async function collectDomain(domain, options = {}) {
 }
 
 module.exports = {
+  collectOverview,
   collectVentas,
   collectInventario,
   collectContabilidad,
   collectPostventa,
+  collectForecast,
   collectCrm,
   collectDomain,
 };

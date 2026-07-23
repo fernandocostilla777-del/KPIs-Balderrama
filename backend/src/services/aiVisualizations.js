@@ -597,6 +597,54 @@ const BUILDERS = {
   consultar_postventa: blocksFromPostventa,
   consultar_contabilidad: blocksFromContabilidad,
   consultar_pronostico: blocksFromForecast,
+  listar_vendedores_360: (data) => {
+    const rows = data?.vendedores || [];
+    if (!rows.length) return [];
+    return [
+      dataTable(
+        'Vendedores · Seguimiento 360',
+        ['Vendedor', 'Clientes', 'Fuentes'],
+        topItems(rows, 12).map((v) => [
+          v.vendedor,
+          fmtNum(v.clientes),
+          Array.isArray(v.fuentes) ? v.fuentes.join(', ') : '—',
+        ]),
+      ),
+    ].filter(Boolean);
+  },
+  resumen_vendedor_360: (data) => {
+    if (!data?.vendedor) return [];
+    const t = data.totales || {};
+    const d = data.desempenoComercial || {};
+    const blocks = [
+      kpiRow(`Seguimiento 360 · ${data.vendedor}`, [
+        kpiItem('Unidades vendidas', fmtNum(d.unidadesVendidas), { icon: 'directions_car', sub: d.fuenteUnidades || 'libro' }),
+        kpiItem('Clientes', fmtNum(t.clientes), { icon: 'group' }),
+        kpiItem('Contratos F&I', fmtNum(d.contratosFi), { icon: 'description' }),
+        kpiItem('Promedio PVAs', d.promedioCantidadPvasPorContrato ?? '—', { icon: 'add_shopping_cart', sub: 'productos/contrato' }),
+        kpiItem('Pruebas de manejo', fmtNum(t.pruebas), { icon: 'speed' }),
+        kpiItem('Retorno taller', d.retornoTallerPct != null ? `${d.retornoTallerPct}%` : '—', { icon: 'build' }),
+      ]),
+    ];
+    if (Array.isArray(d.plazos) && d.plazos.length) {
+      blocks.push(barChart(
+        'Distribución de plazos',
+        d.plazos.map((p) => ({ label: `${p.plazo}m`, count: p.count })),
+      ));
+    }
+    if (Array.isArray(d.pvasPorTipo) && d.pvasPorTipo.length) {
+      blocks.push(dataTable(
+        'PVAs por producto',
+        ['Producto', 'Contratos', 'Penetración'],
+        topItems(d.pvasPorTipo, 8).map((p) => [
+          p.label || p.producto || '—',
+          fmtNum(p.contratos ?? p.count),
+          p.penetracionPct != null ? `${p.penetracionPct}%` : '—',
+        ]),
+      ));
+    }
+    return blocks.filter(Boolean);
+  },
   ejecutar_consulta_sql: blocksFromSql,
 };
 

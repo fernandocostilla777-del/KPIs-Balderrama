@@ -1,0 +1,37 @@
+.profile-card {
+  text-align: center;
+  padding-top: 28px;
+  padding-bottom: 28px;
+
+  h2 {
+    font-family: 'Montserrat', sans-serif;
+    margin: 12px 0 4px;
+  }
+
+  .role {
+    color: rgba(227, 225, 239, 0.65);
+  }
+}
+
+.avatar {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 242, 255, 0.12);
+  border: 1px solid var(--glass-border);
+
+  ion-icon {
+    font-size: 2rem;
+    color: #74f5ff;
+  }
+}
+
+.logout-btn {
+  --border-color: rgba(255, 180, 171, 0.5);
+  --color: #ffb4ab;
+  margin-top: 24px;
+}

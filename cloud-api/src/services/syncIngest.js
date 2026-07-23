@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { withTransaction } = require('../db');
 
-const VALID_DOMAINS = new Set(['ventas', 'inventario', 'contabilidad', 'postventa', 'crm']);
+const VALID_DOMAINS = new Set(['overview', 'ventas', 'forecast', 'inventario', 'contabilidad', 'postventa', 'crm']);
 const VALID_SYNC_TYPES = new Set(['incremental', 'daily', 'monthly']);
 
 function stableStringify(value) {
@@ -63,6 +63,7 @@ async function ingestSyncPayload(body) {
   const periodStart = body.periodStart || null;
   const periodEnd = body.periodEnd || null;
   const sourceHost = body.sourceHost ? String(body.sourceHost) : null;
+  const meta = body.meta && typeof body.meta === 'object' ? body.meta : null;
   const records = Array.isArray(body.records) ? body.records : [];
 
   if (!VALID_DOMAINS.has(domain)) {
@@ -81,10 +82,10 @@ async function ingestSyncPayload(body) {
   return withTransaction(async (client) => {
     const batchRes = await client.query(
       `INSERT INTO sync_batches
-        (domain, sync_type, period_key, period_start, period_end, source_host, record_count, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing')
+        (domain, sync_type, period_key, period_start, period_end, source_host, record_count, meta, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'processing')
        RETURNING id`,
-      [domain, syncType, periodKey, periodStart, periodEnd, sourceHost, normalized.length]
+      [domain, syncType, periodKey, periodStart, periodEnd, sourceHost, normalized.length, meta]
     );
     const batchId = batchRes.rows[0].id;
 

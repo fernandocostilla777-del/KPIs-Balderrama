@@ -1,6 +1,6 @@
 const path = require('path');
 const { query } = require('../db');
-const { getProrationFactors } = require('../config/prorationMatrix');
+const { getProrationFactors, getProrationMatrixMeta } = require('../config/prorationMatrix');
 const { getBalanceAtDate } = require('./accountingEeffService');
 const {
   MENUDEO_BRANCHES,
@@ -473,6 +473,7 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
   const segments = yearSegments(fechaInicio, fechaFin);
   const available = (await Promise.all(segments.map((s) => tableExists(ctasTable(s.year))))).some(Boolean);
   const prorationFactors = getProrationFactors({ fechaFin });
+  const prorationMeta = getProrationMatrixMeta({ fechaFin });
   const adminTotal = await sumAdminTotal(segments);
 
   const [ventas, postventa, seminuevos, balanceGeneral] = await Promise.all([
@@ -497,10 +498,15 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
     ventas,
     postventa,
     seminuevos,
+    proration: {
+      ...prorationMeta,
+      factors: prorationFactors,
+      adminTotal,
+    },
     methodology: {
-      ventas: 'Menudeo (5 sucursales) + Flotillas + Intercambios = total autos nuevos',
+      ventas: 'Menudeo (sucursales) + Flotillas + Intercambios = total autos nuevos',
       postventa: 'Servicio (0460) + Refacciones (0481–84) + HYP (0480/0466)',
-      gastos: 'GPOCONT por departamento + prorrateo administración (740/750; matriz 2026 solo en periodos 2026)',
+      gastos: 'GPOCONT por departamento + prorrateo administración (740/750) según configuración en Administración (ventas/postventa)',
       balance: 'Saldos al cierre · GPOCONT 110–190 + cuentas mayor ACUM',
     },
   };

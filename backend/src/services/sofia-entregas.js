@@ -72,12 +72,24 @@ function buildEntregasDetalleQuery() {
         ISNULL(p.PER_NOMRAZON, '') + ' ' +
         ISNULL(p.PER_PATERNO, '') + ' ' +
         ISNULL(p.PER_MATERNO, '')
-      )) AS CLIENTE
+      )) AS CLIENTE,
+      ISNULL(prev.PREVIAS, 0) AS PREVIAS
     FROM SOF_Venta_Cancel_DEMO s
     LEFT JOIN PER_PERSONAS p ON p.PER_IDPERSONA = s.SOF_IDCliente
     LEFT JOIN ADE_VTAFI v
       ON v.VTE_DOCTO = s.SOF_Factura
       AND v.VTE_TIPODOCTO = 'A'
+    LEFT JOIN (
+      SELECT
+        UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) AS SERIE,
+        COUNT(*) AS PREVIAS
+      FROM SER_ORDEN o
+      WHERE LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) = 'S'
+        AND o.ORE_STATUS <> 'C'
+        AND o.ORE_NUMSERIE IS NOT NULL
+        AND LTRIM(RTRIM(o.ORE_NUMSERIE)) <> ''
+      GROUP BY UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE)))
+    ) prev ON prev.SERIE = UPPER(LTRIM(RTRIM(s.SOF_VIN)))
     WHERE UPPER(LTRIM(RTRIM(s.SOF_OrigenOpe))) = 'ENTREGA'
       AND s.SOF_Resultado = 'EXITO'
       AND COALESCE(
@@ -144,9 +156,15 @@ async function getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes =
     .input('fechaFin', sql.Date, fin)
     .query(buildEntregasDetalleQuery());
 
-  const registros = result.recordset;
+  const registros = (result.recordset || []).map((row) => ({
+    ...row,
+    PREVIAS: Number(row.PREVIAS || 0) || 0,
+  }));
+  const totalEntregasSinPrevias = registros.filter((r) => r.PREVIAS === 0).length;
   const payload = {
     totalNotificacionesEntrega: registros.length,
+    totalEntregasSinPrevias,
+    totalEntregasConPrevias: registros.length - totalEntregasSinPrevias,
     registrosEntrega: registros,
   };
 

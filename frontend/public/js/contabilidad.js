@@ -371,6 +371,24 @@ async function loadContabilidad(fechaInicio, fechaFin) {
   renderRatios(eeff.ratios, s, fmt);
   renderVtasmenTable(data.ventasAutosNuevosEeff, fmt);
   renderDailySalesTable(data.dailyBreakdown || [], fmt);
+
+  if (window.KpiInsights?.apply && s) {
+    window.KpiInsights.apply('contabilidad', {
+      fechaInicio,
+      fechaFin,
+      summary: {
+        ventasTotales: s.ventasTotales,
+        costoVentas: s.costoVentas,
+        utilidadBruta: s.utilidadBruta,
+        margenBrutoPct: s.margenBrutoPct,
+        gastosOperacion: s.gastosOperacion,
+        utilidadOperacion: s.utilidadOperacion,
+        margenOperacionPct: s.margenOperacionPct,
+        puntoEquilibrio: s.puntoEquilibrio,
+        gastoDepartamento: s.gastoDepartamento,
+      },
+    });
+  }
 }
 
 async function onConsultContabilidad(fechaInicio, fechaFin) {

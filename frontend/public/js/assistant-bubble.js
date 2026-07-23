@@ -93,7 +93,7 @@
     if (window.AssistantChat) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = '/js/assistant-core.js?v=4';
+      s.src = '/js/assistant-core.js?v=6';
       s.onload = resolve;
       s.onerror = reject;
       document.body.appendChild(s);
@@ -133,7 +133,10 @@
     setExpanded(!expanded);
   }
 
-  function openPanel() {
+  function openPanel(options = {}) {
+    const prompt = typeof options === 'string' ? options : options?.prompt;
+    const autoSend = typeof options === 'string' ? true : options?.autoSend !== false;
+
     panelOpen = true;
     panel.classList.add('ai-chat-panel--open');
     panel.setAttribute('aria-hidden', 'false');
@@ -143,6 +146,16 @@
     loadCoreScript().then(() => {
       const api = initChat();
       api?.focus();
+      if (prompt && autoSend) {
+        api?.sendMessage?.(String(prompt));
+      } else if (prompt) {
+        const input = panel.querySelector('[data-ai="input"]');
+        if (input) {
+          input.value = String(prompt);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.focus();
+        }
+      }
     });
   }
 
@@ -159,6 +172,14 @@
     if (panelOpen) closePanel();
     else openPanel();
   }
+
+  window.AssistantBubble = {
+    open(promptOrOpts) {
+      openPanel(promptOrOpts);
+    },
+    close: closePanel,
+    isOpen: () => panelOpen,
+  };
 
   function cycleMessage() {
     if (hidden || panelOpen) return;

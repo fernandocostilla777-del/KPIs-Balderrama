@@ -5,7 +5,7 @@
 
 const MENUDEO_BRANCHES = [
   { id: 'piso', label: 'Piso', segment: '0001', revenuePrefixes: ['0400-0001-%'], costPrefixes: ['0600-0001-%'], expenseGpo: '711', prorationKey: 'piso' },
-  { id: 'foraneos', label: 'Foráneos', segment: '0002', revenuePrefixes: ['0400-0002-%'], costPrefixes: ['0600-0002-%'], expenseGpo: '712', prorationKey: 'foraneos' },
+  { id: 'foraneos', label: 'Foráneos digitales', segment: '0002', revenuePrefixes: ['0400-0002-%'], costPrefixes: ['0600-0002-%'], expenseGpo: '712', prorationKey: 'foraneos' },
   { id: 'suauto', label: 'SuAuto', segment: '0008', revenuePrefixes: ['0400-0008-%'], costPrefixes: ['0600-0008-%', '0600-0003-%'], expenseGpo: '713', prorationKey: 'suauto' },
   { id: 'cholula', label: 'Cholula', segment: '0004', revenuePrefixes: ['0400-0004-%'], costPrefixes: ['0600-0004-%'], expenseGpo: '714', prorationKey: 'cholula' },
   { id: 'zacatelco', label: 'Zacatelco', segment: '0005', revenuePrefixes: ['0400-0005-%'], costPrefixes: ['0600-0005-%'], expenseGpo: '715', prorationKey: 'zacatelco' },

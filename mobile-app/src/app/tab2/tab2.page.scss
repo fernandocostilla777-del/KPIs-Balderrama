@@ -1,0 +1,36 @@
+:host { display: block; }
+
+.selector-card {
+  margin-bottom: 16px;
+}
+
+.glass-select {
+  --background: rgba(255, 255, 255, 0.04);
+  --border-radius: 1rem;
+  --padding-start: 12px;
+  --inner-padding-end: 8px;
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+}
+
+.glass-select ion-select {
+  width: 100%;
+  max-width: 100%;
+  color: #e3e1ef;
+  font-weight: 600;
+}
+
+.bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bar-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+  color: rgba(227, 225, 239, 0.85);
+}

@@ -27,7 +27,7 @@ function getDb() {
   if (db) return db;
   if (!fs.existsSync(DB_PATH)) {
     throw new Error(
-      'Base CRM no encontrada. Ejecute: node backend/scripts/etl-crm-ciclos.js "<ruta al CSV Balderrama Ciclos>"'
+      'Base CRM no encontrada. Ejecute: node backend/scripts/etl-crm-ciclos.js "<ruta al XLSX/CSV Balderrama Ciclos>"'
     );
   }
   db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
@@ -61,6 +61,196 @@ function hasPruebasManejoTable(d) {
   return !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crm_pruebas_manejo'`).get();
 }
 
+function hasFinanciamientoTable(d) {
+  return !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crm_financiamiento'`).get();
+}
+
+function hasCsiPosventaTable(d) {
+  return !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crm_csi_posventa'`).get();
+}
+
+function hasCsiVentasTable(d) {
+  return !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crm_csi_ventas'`).get();
+}
+
+function normalizeOrdenCsi(v) {
+  if (v == null) return null;
+  const s = String(v).trim().replace(/\s+/g, '').toUpperCase();
+  return s || null;
+}
+
+function mapCsiPosventaRow(r) {
+  return {
+    fuente: 'posventa',
+    id: r.id,
+    tipo: r.tipo || null,
+    orden: r.orden || null,
+    fecha: r.fecha || null,
+    nombre: r.nombre || null,
+    asesor: r.asesor || null,
+    tecnico: r.tecnico || null,
+    modelo: r.modelo || null,
+    serie: r.serie || null,
+    recomendacion: r.recomendacion != null ? Number(r.recomendacion) : null,
+    incidencia: r.incidencia || null,
+    comentarios: r.comentarios || null,
+    queja: r.comentarios || r.incidencia || null,
+    area: r.area || 'General / Sin clasificar',
+  };
+}
+
+function mapCsiVentasRow(r) {
+  return {
+    fuente: 'ventas',
+    id: r.id,
+    fecha: r.fecha_entrega || null,
+    sucursal: r.sucursal || null,
+    modelo: r.modelo || null,
+    serie: r.serie || null,
+    ejecutivo: r.ejecutivo || null,
+    cliente: r.cliente || null,
+    nps: r.nps != null ? Number(r.nps) : null,
+    incidencia: r.incidencia || null,
+    comentarios: r.comentarios || null,
+    queja: r.comentarios || r.incidencia || null,
+    area: r.area || 'General / Sin clasificar',
+  };
+}
+
+/**
+ * Quejas/incidencias CSI vinculadas al cliente:
+ * - Posventa: por número de orden (col ORDEN)
+ * - Ventas: por serie/VIN (col D)
+ */
+function getCsiQuejasForContact(d, { ordenes = [], vins = [] } = {}) {
+  const posventa = [];
+  const ventas = [];
+
+  const ordenSet = [...new Set(
+    (ordenes || []).map((o) => normalizeOrdenCsi(typeof o === 'object' ? o.orden : o)).filter(Boolean)
+  )];
+  const vinSet = [...new Set((vins || []).map(normalizeVin).filter(Boolean))];
+
+  if (hasCsiPosventaTable(d) && ordenSet.length) {
+    const placeholders = ordenSet.map(() => '?').join(',');
+    const rows = d.prepare(`
+      SELECT * FROM crm_csi_posventa
+      WHERE orden IN (${placeholders})
+      ORDER BY fecha DESC, id DESC
+    `).all(...ordenSet);
+    posventa.push(...rows.map(mapCsiPosventaRow));
+  }
+
+  // Fallback posventa por serie si no hubo match por orden
+  if (hasCsiPosventaTable(d) && vinSet.length) {
+    const placeholders = vinSet.map(() => '?').join(',');
+    const rows = d.prepare(`
+      SELECT * FROM crm_csi_posventa
+      WHERE serie IN (${placeholders})
+      ORDER BY fecha DESC, id DESC
+    `).all(...vinSet);
+    const seen = new Set(posventa.map((r) => r.id));
+    for (const row of rows.map(mapCsiPosventaRow)) {
+      if (!seen.has(row.id)) posventa.push(row);
+    }
+  }
+
+  if (hasCsiVentasTable(d) && vinSet.length) {
+    const clauses = ['serie IN (' + vinSet.map(() => '?').join(',') + ')'];
+    const params = [...vinSet];
+    for (const vin of vinSet) {
+      if (vin.length < 17) {
+        clauses.push('serie LIKE ?');
+        params.push(`%${vin}`);
+      }
+    }
+    const rows = d.prepare(`
+      SELECT * FROM crm_csi_ventas
+      WHERE ${clauses.join(' OR ')}
+      ORDER BY fecha_entrega DESC, id DESC
+    `).all(...params);
+    const seen = new Set();
+    for (const row of rows.map(mapCsiVentasRow)) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      ventas.push(row);
+    }
+  }
+
+  const todas = [...posventa, ...ventas];
+  const porArea = {};
+  for (const q of todas) {
+    const key = q.area || 'General / Sin clasificar';
+    porArea[key] = (porArea[key] || 0) + 1;
+  }
+  const areaPrincipal = Object.entries(porArea).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+  return {
+    posventa,
+    ventas,
+    total: todas.length,
+    totalPosventa: posventa.length,
+    totalVentas: ventas.length,
+    porArea,
+    areaPrincipal,
+  };
+}
+
+function getFinanciamientoByVins(d, vins) {
+  if (!hasFinanciamientoTable(d)) return [];
+  const normalized = [...new Set((vins || []).map(normalizeVin).filter(Boolean))];
+  if (!normalized.length) return [];
+
+  const clauses = ['vin IN (' + normalized.map(() => '?').join(',') + ')'];
+  const params = [...normalized];
+  for (const vin of normalized) {
+    if (vin.length < 17) {
+      clauses.push('vin LIKE ?');
+      params.push(`%${vin}`);
+    }
+  }
+  const rows = d.prepare(`
+    SELECT * FROM crm_financiamiento
+    WHERE ${clauses.join(' OR ')}
+    ORDER BY COALESCE(fecha_compra, fecha_timbrado, fecha) DESC
+  `).all(...params);
+
+  const seen = new Set();
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  return rows
+    .filter((row) => {
+      if (!normalized.some((vin) => matchCrmVinToSerie(vin, row.vin))) return false;
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    })
+    .map((row) => {
+      const fechaCompraValida = validHistoricalDate(row.fecha_compra, row.fecha_timbrado, row.fecha);
+      const purchaseDate = fechaCompraValida ? new Date(`${fechaCompraValida}T00:00:00`) : null;
+      const contratoMayorUnAnio = purchaseDate && !Number.isNaN(purchaseDate.getTime())
+        ? purchaseDate < oneYearAgo
+        : false;
+      const aseguradora = contratoMayorUnAnio ? row.seguro_subsecuente : row.seguro_gratis;
+      const pvas = [
+        { tipo: 'GAP', monto: Number(row.gap_monto || 0) },
+        { tipo: 'Garantía extendida', monto: Number(row.garantia_extendida_monto || 0) },
+        { tipo: 'Accesorios', monto: Number(row.accesorios_monto || 0) },
+        { tipo: 'OnStar', monto: Number(row.onstar_monto || 0), plazo: row.plazo_onstar || null },
+        { tipo: 'Mantenimientos integrados', monto: Number(row.mantenimiento_integrado_monto || 0) },
+      ].filter((item) => item.monto > 0);
+      return {
+        ...row,
+        fecha_compra_valida: fechaCompraValida,
+        aseguradora: aseguradora || null,
+        fuenteAseguradora: contratoMayorUnAnio ? 'seguro_subsecuente' : 'seguro_gratis',
+        contratoMayorUnAnio,
+        pvas,
+      };
+    });
+}
+
 function toIsoDate(value) {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -72,6 +262,19 @@ function toIsoDate(value) {
   const dmy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
   return text || null;
+}
+
+function validHistoricalDate(...values) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  for (const value of values) {
+    const iso = toIsoDate(value);
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
+    const date = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000 || date > tomorrow) continue;
+    return iso;
+  }
+  return null;
 }
 
 function getUltimaActividadByIds(ids) {
@@ -160,6 +363,16 @@ function getCrmStats() {
       rangoFechas: d.prepare(`
         SELECT MIN(fecha) AS desde, MAX(fecha) AS hasta
         FROM crm_pruebas_manejo WHERE fecha IS NOT NULL
+      `).get(),
+    };
+  }
+  if (hasFinanciamientoTable(d)) {
+    stats.financiamiento = {
+      total: d.prepare('SELECT COUNT(*) AS n FROM crm_financiamiento').get().n,
+      vins: d.prepare('SELECT COUNT(DISTINCT vin) AS n FROM crm_financiamiento').get().n,
+      rangoFechas: d.prepare(`
+        SELECT MIN(fecha_compra) AS desde, MAX(fecha_compra) AS hasta
+        FROM crm_financiamiento WHERE fecha_compra IS NOT NULL
       `).get(),
     };
   }
@@ -341,6 +554,60 @@ function searchContacts({ q = '', limit = 25 } = {}) {
     }
   }
 
+  // Financiamiento: búsqueda por VIN o cliente y cruce a ID CRM por VIN
+  if (hasFinanciamientoTable(d) && !isNumeric) {
+    const finRows = d.prepare(`
+      SELECT vin, MAX(cliente) AS cliente, COUNT(*) AS contratos,
+             MAX(unidad) AS unidad, MAX(fecha_compra) AS ultima_compra
+      FROM crm_financiamiento
+      WHERE vin LIKE ? OR cliente LIKE ?
+      GROUP BY vin
+      ORDER BY ultima_compra DESC
+      LIMIT ?
+    `).all(`%${term.toUpperCase()}%`, `%${term.toUpperCase()}%`, max);
+
+    for (const fin of finRows) {
+      const linked = d.prepare(`
+        SELECT id_contacto AS id_crm, MAX(nombre_contacto) AS nombre
+        FROM crm_actividades
+        WHERE vin LIKE ?
+        GROUP BY id_contacto
+        LIMIT 1
+      `).get(`%${fin.vin}%`) || (hasLeadsTable(d)
+        ? d.prepare(`
+            SELECT id_crm, MAX(nombre) AS nombre
+            FROM crm_leads
+            WHERE vin_comprado LIKE ? AND id_crm IS NOT NULL
+            GROUP BY id_crm
+            LIMIT 1
+          `).get(`%${fin.vin}%`)
+        : null);
+
+      if (linked?.id_crm) {
+        const key = String(linked.id_crm);
+        if (byId.has(key)) {
+          byId.get(key).contratos_financiamiento = fin.contratos;
+          byId.get(key).ultimo_auto_interes = byId.get(key).ultimo_auto_interes || fin.unidad;
+        } else {
+          byId.set(key, {
+            id_contacto: linked.id_crm,
+            nombre: linked.nombre || fin.cliente,
+            ciclos: 0,
+            actividades: 0,
+            compras: 1,
+            leads: 0,
+            solicitudes: 0,
+            contratos_financiamiento: fin.contratos,
+            ultimo_auto_interes: fin.unidad,
+            primera_actividad: fin.ultima_compra,
+            ultima_actividad: fin.ultima_compra,
+            soloFinanciamiento: true,
+          });
+        }
+      }
+    }
+  }
+
   return [...byId.values()].slice(0, max);
 }
 
@@ -348,7 +615,17 @@ function matchCrmVinToSerie(crmVin, serieSql) {
   const a = normalizeVin(crmVin);
   const b = normalizeVin(serieSql);
   if (!a || !b) return false;
-  return a === b || b.endsWith(a) || a.endsWith(b);
+  if (a === b || b.endsWith(a) || a.endsWith(b)) return true;
+  // ADE_VTAFI a veces guarda serie con prefijo de inventario: "-014833-9ML137199"
+  const minLen = 8;
+  return a.length >= minLen && b.length >= minLen && a.slice(-minLen) === b.slice(-minLen);
+}
+
+/** Sufijo estable para buscar series con prefijo de inventario en SQL. */
+function vinSearchSuffix(vin, len = 8) {
+  const s = normalizeVin(vin);
+  if (!s || s.length < len) return null;
+  return s.slice(-len);
 }
 
 /**
@@ -370,13 +647,21 @@ async function enrichByVins(vins, {
   list.forEach((vin, i) => {
     params[`vin${i}`] = vin;
     params[`like${i}`] = `%${vin}`;
+    const suffix = vinSearchSuffix(vin);
+    if (suffix) params[`suf${i}`] = `%${suffix}`;
   });
   if (fechaInicio) params.fechaInicio = fechaInicio;
   if (fechaFin) params.fechaFin = fechaFin;
-  const matchSql = (col) => list.map((_, i) => `
-    UPPER(LTRIM(RTRIM(${col}))) = @vin${i}
-    OR UPPER(LTRIM(RTRIM(${col}))) LIKE @like${i}
-  `).join(' OR ');
+  const matchSql = (col) => list.map((vin, i) => {
+    const parts = [
+      `UPPER(LTRIM(RTRIM(${col}))) = @vin${i}`,
+      `UPPER(LTRIM(RTRIM(${col}))) LIKE @like${i}`,
+    ];
+    if (params[`suf${i}`]) {
+      parts.push(`UPPER(LTRIM(RTRIM(${col}))) LIKE @suf${i}`);
+    }
+    return parts.join('\n    OR ');
+  }).join(' OR ');
   const orderDateSql = [
     fechaInicio ? 'AND CONVERT(DATE, o.ORE_FECHAORD, 103) >= @fechaInicio' : '',
     fechaFin ? 'AND CONVERT(DATE, o.ORE_FECHAORD, 103) <= @fechaFin' : '',
@@ -413,6 +698,7 @@ async function enrichByVins(vins, {
           o.ORE_FECHAORD AS ingreso,
           o.ORE_FECHACIE AS cierre,
           o.ORE_STATUS AS status,
+          o.ORE_KILOMETRAJE AS kilometraje,
           LTRIM(RTRIM(o.ORE_TPOORDEN)) AS tipoOrden,
           LTRIM(RTRIM(o.ORE_TIPSERVICIO)) AS tipoServicio,
           LTRIM(RTRIM(COALESCE(NULLIF(veh.VEH_TIPOAUTO, ''), ''))) AS modelo,
@@ -529,6 +815,7 @@ async function getCustomerUnitsDms({ nombre, telefono, maxOrdenes = 5000 } = {})
         o.ORE_FECHAORD AS ingreso,
         o.ORE_FECHACIE AS cierre,
         o.ORE_STATUS AS status,
+        o.ORE_KILOMETRAJE AS kilometraje,
         LTRIM(RTRIM(COALESCE(NULLIF(veh.VEH_TIPOAUTO, ''), ''))) AS modelo,
         veh.VEH_ANMODELO AS anModelo,
         LTRIM(RTRIM(
@@ -570,6 +857,8 @@ async function getCustomerUnitsDms({ nombre, telefono, maxOrdenes = 5000 } = {})
           ordenes: new Set(),
           primeraVisita: null,
           ultimaVisita: null,
+          kilometraje: null,
+          fechaKilometraje: null,
         });
       }
       const unidad = bySerie.get(serie);
@@ -579,39 +868,52 @@ async function getCustomerUnitsDms({ nombre, telefono, maxOrdenes = 5000 } = {})
       const fecha = toIsoDate(row.ingreso || row.cierre);
       if (fecha && (!unidad.primeraVisita || fecha < unidad.primeraVisita)) unidad.primeraVisita = fecha;
       if (fecha && (!unidad.ultimaVisita || fecha > unidad.ultimaVisita)) unidad.ultimaVisita = fecha;
+      const km = Number(row.kilometraje);
+      if (Number.isFinite(km) && km >= 0
+        && (!unidad.fechaKilometraje || !fecha || fecha >= unidad.fechaKilometraje)) {
+        unidad.kilometraje = km;
+        unidad.fechaKilometraje = fecha;
+      }
     }
 
     const series = [...bySerie.keys()];
     let ventas = [];
     if (series.length) {
       const ventaParams = {};
-      const placeholders = series.map((serie, i) => {
+      const conditions = [];
+      series.forEach((serie, i) => {
         ventaParams[`serie${i}`] = serie;
-        return `@serie${i}`;
+        conditions.push(`UPPER(LTRIM(RTRIM(v.VTE_SERIE))) = @serie${i}`);
+        const suffix = vinSearchSuffix(serie);
+        if (suffix) {
+          ventaParams[`suf${i}`] = `%${suffix}`;
+          conditions.push(`UPPER(LTRIM(RTRIM(v.VTE_SERIE))) LIKE @suf${i}`);
+        }
       });
       ventas = await query(`
         SELECT
           UPPER(LTRIM(RTRIM(v.VTE_SERIE))) AS serie,
           LTRIM(RTRIM(v.VTE_DOCTO)) AS factura,
           v.VTE_FECHDOCTO AS fechaFactura,
-          v.VTE_IDCLIENTE AS idClienteVenta
+          v.VTE_IDCLIENTE AS idClienteVenta,
+          v.VTE_TIPODOCTO AS tipoDocto
         FROM ADE_VTAFI v
-        WHERE v.VTE_TIPODOCTO = 'A'
+        WHERE v.VTE_TIPODOCTO IN ('A', 'U')
           AND v.VTE_STATUS = 'I'
-          AND UPPER(LTRIM(RTRIM(v.VTE_SERIE))) IN (${placeholders.join(', ')})
+          AND (${conditions.join(' OR ')})
       `, ventaParams);
-    }
-
-    const ventaBySerie = new Map();
-    for (const venta of ventas) {
-      const serie = normalizeVin(venta.serie);
-      if (!serie || ventaBySerie.has(serie)) continue;
-      ventaBySerie.set(serie, venta);
     }
 
     const unidades = [...bySerie.values()]
       .map((unidad) => {
-        const venta = ventaBySerie.get(unidad.serie);
+        const matches = ventas.filter((venta) => matchCrmVinToSerie(unidad.serie, venta.serie));
+        // 1) Factura a nombre del mismo cliente DMS (A o U)
+        // 2) Si no, venta de auto nuevo (A) del VIN (series con prefijo de inventario)
+        // No atribuir facturas U de otros clientes (reventas posteriores)
+        const venta = matches.find((v) =>
+          unidad.idClienteDms != null && String(v.idClienteVenta) === String(unidad.idClienteDms)
+        ) || matches.find((v) => String(v.tipoDocto || '').toUpperCase() === 'A')
+          || null;
         const ordenIds = [...unidad.ordenes];
         return {
           ...unidad,
@@ -620,6 +922,7 @@ async function getCustomerUnitsDms({ nombre, telefono, maxOrdenes = 5000 } = {})
           ventaEnDistribuidor: !!venta,
           facturaVenta: venta?.factura || null,
           fechaFactura: toIsoDate(venta?.fechaFactura),
+          tipoVenta: venta?.tipoDocto || null,
         };
       })
       .sort((a, b) => String(b.ultimaVisita || '').localeCompare(String(a.ultimaVisita || '')));
@@ -628,6 +931,225 @@ async function getCustomerUnitsDms({ nombre, telefono, maxOrdenes = 5000 } = {})
   } catch (err) {
     return { unidades: [], error: err.message || String(err) };
   }
+}
+
+function monthsElapsed(fromDate, toDate = new Date()) {
+  const iso = toIsoDate(fromDate);
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const from = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(from.getTime()) || from > toDate) return 0;
+  let months = (toDate.getFullYear() - from.getFullYear()) * 12
+    + toDate.getMonth() - from.getMonth();
+  if (toDate.getDate() < from.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+function buildCliente360({
+  compras = [],
+  contratos = [],
+  unidades = [],
+  ordenes = [],
+  timeline = [],
+  leads = [],
+  pruebas = [],
+  quejasCsi = null,
+} = {}) {
+  const compraActual = [...compras].sort((a, b) =>
+    String(b.fechaEntrega || b.fechaFactura || '').localeCompare(
+      String(a.fechaEntrega || a.fechaFactura || '')
+    ))[0] || null;
+  const contratoActual = [...contratos].sort((a, b) =>
+    String(validHistoricalDate(b.fecha_compra_valida, b.fecha_compra, b.fecha_timbrado, b.fecha) || '').localeCompare(
+      String(validHistoricalDate(a.fecha_compra_valida, a.fecha_compra, a.fecha_timbrado, a.fecha) || '')
+    ))[0] || null;
+  const vinActual = normalizeVin(contratoActual?.vin || compraActual?.vin);
+  const unidadActual = unidades.find((u) => matchCrmVinToSerie(vinActual, u.serie))
+    || [...unidades].sort((a, b) =>
+      String(b.fechaFactura || b.ultimaVisita || '').localeCompare(
+        String(a.fechaFactura || a.ultimaVisita || '')
+      ))[0]
+    || null;
+
+  const ordenesValidas = ordenes.filter((o) => String(o.status || '').trim().toUpperCase() !== 'C');
+  const ordenesOrdenadas = [...ordenesValidas].sort((a, b) =>
+    String(toIsoDate(b.ingreso || b.cierre) || '').localeCompare(
+      String(toIsoDate(a.ingreso || a.cierre) || '')
+    ));
+  const ultimaOrden = ordenesOrdenadas[0] || null;
+  const kmOrden = ordenesOrdenadas.find((o) => {
+    const km = Number(o.kilometraje);
+    return Number.isFinite(km) && km >= 0;
+  }) || null;
+
+  const plazo = Number(contratoActual?.plazo_meses);
+  const mesesTranscurridos = monthsElapsed(
+    validHistoricalDate(
+      contratoActual?.fecha_compra_valida,
+      contratoActual?.fecha_compra,
+      contratoActual?.fecha_timbrado,
+      contratoActual?.fecha
+    )
+  );
+  const mensualidadesPagadas = Number.isFinite(plazo) && plazo > 0 && mesesTranscurridos != null
+    ? Math.min(plazo, mesesTranscurridos)
+    : null;
+  const montoFinanciar = Number(contratoActual?.monto_financiar);
+  const enganche = Number(contratoActual?.enganche_monto);
+  const saldoEstimado = Number.isFinite(montoFinanciar) && mensualidadesPagadas != null && plazo > 0
+    ? Math.max(0, montoFinanciar * (1 - mensualidadesPagadas / plazo))
+    : null;
+  const valorEstimadoUnidad = Number.isFinite(montoFinanciar)
+    ? montoFinanciar + (Number.isFinite(enganche) ? enganche : 0)
+    : null;
+
+  const ultimaActividad = [...timeline].sort((a, b) =>
+    String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
+  const textoIncidencias = timeline.map((t) =>
+    `${t.tipo || ''} ${t.resultado || ''}`).join(' | ');
+  const quejasTimeline = (textoIncidencias.match(/QUEJA|INCIDENCIA|RECLAMO|INCONFORMIDAD/gi) || []).length;
+  const quejasIncidencias = Number(quejasCsi?.total ?? 0) > 0
+    ? Number(quejasCsi.total)
+    : quejasTimeline;
+  const digitalPattern = /DIGITAL|WEB|INTERNET|FACEBOOK|INSTAGRAM|WHATSAPP|CHAT|GOOGLE|PORTAL|EMAIL|CORREO/i;
+  const interaccionesDigitales = leads.filter((l) =>
+    digitalPattern.test(`${l.canal || ''} ${l.tipo || ''} ${l.campana || ''}`)
+  ).length + timeline.filter((t) =>
+    digitalPattern.test(`${t.tipo || ''} ${t.resultado || ''}`)
+  ).length;
+
+  const eventos = [];
+  for (const t of timeline) {
+    eventos.push({
+      fecha: toIsoDate(t.fecha),
+      categoria: 'comercial',
+      titulo: t.tipo || 'Contacto comercial',
+      detalle: [t.resultado, t.estatusCiclo].filter(Boolean).join(' · ') || null,
+      vin: t.vin || null,
+    });
+  }
+  for (const c of compras) {
+    eventos.push({
+      fecha: toIsoDate(c.fechaEntrega || c.fechaFactura),
+      categoria: 'compra',
+      titulo: 'Compra de unidad',
+      detalle: [c.producto, c.numFactura ? `Factura ${c.numFactura}` : null].filter(Boolean).join(' · '),
+      vin: c.vin || null,
+    });
+  }
+  for (const c of contratos) {
+    eventos.push({
+      fecha: validHistoricalDate(c.fecha_compra_valida, c.fecha_compra, c.fecha_timbrado, c.fecha),
+      categoria: 'financiamiento',
+      titulo: 'Contrato de financiamiento',
+      detalle: [
+        c.unidad,
+        (c.no_contrato || c.contrato) ? `Contrato ${c.no_contrato || c.contrato}` : null,
+        c.plazo_meses ? `${c.plazo_meses} meses` : null,
+        c.tipo_compra || c.plan_2 || c.plan,
+      ].filter(Boolean).join(' · '),
+      vin: c.vin || null,
+    });
+  }
+  for (const o of ordenesValidas) {
+    eventos.push({
+      fecha: toIsoDate(o.ingreso || o.cierre),
+      categoria: 'taller',
+      titulo: 'Visita a taller',
+      detalle: [
+        o.tipoServicio || o.tipoOrden,
+        Number.isFinite(Number(o.kilometraje)) ? `${Number(o.kilometraje).toLocaleString('es-MX')} km` : null,
+        o.orden ? `Orden ${o.orden}` : null,
+      ].filter(Boolean).join(' · '),
+      vin: normalizeVin(o.serie),
+    });
+  }
+  for (const l of leads) {
+    eventos.push({
+      fecha: toIsoDate(l.fecha_entrada),
+      categoria: 'digital',
+      titulo: 'Lead registrado',
+      detalle: [l.canal, l.auto_interes, l.resultado].filter(Boolean).join(' · '),
+      vin: normalizeVin(l.vin_comprado),
+    });
+  }
+  for (const p of pruebas) {
+    eventos.push({
+      fecha: toIsoDate(p.fecha),
+      categoria: 'prueba',
+      titulo: 'Prueba de manejo',
+      detalle: [p.auto_interes, p.tipo_auto].filter(Boolean).join(' · '),
+      vin: normalizeVin(p.vin),
+    });
+  }
+  for (const q of (quejasCsi?.posventa || [])) {
+    eventos.push({
+      fecha: toIsoDate(q.fecha),
+      categoria: 'queja',
+      titulo: q.incidencia || 'Incidencia CSI posventa',
+      detalle: [q.area, q.orden ? `Orden ${q.orden}` : null, q.queja].filter(Boolean).join(' · '),
+      vin: normalizeVin(q.serie),
+    });
+  }
+  for (const q of (quejasCsi?.ventas || [])) {
+    eventos.push({
+      fecha: toIsoDate(q.fecha),
+      categoria: 'queja',
+      titulo: q.incidencia || 'Incidencia CSI ventas',
+      detalle: [q.area, q.sucursal, q.queja].filter(Boolean).join(' · '),
+      vin: normalizeVin(q.serie),
+    });
+  }
+
+  return {
+    consolidado: {
+      fechaUltimaCompra: toIsoDate(
+        validHistoricalDate(
+          contratoActual?.fecha_compra_valida,
+          contratoActual?.fecha_compra,
+          contratoActual?.fecha_timbrado,
+          contratoActual?.fecha
+        ) || compraActual?.fechaEntrega || compraActual?.fechaFactura
+      ),
+      modeloActual: contratoActual?.unidad || compraActual?.modeloSql || compraActual?.producto
+        || unidadActual?.modelo || null,
+      anModelo: unidadActual?.anModelo || null,
+      vinActual: vinActual || unidadActual?.serie || null,
+      numeroContrato: contratoActual?.no_contrato || contratoActual?.contrato || null,
+      tipoCompra: contratoActual?.tipo_compra || contratoActual?.plan_2
+        || contratoActual?.plan || (contratoActual ? 'Crédito' : null),
+      plazoContratado: Number.isFinite(plazo) && plazo > 0 ? plazo : null,
+      mensualidadesPagadas,
+      saldoEstimado,
+      valorEstimadoUnidad,
+      ultimaVisitaTaller: toIsoDate(ultimaOrden?.ingreso || ultimaOrden?.cierre),
+      kilometraje: kmOrden ? Number(kmOrden.kilometraje) : (unidadActual?.kilometraje ?? null),
+      fechaKilometraje: kmOrden
+        ? toIsoDate(kmOrden.ingreso || kmOrden.cierre)
+        : (unidadActual?.fechaKilometraje || null),
+      serviciosRealizados: ordenesValidas.length,
+      ultimoContactoComercial: toIsoDate(ultimaActividad?.fecha),
+      interaccionesDigitales,
+      quejasIncidencias,
+      quejasPosventa: Number(quejasCsi?.totalPosventa || 0),
+      quejasVentas: Number(quejasCsi?.totalVentas || 0),
+      quejasAreaPrincipal: quejasCsi?.areaPrincipal || null,
+      historialCompras: new Set([
+        ...compras.map((c) => normalizeVin(c.vin)),
+        ...contratos.map((c) => normalizeVin(c.vin)),
+      ].filter(Boolean)).size,
+      metodologia: {
+        mensualidades: 'Meses transcurridos desde la compra, limitados al plazo; no confirma pagos reales.',
+        saldo: 'Monto financiado amortizado linealmente; no incluye intereses, pagos anticipados ni mora.',
+        valorUnidad: 'Monto financiado más enganche al contratar; no es un avalúo comercial actual.',
+        kilometraje: 'Último kilometraje disponible en una orden de taller.',
+        quejas: 'CSI Posventa (orden) + CSI Ventas (serie/VIN). Área inferida del texto de la incidencia.',
+      },
+    },
+    timeline: eventos
+      .filter((e) => e.fecha)
+      .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+      .slice(0, 250),
+  };
 }
 
 /**
@@ -744,11 +1266,34 @@ async function getContactHistory(idContacto, {
     const importeTaller = ordenesServicio
       .filter((o) => String(o.status || '').toUpperCase() !== 'C')
       .reduce((sum, o) => sum + Number(o.importe || 0), 0);
+    const contratosFinanciamiento = getFinanciamientoByVins(d, [
+      ...vinsLead,
+      ...unidadesDms.unidades.map((unidad) => unidad.serie),
+    ]);
     const fechasAlt = [
       ...leads.map((l) => l.fecha_entrada),
       ...solicitudes.map((s) => s.fecha_solicitud),
       ...pruebasManejo.map((p) => p.fecha),
+      ...contratosFinanciamiento.map((contrato) => contrato.fecha_compra),
     ].filter(Boolean).sort();
+    const quejasCsi = getCsiQuejasForContact(d, {
+      ordenes: ordenesServicio,
+      vins: [
+        ...vinsLead,
+        ...unidadesDms.unidades.map((unidad) => unidad.serie),
+        ...contratosFinanciamiento.map((c) => c.vin),
+      ],
+    });
+    const cliente360 = buildCliente360({
+      compras: vinsLead.map((vin) => ({ vin })),
+      contratos: contratosFinanciamiento,
+      unidades: unidadesDms.unidades,
+      ordenes: ordenesServicio,
+      timeline: [],
+      leads,
+      pruebas: pruebasManejo,
+      quejasCsi,
+    });
     return {
       idContacto: id,
       encontrado: true,
@@ -763,10 +1308,16 @@ async function getContactHistory(idContacto, {
         totalLeads: leads.length,
         totalSolicitudes: solicitudes.length,
         totalPruebasManejo: pruebasManejo.length,
+        totalContratosFinanciamiento: contratosFinanciamiento.length,
+        totalPvas: contratosFinanciamiento.reduce((sum, contrato) => sum + contrato.pvas.length, 0),
         realizoPruebaManejo: pruebasManejo.length > 0,
         pruebaManejoConCompra: pruebasManejo.length > 0 && vinsLead.length > 0,
         totalUnidadesDistribuidor: unidadesDms.unidades.length,
         totalOrdenesServicio: ordenesServicio.length,
+        totalQuejas: quejasCsi.total,
+        totalQuejasPosventa: quejasCsi.totalPosventa,
+        totalQuejasVentas: quejasCsi.totalVentas,
+        quejasAreaPrincipal: quejasCsi.areaPrincipal,
         importeTaller,
         primeraActividad: fechasAlt[0] || null,
         ultimaActividad: fechasAlt[fechasAlt.length - 1] || null,
@@ -776,7 +1327,11 @@ async function getContactHistory(idContacto, {
       leads,
       solicitudes,
       pruebasManejo,
+      contratosFinanciamiento,
       timeline: [],
+      quejasCsi,
+      ficha360: cliente360.consolidado,
+      timeline360: cliente360.timeline,
       unidadesSql: [...(sqlEnrich.unidades || []), ...(sqlAdicional.unidades || [])],
       unidadesDistribuidor: unidadesDms.unidades,
       ordenesServicio,
@@ -895,6 +1450,10 @@ async function getContactHistory(idContacto, {
 
   // Adjuntar cruce SQL a cada compra CRM
   const unidadesSql = [...(sqlEnrich.unidades || []), ...(sqlAdicional.unidades || [])];
+  const contratosFinanciamiento = getFinanciamientoByVins(d, [
+    ...vins,
+    ...unidadesDms.unidades.map((unidad) => unidad.serie),
+  ]);
   const sqlByVin = new Map(unidadesSql.map((u) => [u.vin, u]));
   for (const compra of compras) {
     const enr = sqlByVin.get(compra.vin);
@@ -906,7 +1465,29 @@ async function getContactHistory(idContacto, {
       (orden) => !ordenIdsCliente.size || ordenIdsCliente.has(String(orden.orden))
     );
     compra.totalOrdenes = compra.ordenesServicio.length;
+    compra.financiamiento = contratosFinanciamiento.find(
+      (contrato) => matchCrmVinToSerie(compra.vin, contrato.vin)
+    ) || null;
   }
+  const quejasCsi = getCsiQuejasForContact(d, {
+    ordenes: ordenesServicio,
+    vins: [
+      ...vins,
+      ...unidadesDms.unidades.map((unidad) => unidad.serie),
+      ...contratosFinanciamiento.map((c) => c.vin),
+      ...leads.map((l) => l.vin_comprado),
+    ],
+  });
+  const cliente360 = buildCliente360({
+    compras,
+    contratos: contratosFinanciamiento,
+    unidades: unidadesDms.unidades,
+    ordenes: ordenesServicio,
+    timeline,
+    leads,
+    pruebas: pruebasManejo,
+    quejasCsi,
+  });
 
   return {
     idContacto: id,
@@ -922,10 +1503,16 @@ async function getContactHistory(idContacto, {
       totalLeads: leads.length,
       totalSolicitudes: solicitudes.length,
       totalPruebasManejo: pruebasManejo.length,
+      totalContratosFinanciamiento: contratosFinanciamiento.length,
+      totalPvas: contratosFinanciamiento.reduce((sum, contrato) => sum + contrato.pvas.length, 0),
       realizoPruebaManejo: pruebasManejo.length > 0,
       pruebaManejoConCompra: pruebasManejo.length > 0 && compras.length > 0,
       totalUnidadesDistribuidor: unidadesDms.unidades.length,
       totalOrdenesServicio: ordenesServicio.length,
+      totalQuejas: quejasCsi.total,
+      totalQuejasPosventa: quejasCsi.totalPosventa,
+      totalQuejasVentas: quejasCsi.totalVentas,
+      quejasAreaPrincipal: quejasCsi.areaPrincipal,
       importeTaller,
       importeFacturadoTaller,
       importeAbiertoTaller,
@@ -942,7 +1529,11 @@ async function getContactHistory(idContacto, {
     leads,
     solicitudes,
     pruebasManejo,
+    contratosFinanciamiento,
     timeline,
+    quejasCsi,
+    ficha360: cliente360.consolidado,
+    timeline360: cliente360.timeline,
     timelineTruncado: rows.length > maxActividades,
     unidadesSql,
     unidadesDistribuidor: unidadesDms.unidades,
@@ -1393,6 +1984,7 @@ function getSeguimiento360Summary({ periodo = null, desde = null, hasta = null }
   const solicitudWhere = whereFor('fecha_solicitud');
   const pruebaWhere = whereFor('fecha');
   const cicloWhere = whereFor('fecha_inicio_ciclo');
+  const financiamientoWhere = whereFor('fecha_compra');
 
   const leads = hasLeadsTable(d)
     ? d.prepare(`
@@ -1452,6 +2044,25 @@ function getSeguimiento360Summary({ periodo = null, desde = null, hasta = null }
     ${cicloWhere.sql}
   `).get(...cicloWhere.params);
 
+  const financiamiento = hasFinanciamientoTable(d)
+    ? d.prepare(`
+        SELECT
+          COUNT(*) AS total,
+          COUNT(DISTINCT vin) AS unidades,
+          SUM(CASE WHEN gap_monto > 0 THEN 1 ELSE 0 END) AS conGap,
+          SUM(CASE WHEN garantia_extendida_monto > 0 THEN 1 ELSE 0 END) AS conGarantiaExtendida,
+          SUM(CASE WHEN accesorios_monto > 0 THEN 1 ELSE 0 END) AS conAccesorios,
+          SUM(CASE WHEN onstar_monto > 0 THEN 1 ELSE 0 END) AS conOnstar,
+          SUM(CASE WHEN mantenimiento_integrado_monto > 0 THEN 1 ELSE 0 END) AS conMantenimiento,
+          SUM(CASE WHEN upper(trim(COALESCE(robo_parcial, ''))) IN ('C/COBERTURA', 'CON COBERTURA', 'SI') THEN 1 ELSE 0 END) AS conRoboParcial
+        FROM crm_financiamiento
+        ${financiamientoWhere.sql}
+      `).get(...financiamientoWhere.params)
+    : {
+        total: 0, unidades: 0, conGap: 0, conGarantiaExtendida: 0,
+        conAccesorios: 0, conOnstar: 0, conMantenimiento: 0, conRoboParcial: 0,
+      };
+
   const fillZeros = (record, keys) => {
     for (const key of keys) record[key] = Number(record[key] || 0);
   };
@@ -1459,6 +2070,10 @@ function getSeguimiento360Summary({ periodo = null, desde = null, hasta = null }
   fillZeros(solicitudes, ['total', 'clientes', 'aprobadas', 'conCompra']);
   fillZeros(pruebasManejo, ['total', 'clientes', 'conCompra']);
   fillZeros(ciclos, ['total', 'clientes', 'actividades', 'clientesConCompra', 'unidadesConVin']);
+  fillZeros(financiamiento, [
+    'total', 'unidades', 'conGap', 'conGarantiaExtendida',
+    'conAccesorios', 'conOnstar', 'conMantenimiento', 'conRoboParcial',
+  ]);
 
   const pct = (numerator, denominator) => (
     denominator ? Math.round((Number(numerator || 0) / Number(denominator)) * 10000) / 100 : 0
@@ -1471,6 +2086,7 @@ function getSeguimiento360Summary({ periodo = null, desde = null, hasta = null }
     solicitudes,
     pruebasManejo,
     ciclos,
+    financiamiento,
     conversiones: {
       leadACompraPct: pct(leads.conCompra, leads.total),
       solicitudACompraPct: pct(solicitudes.conCompra, solicitudes.total),
@@ -1493,7 +2109,7 @@ function getSeguimiento360Summary({ periodo = null, desde = null, hasta = null }
 
 /**
  * Exporta registros CRM del periodo para sincronización a la nube.
- * Incluye leads, solicitudes F&I, pruebas de manejo y actividades (ciclos).
+ * Incluye leads, solicitudes F&I, pruebas de manejo, contratos y actividades.
  */
 function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
   if (!fechaInicio || !fechaFin) {
@@ -1508,7 +2124,7 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
 
   const d = getDb();
   const records = [];
-  const counts = { leads: 0, solicitudes: 0, pruebas: 0, actividades: 0 };
+  const counts = { leads: 0, solicitudes: 0, pruebas: 0, financiamiento: 0, actividades: 0 };
 
   function mapSqliteRows(entity, rows) {
     for (const row of rows) {
@@ -1522,6 +2138,7 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
     if (entity === 'lead') counts.leads += rows.length;
     else if (entity === 'solicitud') counts.solicitudes += rows.length;
     else if (entity === 'prueba') counts.pruebas += rows.length;
+    else if (entity === 'financiamiento') counts.financiamiento += rows.length;
     else if (entity === 'actividad') counts.actividades += rows.length;
   }
 
@@ -1553,6 +2170,16 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
     mapSqliteRows('prueba', pruebas);
   }
 
+  if (hasFinanciamientoTable(d)) {
+    const financiamiento = d.prepare(`
+      SELECT * FROM crm_financiamiento
+      WHERE COALESCE(fecha_compra, fecha_timbrado) IS NOT NULL
+        AND COALESCE(fecha_compra, fecha_timbrado) >= ?
+        AND COALESCE(fecha_compra, fecha_timbrado) <= ?
+    `).all(fechaInicio, fechaFin);
+    mapSqliteRows('financiamiento', financiamiento);
+  }
+
   const actividades = d.prepare(`
     SELECT * FROM crm_actividades
     WHERE COALESCE(fecha_inicio_ciclo, fecha_factura, fecha_crea_actividad, fecha_entrega) IS NOT NULL
@@ -1573,6 +2200,956 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
   };
 }
 
+function normalizeVendedorKey(v) {
+  const s = String(v || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  return s && s !== 'NULL' ? s : null;
+}
+
+/** Clave estable por tokens ordenados: "Gabriel Chacon" ≡ "CHACON GABRIEL". */
+function personTokenKey(v) {
+  const s = String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  if (!s || s === 'NULL') return null;
+  const tokens = s.split(' ').filter(Boolean);
+  return tokens.length ? tokens.sort().join(' ') : null;
+}
+
+function chunkArray(arr, size) {
+  const out = [];
+  const n = Math.max(1, Number(size) || 40);
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+function avg(nums) {
+  const list = (nums || []).filter((n) => Number.isFinite(n));
+  if (!list.length) return null;
+  return list.reduce((a, b) => a + b, 0) / list.length;
+}
+
+function roundMoney(n) {
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function inPeriod(fecha, fi, ff) {
+  if (!fecha) return !fi && !ff;
+  const f = String(fecha).slice(0, 10);
+  if (fi && f < String(fi)) return false;
+  if (ff && f > String(ff)) return false;
+  return true;
+}
+
+function vendedorDateClause(column, fechaInicio, fechaFin, params) {
+  const parts = [];
+  if (fechaInicio) {
+    parts.push(`${column} >= ?`);
+    params.push(String(fechaInicio));
+  }
+  if (fechaFin) {
+    parts.push(`${column} <= ?`);
+    params.push(String(fechaFin));
+  }
+  return parts.length ? ` AND ${parts.join(' AND ')}` : '';
+}
+
+function collectVendedorVins(d, { clientesIds, vendedorKey, fechaInicio, fechaFin }) {
+  const vins = new Set();
+  const actDate = 'COALESCE(fecha_inicio_ciclo, fecha_factura, fecha_crea_actividad, fecha_entrega)';
+  if (clientesIds.length) {
+    const ph = clientesIds.map(() => '?').join(',');
+    const params = [...clientesIds];
+    const dateSql = vendedorDateClause(actDate, fechaInicio, fechaFin, params);
+    const rows = d.prepare(`
+      SELECT DISTINCT UPPER(TRIM(vin)) AS vin
+      FROM crm_actividades
+      WHERE CAST(id_contacto AS TEXT) IN (${ph})
+        AND vin IS NOT NULL AND TRIM(vin) <> ''
+        ${dateSql}
+    `).all(...params);
+    for (const r of rows) {
+      const vin = normalizeVin(r.vin);
+      if (vin) vins.add(vin);
+    }
+  }
+  {
+    const params = [vendedorKey];
+    const dateSql = vendedorDateClause(actDate, fechaInicio, fechaFin, params);
+    const rows = d.prepare(`
+      SELECT DISTINCT UPPER(TRIM(vin)) AS vin
+      FROM crm_actividades
+      WHERE UPPER(TRIM(vendedor)) = ?
+        AND vin IS NOT NULL AND TRIM(vin) <> ''
+        ${dateSql}
+    `).all(...params);
+    for (const r of rows) {
+      const vin = normalizeVin(r.vin);
+      if (vin) vins.add(vin);
+    }
+  }
+  return [...vins];
+}
+
+function buildFinanciamientoVendedorStats(d, {
+  tokenKey,
+  vins,
+  fechaInicio,
+  fechaFin,
+}) {
+  if (!hasFinanciamientoTable(d) || !tokenKey) {
+    return {
+      fuente: 'crm_financiamiento',
+      contratos: 0,
+      match: 'ninguno',
+      montoFinanciarPromedio: null,
+      montoFinanciarTotal: 0,
+      enganchePromedio: null,
+      plazoPromedio: null,
+      plazos: [],
+      pvas: {
+        contratosConPva: 0,
+        penetracionPct: null,
+        porTipo: [],
+        montoTotalPvas: 0,
+        montoPromedioPvaPorContrato: null,
+        promedioCantidadPvas: null,
+        totalCantidadPvas: 0,
+      },
+      planes: [],
+      tiposCompra: [],
+      muestra: [],
+    };
+  }
+
+  const vinSet = new Set((vins || []).map(normalizeVin).filter(Boolean));
+  const all = d.prepare(`
+    SELECT *
+    FROM crm_financiamiento
+    WHERE COALESCE(fecha_compra, fecha, fecha_timbrado) IS NOT NULL
+       OR vin IS NOT NULL
+  `).all();
+
+  const byAsesor = [];
+  const byVin = [];
+  for (const row of all) {
+    const fecha = row.fecha_compra || row.fecha || row.fecha_timbrado;
+    if (!inPeriod(fecha, fechaInicio, fechaFin)) continue;
+    const asesorTok = personTokenKey(row.asesor);
+    const vin = normalizeVin(row.vin);
+    if (asesorTok && asesorTok === tokenKey) byAsesor.push(row);
+    else if (vin && vinSet.has(vin)) byVin.push(row);
+  }
+
+  const match = byAsesor.length ? 'asesor' : (byVin.length ? 'vin_cartera' : 'ninguno');
+  const contratos = byAsesor.length ? byAsesor : byVin;
+
+  const montos = contratos.map((c) => Number(c.monto_financiar)).filter((n) => Number.isFinite(n) && n > 0);
+  const enganches = contratos.map((c) => Number(c.enganche_monto)).filter((n) => Number.isFinite(n) && n > 0);
+  const plazosNums = contratos.map((c) => Number(c.plazo_meses)).filter((n) => Number.isFinite(n) && n > 0);
+
+  const plazoMap = new Map();
+  for (const p of plazosNums) {
+    plazoMap.set(p, (plazoMap.get(p) || 0) + 1);
+  }
+  const plazos = [...plazoMap.entries()]
+    .map(([plazo, count]) => ({ plazo, count, pct: contratos.length ? Math.round((count / contratos.length) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.count - a.count || a.plazo - b.plazo);
+
+  const pvaDefs = [
+    { key: 'gap', label: 'GAP', col: 'gap_monto' },
+    { key: 'garantia', label: 'Garantía extendida', col: 'garantia_extendida_monto' },
+    { key: 'accesorios', label: 'Accesorios', col: 'accesorios_monto' },
+    { key: 'onstar', label: 'OnStar', col: 'onstar_monto' },
+    { key: 'mantenimiento', label: 'Mantenimientos', col: 'mantenimiento_integrado_monto' },
+  ];
+  const porTipo = pvaDefs.map((def) => {
+    const con = contratos.filter((c) => Number(c[def.col] || 0) > 0);
+    const monto = con.reduce((s, c) => s + Number(c[def.col] || 0), 0);
+    return {
+      tipo: def.label,
+      key: def.key,
+      contratos: con.length,
+      penetracionPct: contratos.length ? Math.round((con.length / contratos.length) * 1000) / 10 : 0,
+      montoTotal: roundMoney(monto),
+      montoPromedio: roundMoney(avg(con.map((c) => Number(c[def.col] || 0)))),
+    };
+  });
+  const contratosConPva = contratos.filter((c) => pvaDefs.some((def) => Number(c[def.col] || 0) > 0)).length;
+  const montoTotalPvas = porTipo.reduce((s, t) => s + Number(t.montoTotal || 0), 0);
+  const cantidadesPva = contratos.map((c) =>
+    pvaDefs.reduce((n, def) => n + (Number(c[def.col] || 0) > 0 ? 1 : 0), 0)
+  );
+  const totalCantidadPvas = cantidadesPva.reduce((s, n) => s + n, 0);
+  const promedioCantidadPvas = contratos.length
+    ? Math.round((totalCantidadPvas / contratos.length) * 10) / 10
+    : null;
+
+  const planMap = new Map();
+  const tipoMap = new Map();
+  for (const c of contratos) {
+    const plan = String(c.plan || c.plan_2 || '(sin plan)').trim() || '(sin plan)';
+    planMap.set(plan, (planMap.get(plan) || 0) + 1);
+    const tipo = String(c.tipo_compra || '(sin tipo)').trim() || '(sin tipo)';
+    tipoMap.set(tipo, (tipoMap.get(tipo) || 0) + 1);
+  }
+
+  const muestra = contratos.slice(0, 12).map((c) => {
+    const pvaLabels = pvaDefs.filter((def) => Number(c[def.col] || 0) > 0).map((def) => def.label);
+    return {
+      fecha: c.fecha_compra || c.fecha || null,
+      cliente: c.cliente || null,
+      vin: c.vin || null,
+      unidad: c.unidad || null,
+      contrato: c.no_contrato || c.contrato || null,
+      plazo: Number(c.plazo_meses) || null,
+      montoFinanciar: Number(c.monto_financiar) || null,
+      enganche: Number(c.enganche_monto) || null,
+      pvas: pvaLabels,
+      cantidadPvas: pvaLabels.length,
+    };
+  });
+
+  return {
+    fuente: 'crm_financiamiento',
+    match,
+    contratos: contratos.length,
+    montoFinanciarPromedio: roundMoney(avg(montos)),
+    montoFinanciarTotal: roundMoney(montos.reduce((s, n) => s + n, 0)),
+    enganchePromedio: roundMoney(avg(enganches)),
+    plazoPromedio: plazosNums.length ? Math.round(avg(plazosNums) * 10) / 10 : null,
+    plazos,
+    pvas: {
+      contratosConPva,
+      penetracionPct: contratos.length ? Math.round((contratosConPva / contratos.length) * 1000) / 10 : null,
+      porTipo,
+      montoTotalPvas: roundMoney(montoTotalPvas),
+      montoPromedioPvaPorContrato: contratos.length ? roundMoney(montoTotalPvas / contratos.length) : null,
+      totalCantidadPvas,
+      promedioCantidadPvas,
+    },
+    planes: [...planMap.entries()].map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count).slice(0, 8),
+    tiposCompra: [...tipoMap.entries()].map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count),
+    muestra,
+  };
+}
+
+function buildLibroVentasCrmStats(d, { clientesIds, vendedorKey, fechaInicio, fechaFin }) {
+  const actDate = 'COALESCE(fecha_factura, fecha_entrega, fecha_inicio_ciclo, fecha_crea_actividad)';
+  const params = [vendedorKey];
+  const dateSql = vendedorDateClause(actDate, fechaInicio, fechaFin, params);
+  const rows = d.prepare(`
+    SELECT
+      CAST(id_contacto AS TEXT) AS id_crm,
+      nombre_contacto AS nombre,
+      UPPER(TRIM(vin)) AS vin,
+      num_factura AS factura,
+      fecha_factura AS fecha,
+      producto_vendido AS modelo,
+      facturado_a AS cliente
+    FROM crm_actividades
+    WHERE UPPER(TRIM(vendedor)) = ?
+      AND num_factura IS NOT NULL AND TRIM(num_factura) <> ''
+      ${dateSql}
+  `).all(...params);
+
+  const byFactura = new Map();
+  for (const r of rows) {
+    const key = `${r.factura}|${r.vin || ''}`;
+    if (!byFactura.has(key)) byFactura.set(key, r);
+  }
+  const ventas = [...byFactura.values()];
+  return {
+    fuente: 'crm_actividades',
+    unidades: ventas.length,
+    clientes: new Set(ventas.map((v) => v.id_crm).filter(Boolean)).size,
+    vins: new Set(ventas.map((v) => normalizeVin(v.vin)).filter(Boolean)).size,
+    muestra: ventas.slice(0, 15).map((v) => ({
+      fecha: v.fecha || null,
+      factura: v.factura || null,
+      vin: v.vin || null,
+      modelo: v.modelo || null,
+      cliente: v.cliente || v.nombre || null,
+      idCrm: v.id_crm || null,
+    })),
+  };
+}
+
+async function mapChunks(list, size, worker) {
+  const chunks = chunkArray(list, size);
+  const concurrency = 3;
+  const results = [];
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const batch = chunks.slice(i, i + concurrency);
+    const part = await Promise.all(batch.map((chunk, idx) => worker(chunk, i + idx)));
+    results.push(...part);
+  }
+  return results;
+}
+
+async function queryLibroVentasSqlByVins(vins, fechaInicio, fechaFin) {
+  const list = [...new Set((vins || []).map(normalizeVin).filter(Boolean))];
+  if (!list.length) return [];
+  const parts = await mapChunks(list, 40, async (chunk) => {
+    const params = {};
+    chunk.forEach((vin, i) => {
+      params[`vin${i}`] = vin;
+      params[`like${i}`] = `%${vin}`;
+    });
+    if (fechaInicio) params.fechaInicio = fechaInicio;
+    if (fechaFin) params.fechaFin = fechaFin;
+    const match = chunk.map((_, i) =>
+      `(UPPER(LTRIM(RTRIM(v.VTE_SERIE))) = @vin${i} OR UPPER(LTRIM(RTRIM(v.VTE_SERIE))) LIKE @like${i})`
+    ).join(' OR ');
+    const dateSql = [
+      fechaInicio ? 'AND CONVERT(DATE, v.VTE_FECHDOCTO, 103) >= @fechaInicio' : '',
+      fechaFin ? 'AND CONVERT(DATE, v.VTE_FECHDOCTO, 103) <= @fechaFin' : '',
+    ].filter(Boolean).join('\n');
+    try {
+      return await query(`
+        SELECT
+          UPPER(LTRIM(RTRIM(v.VTE_SERIE))) AS serie,
+          LTRIM(RTRIM(v.VTE_DOCTO)) AS factura,
+          v.VTE_FECHDOCTO AS fechaFactura,
+          LTRIM(RTRIM(v.VTE_FORMAPAGO)) AS formaPago,
+          LTRIM(RTRIM(veh.VEH_TIPOAUTO)) AS modelo,
+          veh.VEH_ANMODELO AS anModelo,
+          LTRIM(RTRIM(
+            ISNULL(B.PER_PATERNO, '') + ' ' + ISNULL(B.PER_MATERNO, '') + ' ' + ISNULL(B.PER_NOMRAZON, '')
+          )) AS vendedorLibro,
+          LTRIM(RTRIM(
+            ISNULL(A.PER_NOMRAZON, '') + ' ' + ISNULL(A.PER_PATERNO, '') + ' ' + ISNULL(A.PER_MATERNO, '')
+          )) AS cliente
+        FROM ADE_VTAFI v
+        INNER JOIN SER_VEHICULO veh
+          ON veh.VEH_NUMSERIE = v.VTE_SERIE
+          AND veh.VEH_NOINVENTA > 0
+        LEFT JOIN PER_PERSONAS A ON A.PER_IDPERSONA = v.VTE_IDCLIENTE
+        LEFT JOIN PER_PERSONAS B ON B.PER_IDPERSONA = veh.VEH_VENDEDOR
+        WHERE v.VTE_TIPODOCTO = 'A'
+          AND v.VTE_STATUS = 'I'
+          AND veh.VEH_SITUACION IN ('VEN')
+          AND (${match})
+          ${dateSql}
+        ORDER BY CONVERT(DATE, v.VTE_FECHDOCTO, 103) DESC
+      `, params);
+    } catch (err) {
+      console.warn('[crm] libro ventas SQL chunk:', err.message);
+      return [];
+    }
+  });
+  return parts.flat();
+}
+
+async function queryTallerReturnByVins(vins) {
+  const list = [...new Set((vins || []).map(normalizeVin).filter(Boolean))];
+  if (!list.length) {
+    return { vinsConOrden: new Set(), ordenes: 0, importe: 0 };
+  }
+  const vinsConOrden = new Set();
+  let ordenes = 0;
+  let importe = 0;
+  const parts = await mapChunks(list, 40, async (chunk) => {
+    const params = {};
+    chunk.forEach((vin, i) => {
+      params[`vin${i}`] = vin;
+      params[`like${i}`] = `%${vin}`;
+    });
+    const match = chunk.map((_, i) =>
+      `(UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) = @vin${i} OR UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) LIKE @like${i})`
+    ).join(' OR ');
+    try {
+      return await query(`
+        SELECT
+          UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) AS serie,
+          COUNT(*) AS ordenes,
+          SUM(
+            CASE
+              WHEN ISNULL(fac.importe, 0) > 0 THEN fac.importe
+              WHEN ISNULL(det.subtotal, 0) + ISNULL(det.iva, 0) > 0 THEN ISNULL(det.subtotal, 0) + ISNULL(det.iva, 0)
+              ELSE ISNULL(tcx.importe, 0)
+            END
+          ) AS importe
+        FROM SER_ORDEN o
+        LEFT JOIN (
+          SELECT fos_idorden, SUM(fos_total) AS importe
+          FROM SER_FACORDEN
+          GROUP BY fos_idorden
+        ) fac ON fac.fos_idorden = o.ORE_IDORDEN
+        LEFT JOIN (
+          SELECT TCX_IDORDEN AS idorden, SUM(TCX_TOTAL) AS importe
+          FROM SER_ORDTOTCXP
+          WHERE TCX_STATUS IN ('T', 'A')
+          GROUP BY TCX_IDORDEN
+        ) tcx ON tcx.idorden = o.ORE_IDORDEN
+        LEFT JOIN (
+          SELECT ORD_IDORDEN AS idorden, SUM(ORD_SUBTOTAL) AS subtotal, SUM(ORD_IVATOT) AS iva
+          FROM SER_ORDENDET
+          GROUP BY ORD_IDORDEN
+        ) det ON det.idorden = o.ORE_IDORDEN
+        WHERE o.ORE_STATUS <> 'C'
+          AND (${match})
+        GROUP BY UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE)))
+      `, params);
+    } catch (err) {
+      console.warn('[crm] taller return SQL chunk:', err.message);
+      return [];
+    }
+  });
+  for (const rows of parts) {
+    for (const r of rows) {
+      const vin = normalizeVin(r.serie);
+      if (vin) vinsConOrden.add(vin);
+      ordenes += Number(r.ordenes || 0);
+      importe += Number(r.importe || 0);
+    }
+  }
+  return { vinsConOrden, ordenes, importe };
+}
+
+async function buildVendedorComercialStats(d, {
+  vendedorKey,
+  vendedorNombre,
+  clientesIds,
+  fechaInicio,
+  fechaFin,
+}) {
+  const tokenKey = personTokenKey(vendedorNombre) || personTokenKey(vendedorKey);
+  const vins = collectVendedorVins(d, {
+    clientesIds,
+    vendedorKey,
+    fechaInicio,
+    fechaFin,
+  });
+
+  const financiamiento = buildFinanciamientoVendedorStats(d, {
+    tokenKey,
+    vins,
+    fechaInicio,
+    fechaFin,
+  });
+  const libroCrm = buildLibroVentasCrmStats(d, {
+    clientesIds,
+    vendedorKey,
+    fechaInicio,
+    fechaFin,
+  });
+
+  let libroSql = { unidades: 0, porTipoPago: [], muestra: [], error: null };
+  let retorno = {
+    vinsCartera: vins.length,
+    vinsConTaller: 0,
+    clientesConCompra: 0,
+    clientesConTaller: 0,
+    tasaRetornoPct: null,
+    ordenes: 0,
+    importeTaller: 0,
+    error: null,
+  };
+
+  const [libroResult, tallerResult] = await Promise.all([
+    queryLibroVentasSqlByVins(vins, fechaInicio, fechaFin)
+      .then((ventasSql) => {
+        const byDoc = new Map();
+        for (const row of ventasSql) {
+          const k = `${row.factura}|${row.serie}`;
+          if (!byDoc.has(k)) byDoc.set(k, row);
+        }
+        const unique = [...byDoc.values()];
+        const pagoMap = new Map();
+        for (const row of unique) {
+          const fp = String(row.formaPago || 'OTRO').trim() || 'OTRO';
+          pagoMap.set(fp, (pagoMap.get(fp) || 0) + 1);
+        }
+        return {
+          fuente: 'ADE_VTAFI',
+          unidades: unique.length,
+          porTipoPago: [...pagoMap.entries()]
+            .map(([label, count]) => ({ label, count }))
+            .sort((a, b) => b.count - a.count),
+          muestra: unique.slice(0, 15).map((v) => ({
+            fecha: v.fechaFactura || null,
+            factura: v.factura || null,
+            vin: v.serie || null,
+            modelo: v.modelo || null,
+            formaPago: v.formaPago || null,
+            cliente: v.cliente || null,
+            vendedorLibro: v.vendedorLibro || null,
+          })),
+          error: null,
+        };
+      })
+      .catch((err) => ({
+        unidades: 0,
+        porTipoPago: [],
+        muestra: [],
+        error: err.message,
+      })),
+    queryTallerReturnByVins(vins).catch((err) => ({
+      vinsConOrden: new Set(),
+      ordenes: 0,
+      importe: 0,
+      error: err.message,
+    })),
+  ]);
+
+  libroSql = libroResult;
+
+  if (tallerResult.error) {
+    retorno.error = tallerResult.error;
+  } else {
+    const taller = tallerResult;
+    let clientesConCompra = 0;
+    let clientesConTaller = 0;
+    if (clientesIds.length) {
+      const ph = clientesIds.map(() => '?').join(',');
+      const compraRows = d.prepare(`
+        SELECT CAST(id_contacto AS TEXT) AS id_crm,
+          GROUP_CONCAT(DISTINCT UPPER(TRIM(vin))) AS vins
+        FROM crm_actividades
+        WHERE CAST(id_contacto AS TEXT) IN (${ph})
+          AND vin IS NOT NULL AND TRIM(vin) <> ''
+        GROUP BY CAST(id_contacto AS TEXT)
+      `).all(...clientesIds);
+      clientesConCompra = compraRows.length;
+      for (const row of compraRows) {
+        const clientVins = String(row.vins || '').split(',').map(normalizeVin).filter(Boolean);
+        if (clientVins.some((vin) => taller.vinsConOrden.has(vin))) clientesConTaller += 1;
+      }
+    }
+    const base = clientesConCompra || vins.length;
+    const retornos = clientesConCompra ? clientesConTaller : taller.vinsConOrden.size;
+    retorno = {
+      vinsCartera: vins.length,
+      vinsConTaller: taller.vinsConOrden.size,
+      clientesConCompra,
+      clientesConTaller,
+      tasaRetornoPct: base > 0 ? Math.round((retornos / base) * 1000) / 10 : null,
+      ordenes: taller.ordenes,
+      importeTaller: roundMoney(taller.importe),
+      base: clientesConCompra ? 'clientes_con_compra' : 'vins_cartera',
+    };
+  }
+
+  const sqlUnits = Number(libroSql.unidades || 0);
+  const crmUnits = Number(libroCrm.unidades || 0);
+  // Fuente fiel: libro ADE_VTAFI (SQL). CRM solo como respaldo si no hay facturas en DMS.
+  const libroUnidades = sqlUnits > 0 ? sqlUnits : crmUnits;
+  const libroFuente = sqlUnits > 0 ? 'ADE_VTAFI' : (crmUnits > 0 ? 'crm_facturas' : 'ninguna');
+
+  return {
+    vinsCartera: vins.length,
+    libroVentas: {
+      sql: libroSql,
+      crm: libroCrm,
+      unidades: libroUnidades,
+      fuente: libroFuente,
+    },
+    financiamiento,
+    retornoTaller: retorno,
+  };
+}
+
+/**
+ * Catálogo de vendedores / ejecutivos con conteo de clientes.
+ */
+function listVendedores({ q = '', limit = 250 } = {}) {
+  const d = getDb();
+  const max = Math.min(500, Math.max(1, Number(limit) || 250));
+  const term = String(q || '').trim();
+  const map = new Map();
+
+  const bump = (nombre, clientes, fuente) => {
+    const key = normalizeVendedorKey(nombre);
+    if (!key) return;
+    const display = String(nombre || '').replace(/\s+/g, ' ').trim();
+    if (!map.has(key)) {
+      map.set(key, { vendedor: display, key, clientes: 0, fuentes: new Set() });
+    }
+    const row = map.get(key);
+    if (display.length > row.vendedor.length) row.vendedor = display;
+    row.clientes = Math.max(row.clientes, Number(clientes || 0));
+    row.fuentes.add(fuente);
+  };
+
+  const like = term ? `%${term}%` : null;
+  const actSql = `
+    SELECT TRIM(vendedor) AS nombre, COUNT(DISTINCT id_contacto) AS clientes
+    FROM crm_actividades
+    WHERE vendedor IS NOT NULL AND TRIM(vendedor) <> ''
+      ${like ? 'AND vendedor LIKE ?' : ''}
+    GROUP BY UPPER(TRIM(vendedor))
+  `;
+  for (const r of d.prepare(actSql).all(...(like ? [like] : []))) {
+    bump(r.nombre, r.clientes, 'ciclos');
+  }
+
+  if (hasLeadsTable(d)) {
+    const leadSql = `
+      SELECT TRIM(ejecutivo_asignado) AS nombre, COUNT(DISTINCT id_crm) AS clientes
+      FROM crm_leads
+      WHERE ejecutivo_asignado IS NOT NULL AND TRIM(ejecutivo_asignado) <> ''
+        AND id_crm IS NOT NULL
+        ${like ? 'AND ejecutivo_asignado LIKE ?' : ''}
+      GROUP BY UPPER(TRIM(ejecutivo_asignado))
+    `;
+    for (const r of d.prepare(leadSql).all(...(like ? [like] : []))) {
+      bump(r.nombre, r.clientes, 'leads');
+    }
+  }
+
+  if (hasPruebasManejoTable(d)) {
+    const pruebaSql = `
+      SELECT TRIM(ejecutivo_ventas) AS nombre, COUNT(DISTINCT id_crm) AS clientes
+      FROM crm_pruebas_manejo
+      WHERE ejecutivo_ventas IS NOT NULL AND TRIM(ejecutivo_ventas) <> ''
+        AND id_crm IS NOT NULL
+        ${like ? 'AND ejecutivo_ventas LIKE ?' : ''}
+      GROUP BY UPPER(TRIM(ejecutivo_ventas))
+    `;
+    for (const r of d.prepare(pruebaSql).all(...(like ? [like] : []))) {
+      bump(r.nombre, r.clientes, 'pruebas');
+    }
+  }
+
+  if (hasSolicitudesTable(d)) {
+    const solSql = `
+      SELECT TRIM(asesor) AS nombre, COUNT(DISTINCT id_crm) AS clientes
+      FROM crm_solicitudes
+      WHERE asesor IS NOT NULL AND TRIM(asesor) <> ''
+        AND id_crm IS NOT NULL
+        ${like ? 'AND asesor LIKE ?' : ''}
+      GROUP BY UPPER(TRIM(asesor))
+    `;
+    for (const r of d.prepare(solSql).all(...(like ? [like] : []))) {
+      bump(r.nombre, r.clientes, 'solicitudes');
+    }
+  }
+
+  return [...map.values()]
+    .map((r) => ({
+      vendedor: r.vendedor,
+      key: r.key,
+      clientes: r.clientes,
+      fuentes: [...r.fuentes],
+    }))
+    .sort((a, b) => b.clientes - a.clientes || a.vendedor.localeCompare(b.vendedor, 'es'))
+    .slice(0, max);
+}
+
+function resolveVendedorNombre(d, vendedorRaw) {
+  const key = normalizeVendedorKey(vendedorRaw);
+  if (!key) return null;
+
+  const exact = d.prepare(`
+    SELECT TRIM(vendedor) AS nombre
+    FROM crm_actividades
+    WHERE vendedor IS NOT NULL AND UPPER(TRIM(vendedor)) = ?
+    LIMIT 1
+  `).get(key);
+  if (exact?.nombre) return String(exact.nombre).replace(/\s+/g, ' ').trim();
+
+  if (hasLeadsTable(d)) {
+    const lead = d.prepare(`
+      SELECT TRIM(ejecutivo_asignado) AS nombre
+      FROM crm_leads
+      WHERE ejecutivo_asignado IS NOT NULL AND UPPER(TRIM(ejecutivo_asignado)) = ?
+      LIMIT 1
+    `).get(key);
+    if (lead?.nombre) return String(lead.nombre).replace(/\s+/g, ' ').trim();
+  }
+
+  // Búsqueda parcial si hay un único match
+  const candidates = listVendedores({ q: vendedorRaw, limit: 20 })
+    .filter((v) => v.key === key || v.key.includes(key) || key.includes(v.key));
+  if (candidates.length === 1) return candidates[0].vendedor;
+  if (candidates.length > 1) {
+    const exactKey = candidates.find((v) => v.key === key);
+    if (exactKey) return exactKey.vendedor;
+  }
+  return String(vendedorRaw || '').replace(/\s+/g, ' ').trim() || null;
+}
+
+/**
+ * Acumulado de actividad CRM de los clientes vinculados a un vendedor.
+ * Vinculación: actividades.vendedor | leads.ejecutivo | pruebas.ejecutivo | solicitudes.asesor
+ */
+async function getVendedorResumen({
+  vendedor,
+  fechaInicio = null,
+  fechaFin = null,
+  limit = 300,
+} = {}) {
+  const d = getDb();
+  const nombre = resolveVendedorNombre(d, vendedor);
+  const key = normalizeVendedorKey(nombre || vendedor);
+  if (!key) throw new Error('Indique un vendedor válido.');
+
+  const max = Math.min(500, Math.max(1, Number(limit) || 300));
+  const fi = fechaInicio ? String(fechaInicio) : null;
+  const ff = fechaFin ? String(fechaFin) : null;
+  if (fi && ff && fi > ff) {
+    throw new Error('La fecha inicial no puede ser posterior a la final.');
+  }
+
+  const actDate = 'COALESCE(fecha_inicio_ciclo, fecha_factura, fecha_crea_actividad, fecha_entrega)';
+  const clientUnions = [];
+  const clientParams = [];
+
+  {
+    const p = [key];
+    const dateSql = vendedorDateClause(actDate, fi, ff, p);
+    clientUnions.push(`
+      SELECT CAST(id_contacto AS TEXT) AS id_crm
+      FROM crm_actividades
+      WHERE id_contacto IS NOT NULL
+        AND UPPER(TRIM(vendedor)) = ?
+        ${dateSql}
+    `);
+    clientParams.push(...p);
+  }
+
+  if (hasLeadsTable(d)) {
+    const p = [key];
+    const dateSql = vendedorDateClause('fecha_entrada', fi, ff, p);
+    clientUnions.push(`
+      SELECT CAST(id_crm AS TEXT) AS id_crm
+      FROM crm_leads
+      WHERE id_crm IS NOT NULL
+        AND UPPER(TRIM(ejecutivo_asignado)) = ?
+        ${dateSql}
+    `);
+    clientParams.push(...p);
+  }
+
+  if (hasPruebasManejoTable(d)) {
+    const p = [key];
+    const dateSql = vendedorDateClause('fecha', fi, ff, p);
+    clientUnions.push(`
+      SELECT CAST(id_crm AS TEXT) AS id_crm
+      FROM crm_pruebas_manejo
+      WHERE id_crm IS NOT NULL
+        AND UPPER(TRIM(ejecutivo_ventas)) = ?
+        ${dateSql}
+    `);
+    clientParams.push(...p);
+  }
+
+  if (hasSolicitudesTable(d)) {
+    const p = [key];
+    const dateSql = vendedorDateClause('fecha_solicitud', fi, ff, p);
+    clientUnions.push(`
+      SELECT CAST(id_crm AS TEXT) AS id_crm
+      FROM crm_solicitudes
+      WHERE id_crm IS NOT NULL
+        AND UPPER(TRIM(asesor)) = ?
+        ${dateSql}
+    `);
+    clientParams.push(...p);
+  }
+
+  const clientesIds = d.prepare(`
+    SELECT DISTINCT id_crm FROM (${clientUnions.join(' UNION ')})
+    WHERE id_crm IS NOT NULL AND TRIM(id_crm) <> ''
+  `).all(...clientParams).map((r) => String(r.id_crm));
+
+  const totales = {
+    clientes: clientesIds.length,
+    actividades: 0,
+    ciclos: 0,
+    compras: 0,
+    leads: 0,
+    solicitudes: 0,
+    pruebas: 0,
+  };
+
+  if (!clientesIds.length) {
+    const comercial = await buildVendedorComercialStats(d, {
+      vendedorKey: key,
+      vendedorNombre: nombre || key,
+      clientesIds: [],
+      fechaInicio: fi,
+      fechaFin: ff,
+    });
+    return {
+      vendedor: nombre || key,
+      key,
+      periodo: { fechaInicio: fi, fechaFin: ff },
+      totales,
+      comercial,
+      clientes: [],
+    };
+  }
+
+  // Agregados por cliente (actividad de la cartera del vendedor en el periodo)
+  const placeholders = clientesIds.map(() => '?').join(',');
+  const actParams = [...clientesIds];
+  const actPeriod = vendedorDateClause(actDate, fi, ff, actParams);
+  const porActividad = d.prepare(`
+    SELECT
+      CAST(id_contacto AS TEXT) AS id_crm,
+      MAX(nombre_contacto) AS nombre,
+      COUNT(DISTINCT id_ciclo) AS ciclos,
+      COUNT(*) AS actividades,
+      COUNT(DISTINCT CASE WHEN vin IS NOT NULL AND TRIM(vin) <> '' THEN UPPER(TRIM(vin)) END) AS compras,
+      MAX(${actDate}) AS ultima_actividad
+    FROM crm_actividades
+    WHERE CAST(id_contacto AS TEXT) IN (${placeholders})
+      ${actPeriod}
+    GROUP BY CAST(id_contacto AS TEXT)
+  `).all(...actParams);
+
+  const byId = new Map();
+  for (const id of clientesIds) {
+    byId.set(id, {
+      id_contacto: id,
+      nombre: null,
+      telefono: null,
+      correo: null,
+      ciclos: 0,
+      actividades: 0,
+      compras: 0,
+      leads: 0,
+      solicitudes: 0,
+      pruebas: 0,
+      ultima_actividad: null,
+    });
+  }
+
+  for (const r of porActividad) {
+    const row = byId.get(String(r.id_crm));
+    if (!row) continue;
+    row.nombre = r.nombre || row.nombre;
+    row.ciclos = Number(r.ciclos || 0);
+    row.actividades = Number(r.actividades || 0);
+    row.compras = Number(r.compras || 0);
+    row.ultima_actividad = r.ultima_actividad || row.ultima_actividad;
+    totales.ciclos += row.ciclos;
+    totales.actividades += row.actividades;
+    totales.compras += row.compras;
+  }
+
+  if (hasLeadsTable(d)) {
+    const p = [...clientesIds];
+    const dateSql = vendedorDateClause('fecha_entrada', fi, ff, p);
+    const rows = d.prepare(`
+      SELECT CAST(id_crm AS TEXT) AS id_crm,
+        MAX(nombre) AS nombre,
+        MAX(telefono) AS telefono,
+        MAX(correo) AS correo,
+        COUNT(*) AS leads,
+        MAX(fecha_entrada) AS ultima
+      FROM crm_leads
+      WHERE CAST(id_crm AS TEXT) IN (${placeholders})
+        ${dateSql}
+      GROUP BY CAST(id_crm AS TEXT)
+    `).all(...p);
+    for (const r of rows) {
+      const row = byId.get(String(r.id_crm));
+      if (!row) continue;
+      row.leads = Number(r.leads || 0);
+      row.nombre = row.nombre || r.nombre;
+      row.telefono = row.telefono || r.telefono;
+      row.correo = row.correo || r.correo;
+      totales.leads += row.leads;
+      if (!row.ultima_actividad || (r.ultima && String(r.ultima) > String(row.ultima_actividad))) {
+        row.ultima_actividad = r.ultima;
+      }
+    }
+  }
+
+  if (hasSolicitudesTable(d)) {
+    const p = [...clientesIds];
+    const dateSql = vendedorDateClause('fecha_solicitud', fi, ff, p);
+    const rows = d.prepare(`
+      SELECT CAST(id_crm AS TEXT) AS id_crm, COUNT(*) AS n, MAX(fecha_solicitud) AS ultima
+      FROM crm_solicitudes
+      WHERE CAST(id_crm AS TEXT) IN (${placeholders})
+        ${dateSql}
+      GROUP BY CAST(id_crm AS TEXT)
+    `).all(...p);
+    for (const r of rows) {
+      const row = byId.get(String(r.id_crm));
+      if (!row) continue;
+      row.solicitudes = Number(r.n || 0);
+      totales.solicitudes += row.solicitudes;
+      if (!row.ultima_actividad || (r.ultima && String(r.ultima) > String(row.ultima_actividad))) {
+        row.ultima_actividad = r.ultima;
+      }
+    }
+  }
+
+  if (hasPruebasManejoTable(d)) {
+    const p = [...clientesIds];
+    const dateSql = vendedorDateClause('fecha', fi, ff, p);
+    const rows = d.prepare(`
+      SELECT CAST(id_crm AS TEXT) AS id_crm, COUNT(*) AS n, MAX(fecha) AS ultima,
+        MAX(nombre_cliente) AS nombre,
+        MAX(telefono) AS telefono,
+        MAX(correo) AS correo
+      FROM crm_pruebas_manejo
+      WHERE CAST(id_crm AS TEXT) IN (${placeholders})
+        ${dateSql}
+      GROUP BY CAST(id_crm AS TEXT)
+    `).all(...p);
+    for (const r of rows) {
+      const row = byId.get(String(r.id_crm));
+      if (!row) continue;
+      row.pruebas = Number(r.n || 0);
+      row.nombre = row.nombre || r.nombre;
+      row.telefono = row.telefono || r.telefono;
+      row.correo = row.correo || r.correo;
+      totales.pruebas += row.pruebas;
+      if (!row.ultima_actividad || (r.ultima && String(r.ultima) > String(row.ultima_actividad))) {
+        row.ultima_actividad = r.ultima;
+      }
+    }
+  }
+
+  const clientes = [...byId.values()]
+    .sort((a, b) => {
+      const score = (x) => (x.compras * 10) + x.ciclos + x.leads + x.solicitudes + x.pruebas + x.actividades;
+      const diff = score(b) - score(a);
+      if (diff) return diff;
+      return String(b.ultima_actividad || '').localeCompare(String(a.ultima_actividad || ''));
+    })
+    .slice(0, max);
+
+  const comercial = await buildVendedorComercialStats(d, {
+    vendedorKey: key,
+    vendedorNombre: nombre || key,
+    clientesIds,
+    fechaInicio: fi,
+    fechaFin: ff,
+  });
+
+  // Alinear Compras (VIN) con Libro de ventas (ADE_VTAFI): misma fuente fiel.
+  const comprasCrm = Number(totales.compras || 0);
+  const comprasLibro = Number(comercial?.libroVentas?.unidades || 0);
+  totales.comprasCrm = comprasCrm;
+  if (comprasLibro > 0 || comercial?.libroVentas?.fuente === 'ADE_VTAFI') {
+    totales.compras = comprasLibro;
+    totales.comprasFuente = comercial?.libroVentas?.fuente || 'ADE_VTAFI';
+  } else {
+    totales.comprasFuente = 'crm_vin';
+  }
+
+  return {
+    vendedor: nombre || key,
+    key,
+    periodo: { fechaInicio: fi, fechaFin: ff },
+    totales,
+    comercial,
+    clientes,
+  };
+}
+
 module.exports = {
   isAvailable,
   releaseDb,
@@ -1590,4 +3167,6 @@ module.exports = {
   resolveIdCrmBySerie,
   resolveIdCrmByNombre,
   resolveIdCrmByTelefono,
+  listVendedores,
+  getVendedorResumen,
 };

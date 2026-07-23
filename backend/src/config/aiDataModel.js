@@ -30,7 +30,11 @@ Para "¿cuántos Aveo se vendieron?":
 - SER_VEHICULO (VEH_SITUACION <> 'VEN') + VEN_DETALLE (VHD_*) para costo/plan piso.
 
 ### Post-venta
-- SER_ORDEN: órdenes de servicio (ingreso, facturación, importes, asesor).
+- SER_ORDEN: órdenes de taller (ingreso, facturación, importes, asesor). El área se define por la **primera letra del folio** (ORE_IDORDEN):
+  - **HyP**: A, F, H, J, V, Z, Ó
+  - **Servicio**: C, D, G, I, K, N, O, Q, S, X, Y, Á, M, E, R
+- Abiertas = estatus A/T/D/P; Facturadas = I; Canceladas = C.
+- Herramienta: consultar_postventa con area=hyp|servicio y estatus=abiertas|facturadas|todas.
 
 ### Contabilidad / EEFF
 - CON_CTAS01{AAAA}: saldos por cuenta y mes (CTA_GPOCONT, CTA_NUMCTA).
@@ -41,6 +45,12 @@ Para "¿cuántos Aveo se vendieron?":
 - Si preguntan por modelo/marca/unidad específica → consultar_ventas_modelo.
 - Si preguntan totales generales → consultar_ventas o consultar_resumen_ejecutivo.
 - Explica en 1-2 frases qué tablas relacionaste y por qué.
+
+### Seguimiento 360 (CRM Balderrama Ciclos + DMS)
+- Vista **por cliente**: buscar_cliente_crm → historico_cliente_crm.
+- Vista **por vendedor**: listar_vendedores_360 → resumen_vendedor_360.
+- **Unidades vendidas del vendedor** = facturas ADE_VTAFI de los VIN de su cartera (no el conteo CRM de VIN como fuente primaria).
+- **Promedio PVAs** = conteo de productos PVA con monto > 0 por contrato (GAP, garantía, etc.), no importe.
 `;
 
 module.exports = { AI_DATA_MODEL };

@@ -1,5 +1,5 @@
 (function () {
-  const { api, showLoading, setText, chartOptions, chartPalette, chartColors } = window.Dashboard;
+  const { api, showLoading, setText, chartOptions, chartColors } = window.Dashboard;
 
   const el = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
@@ -14,8 +14,12 @@
   let currentIdContacto = null;
   let currentClientData = null;
   let currentCierresData = null;
+  let currentVendedorData = null;
+  let currentVista = 'cliente';
+  let openVendComercialKpi = null;
   let openKpiKey = null;
   const charts = {};
+  let vendedoresCache = [];
 
   function destroyChart(name) {
     if (charts[name]) {
@@ -70,9 +74,14 @@
     const badge = el('statusBadge');
     if (!badge) return;
     badge.textContent = text;
-    badge.className = 'top-bar-meta';
+    badge.className = 'sidebar-status-line';
     if (type === 'loading') badge.classList.add('status-loading');
     else if (type === 'error') badge.classList.add('status-error');
+    const dot = document.querySelector('[data-status-dot]');
+    if (dot) {
+      dot.classList.toggle('is-loading', type === 'loading');
+      dot.classList.toggle('is-error', type === 'error');
+    }
   }
 
   function getPeriod() {
@@ -181,11 +190,393 @@
       );
       el('emptyState').classList.add('hidden');
       el('clientPanel').classList.add('hidden');
+      el('vendedorPanel')?.classList.add('hidden');
       el('cierresPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
       setStatus(err.message, 'error');
     } finally {
       showLoading(false);
+    }
+  }
+
+  function setVista(vista) {
+    currentVista = vista === 'vendedor' ? 'vendedor' : 'cliente';
+    document.querySelectorAll('[data-vista]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.vista === currentVista);
+    });
+    el('vistaClienteWrap')?.classList.toggle('hidden', currentVista !== 'cliente');
+    el('vistaVendedorWrap')?.classList.toggle('hidden', currentVista !== 'vendedor');
+
+    if (currentVista === 'vendedor') {
+      el('cierresPanel')?.classList.add('hidden');
+      el('searchResultsWrap')?.classList.add('hidden');
+      el('clientPanel')?.classList.add('hidden');
+      loadVendedoresCatalog().then(() => {
+        if (el('vendedorInput')?.value.trim()) cargarVendedorResumen();
+        else {
+          el('vendedorPanel')?.classList.add('hidden');
+          el('emptyState')?.classList.remove('hidden');
+          setStatus('Elige un vendedor para ver el acumulado de su cartera');
+        }
+      });
+    } else {
+      el('vendedorPanel')?.classList.add('hidden');
+      if (!currentIdContacto && !(el('searchResults')?.children?.length)) {
+        el('emptyState')?.classList.remove('hidden');
+      }
+      setStatus('Listo');
+    }
+  }
+
+  async function loadVendedoresCatalog() {
+    try {
+      const data = await api('/crm/vendedores?limit=300');
+      vendedoresCache = data.vendedores || [];
+      const list = el('vendedorDatalist');
+      if (list) {
+        list.innerHTML = vendedoresCache.map((v) =>
+          `<option value="${esc(v.vendedor)}" label="${Number(v.clientes || 0)} clientes"></option>`
+        ).join('');
+      }
+      setText('vendedorHint', `${vendedoresCache.length} vendedor(es)`);
+    } catch (err) {
+      setText('vendedorHint', '');
+      console.warn('[Seguimiento] vendedores', err);
+    }
+  }
+
+  async function cargarVendedorResumen() {
+    const vendedor = el('vendedorInput')?.value.trim();
+    if (!vendedor) {
+      setStatus('Escribe o elige un vendedor', 'error');
+      return;
+    }
+    const { fechaInicio, fechaFin } = getPeriod();
+    if ((fechaInicio && !fechaFin) || (!fechaInicio && fechaFin)) {
+      setStatus('Indica ambas fechas del periodo, o déjalas vacías para todo el histórico', 'error');
+      return;
+    }
+    if (fechaInicio && fechaFin && fechaInicio > fechaFin) {
+      setStatus('La fecha inicial no puede ser posterior a la final', 'error');
+      return;
+    }
+
+    setStatus('Consultando acumulado del vendedor...', 'loading');
+    showLoading(true);
+    try {
+      const qs = new URLSearchParams({ vendedor, limit: '400' });
+      if (fechaInicio) qs.set('fechaInicio', fechaInicio);
+      if (fechaFin) qs.set('fechaFin', fechaFin);
+      const data = await api(`/crm/vendedores/resumen?${qs.toString()}`);
+      renderVendedorResumen(data);
+      setText('periodLabel', fechaInicio && fechaFin ? `${fechaInicio} — ${fechaFin}` : 'Todo el histórico');
+      setStatus(
+        `${data.vendedor}: ${data.totales?.clientes || 0} clientes · ${data.totales?.ciclos || 0} ciclos · ${data.totales?.compras || 0} compras`
+      );
+      el('emptyState').classList.add('hidden');
+      el('clientPanel').classList.add('hidden');
+      el('cierresPanel')?.classList.add('hidden');
+      el('searchResultsWrap')?.classList.add('hidden');
+      el('vendedorPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      setStatus(err.message, 'error');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  function closeVendComercialDetail() {
+    openVendComercialKpi = null;
+    const panel = el('vendedorComercialDetail');
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.innerHTML = '';
+    }
+    document.querySelectorAll('[data-vend-kpi].is-open').forEach((c) => {
+      c.classList.remove('is-open');
+      c.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function buildVendComercialDetailHtml(key) {
+    const data = currentVendedorData;
+    if (!data) return null;
+    const com = data.comercial || {};
+    const fin = com.financiamiento || {};
+    const pvas = fin.pvas || {};
+    const libro = com.libroVentas || {};
+
+    const titles = {
+      libro: 'Unidades vendidas',
+      contratos: 'Contratos F&I',
+      plazos: 'Distribución de plazos',
+      pvas: 'PVAs por producto',
+    };
+    const title = titles[key];
+    if (!title) return null;
+
+    let value = '—';
+    let body = '';
+
+    if (key === 'libro') {
+      const unidades = libro.unidades ?? libro.sql?.unidades ?? 0;
+      value = String(unidades);
+      const rows = (libro.sql?.muestra?.length ? libro.sql.muestra : (libro.crm?.muestra || []));
+      const hint = libro.sql?.unidades
+        ? `${libro.sql.unidades} unidades facturadas en ADE_VTAFI`
+        : `${libro.crm?.unidades || 0} facturas en CRM (sin match ADE_VTAFI)`;
+      body = `
+        <p class="kpi-subtitle" style="margin:0 0 10px">${esc(hint)}</p>
+        <div class="table-scroll" style="max-height:320px">
+          <table class="data-table">
+            <thead><tr>
+              <th>Fecha</th><th>Factura</th><th>VIN</th><th>Modelo</th><th>Forma pago</th><th>Cliente</th>
+            </tr></thead>
+            <tbody>
+              ${rows.length
+                ? rows.map((r) => `
+                  <tr>
+                    <td>${dash(r.fecha)}</td>
+                    <td>${dash(r.factura)}</td>
+                    <td>${dash(r.vin)}</td>
+                    <td>${dash(r.modelo)}</td>
+                    <td>${dash(r.formaPago || '—')}</td>
+                    <td>${dash(r.cliente)}</td>
+                  </tr>`).join('')
+                : '<tr class="empty-row"><td colspan="6">Sin ventas en libro para la cartera</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+    } else if (key === 'contratos') {
+      value = String(fin.contratos ?? 0);
+      const rows = fin.muestra || [];
+      const hint = fin.montoFinanciarTotal
+        ? `Total financiado ${money(fin.montoFinanciarTotal)} · match ${fin.match || '—'}`
+        : `Match ${fin.match || 'ninguno'}`;
+      body = `
+        <p class="kpi-subtitle" style="margin:0 0 10px">${esc(hint)}</p>
+        <div class="table-scroll" style="max-height:320px">
+          <table class="data-table">
+            <thead><tr>
+              <th>Fecha</th><th>Cliente</th><th>Unidad</th><th class="cell-num">Plazo</th>
+              <th class="cell-money">Monto</th><th class="cell-num"># PVAs</th><th>PVAs</th>
+            </tr></thead>
+            <tbody>
+              ${rows.length
+                ? rows.map((r) => `
+                  <tr>
+                    <td>${dash(r.fecha)}</td>
+                    <td>${dash(r.cliente)}</td>
+                    <td>${dash(r.unidad)}</td>
+                    <td class="cell-num">${r.plazo != null ? `${r.plazo} m` : '—'}</td>
+                    <td class="cell-money">${r.montoFinanciar != null ? money(r.montoFinanciar) : '—'}</td>
+                    <td class="cell-num">${Number(r.cantidadPvas ?? (r.pvas || []).length)}</td>
+                    <td>${(r.pvas || []).length ? esc((r.pvas || []).join(', ')) : '—'}</td>
+                  </tr>`).join('')
+                : '<tr class="empty-row"><td colspan="7">Sin contratos de muestra</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+    } else if (key === 'plazos') {
+      const plazos = fin.plazos || [];
+      value = fin.plazoPromedio != null ? `${fin.plazoPromedio} m` : '—';
+      const hint = fin.plazoPromedio != null
+        ? `Promedio ${fin.plazoPromedio} meses · enganche prom. ${fin.enganchePromedio != null ? money(fin.enganchePromedio) : '—'}`
+        : 'Sin contratos de financiamiento en el periodo';
+      body = `
+        <p class="kpi-subtitle" style="margin:0 0 10px">${esc(hint)}</p>
+        <div class="table-scroll" style="max-height:320px">
+          <table class="data-table">
+            <thead><tr>
+              <th>Plazo</th><th class="cell-num">Contratos</th><th class="cell-num">%</th>
+            </tr></thead>
+            <tbody>
+              ${plazos.length
+                ? plazos.map((p) => `
+                  <tr>
+                    <td>${dash(p.plazo)} meses</td>
+                    <td class="cell-num">${Number(p.count || 0)}</td>
+                    <td class="cell-num">${Number(p.pct || 0)}%</td>
+                  </tr>`).join('')
+                : '<tr class="empty-row"><td colspan="3">Sin plazos registrados</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+    } else if (key === 'pvas') {
+      value = pvas.promedioCantidadPvas != null
+        ? String(pvas.promedioCantidadPvas)
+        : '—';
+      const rows = pvas.porTipo || [];
+      const hint = [
+        pvas.promedioCantidadPvas != null ? `Promedio ${pvas.promedioCantidadPvas} PVAs/contrato` : null,
+        pvas.penetracionPct != null ? `Penetración ${pvas.penetracionPct}%` : null,
+        `${pvas.contratosConPva || 0} contratos con PVA`,
+        `${pvas.totalCantidadPvas || 0} PVAs en total`,
+      ].filter(Boolean).join(' · ');
+      body = `
+        <p class="kpi-subtitle" style="margin:0 0 10px">${esc(hint)}</p>
+        <div class="table-scroll" style="max-height:320px">
+          <table class="data-table">
+            <thead><tr>
+              <th>Producto</th><th class="cell-num">Contratos</th>
+              <th class="cell-num">Penetración</th><th class="cell-money">Monto</th>
+            </tr></thead>
+            <tbody>
+              ${rows.length
+                ? rows.map((p) => `
+                  <tr>
+                    <td>${dash(p.tipo)}</td>
+                    <td class="cell-num">${Number(p.contratos || 0)}</td>
+                    <td class="cell-num">${Number(p.penetracionPct || 0)}%</td>
+                    <td class="cell-money">${money(p.montoTotal || 0)}</td>
+                  </tr>`).join('')
+                : '<tr class="empty-row"><td colspan="4">Sin PVAs en contratos</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    return `
+      <div class="kpi-detail-panel__head">
+        <div>
+          <p class="kpi-detail-panel__eyebrow">Desempeño comercial</p>
+          <h4 class="kpi-detail-panel__title">${esc(title)}</h4>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="kpi-detail-panel__value">${esc(value)}</span>
+          <button type="button" class="kpi-detail-panel__close" data-close-vend-detail aria-label="Cerrar desglose">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </div>
+      ${body}`;
+  }
+
+  function renderVendComercialDetail(key) {
+    const panel = el('vendedorComercialDetail');
+    if (!panel || !key) return;
+
+    if (openVendComercialKpi === key) {
+      closeVendComercialDetail();
+      return;
+    }
+
+    const html = buildVendComercialDetailHtml(key);
+    if (!html) return;
+
+    closeVendComercialDetail();
+    panel.innerHTML = html;
+    panel.classList.remove('hidden');
+    openVendComercialKpi = key;
+
+    const card = document.querySelector(`[data-vend-kpi="${key}"]`);
+    if (card) {
+      card.classList.add('is-open');
+      card.setAttribute('aria-expanded', 'true');
+    }
+    panel.querySelector('[data-close-vend-detail]')?.addEventListener('click', closeVendComercialDetail);
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function renderVendedorResumen(data) {
+    currentVendedorData = data;
+    closeVendComercialDetail();
+    const panel = el('vendedorPanel');
+    if (!panel) return;
+    panel.classList.remove('hidden');
+    const tot = data.totales || {};
+    const com = data.comercial || {};
+    const fin = com.financiamiento || {};
+    const pvas = fin.pvas || {};
+    const retorno = com.retornoTaller || {};
+    const libro = com.libroVentas || {};
+    const plazos = fin.plazos || [];
+    const periodo = data.periodo || {};
+    const periodoTxt = periodo.fechaInicio && periodo.fechaFin
+      ? `Periodo ${periodo.fechaInicio} — ${periodo.fechaFin}`
+      : 'Todo el histórico';
+    setText('vendedorSubtitle', `${data.vendedor || '—'} · ${periodoTxt}`);
+    setText('kVendClientes', tot.clientes ?? 0);
+    setText('kVendCiclos', tot.ciclos ?? 0);
+    setText('kVendLeads', tot.leads ?? 0);
+    setText('kVendSolicitudes', tot.solicitudes ?? 0);
+    setText('kVendPruebas', tot.pruebas ?? 0);
+    const libroUnits = Number(libro.unidades ?? libro.sql?.unidades ?? 0);
+    setText('vendedorCount', `${(data.clientes || []).length} cliente(s) listado(s)`);
+
+    setText('kVendLibro', libroUnits);
+    setText(
+      'kVendLibroSub',
+      libro.fuente === 'ADE_VTAFI' || Number(libro.sql?.unidades || 0) > 0
+        ? 'Facturas registradas en ADE_VTAFI'
+        : (libro.fuente === 'crm_facturas'
+          ? 'Facturas CRM (sin match en ADE_VTAFI)'
+          : 'Sin ventas registradas')
+    );
+    setText('kVendContratos', fin.contratos ?? 0);
+    setText(
+      'kVendContratosSub',
+      fin.match === 'asesor'
+        ? 'Match por asesor F&I'
+        : (fin.match === 'vin_cartera' ? 'Match por VIN de cartera' : 'Sin contratos')
+    );
+    setText('kVendMontoFin', fin.montoFinanciarPromedio != null ? money(fin.montoFinanciarPromedio) : '—');
+    setText('kVendPlazo', fin.plazoPromedio != null ? `${fin.plazoPromedio} m` : '—');
+    setText(
+      'kVendPlazoSub',
+      plazos.length
+        ? `${plazos.length} plazo(s) distinto(s) · enganche prom. ${fin.enganchePromedio != null ? money(fin.enganchePromedio) : '—'}`
+        : (fin.plazoPromedio != null
+          ? `Enganche prom. ${fin.enganchePromedio != null ? money(fin.enganchePromedio) : '—'}`
+          : 'Sin contratos de financiamiento')
+    );
+    setText(
+      'kVendPvas',
+      pvas.promedioCantidadPvas != null ? pvas.promedioCantidadPvas : '—'
+    );
+    setText(
+      'kVendPvasSub',
+      pvas.promedioCantidadPvas != null
+        ? `${pvas.totalCantidadPvas || 0} PVAs en ${fin.contratos || 0} contratos · ${pvas.penetracionPct ?? 0}% con al menos 1`
+        : 'Cantidad promedio de PVAs por contrato'
+    );
+    setText('kVendRetorno', retorno.tasaRetornoPct != null ? `${retorno.tasaRetornoPct}%` : '—');
+    setText(
+      'kVendRetornoSub',
+      retorno.base === 'clientes_con_compra'
+        ? `${retorno.clientesConTaller || 0} de ${retorno.clientesConCompra || 0} con compra · ${retorno.ordenes || 0} órdenes`
+        : `${retorno.vinsConTaller || 0} de ${retorno.vinsCartera || 0} VIN · ${retorno.ordenes || 0} órdenes`
+    );
+
+    const rows = data.clientes || [];
+    el('vendedorClientesTable').innerHTML = rows.length ? rows.map((c) => `
+      <tr>
+        <td>${dash(c.id_contacto)}</td>
+        <td>${dash(c.nombre)}</td>
+        <td class="cell-num">${Number(c.leads || 0)}</td>
+        <td class="cell-num">${Number(c.ciclos || 0)}</td>
+        <td class="cell-num">${Number(c.solicitudes || 0)}</td>
+        <td class="cell-num">${Number(c.pruebas || 0)}</td>
+        <td class="cell-num">${Number(c.compras || 0)}</td>
+        <td class="cell-num">${Number(c.actividades || 0)}</td>
+        <td>${dash(c.ultima_actividad)}</td>
+        <td>${c.id_contacto ? `<button type="button" class="chip" data-open-vend="${esc(c.id_contacto)}">Ver 360</button>` : ''}</td>
+      </tr>
+    `).join('') : '<tr class="empty-row"><td colspan="10">Sin clientes vinculados a este vendedor en el periodo.</td></tr>';
+
+    el('vendedorClientesTable').querySelectorAll('[data-open-vend]').forEach((btn) => {
+      btn.addEventListener('click', () => openClient(btn.dataset.openVend));
+    });
+
+    if (window.KpiInsights?.apply) {
+      window.KpiInsights.apply('seguimiento', {
+        vista: 'vendedor',
+        vendedor: data.vendedor,
+        fechaInicio: periodo.fechaInicio || null,
+        fechaFin: periodo.fechaFin || null,
+        totales: tot,
+        comercial: com,
+      });
     }
   }
 
@@ -231,6 +622,15 @@
     });
 
     renderCierresCharts(data);
+
+    if (window.KpiInsights?.apply) {
+      window.KpiInsights.apply('seguimiento', {
+        vista: 'cierres',
+        fechaInicio: periodo.fechaInicio || null,
+        fechaFin: periodo.fechaFin || null,
+        totales: tot,
+      });
+    }
   }
 
   function highlightCierreRow(idx) {
@@ -345,6 +745,7 @@
       }
       renderClient(h);
       el('cierresPanel').classList.add('hidden');
+      el('vendedorPanel')?.classList.add('hidden');
       setStatus(`Cliente ${idContacto} · ${h.nombre || ''}`);
       el('clientPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
@@ -468,24 +869,114 @@
       }),
     });
 
-    const porTipo = countBy(ordenes, (o) => o.tipoServicio || o.tipoOrden || o.status);
-    const panelTipo = el('panelChartOrdenesTipo');
-    if (panelTipo) panelTipo.classList.toggle('hidden', !porTipo.length);
-    createChart('ordenesTipo', 'chartOrdenesTipo', {
-      type: 'doughnut',
-      data: {
-        labels: porTipo.length ? porTipo.map((r) => r.label) : ['Sin órdenes'],
-        datasets: [{
-          data: porTipo.length ? porTipo.map((r) => r.value) : [1],
-          backgroundColor: porTipo.length ? chartPalette : ['#DDE3EC'],
-          borderWidth: 0,
-        }],
-      },
-      options: chartOptions({
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
-      }),
+  }
+
+  function dateMx(value) {
+    if (!value) return '—';
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : esc(value);
+  }
+
+  function renderFicha360(h) {
+    const f = h.ficha360 || {};
+    const vehicle = el('ficha360Vehicle');
+    vehicle.innerHTML = `
+      <span class="material-symbols-outlined">directions_car</span>
+      <div>
+        <strong>${dash(f.modeloActual)}</strong>
+        <small>${[f.anModelo ? `Modelo ${esc(f.anModelo)}` : null, f.vinActual].filter(Boolean).map(esc).join(' · ') || 'Unidad sin identificar'}</small>
+      </div>`;
+
+    const items = [
+      ['event_available', 'Última compra', dateMx(f.fechaUltimaCompra), 'purchase', 'secCompras', null],
+      ['description', 'Número de contrato', dash(f.numeroContrato), 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['credit_card', 'Tipo de compra', dash(f.tipoCompra), 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['calendar_month', 'Plazo contratado', f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['task_alt', 'Mensualidades estimadas', f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)}` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['account_balance_wallet', 'Saldo estimado', f.saldoEstimado != null ? money(f.saldoEstimado) : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['sell', 'Valor de referencia', f.valorEstimadoUnidad != null ? money(f.valorEstimadoUnidad) : '—', 'finance', 'secFinanciamiento', null],
+      ['build', 'Último servicio', dateMx(f.ultimaVisitaTaller), 'service', 'secOrdenes', 'taller'],
+      ['speed', 'Kilometraje registrado', f.kilometraje != null ? `${Number(f.kilometraje).toLocaleString('es-MX')} km` : '—', 'service', 'secOrdenes', 'taller'],
+      ['car_repair', 'Servicios realizados', Number(f.serviciosRealizados || 0).toLocaleString('es-MX'), 'service', 'secOrdenes', 'taller'],
+      ['support_agent', 'Último contacto comercial', dateMx(f.ultimoContactoComercial), 'relation', 'secTimeline', 'comercial'],
+      ['devices', 'Interacciones digitales', Number(f.interaccionesDigitales || 0).toLocaleString('es-MX'), 'relation', 'secLeads', 'digital'],
+      ['feedback', 'Quejas o incidencias', Number(f.quejasIncidencias || 0).toLocaleString('es-MX'), 'relation', 'secTimeline', 'queja', 'quejas'],
+      ['garage', 'Historial de compras', `${Number(f.historialCompras || 0)} vehículo(s)`, 'purchase', 'secCompras', 'compra', 'compras'],
+    ];
+    el('ficha360Grid').innerHTML = items.map(([icon, label, value, tone, gotoId, filter, openKpi]) => `
+      <button type="button" class="client-360-stat client-360-stat--${tone}" ${openKpi === 'quejas' ? 'id="kQuejas"' : ''} data-goto="${esc(gotoId)}" data-timeline-filter="${esc(filter || '')}" ${openKpi ? `data-open-kpi="${esc(openKpi)}"` : ''} title="Ver detalle relacionado">
+        <span class="material-symbols-outlined client-360-stat-icon">${icon}</span>
+        <div><span>${label}</span><strong>${value}</strong></div>
+      </button>`).join('');
+
+    el('ficha360Grid').querySelectorAll('[data-goto]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const openKpi = btn.dataset.openKpi;
+        if (openKpi) {
+          openClientKpiByKey(openKpi, btn.dataset.goto || null);
+          return;
+        }
+        const filter = btn.dataset.timelineFilter;
+        if (filter) renderTimeline360(currentTimeline360, filter);
+        gotoSection(btn.dataset.goto);
+      });
     });
 
+    const method = f.metodologia || {};
+    const methodEntries = Object.values(method).filter(Boolean);
+    const methodEl = el('ficha360Method');
+    methodEl.classList.toggle('hidden', !methodEntries.length);
+    methodEl.innerHTML = methodEntries.length
+      ? `<span class="material-symbols-outlined">info</span><span><strong>Cómo leer las estimaciones:</strong> ${methodEntries.map(esc).join(' ')}</span>`
+      : '';
+  }
+
+  let currentTimeline360 = [];
+
+  function renderTimeline360(events, active = 'todos') {
+    currentTimeline360 = events || [];
+    const list = currentTimeline360;
+    const categories = [
+      ['todos', 'Todo'],
+      ['compra', 'Compras'],
+      ['financiamiento', 'Financiamiento'],
+      ['taller', 'Taller'],
+      ['comercial', 'Comercial'],
+      ['digital', 'Digital'],
+      ['prueba', 'Pruebas'],
+      ['queja', 'Quejas CSI'],
+    ].filter(([key]) => key === 'todos' || list.some((event) => event.categoria === key));
+    el('timeline360Filters').innerHTML = categories.map(([key, label]) => `
+      <button type="button" class="timeline-360-filter${active === key ? ' is-active' : ''}" data-timeline-filter="${key}">
+        ${label}<span>${key === 'todos' ? list.length : list.filter((event) => event.categoria === key).length}</span>
+      </button>`).join('');
+    const filtered = active === 'todos' ? list : list.filter((event) => event.categoria === active);
+    setText('timeline360Count', `${filtered.length} evento(s)`);
+    const iconByCategory = {
+      compra: 'directions_car',
+      financiamiento: 'request_quote',
+      taller: 'build',
+      comercial: 'forum',
+      digital: 'devices',
+      prueba: 'steering_wheel_heat',
+      queja: 'feedback',
+    };
+    el('timeline360List').innerHTML = filtered.length ? filtered.map((event) => `
+      <article class="timeline-360-event timeline-360-event--${esc(event.categoria || 'comercial')}">
+        <div class="timeline-360-date">${dateMx(event.fecha)}</div>
+        <div class="timeline-360-marker">
+          <span class="material-symbols-outlined">${iconByCategory[event.categoria] || 'circle'}</span>
+        </div>
+        <div class="timeline-360-content">
+          <div class="timeline-360-category">${dash(event.categoria)}</div>
+          <h4>${dash(event.titulo)}</h4>
+          ${event.detalle ? `<p>${esc(event.detalle)}</p>` : ''}
+          ${event.vin ? `<small>VIN ${esc(event.vin)}</small>` : ''}
+        </div>
+      </article>`).join('') : '<p class="timeline-360-empty">No hay eventos en esta categoría.</p>';
+    el('timeline360Filters').querySelectorAll('[data-timeline-filter]').forEach((button) => {
+      button.addEventListener('click', () => renderTimeline360(list, button.dataset.timelineFilter));
+    });
   }
 
   function renderClient(h) {
@@ -493,6 +984,8 @@
     closeKpiDetail();
     el('emptyState').classList.add('hidden');
     el('clientPanel').classList.remove('hidden');
+    renderFicha360(h);
+    renderTimeline360(h.timeline360 || []);
 
     setText('clientName', h.nombre || `Cliente ${h.idContacto}`);
     const metaParts = [`ID CRM: ${h.idContacto}`];
@@ -520,7 +1013,6 @@
 
     setText('kLeads', h.resumen?.totalLeads ?? 0);
     setText('kCiclos', h.resumen?.totalCiclos ?? 0);
-    setText('kCompras', h.resumen?.totalCompras ?? 0);
     setText('kUnidadesDistribuidor', h.resumen?.totalUnidadesDistribuidor ?? 0);
     setText('kSolicitudes', h.resumen?.totalSolicitudes ?? 0);
     setText('kPruebasManejo', h.resumen?.totalPruebasManejo ?? 0);
@@ -536,6 +1028,18 @@
     );
 
     renderClientCharts(h);
+
+    if (window.KpiInsights?.apply) {
+      window.KpiInsights.apply('seguimiento', {
+        vista: 'cliente',
+        idContacto: h.idContacto,
+        nombre: h.nombre,
+        resumen: h.resumen || {},
+        ordenesCount: (h.ordenesServicio || []).length,
+        quejasCsi: h.quejasCsi || null,
+        ficha360: h.ficha360 || {},
+      });
+    }
 
     const unidadesDistribuidor = h.unidadesDistribuidor || [];
     setText('unidadesDistribuidorCount', `${unidadesDistribuidor.length} unidad(es)`);
@@ -560,16 +1064,38 @@
     el('comprasTable').innerHTML = compras.length ? compras.map((c) => `
       <tr>
         <td>${dash(c.vin)}</td>
-        <td>${dash(c.serieSql)}</td>
         <td>${dash(c.producto)}</td>
         <td>${dash(c.modeloSql)}</td>
         <td>${dash(c.numFactura)}</td>
-        <td>${dash(c.facturaVentaSql)}</td>
         <td>${dash(c.fechaFactura)}</td>
         <td>${dash(c.vendedor)}</td>
         <td class="cell-num">${Number(c.totalOrdenes || 0)}</td>
       </tr>`).join('')
-      : '<tr><td colspan="9" style="text-align:center;color:#94a3b8">Sin compras registradas (sin VIN en ciclos)</td></tr>';
+      : '<tr><td colspan="7" style="text-align:center;color:#94a3b8">Sin compras registradas (sin VIN en ciclos)</td></tr>';
+
+    const contratos = h.contratosFinanciamiento || [];
+    const pvaLabel = (monto) => (Number(monto || 0) > 0 ? money(monto) : '—');
+    setText('financiamientoCount', `${contratos.length} contrato(s)`);
+    el('financiamientoTable').innerHTML = contratos.length ? contratos.map((c) => `
+      <tr>
+        <td>${dash(c.vin)}</td>
+        <td>${dash(c.no_contrato || c.contrato)}</td>
+        <td>${dash(c.unidad)}</td>
+        <td>${dash(c.fecha_compra)}</td>
+        <td class="cell-num">${c.plazo_meses != null ? `${Number(c.plazo_meses)} meses` : '—'}</td>
+        <td>${c.enganche_pct != null ? `${Number(c.enganche_pct).toFixed(2)}%` : '—'}</td>
+        <td class="cell-money">${c.enganche_monto != null ? money(c.enganche_monto) : '—'}</td>
+        <td>${pvaLabel(c.gap_monto)}</td>
+        <td>${pvaLabel(c.garantia_extendida_monto)}</td>
+        <td>${Number(c.onstar_monto || 0) > 0
+          ? `${money(c.onstar_monto)}${c.plazo_onstar ? ` · ${esc(c.plazo_onstar)}` : ''}`
+          : '—'}</td>
+        <td>${pvaLabel(c.mantenimiento_integrado_monto)}</td>
+        <td>${dash(c.aseguradora)}</td>
+        <td>${dash(c.robo_parcial)}</td>
+        <td>${dash(c.especial || c.plan_2 || c.plan)}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="14" style="text-align:center;color:#94a3b8">Sin contratos de financiamiento ligados por VIN</td></tr>';
 
     const ordenes = h.ordenesServicio || [];
     setText('ordenesCount', `${ordenes.length} orden(es)`);
@@ -581,12 +1107,11 @@
         <td>${dash(o.modelo)}</td>
         <td>${dash(o.ingreso)}</td>
         <td>${dash(o.cierre)}</td>
-        <td>${dash(o.status)}</td>
         <td>${dash(o.asesor)}</td>
         <td>${dash(o.facturaTaller)}</td>
         <td class="cell-money">${o.importe ? money(o.importe) : '—'}</td>
       </tr>`).join('')
-      : `<tr><td colspan="9" style="text-align:center;color:#94a3b8">${h.sqlError ? 'SQL no disponible: ' + esc(h.sqlError) : 'Sin órdenes de servicio para los VIN del cliente'}</td></tr>`;
+      : `<tr><td colspan="8" style="text-align:center;color:#94a3b8">${h.sqlError ? 'SQL no disponible: ' + esc(h.sqlError) : 'Sin órdenes de servicio para los VIN del cliente'}</td></tr>`;
 
     const pruebasManejo = h.pruebasManejo || [];
     setText('pruebasManejoCount', `${pruebasManejo.length} prueba(s)`);
@@ -606,23 +1131,6 @@
     }).join('')
       : '<tr><td colspan="8" style="text-align:center;color:#94a3b8">Sin pruebas de manejo registradas</td></tr>';
 
-    const solicitudes = h.solicitudes || [];
-    setText('solicitudesCount', `${solicitudes.length} solicitud(es)`);
-    el('solicitudesTable').innerHTML = solicitudes.length ? solicitudes.map((s) => `
-      <tr>
-        <td>${dash(s.fecha_solicitud)}</td>
-        <td>${dash(s.no_solicitud)}</td>
-        <td>${dash(s.financiera)}</td>
-        <td>${dash(s.unidad_paquete)}</td>
-        <td>${s.estatus ? badge(s.estatus, String(s.estatus).toUpperCase().startsWith('APROBADA') ? 'badge-running' : 'badge-maintenance') : '—'}</td>
-        <td>${dash(s.asesor)}</td>
-        <td>${dash(s.fi)}</td>
-        <td>${dash(s.fecha_aprobacion)}</td>
-        <td>${dash(s.fecha_compra)}</td>
-        <td class="cell-money">${s.enganche ? money(s.enganche) : '—'}</td>
-      </tr>`).join('')
-      : '<tr><td colspan="10" style="text-align:center;color:#94a3b8">Sin solicitudes de crédito registradas</td></tr>';
-
     const leads = h.leads || [];
     setText('leadsCount', `${leads.length} lead(s)`);
     el('leadsTable').innerHTML = leads.length ? leads.map((l) => `
@@ -637,33 +1145,18 @@
         <td>${l.cita_programada === 'SI' ? badge('Cita', 'badge-running') : '—'}</td>
       </tr>`).join('')
       : '<tr><td colspan="8" style="text-align:center;color:#94a3b8">Sin leads registrados</td></tr>';
-
-    const timeline = (h.timeline || []).slice().reverse();
-    setText('timelineCount', `${timeline.length} actividad(es)${h.timelineTruncado ? ' (recientes)' : ''}`);
-    el('timelineList').innerHTML = timeline.length ? timeline.map((t) => `
-      <div style="display:flex;gap:12px;padding:10px 4px;border-bottom:1px solid rgba(148,163,184,0.15)">
-        <div style="min-width:92px;color:#64748b;font-size:12px;font-weight:700">${dash(t.fecha)}</div>
-        <div style="flex:1">
-          <div style="font-weight:600;color:#1e293b;font-size:13px">${dash(t.tipo)}</div>
-          <div style="color:#64748b;font-size:12px">
-            ${t.resultado ? esc(t.resultado) : ''}
-            ${t.estatusCiclo ? ` · Ciclo: ${esc(t.estatusCiclo)}` : ''}
-            ${t.vin ? ` · VIN: ${esc(t.vin)}` : ''}
-          </div>
-        </div>
-      </div>`).join('')
-      : '<p style="color:#94a3b8;text-align:center">Sin actividades</p>';
   }
 
   function gotoSection(targetId) {
     const target = el(targetId);
     if (!target || target.closest('.hidden')) return;
     const panel = target.classList.contains('section-panel')
+      || target.classList.contains('client-360-shell')
+      || target.classList.contains('client-360-timeline')
       ? target
-      : (target.closest('.section-panel') || target);
+      : (target.closest('.section-panel, .client-360-shell, .client-360-timeline') || target);
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     panel.classList.remove('section-flash');
-    // Reinicia la animación si se hace clic dos veces en el mismo KPI
     void panel.offsetWidth;
     panel.classList.add('section-flash');
     setTimeout(() => panel.classList.remove('section-flash'), 1700);
@@ -684,7 +1177,6 @@
     const compras = h.compras || [];
     const ordenes = h.ordenesServicio || [];
     const unidades = h.unidadesDistribuidor || [];
-    const timeline = h.timeline || [];
     const r = h.resumen || {};
     const num = (v) => Number(v || 0).toLocaleString('es-MX');
 
@@ -709,18 +1201,21 @@
       }
       case 'ciclos': {
         const estatus = Object.entries(r.estatusCiclos || {}).map(([label, value]) => ({ label, value }));
+        const timeline360 = h.timeline360 || [];
+        const comerciales = timeline360.filter((e) => e.categoria === 'comercial');
         return {
           title: 'Ciclos de venta',
           value: num(r.totalCiclos ?? 0),
           sections: [
             { titulo: 'Resumen', rows: [
               { label: 'Ciclos en CRM', value: num(r.totalCiclos ?? 0) },
-              { label: 'Actividades registradas', value: num(timeline.length) },
+              { label: 'Eventos en línea de tiempo 360', value: num(timeline360.length) },
+              { label: 'Contactos comerciales', value: num(comerciales.length) },
               { label: 'Primera actividad', value: r.primeraActividad || '—' },
               { label: 'Última actividad', value: r.ultimaActividad || '—' },
             ] },
             { titulo: 'Por estatus de ciclo', rows: estatus.map((x) => ({ label: x.label, value: num(x.value) })) },
-            { titulo: 'Actividades por tipo', rows: topN(countBy(timeline, (t) => t.tipo)).map((x) => ({ label: x.label, value: num(x.value) })) },
+            { titulo: 'Eventos por categoría', rows: topN(countBy(timeline360, (t) => t.categoria)).map((x) => ({ label: x.label, value: num(x.value) })) },
           ],
         };
       }
@@ -831,6 +1326,44 @@
           ],
         };
       }
+      case 'quejas': {
+        const csi = h.quejasCsi || {};
+        const posventa = csi.posventa || [];
+        const ventas = csi.ventas || [];
+        const porArea = Object.entries(csi.porArea || {}).map(([label, value]) => ({ label, value }));
+        const rowQueja = (q, kind) => ({
+          label: [
+            q.incidencia || 'Incidencia',
+            kind === 'posventa' && q.orden ? `Orden ${q.orden}` : null,
+            kind === 'ventas' && q.serie ? `Serie ${q.serie}` : null,
+            q.fecha || null,
+          ].filter(Boolean).join(' · '),
+          value: q.area || 'Sin área',
+          detail: q.queja || q.comentarios || 'Sin comentario',
+          badge: q.area || null,
+        });
+        return {
+          title: 'Quejas o incidencias (CSI)',
+          value: num(csi.total ?? (posventa.length + ventas.length)),
+          sections: [
+            { titulo: 'Resumen', rows: [
+              { label: 'Total CSI', value: num(csi.total ?? 0) },
+              { label: 'Posventa (por orden)', value: num(csi.totalPosventa ?? posventa.length) },
+              { label: 'Ventas (por serie/VIN)', value: num(csi.totalVentas ?? ventas.length) },
+              { label: 'Área principal inferida', value: csi.areaPrincipal || '—' },
+            ] },
+            { titulo: 'Por área / departamento', rows: porArea.length
+              ? porArea.sort((a, b) => b.value - a.value).map((x) => ({ label: x.label, value: num(x.value) }))
+              : [{ label: 'Sin clasificación todavía', value: '—' }] },
+            { titulo: 'Posventa', rows: posventa.length
+              ? posventa.map((q) => rowQueja(q, 'posventa'))
+              : [{ label: 'Sin incidencias CSI Posventa vinculadas por orden/serie', value: '—' }] },
+            { titulo: 'Ventas', rows: ventas.length
+              ? ventas.map((q) => rowQueja(q, 'ventas'))
+              : [{ label: 'Sin incidencias CSI Ventas vinculadas por serie/VIN', value: '—' }] },
+          ],
+        };
+      }
       default:
         return null;
     }
@@ -917,12 +1450,12 @@
       }
     });
     document.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
+    document.querySelectorAll('.client-360-stat.is-open').forEach((c) => c.classList.remove('is-open'));
   }
 
-  function renderKpiDetail(card) {
-    const kpi = card.dataset.kpi;
-    const isCierre = kpi.startsWith('cierre');
-    const panelId = isCierre ? 'cierresKpiDetail' : 'clientKpiDetail';
+  function fillKpiDetailPanel(panelId, kpi, detail, gotoId, sourceEl) {
+    const panel = el(panelId);
+    if (!detail || !panel) return;
     const key = `${panelId}:${kpi}`;
 
     if (openKpiKey === key) {
@@ -931,25 +1464,21 @@
     }
     closeKpiDetail();
 
-    const detail = isCierre
-      ? (currentCierresData ? buildCierresKpiDetail(kpi, currentCierresData) : null)
-      : (currentClientData ? buildClientKpiDetail(kpi, currentClientData) : null);
-    const panel = el(panelId);
-    if (!detail || !panel) return;
-
     const sectionsHtml = (detail.sections || [])
       .filter((s) => (s.rows || []).length)
       .map((s) => `
         <div class="kpi-detail-group">
           <h5>${esc(s.titulo)}</h5>
           ${s.rows.map((row) => `
-            <div class="kpi-detail-row">
-              <span class="lbl" title="${esc(row.label)}">${esc(row.label)}</span>
-              <span class="val">${esc(row.value)}</span>
+            <div class="kpi-detail-row${row.detail ? ' kpi-detail-row--stack' : ''}">
+              <div class="kpi-detail-row__main">
+                <span class="lbl" title="${esc(row.label)}">${esc(row.label)}</span>
+                <span class="val">${row.badge ? `<span class="badge-tipo badge-flotilla">${esc(row.badge)}</span>` : esc(row.value)}</span>
+              </div>
+              ${row.detail ? `<p class="kpi-detail-row__detail">${esc(row.detail)}</p>` : ''}
             </div>`).join('')}
         </div>`).join('');
 
-    const gotoId = card.dataset.goto;
     panel.innerHTML = `
       <div class="kpi-detail-panel__head">
         <div>
@@ -980,8 +1509,26 @@
     });
 
     openKpiKey = key;
-    card.classList.add('is-open');
+    sourceEl?.classList.add('is-open');
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function openClientKpiByKey(kpi, gotoId) {
+    if (!currentClientData) return;
+    const detail = buildClientKpiDetail(kpi, currentClientData);
+    const source = document.querySelector(`.client-360-stat[data-open-kpi="${kpi}"]`)
+      || document.querySelector(`.kpi-card--clickable[data-kpi="${kpi}"]`);
+    fillKpiDetailPanel('clientKpiDetail', kpi, detail, gotoId, source);
+  }
+
+  function renderKpiDetail(card) {
+    const kpi = card.dataset.kpi;
+    const isCierre = kpi.startsWith('cierre');
+    const panelId = isCierre ? 'cierresKpiDetail' : 'clientKpiDetail';
+    const detail = isCierre
+      ? (currentCierresData ? buildCierresKpiDetail(kpi, currentCierresData) : null)
+      : (currentClientData ? buildClientKpiDetail(kpi, currentClientData) : null);
+    fillKpiDetailPanel(panelId, kpi, detail, card.dataset.goto || null, card);
   }
 
   document.querySelectorAll('.kpi-card--clickable[data-kpi]').forEach((card) => {
@@ -994,14 +1541,33 @@
     });
   });
 
+  document.querySelectorAll('[data-vend-kpi]').forEach((card) => {
+    card.addEventListener('click', () => renderVendComercialDetail(card.dataset.vendKpi));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        renderVendComercialDetail(card.dataset.vendKpi);
+      }
+    });
+  });
+
   el('btnBuscar').addEventListener('click', buscar);
   el('searchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') buscar();
   });
 
+  document.querySelectorAll('[data-vista]').forEach((btn) => {
+    btn.addEventListener('click', () => setVista(btn.dataset.vista));
+  });
+  el('btnVendedor')?.addEventListener('click', cargarVendedorResumen);
+  el('vendedorInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') cargarVendedorResumen();
+  });
+
   el('btnPeriodoOrdenes').addEventListener('click', () => {
     setActivePeriodChip(null);
-    cargarCierresPeriodo();
+    if (currentVista === 'vendedor') cargarVendedorResumen();
+    else cargarCierresPeriodo();
   });
 
   function setActivePeriodChip(preset) {
@@ -1019,6 +1585,11 @@
         el('fechaFinOrdenes').value = '';
         setText('periodLabel', 'Todo el histórico');
         el('cierresPanel').classList.add('hidden');
+        if (currentVista === 'vendedor') {
+          if (el('vendedorInput')?.value.trim()) cargarVendedorResumen();
+          else setStatus('Periodo: todo el histórico. Elige un vendedor.');
+          return;
+        }
         if (currentIdContacto) openClient(currentIdContacto);
         else setStatus('Periodo limpiado. Define fechas o busca un cliente.');
         return;
@@ -1026,7 +1597,8 @@
       const [start, end] = window.Dashboard.getDatePresetRange(preset);
       el('fechaInicioOrdenes').value = window.Dashboard.formatDateInput(start);
       el('fechaFinOrdenes').value = window.Dashboard.formatDateInput(end);
-      cargarCierresPeriodo();
+      if (currentVista === 'vendedor') cargarVendedorResumen();
+      else cargarCierresPeriodo();
     });
   });
 
@@ -1037,10 +1609,14 @@
   const params = new URLSearchParams(location.search);
   const initialId = params.get('id');
   const initialQ = params.get('q');
+  const initialVendedor = params.get('vendedor');
   el('fechaInicioOrdenes').value = params.get('fechaInicio') || '';
   el('fechaFinOrdenes').value = params.get('fechaFin') || '';
 
-  if (params.get('fechaInicio') && params.get('fechaFin') && !initialId && !initialQ) {
+  if (initialVendedor) {
+    if (el('vendedorInput')) el('vendedorInput').value = initialVendedor;
+    setVista('vendedor');
+  } else if (params.get('fechaInicio') && params.get('fechaFin') && !initialId && !initialQ) {
     cargarCierresPeriodo();
   } else if (initialId) {
     openClient(initialId);

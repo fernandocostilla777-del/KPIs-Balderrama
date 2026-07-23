@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "ventasSharePct": 70,
+  "postventaSharePct": 30,
+  "ventas": {
+    "piso": 37,
+    "foraneos": 23,
+    "suauto": 1,
+    "cholula": 9,
+    "zacatelco": 10,
+    "casa": 8,
+    "intercambios": 2.5,
+    "flotillas": 1,
+    "seminuevos": 8.5
+  },
+  "postventa": {
+    "refacciones": 10,
+    "hyp": 10,
+    "servicio": 10
+  },
+  "updatedAt": null
+}

@@ -39,7 +39,7 @@
     const horizon = document.getElementById('horizonSelect').value || '6';
     const status = document.getElementById('statusBadge');
     status.textContent = 'Consultando...';
-    status.className = 'top-bar-meta status-loading';
+    status.className = 'sidebar-status-line status-loading';
     showLoading(true);
 
     try {
@@ -71,6 +71,22 @@
       setText('dataSource', data.dataSource === 'sql'
         ? 'Datos operativos (SQL) · ventas facturadas'
         : (data.dataSource || '—'));
+
+      if (window.KpiInsights?.apply) {
+        window.KpiInsights.apply('forecast', {
+          horizon,
+          dataSource: data.dataSource,
+          kpis: {
+            lastMonthUnits: k.lastMonthUnits,
+            nextMonthUnits: k.nextMonthUnits,
+            horizonTotal: k.horizonTotal,
+            horizonMonths: k.horizonMonths,
+            mape: k.mape,
+            variationPct: k.variationPct,
+            incompleteMonth: k.incompleteMonth,
+          },
+        });
+      }
 
       document.getElementById('forecastTable').innerHTML = data.forecast.map((r) => `
         <tr>
@@ -224,10 +240,10 @@
       status.textContent = data.dataSource === 'sql'
         ? `Datos operativos · ${data.metrics.trainSize} meses de historia`
         : `Fuente: ${data.dataSource} · ${data.metrics.trainSize} meses`;
-      status.className = 'top-bar-meta';
+      status.className = 'sidebar-status-line';
     } catch (err) {
       status.textContent = err.message;
-      status.className = 'top-bar-meta status-error';
+      status.className = 'sidebar-status-line status-error';
     } finally {
       showLoading(false);
     }

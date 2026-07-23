@@ -1,0 +1,197 @@
+@import "@ionic/angular/css/core.css";
+@import "@ionic/angular/css/normalize.css";
+@import "@ionic/angular/css/structure.css";
+@import "@ionic/angular/css/typography.css";
+@import "@ionic/angular/css/display.css";
+@import "@ionic/angular/css/padding.css";
+@import "@ionic/angular/css/float-elements.css";
+@import "@ionic/angular/css/text-alignment.css";
+@import "@ionic/angular/css/text-transformation.css";
+@import "@ionic/angular/css/flex-utils.css";
+@import "@ionic/angular/css/palettes/dark.always.css";
+@import "./theme/variables.scss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap');
+
+html, body, ion-app {
+  background: #12131c;
+}
+
+.liquid-bg {
+  --background: transparent;
+  position: relative;
+}
+
+.liquid-bg::before,
+.liquid-bg::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(60px);
+}
+
+.liquid-bg::before {
+  width: 140vw;
+  height: 140vw;
+  top: -20%;
+  left: -30%;
+  background: radial-gradient(circle, var(--liquid-cyan), transparent 70%);
+}
+
+.liquid-bg::after {
+  width: 120vw;
+  height: 120vw;
+  bottom: -15%;
+  right: -25%;
+  background: radial-gradient(circle, var(--liquid-purple), transparent 70%);
+}
+
+ion-content.liquid-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 2rem;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.glass-header ion-toolbar {
+  --background: rgba(255, 255, 255, 0.05);
+  --border-color: rgba(255, 255, 255, 0.1);
+}
+
+.page-pad {
+  --padding-start: 20px;
+  --padding-end: 20px;
+  --padding-top: 12px;
+  --padding-bottom: 100px;
+}
+
+.hero-card .hero-value {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #e1fdff;
+  line-height: 1.1;
+}
+
+.label-upper {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(185, 202, 203, 0.9);
+}
+
+.hero-top, .row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--glass-border);
+  color: #74f5ff;
+}
+
+.progress-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 12px;
+
+  &.tall {
+    height: 8px;
+  }
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #74f5ff, #d1bcff);
+  box-shadow: 0 0 10px rgba(0, 242, 255, 0.45);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.kpi-tile {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  padding: 12px;
+
+  .kpi-label {
+    display: block;
+    font-size: 0.75rem;
+    color: rgba(185, 202, 203, 0.85);
+    margin-bottom: 4px;
+  }
+
+  strong {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 1.1rem;
+  }
+
+  .cyan { color: #74f5ff; }
+  .purple { color: #d1bcff; }
+}
+
+h3 {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.muted {
+  color: rgba(227, 225, 239, 0.55);
+  font-size: 0.85rem;
+  margin: 8px 0 0;
+}
+
+.accent {
+  color: #74f5ff;
+  font-weight: 600;
+}
+
+.center-msg {
+  display: flex;
+  justify-content: center;
+  padding: 48px;
+}
+
+.error-card {
+  color: #ffb4ab;
+  text-align: center;
+}
+
+.glass-list {
+  background: transparent;
+}
+
+.glass-list-item {
+  --background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}

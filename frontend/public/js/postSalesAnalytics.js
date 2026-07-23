@@ -54,14 +54,37 @@
     return tipo || '';
   }
 
+  function hasRefacciones(r) {
+    return Boolean(r?.conRefacciones) || Number(r?.refaccionesLineas || 0) > 0;
+  }
+
   function applyFilters(records, filters = {}) {
     let rows = records.slice();
     const q = (filters.buscar || '').trim().toLowerCase();
+    const area = String(filters.area || '').toLowerCase();
+
+    if (area === 'servicio' || area === 'hyp') {
+      if (global.PostSalesOrderTypes?.matchesArea) {
+        rows = rows.filter((r) => global.PostSalesOrderTypes.matchesArea(r, area));
+      }
+    } else if (area === 'refacciones') {
+      rows = [];
+    }
 
     if (filters.status) rows = rows.filter((r) => r.statusGroup === filters.status || r.statusLabel === filters.status);
     if (filters.asesor) rows = rows.filter((r) => r.asesor === filters.asesor);
     if (filters.aseguradora) rows = rows.filter((r) => (r.aseguradora || 'Sin aseguradora') === filters.aseguradora);
-    if (filters.tipo) rows = rows.filter((r) => orderTypeLabel(r) === filters.tipo);
+    if (filters.tipo != null) {
+      const tipos = Array.isArray(filters.tipo)
+        ? filters.tipo
+        : String(filters.tipo).split('|').map((t) => t.trim()).filter(Boolean);
+      if (!tipos.length) {
+        rows = [];
+      } else {
+        const set = new Set(tipos);
+        rows = rows.filter((r) => set.has(orderTypeLabel(r)));
+      }
+    }
     if (filters.antiguedad) rows = rows.filter((r) => r.antiguedad === filters.antiguedad);
     if (filters.semaforo) rows = rows.filter((r) => r.semaforo === filters.semaforo);
     if (filters.importeMin != null && filters.importeMin !== '') {
@@ -94,9 +117,90 @@
     };
   }
 
-  function computeDashboard(records, filters = {}, openSnapshot = []) {
+  function buildMonthlyMap(rows) {
+    const monthlyMap = new Map();
+    for (const r of rows) {
+      const mk = monthKey(r.ingresoDate);
+      if (!mk) continue;
+      if (!monthlyMap.has(mk)) {
+        monthlyMap.set(mk, { ingresadas: 0, facturadas: 0, importeFacturado: 0, importeAbierto: 0, importeIngresado: 0 });
+      }
+      const m = monthlyMap.get(mk);
+      m.ingresadas += 1;
+      m.importeIngresado += r.importe;
+      if (r.status === 'I') {
+        m.facturadas += 1;
+        m.importeFacturado += r.importeFacturado || r.importe;
+      }
+      if (OPEN.has(r.status)) m.importeAbierto += r.importeAbierto || r.importe;
+    }
+    return [...monthlyMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }
+
+  function buildMejorMesStats(monthly) {
+    const bestMonth = monthly.reduce((best, [k, v]) => (
+      !best || v.importeFacturado > best.importeFacturado ? { key: k, ...v } : best
+    ), null);
+    if (!bestMonth) return { bestMonth: null, mejorMesStats: null };
+
+    const monthsRanked = monthly
+      .map(([k, v]) => ({ key: k, label: monthLabel(k), ...v }))
+      .sort((a, b) => b.importeFacturado - a.importeFacturado);
+    const secondBest = monthsRanked[1] || null;
+    const totalFacturadoMeses = monthsRanked.reduce((s, m) => s + m.importeFacturado, 0);
+    const promedioMensualFacturado = monthsRanked.length
+      ? totalFacturadoMeses / monthsRanked.length
+      : 0;
+
+    return {
+      bestMonth,
+      mejorMesStats: {
+        key: bestMonth.key,
+        label: monthLabel(bestMonth.key),
+        importeFacturado: bestMonth.importeFacturado,
+        facturadas: bestMonth.facturadas,
+        ingresadas: bestMonth.ingresadas,
+        importeIngresado: bestMonth.importeIngresado,
+        ticket: bestMonth.facturadas ? bestMonth.importeFacturado / bestMonth.facturadas : 0,
+        pctFacturacion: bestMonth.ingresadas
+          ? Math.round((bestMonth.facturadas / bestMonth.ingresadas) * 1000) / 10
+          : 0,
+        mesesComparados: monthsRanked.length,
+        segundoMes: secondBest ? secondBest.label : null,
+        segundoKey: secondBest ? secondBest.key : null,
+        segundoImporte: secondBest ? secondBest.importeFacturado : 0,
+        vsSegundoImporte: secondBest ? bestMonth.importeFacturado - secondBest.importeFacturado : 0,
+        vsSegundoPct: secondBest && secondBest.importeFacturado > 0
+          ? Math.round(((bestMonth.importeFacturado - secondBest.importeFacturado) / secondBest.importeFacturado) * 1000) / 10
+          : null,
+        promedioMensual: promedioMensualFacturado,
+        vsPromedioImporte: bestMonth.importeFacturado - promedioMensualFacturado,
+        vsPromedioPct: promedioMensualFacturado > 0
+          ? Math.round(((bestMonth.importeFacturado - promedioMensualFacturado) / promedioMensualFacturado) * 1000) / 10
+          : null,
+        sharePct: totalFacturadoMeses > 0
+          ? Math.round((bestMonth.importeFacturado / totalFacturadoMeses) * 1000) / 10
+          : 0,
+        alcance: 'acumulado-anio',
+        ranking: monthsRanked.map((m, i) => ({
+          posicion: i + 1,
+          key: m.key,
+          label: m.label,
+          importeFacturado: m.importeFacturado,
+          facturadas: m.facturadas,
+          ingresadas: m.ingresadas,
+          esMejor: m.key === bestMonth.key,
+        })),
+      },
+    };
+  }
+
+  function computeDashboard(records, filters = {}, openSnapshot = [], ytdRecords = null) {
     const filtered = applyFilters(records, filters);
     const filteredOpen = applyFilters(openSnapshot, filters);
+    const ytdFiltered = Array.isArray(ytdRecords) && ytdRecords.length
+      ? applyFilters(ytdRecords, filters)
+      : filtered;
     const facturadas = filtered.filter((r) => r.status === 'I');
     const importeIngresado = sum(filtered, (r) => r.importe);
     const importeFacturado = sum(facturadas, (r) => r.importeFacturado || r.importe);
@@ -122,6 +226,11 @@
 
     const risk = {
       criticas60: filteredOpen.filter((r) => r.critica).length,
+      conRefacciones: filteredOpen.filter((r) => hasRefacciones(r)).length,
+      conRefaccionesImporte: sum(
+        filteredOpen.filter((r) => hasRefacciones(r)),
+        (r) => r.importeAbierto || r.importe,
+      ),
       promesasVencidas: filteredOpen.filter((r) => r.promesaVencida).length,
       promedioSemanal: weekly.length
         ? Math.round((sum(filtered, () => 1) / weekly.length) * 10) / 10
@@ -133,30 +242,14 @@
       excluidos: filtered.filter((r) => r.excluido).length,
     };
 
-    const monthlyMap = new Map();
-    for (const r of filtered) {
-      const mk = monthKey(r.ingresoDate);
-      if (!mk) continue;
-      if (!monthlyMap.has(mk)) {
-        monthlyMap.set(mk, { ingresadas: 0, facturadas: 0, importeFacturado: 0, importeAbierto: 0, importeIngresado: 0 });
-      }
-      const m = monthlyMap.get(mk);
-      m.ingresadas += 1;
-      m.importeIngresado += r.importe;
-      if (r.status === 'I') {
-        m.facturadas += 1;
-        m.importeFacturado += r.importeFacturado || r.importe;
-      }
-      if (OPEN.has(r.status)) m.importeAbierto += r.importeAbierto || r.importe;
-    }
-    const monthly = [...monthlyMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const monthly = buildMonthlyMap(filtered);
+    const monthlyYtd = buildMonthlyMap(ytdFiltered);
     const lastMonth = monthly[monthly.length - 1];
     const prevMonth = monthly[monthly.length - 2];
-    const bestMonth = monthly.reduce((best, [k, v]) => (
-      !best || v.importeFacturado > best.importeFacturado ? { key: k, ...v } : best
-    ), null);
+    const { bestMonth, mejorMesStats } = buildMejorMesStats(monthlyYtd);
 
     const canceladas = filtered.filter((r) => r.status === 'C');
+    const cerradas = filtered.filter((r) => !OPEN.has(r.status));
     const pctImporteFacturado = importeIngresado > 0
       ? Math.round((importeFacturado / importeIngresado) * 1000) / 10
       : 0;
@@ -171,6 +264,9 @@
       pctFacturado: filtered.length ? Math.round((facturadas.length / filtered.length) * 1000) / 10 : 0,
       ticketPromFacturado: facturadas.length ? importeFacturado / facturadas.length : 0,
       canceladas: canceladas.length,
+      cerradas: cerradas.length,
+      pctCerrado: filtered.length ? Math.round((cerradas.length / filtered.length) * 1000) / 10 : 0,
+      importeCerrado: sum(cerradas, (r) => r.importeFacturado || r.importe),
     };
 
     const finance = {
@@ -188,6 +284,10 @@
       pctImporteFacturado,
       ticketPromIngresado: filtered.length ? importeIngresado / filtered.length : 0,
       ultimoMesLabel: lastMonth ? monthLabel(lastMonth[0]) : '—',
+      ultimoMesKey: lastMonth ? lastMonth[0] : null,
+      mejorMesKey: bestMonth ? bestMonth.key : null,
+      mejorMesStats,
+      mejorMesAlcance: 'acumulado-anio',
       tieneMesAnterior: Boolean(prevMonth),
     };
 
@@ -270,9 +370,9 @@
 
         const buckets = new Map();
         for (const r of filtered.filter(sinAseg)) {
-          const { letra, tipo, label } = fromOrden(r.orden);
+          const { letra, tipo } = fromOrden(r.orden);
           const key = letra || '_';
-          if (!buckets.has(key)) buckets.set(key, { tipoOrden: label, letra, rows: [] });
+          if (!buckets.has(key)) buckets.set(key, { tipoOrden: tipo, letra, rows: [] });
           buckets.get(key).rows.push(r);
         }
 

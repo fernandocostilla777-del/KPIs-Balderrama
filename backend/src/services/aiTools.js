@@ -11,6 +11,7 @@ const { loadDailySalesUnits } = require('./ventasNuevosFinanciero');
 const { getVentasPorModelo } = require('./aiVentasModeloService');
 const crmCiclos = require('./crmCiclosService');
 const { getVentasPorAuto } = require('./ventasPorAuto');
+const { generateExcelExport } = require('./aiExcelExport');
 
 const FORBIDDEN_SQL = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE',
@@ -178,12 +179,28 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'consultar_postventa',
-      description: 'Post-venta y servicio: órdenes ingresadas/facturadas, importes, tipos de orden y desempeño.',
+      description:
+        'Post-venta / taller: órdenes de Servicio o HyP. '
+        + 'OBLIGATORIO usar area="hyp" para hojalatería y pintura (folios A,F,H,J,V,Z,Ó) '
+        + 'y area="servicio" para órdenes de servicio (C,D,G,I,K,N,O,Q,S,X,Y,Á,M,E,R). '
+        + 'Para abiertas usa estatus="abiertas". '
+        + 'Ejemplo: “órdenes HyP abiertas de 2025” → area=hyp, estatus=abiertas, fechaInicio=2025-01-01, fechaFin=2025-12-31. '
+        + 'Responde con resumen.totalFiltrado o resumen.abiertasEnPeriodo; NUNCA uses un total global sin filtrar área.',
       parameters: {
         type: 'object',
         properties: {
           fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD' },
           fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD' },
+          area: {
+            type: 'string',
+            description: 'Área PostVenta: hyp | servicio | posventa (default posventa = ambas)',
+            enum: ['hyp', 'servicio', 'posventa'],
+          },
+          estatus: {
+            type: 'string',
+            description: 'Filtro de estatus: abiertas | facturadas | canceladas | todas',
+            enum: ['abiertas', 'facturadas', 'canceladas', 'todas'],
+          },
         },
         required: ['fechaInicio', 'fechaFin'],
       },
@@ -280,11 +297,20 @@ const TOOL_DEFINITIONS = [
     function: {
       name: 'historico_cliente_crm',
       description:
-        'Histórico COMPLETO de actividad de un cliente en el distribuidor. Compra en ciclo de venta = VIN asignado '
+        'CRM 360° COMPLETO de un cliente en el distribuidor. Incluye ficha360 con última compra, modelo/año/VIN actual, '
+        + 'tipo y plazo de compra, mensualidades y saldo ESTIMADOS, valor de referencia, última visita a taller, '
+        + 'último kilometraje registrado, servicios realizados, último contacto comercial, interacciones digitales, '
+        + 'quejas/incidencias e historial de compras. Incluye timeline360 unificada con compras, financiamiento, taller, '
+        + 'contactos comerciales, leads digitales y pruebas de manejo. También devuelve contratos de financiamiento '
+        + 'relacionados al VIN con su número de contrato, aseguradora y PVAs '
+        + '(GAP, garantía extendida, accesorios, OnStar y mantenimientos integrados). '
+        + 'Compra en ciclo de venta = VIN asignado '
         + '(columna T del CRM). Ese VIN se cruza con SQL: factura de venta (ADE_VTAFI.VTE_SERIE / VTE_DOCTO) y '
         + 'órdenes de servicio (SER_ORDEN.ORE_NUMSERIE). También incluye ciclos, leads, solicitudes de crédito F&I '
         + '(financiera, estatus, aprobación, enganche), pruebas de manejo, vendedor, línea de tiempo y TODAS las unidades '
         + 'a nombre del cliente en el DMS, incluso si no tienen una venta originada en nuestra base. Un ID CRM puede tener varios VIN. '
+        + 'Las mensualidades pagadas y el saldo son aproximaciones por tiempo transcurrido y amortización lineal; '
+        + 'no deben presentarse como pagos o saldo real de la financiera. '
         + 'Requiere id_contacto (= ID CRM).',
       parameters: {
         type: 'object',
@@ -337,7 +363,8 @@ const TOOL_DEFINITIONS = [
         + 'pruebas de manejo, ciclos, actividades y compras por VIN. Incluye clientes distintos y conversiones '
         + 'lead→compra, solicitud→compra y prueba de manejo→compra. Úsala para preguntas agregadas que mezclan '
         + 'dos o más fuentes, o para solicitudes/pruebas de manejo por periodo. La conversión lead→compra es una '
-        + 'atribución por ID CRM + VIN de la cohorte de leads, no el cociente entre ventas totales del DMS y leads.',
+        + 'atribución por ID CRM + VIN de la cohorte de leads, no el cociente entre ventas totales del DMS y leads. '
+        + 'Para desempeño de un vendedor/ejecutivo concreto usa resumen_vendedor_360 (no esta herramienta).',
       parameters: {
         type: 'object',
         properties: {
@@ -349,6 +376,95 @@ const TOOL_DEFINITIONS = [
           desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD (opcional)' },
           hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD (opcional)' },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'listar_vendedores_360',
+      description:
+        'Lista vendedores/ejecutivos/asesores de Seguimiento 360 con conteo de clientes en cartera. '
+        + 'Fuentes: ciclos (vendedor), leads (ejecutivo), pruebas de manejo (ejecutivo) y solicitudes F&I (asesor). '
+        + 'Úsala cuando pregunten “qué vendedores hay”, “busca al ejecutivo X” o antes de resumen_vendedor_360 '
+        + 'si el nombre no es exacto.',
+      parameters: {
+        type: 'object',
+        properties: {
+          q: { type: 'string', description: 'Filtro opcional por nombre parcial del vendedor' },
+          limit: { type: 'string', description: 'Máximo de resultados (default 50)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'resumen_vendedor_360',
+      description:
+        'Resumen Seguimiento 360 por vendedor (misma vista “Por vendedor” del dashboard). Incluye cartera '
+        + '(clientes, ciclos, leads, solicitudes F&I, pruebas de manejo), unidades vendidas del libro ADE_VTAFI '
+        + '(comercial.libroVentas.unidades — fuente fiel de facturas), desempeño comercial F&I '
+        + '(contratos, monto a financiar, plazo promedio, distribución de plazos), promedio de PVAs '
+        + '(cantidad promedio de productos PVA por contrato, no monto) y retorno a taller. '
+        + 'Úsala para “cómo va el vendedor X”, “unidades vendidas de…”, “contratos F&I de…”, “PVAs de…”, '
+        + '“pruebas de manejo de…”, “retorno a taller del ejecutivo…”.',
+      parameters: {
+        type: 'object',
+        properties: {
+          vendedor: { type: 'string', description: 'Nombre del vendedor / ejecutivo / asesor' },
+          fechaInicio: { type: 'string', description: 'Inicio opcional YYYY-MM-DD' },
+          fechaFin: { type: 'string', description: 'Fin opcional YYYY-MM-DD' },
+          limit: { type: 'string', description: 'Máximo de clientes en listado (default 50 para IA)' },
+        },
+        required: ['vendedor'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'generar_excel',
+      description:
+        'OBLIGATORIA cuando el usuario pida Excel, XLSX, descargar listado, exportar o “pásame un archivo”. '
+        + 'Genera un .xlsx descargable en el chat. '
+        + 'fuente=postventa (con area hyp|servicio|posventa y estatus) | ventas | inventario | manual. '
+        + 'Para postventa/ventas siempre pasa fechaInicio y fechaFin. '
+        + 'NO inventes filas: esta herramienta consulta la base y arma el archivo. '
+        + 'Después de usarla, dile al usuario que use el botón de descarga del chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fuente: {
+            type: 'string',
+            description: 'Origen de datos',
+            enum: ['postventa', 'ventas', 'inventario', 'manual'],
+          },
+          fechaInicio: { type: 'string', description: 'YYYY-MM-DD (postventa/ventas)' },
+          fechaFin: { type: 'string', description: 'YYYY-MM-DD (postventa/ventas)' },
+          area: {
+            type: 'string',
+            description: 'Solo postventa: hyp | servicio | posventa',
+            enum: ['hyp', 'servicio', 'posventa'],
+          },
+          estatus: {
+            type: 'string',
+            description: 'Solo postventa: abiertas | facturadas | canceladas | todas',
+            enum: ['abiertas', 'facturadas', 'canceladas', 'todas'],
+          },
+          filename: { type: 'string', description: 'Nombre sugerido del archivo, ej. hyp_abiertas_2025.xlsx' },
+          filas: {
+            type: 'array',
+            description: 'Solo fuente=manual: arreglo de objetos fila',
+            items: { type: 'object' },
+          },
+          sheets: {
+            type: 'array',
+            description: 'Solo fuente=manual: hojas [{name, rows}]',
+            items: { type: 'object' },
+          },
+        },
+        required: ['fuente'],
       },
     },
   },
@@ -505,7 +621,12 @@ async function executeTool(name, args = {}) {
       result = await getInventory({ planPisoPeriod: args.planPisoPeriod || 'all' });
       break;
     case 'consultar_postventa':
-      result = await getPostSales(args);
+      result = await getPostSales({
+        fechaInicio: args.fechaInicio,
+        fechaFin: args.fechaFin,
+        area: args.area || 'posventa',
+        estatus: args.estatus || 'todas',
+      });
       break;
     case 'consultar_contabilidad':
       result = await getContabilidad(args);
@@ -535,6 +656,69 @@ async function executeTool(name, args = {}) {
     case 'resumen_seguimiento_360':
       result = crmCiclos.getSeguimiento360Summary(args);
       break;
+    case 'listar_vendedores_360':
+      result = {
+        vendedores: crmCiclos.listVendedores({
+          q: args.q || '',
+          limit: Math.min(100, Math.max(1, Number(args.limit) || 50)),
+        }),
+      };
+      break;
+    case 'resumen_vendedor_360': {
+      const raw = await crmCiclos.getVendedorResumen({
+        vendedor: args.vendedor,
+        fechaInicio: args.fechaInicio || null,
+        fechaFin: args.fechaFin || null,
+        limit: Math.min(80, Math.max(1, Number(args.limit) || 50)),
+      });
+      const fin = raw.comercial?.financiamiento || {};
+      const pvas = fin.pvas || {};
+      const libro = raw.comercial?.libroVentas || {};
+      const retorno = raw.comercial?.retornoTaller || {};
+      result = {
+        vendedor: raw.vendedor,
+        periodo: raw.periodo,
+        totales: raw.totales,
+        desempenoComercial: {
+          unidadesVendidas: Number(libro.unidades || 0),
+          fuenteUnidades: libro.fuente || null,
+          contratosFi: Number(fin.contratos || 0),
+          matchFinanciamiento: fin.match || null,
+          montoPromedioFinanciar: fin.montoFinanciarPromedio ?? null,
+          plazoPromedioMeses: fin.plazoPromedio ?? null,
+          plazos: fin.plazos || [],
+          promedioCantidadPvasPorContrato: pvas.promedioCantidadPvas ?? null,
+          penetracionPvasPct: pvas.penetracionPct ?? null,
+          pvasPorTipo: pvas.porTipo || [],
+          retornoTallerPct: retorno.tasaRetornoPct ?? null,
+          retornoBase: retorno.base || null,
+          ordenesTaller: retorno.ordenes ?? 0,
+        },
+        libroVentas: {
+          unidades: Number(libro.unidades || 0),
+          fuente: libro.fuente || null,
+          porTipoPago: libro.sql?.porTipoPago || libro.crm?.porTipoPago || [],
+          muestra: (libro.sql?.muestra?.length ? libro.sql.muestra : (libro.crm?.muestra || [])).slice(0, 10),
+        },
+        clientes: (raw.clientes || []).slice(0, 25).map((c) => ({
+          id_contacto: c.id_contacto,
+          nombre: c.nombre,
+          ciclos: c.ciclos,
+          leads: c.leads,
+          solicitudes: c.solicitudes,
+          pruebas: c.pruebas,
+          compras: c.compras,
+          ultima_actividad: c.ultima_actividad,
+        })),
+        nota:
+          'Unidades vendidas = libro ADE_VTAFI cuando hay match. '
+          + 'Promedio PVAs = cantidad de productos con monto > 0 por contrato (no monto monetario).',
+      };
+      break;
+    }
+    case 'generar_excel':
+      result = await generateExcelExport(args);
+      break;
     case 'listar_tablas_bd':
       result = await listTables(args);
       break;
@@ -548,6 +732,7 @@ async function executeTool(name, args = {}) {
       throw new Error(`Herramienta desconocida: ${name}`);
   }
 
+  if (name === 'generar_excel') return result;
   return trimForAi(result);
 }
 

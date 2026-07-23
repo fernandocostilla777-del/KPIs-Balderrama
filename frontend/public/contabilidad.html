@@ -6,7 +6,7 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -15,10 +15,6 @@
 <header class="top-bar">
 <div class="top-bar-actions">
 <span class="top-bar-title">Contabilidad</span>
-<span id="statusBadge" class="top-bar-meta">Listo</span>
-</div>
-<div class="top-bar-actions">
-<span id="lastUpdated" class="top-bar-meta"></span>
 </div>
 </header>
 <div class="main-content custom-scrollbar">
@@ -136,7 +132,7 @@
 <div id="kpiGastoDepartamento" class="kpi-value money">—</div>
 <p id="kpiGastoDepartamentoSub" class="kpi-subtitle">Por departamento · catálogo Excel</p>
 </div>
-<div class="kpi-card kpi-card--eeff kpi-card--amber">
+<div class="kpi-card kpi-card--eeff kpi-card--amber" id="kpiCardGastosOperacion">
 <div class="kpi-card-head"><span class="kpi-title">Gastos de operación</span><span class="material-symbols-outlined kpi-icon">payments</span></div>
 <div id="kpiGastosOperacion" class="kpi-value money">—</div>
 <p id="kpiGastosOperacionSub" class="kpi-subtitle">Grupo 0700 · total consolidado</p>
@@ -474,12 +470,13 @@ Exportar CSV
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js?v=2"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/sidebar.js?v=8"></script>
+<script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/assistant-bubble.js?v=3"></script>
+<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/assistant-bubble.js?v=4"></script>
 <script src="/js/eeff.js?v=12"></script>
-<script src="/js/contabilidad.js?v=18"></script>
+<script src="/js/contabilidad.js?v=19"></script>
 </body>
 </html>

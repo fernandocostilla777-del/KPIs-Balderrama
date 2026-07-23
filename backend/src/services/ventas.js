@@ -2,6 +2,7 @@ const { getPool, sql } = require('../db');
 const { enrichVentasRows, countByCanal, CANALES_ORDEN, getCanalLabel } = require('./canales-venta');
 const { getNotificacionesEntrega, computeCoberturaSofia } = require('./sofia-entregas');
 const { getComparativoYtd } = require('./ytd-comparativo');
+const { getInventory } = require('./inventoryService');
 
 const TIPO_VENTA_CASE = `
   CASE VTE_FORMAPAGO
@@ -375,6 +376,10 @@ function summarizeVentas(rows, inicio, fin, sofiaEntregas = {}) {
     totalClientes: clientes.size,
     totalModelos: modelos.size,
     totalNotificacionesEntrega: cobertura.totalNotificacionesEntrega,
+    totalEntregasSinPrevias: sofiaEntregas.totalEntregasSinPrevias
+      ?? entregasRows.filter((r) => Number(r.PREVIAS || 0) === 0).length,
+    totalEntregasConPrevias: sofiaEntregas.totalEntregasConPrevias
+      ?? entregasRows.filter((r) => Number(r.PREVIAS || 0) > 0).length,
     totalUnidadesFacturadas: cobertura.totalUnidadesFacturadas,
     totalUnidadesFacturadasNoTimbradas: cobertura.totalUnidadesFacturadasNoTimbradas,
     numeradorCobertura: cobertura.numeradorCobertura,
@@ -415,17 +420,20 @@ async function getVentas({ fechaInicio, fechaFin }) {
   request.input('fechaFin', sql.Date, fin);
 
   const incluirPorMes = isAcumuladoAnual(inicio, fin);
-  const [result, sofiaEntregas, comparativoYtd] = await Promise.all([
+  const [result, sofiaEntregas, comparativoYtd, inventorySnap] = await Promise.all([
     request.query(buildVentasQuery()),
     getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes }),
     getComparativoYtd(fechaFin),
+    getInventory({ planPisoPeriod: 'all' }).catch(() => null),
   ]);
 
   const rows = enrichVentasRows(result.recordset);
+  const resumen = summarizeVentas(rows, inicio, fin, sofiaEntregas);
+  resumen.unidadesApartadas = Number(inventorySnap?.summary?.availableApartadas ?? 0);
 
   return {
     filtros: { fechaInicio, fechaFin },
-    resumen: summarizeVentas(rows, inicio, fin, sofiaEntregas),
+    resumen,
     comparativoYtd,
     registros: rows,
     entregasSofia: sofiaEntregas.registrosEntrega ?? [],

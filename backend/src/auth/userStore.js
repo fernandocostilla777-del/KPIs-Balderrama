@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ROLES, resolveRoleFromUsername } = require('./roles');
-const { hashPassword, verifyPassword } = require('./password');
+const { hashPassword, verifyPassword, encryptPassword, decryptPassword } = require('./password');
 
 const USERS_FILE = path.join(__dirname, '../../data/users.json');
 
@@ -55,11 +55,26 @@ function toStoredUser({ username, password, role, active = true }) {
   return {
     username: normalizeUsername(username),
     passwordHash: hashPassword(password),
+    passwordEnc: encryptPassword(password),
     role,
     active,
     createdAt: ts,
     updatedAt: ts,
   };
+}
+
+function backfillPasswordEnc(store) {
+  let changed = false;
+  for (const user of store.users) {
+    if (user.passwordEnc) continue;
+    const seed = SEED_USERS.find((s) => s.username === user.username);
+    if (seed && verifyPassword(seed.password, user.passwordHash)) {
+      user.passwordEnc = encryptPassword(seed.password);
+      changed = true;
+    }
+  }
+  if (changed) saveStore(store);
+  return store;
 }
 
 function ensureStore() {
@@ -85,7 +100,7 @@ function loadStore() {
     const raw = fs.readFileSync(USERS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     if (parsed?.users && Array.isArray(parsed.users)) {
-      return ensureAdminUser(parsed);
+      return backfillPasswordEnc(ensureAdminUser(parsed));
     }
   } catch {
     /* archivo corrupto */
@@ -107,6 +122,7 @@ function sanitizeUser(user) {
     role: user.role,
     roleLabel: ROLES[user.role]?.label || user.role,
     active: user.active !== false,
+    hasRevealablePassword: Boolean(user.passwordEnc),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -177,7 +193,11 @@ function updateUser(username, { password, role, active }) {
   const user = store.users[idx];
   if (role !== undefined) user.role = validateRole(role);
   if (active !== undefined) user.active = !!active;
-  if (password) user.passwordHash = hashPassword(validatePassword(password));
+  if (password) {
+    const validPassword = validatePassword(password);
+    user.passwordHash = hashPassword(validPassword);
+    user.passwordEnc = encryptPassword(validPassword);
+  }
   user.updatedAt = nowIso();
 
   store.users[idx] = user;
@@ -210,6 +230,27 @@ function getAssignableRoles() {
   return Object.values(ROLES).map((r) => ({ id: r.id, label: r.label }));
 }
 
+function revealPassword(username) {
+  const user = findUser(username);
+  if (!user) throw new Error('Usuario no encontrado.');
+  if (!user.passwordEnc) {
+    return {
+      available: false,
+      username: user.username,
+      message: 'No hay contraseña recuperable. Restablézcala desde Administración para poder verla después.',
+    };
+  }
+  const password = decryptPassword(user.passwordEnc);
+  if (!password) {
+    return {
+      available: false,
+      username: user.username,
+      message: 'No se pudo descifrar la contraseña. Restablézcala e intente de nuevo.',
+    };
+  }
+  return { available: true, username: user.username, password };
+}
+
 module.exports = {
   listUsers,
   findUser,
@@ -218,4 +259,5 @@ module.exports = {
   updateUser,
   deleteUser,
   getAssignableRoles,
+  revealPassword,
 };

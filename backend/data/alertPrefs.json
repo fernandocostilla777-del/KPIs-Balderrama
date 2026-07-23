@@ -1,0 +1,37 @@
+{
+  "byRole": {
+    "administracion": [
+      "inventario_envejecidas",
+      "inventario_sin_previas",
+      "plan_piso",
+      "entregas_sin_previa",
+      "sin_timbrar",
+      "margen_asesores",
+      "taller_abiertas",
+      "sistema"
+    ],
+    "direccion": [
+      "inventario_envejecidas",
+      "inventario_sin_previas",
+      "plan_piso",
+      "entregas_sin_previa",
+      "sin_timbrar",
+      "margen_asesores",
+      "taller_abiertas",
+      "sistema"
+    ],
+    "gerencia_comercial": [
+      "entregas_sin_previa",
+      "sin_timbrar",
+      "margen_asesores",
+      "inventario_sin_previas",
+      "sistema"
+    ],
+    "contabilidad": [
+      "plan_piso",
+      "sin_timbrar",
+      "taller_abiertas",
+      "sistema"
+    ]
+  }
+}

@@ -1,6 +1,8 @@
 const { query } = require('../db');
 const { loadVentasNuevosFinancial } = require('./ventasNuevosFinanciero');
 const { loadSalesExecutiveAnalytics } = require('./salesExecutiveAnalytics');
+const { getVentas } = require('./ventas');
+const { getInventory } = require('./inventoryService');
 
 function buildSerDateClause(fechaInicio, fechaFin) {
   if (!fechaInicio || !fechaFin) return { clause: '', params: {} };
@@ -76,6 +78,8 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     service,
     inventoryByModel,
     salesAnalytics,
+    ventasOps,
+    inventoryOps,
   ] = await Promise.all([
     loadVentasNuevosFinancial({ fechaInicio, fechaFin }),
     query(`
@@ -93,6 +97,14 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
       FROM BI_INVENTARIO_NUEVOS GROUP BY Modelo
     `),
     loadSalesExecutiveAnalytics({ fechaInicio, fechaFin }),
+    getVentas({ fechaInicio, fechaFin }).catch((err) => {
+      console.warn('[overview] ventas ops:', err.message);
+      return null;
+    }),
+    getInventory({ planPisoPeriod: 'all' }).catch((err) => {
+      console.warn('[overview] inventory ops:', err.message);
+      return null;
+    }),
   ]);
 
   const s = ventasLive.summary;
@@ -105,6 +117,8 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
   }));
 
   const totalEstadoUnits = ventasLive.byEstado.reduce((sum, r) => sum + r.units, 0) || 1;
+  const vr = ventasOps?.resumen || {};
+  const inv = inventoryOps?.summary || {};
 
   const sales = {
     units: s.units,
@@ -122,17 +136,35 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     conCosto: s.conCosto,
     sinCosto: s.sinCosto,
     marginPct: s.marginPct,
-    retailUnits: s.retailUnits,
-    flotillaUnits: s.flotillaUnits,
+    retailUnits: s.retailUnits ?? vr.totalRetail ?? 0,
+    flotillaUnits: s.flotillaUnits ?? vr.totalFlotillas ?? 0,
     ticketPromedio: s.ticketPromedio,
   };
 
   const inventory = {
-    totalUnits: invBi.totalUnits,
-    availableUnits: invBi.availableUnits,
+    totalUnits: Number(inv.totalUnits ?? invBi.totalUnits ?? 0),
+    availableUnits: Number(inv.available ?? invBi.availableUnits ?? 0),
+    availableLibres: Number(inv.availableLibres ?? 0),
+    availableApartadas: Number(inv.availableApartadas ?? 0),
+    sinPrevias: Number(inv.sinPrevias ?? 0),
+    conPrevias: Number(inv.conPrevias ?? 0),
+    planPisoTotal: Number(inv.planPisoTotal ?? 0),
+    planPisoUnits: Number(inv.planPisoUnits ?? 0),
+    ageingAlertsCount: Number(inv.ageingAlertsCount ?? inv.urgentAlerts ?? 0),
+    avgDaysAvailable: Number(inv.avgDaysAvailable ?? 0),
     inventoryCost: invBi.inventoryCost,
     inventoryValue: invBi.inventoryValue || invBi.inventoryCost,
-    avgDaysInventory: 0,
+    avgDaysInventory: Number(inv.avgDaysAvailable ?? 0),
+  };
+
+  const operaciones = {
+    unidadesVendidas: Number(vr.totalVentas ?? sales.units ?? 0),
+    retail: Number(vr.totalRetail ?? sales.retailUnits ?? 0),
+    flotillas: Number(vr.totalFlotillas ?? sales.flotillaUnits ?? 0),
+    entregasSofia: Number(vr.totalNotificacionesEntrega ?? 0),
+    sinTimbrar: Number(vr.totalUnidadesFacturadasNoTimbradas ?? 0),
+    coberturaNumerador: Number(vr.numeradorCobertura ?? 0),
+    entregasSinPrevias: Number(vr.totalEntregasSinPrevias ?? 0),
   };
 
   const consolidated = {
@@ -145,16 +177,24 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
   return {
     filtros: { fechaInicio, fechaFin },
     financial: { sales, inventory, service, consolidated },
+    operaciones,
     salesAnalytics,
     kpis: {
       totalUnits: sales.units,
       totalRevenue: sales.revenue,
       totalUtility: sales.utility,
+      marginPct: sales.marginPct,
       avgDaysInventory: inventory.avgDaysInventory,
       availableUnits: inventory.availableUnits,
       totalInventory: inventory.totalUnits,
+      sinPrevias: inventory.sinPrevias,
+      planPisoTotal: inventory.planPisoTotal,
+      ageingAlertsCount: inventory.ageingAlertsCount,
       serviceRevenue: service.importeFacturado,
       serviceOrders: service.facturadas,
+      entregasSofia: operaciones.entregasSofia,
+      retailUnits: operaciones.retail,
+      flotillaUnits: operaciones.flotillas,
       fleetEfficiency: inventory.totalUnits
         ? Math.round((1 - inventory.availableUnits / inventory.totalUnits) * 1000) / 10
         : 0,

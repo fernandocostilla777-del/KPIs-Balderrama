@@ -41,10 +41,19 @@ function printStartupUrls() {
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowed = new Set([FRONTEND_URL, `http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+  const allowed = new Set([
+    FRONTEND_URL,
+    `http://localhost:${PORT}`,
+    `http://127.0.0.1:${PORT}`,
+    'http://localhost:8100',
+    'http://127.0.0.1:8100',
+    'capacitor://localhost',
+    'http://localhost',
+  ]);
   getLanAddresses().forEach((ip) => {
     allowed.add(`http://${ip}:5173`);
     allowed.add(`http://${ip}:${PORT}`);
+    allowed.add(`http://${ip}:8100`);
   });
   if (origin && allowed.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);

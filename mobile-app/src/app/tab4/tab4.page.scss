@@ -1,0 +1,28 @@
+:host {
+  display: block;
+}
+
+.seguimiento-hero {
+  background:
+    linear-gradient(135deg, rgba(0, 219, 231, 0.1), rgba(112, 0, 255, 0.1)),
+    var(--glass-bg);
+}
+
+.conversion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.conversion-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: rgba(227, 225, 239, 0.85);
+  font-size: 0.9rem;
+}
+
+.conversion-meta strong {
+  color: #74f5ff;
+}

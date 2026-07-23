@@ -39,9 +39,31 @@ async function api(path) {
   return res.json();
 }
 
-function showLoading(show = true) {
+function ensureLoadingBrand() {
   const el = document.getElementById('loading');
+  if (!el || el.dataset.branded === '1') return el;
+  el.dataset.branded = '1';
+  el.innerHTML = `
+    <div class="loading-stack">
+      <div class="loading-brand">
+        <span class="loading-brand__by">Powered by</span>
+        <img src="/img/logoStrega-uniformes.png" alt="Strega Uniformes" class="loading-brand__logo"/>
+      </div>
+      <div class="spinner" aria-hidden="true"></div>
+    </div>
+  `;
+  return el;
+}
+
+function showLoading(show = true) {
+  const el = ensureLoadingBrand() || document.getElementById('loading');
   if (el) el.classList.toggle('hidden', !show);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ensureLoadingBrand);
+} else {
+  ensureLoadingBrand();
 }
 
 function setText(id, text) {
@@ -240,9 +262,14 @@ function initDateFilter({ onConsult, statusId = 'statusBadge', getInitialRange }
   function setStatus(text, type = 'ready') {
     if (!statusEl) return;
     statusEl.textContent = text;
-    statusEl.className = 'top-bar-meta';
+    statusEl.className = 'sidebar-status-line';
     if (type === 'loading') statusEl.classList.add('status-loading');
     else if (type === 'error') statusEl.classList.add('status-error');
+    const dot = document.querySelector('[data-status-dot]');
+    if (dot) {
+      dot.classList.toggle('is-loading', type === 'loading');
+      dot.classList.toggle('is-error', type === 'error');
+    }
   }
 
   const compact = initCompactFilters();

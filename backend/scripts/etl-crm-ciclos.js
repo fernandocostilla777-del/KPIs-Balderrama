@@ -1,19 +1,20 @@
 /**
  * ETL: carga "Balderrama Ciclos" (CRM) a base interna SQLite.
  *
- * Fuente : CSV export del CRM (ID_CONTACTO = ID CRM)
+ * Fuente : CSV o XLSX export del CRM (ID_CONTACTO = ID CRM)
  * Destino: backend/data/crm-ciclos.db  · tabla crm_actividades
  *
  * Uso:
+ *   node backend/scripts/etl-crm-ciclos.js "C:/ruta/Balderrama acumulados ciclos.xlsx"
  *   node backend/scripts/etl-crm-ciclos.js "C:/ruta/Balderrama Ciclos.csv"
- *   (sin argumento usa la ruta por defecto de Documents/MAYO 2026)
  */
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const XLSX = require('xlsx');
 const Database = require('better-sqlite3');
 
-const DEFAULT_CSV = 'C:/Users/ABP-SDN-SI-221/Documents/MAYO 2026/Balderrama Ciclos.csv';
+const DEFAULT_SOURCE = 'C:/Users/ABP-SDN-SI-221/Documents/JULIO 26/Balderrama acumulados ciclos.xlsx';
 const DB_PATH = path.join(__dirname, '../data/crm-ciclos.db');
 
 const COLUMNS = [
@@ -25,11 +26,32 @@ const COLUMNS = [
   'FECHA_ENTREGA', 'VENDEDOR',
 ];
 
-// Fechas del CRM vienen dd/mm/yyyy → ISO yyyy-mm-dd para poder ordenar
-function toIso(dmy) {
-  const m = String(dmy || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (!m) return null;
-  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+const DATE_COLS = new Set([
+  'FECHA_INICIO_CICLO', 'FECHA_ESPERADA_CIERRE', 'FECHA_ESTATUS',
+  'FECHA_CREA_ACTIVIDAD', 'FECHA_PROG_ACTIVIDAD', 'FECHA_RESP_ACTIVIDAD',
+  'FECHA_FACTURA', 'FECHA_ENTREGA',
+]);
+
+function toIso(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const number = Number(value);
+  if (Number.isFinite(number) && number > 20000 && number < 80000) {
+    return new Date(Date.UTC(1899, 11, 30) + number * 86400000).toISOString().slice(0, 10);
+  }
+  const text = String(value).trim();
+  const dmy = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+}
+
+function cleanText(value) {
+  if (value == null) return null;
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  return text || null;
 }
 
 function parseCsvLine(line) {
@@ -54,10 +76,105 @@ function parseCsvLine(line) {
   return out;
 }
 
+function mapRecord(header, cells) {
+  const rec = {};
+  for (let i = 0; i < COLUMNS.length; i++) {
+    const col = COLUMNS[i];
+    const idx = header.indexOf(col);
+    let val = idx >= 0 ? cells[idx] : null;
+    if (DATE_COLS.has(col)) val = toIso(val);
+    else val = cleanText(val);
+    rec[col] = val;
+  }
+  return rec;
+}
+
+function valuesFromRecord(rec) {
+  return [
+    rec.ID_CONTACTO, rec.NOMBRE_CONTACTO, rec.ID_CICLO, rec.FECHA_INICIO_CICLO,
+    rec.FECHA_ESPERADA_CIERRE, rec.ESTATUS, rec.FECHA_ESTATUS, rec.TIPO_ACTIVIDAD,
+    rec.FECHA_CREA_ACTIVIDAD, rec.FECHA_PROG_ACTIVIDAD, rec.FECHA_RESP_ACTIVIDAD,
+    rec.RESULTADO_ACTIVIDAD, rec.FORMA_CONTACTO, rec.MEDIO_CONTACTO, rec.SUBMEDIO_CONTACTO,
+    rec.NUM_FACTURA, rec.FACTURADO_A, rec.PRODUCTO_VENDIDO, rec.FECHA_FACTURA, rec.VIN,
+    rec.FECHA_ENTREGA, rec.VENDEDOR,
+  ];
+}
+
+async function loadFromCsv(csvPath, insertMany) {
+  let header = null;
+  let total = 0;
+  let skipped = 0;
+  let batch = [];
+  const BATCH_SIZE = 5000;
+
+  const rl = readline.createInterface({
+    input: fs.createReadStream(csvPath, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  });
+
+  for await (const line of rl) {
+    if (!header) {
+      header = parseCsvLine(line.replace(/^\uFEFF/, '')).map((h) => h.trim().toUpperCase());
+      continue;
+    }
+    if (!line.trim()) continue;
+    const rec = mapRecord(header, parseCsvLine(line));
+    if (!rec.ID_CONTACTO) { skipped += 1; continue; }
+    batch.push(valuesFromRecord(rec));
+    if (batch.length >= BATCH_SIZE) {
+      insertMany(batch);
+      total += batch.length;
+      batch = [];
+      if (total % 100000 === 0) console.log(`  ${total.toLocaleString()} filas...`);
+    }
+  }
+  if (batch.length) {
+    insertMany(batch);
+    total += batch.length;
+  }
+  return { total, skipped };
+}
+
+function loadFromXlsx(xlsxPath, insertMany) {
+  console.log('Leyendo XLSX...');
+  const workbook = XLSX.readFile(xlsxPath);
+  const sheetName = workbook.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    header: 1,
+    defval: null,
+    raw: true,
+  });
+  if (!rows.length) throw new Error('El Excel no tiene filas');
+
+  const header = rows[0].map((h) => String(h || '').trim().toUpperCase());
+  let total = 0;
+  let skipped = 0;
+  let batch = [];
+  const BATCH_SIZE = 5000;
+
+  for (let i = 1; i < rows.length; i++) {
+    const rec = mapRecord(header, rows[i] || []);
+    if (!rec.ID_CONTACTO) { skipped += 1; continue; }
+    batch.push(valuesFromRecord(rec));
+    if (batch.length >= BATCH_SIZE) {
+      insertMany(batch);
+      total += batch.length;
+      batch = [];
+      if (total % 100000 === 0) console.log(`  ${total.toLocaleString()} filas...`);
+    }
+  }
+  if (batch.length) {
+    insertMany(batch);
+    total += batch.length;
+  }
+  console.log(`Hoja "${sheetName}" procesada`);
+  return { total, skipped };
+}
+
 async function run() {
-  const csvPath = process.argv[2] || DEFAULT_CSV;
-  if (!fs.existsSync(csvPath)) {
-    console.error(`No existe el archivo: ${csvPath}`);
+  const sourcePath = process.argv[2] || DEFAULT_SOURCE;
+  if (!fs.existsSync(sourcePath)) {
+    console.error(`No existe el archivo: ${sourcePath}`);
     process.exit(1);
   }
 
@@ -105,61 +222,15 @@ async function run() {
       fecha_entrega, vendedor
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
-
-  const DATE_COLS = new Set([
-    'FECHA_INICIO_CICLO', 'FECHA_ESPERADA_CIERRE', 'FECHA_ESTATUS',
-    'FECHA_CREA_ACTIVIDAD', 'FECHA_PROG_ACTIVIDAD', 'FECHA_RESP_ACTIVIDAD',
-    'FECHA_FACTURA', 'FECHA_ENTREGA',
-  ]);
-
-  let header = null;
-  let total = 0;
-  let skipped = 0;
-  let batch = [];
-  const BATCH_SIZE = 5000;
   const insertMany = db.transaction((rows) => {
-    for (const r of rows) insert.run(r);
+    for (const row of rows) insert.run(row);
   });
 
-  // Export del CRM: UTF-8 con BOM
-  const rl = readline.createInterface({
-    input: fs.createReadStream(csvPath, { encoding: 'utf8' }),
-    crlfDelay: Infinity,
-  });
-
-  for await (const line of rl) {
-    if (!header) {
-      const clean = line.replace(/^\uFEFF/, '');
-      header = parseCsvLine(clean).map((h) => h.trim().toUpperCase());
-      continue;
-    }
-    if (!line.trim()) continue;
-    const cells = parseCsvLine(line);
-    const rec = {};
-    for (let i = 0; i < COLUMNS.length; i++) {
-      const idx = header.indexOf(COLUMNS[i]);
-      let val = idx >= 0 ? String(cells[idx] ?? '').trim() : '';
-      if (DATE_COLS.has(COLUMNS[i])) val = toIso(val);
-      rec[COLUMNS[i]] = val || null;
-    }
-    if (!rec.ID_CONTACTO) { skipped++; continue; }
-
-    batch.push([
-      rec.ID_CONTACTO, rec.NOMBRE_CONTACTO, rec.ID_CICLO, rec.FECHA_INICIO_CICLO,
-      rec.FECHA_ESPERADA_CIERRE, rec.ESTATUS, rec.FECHA_ESTATUS, rec.TIPO_ACTIVIDAD,
-      rec.FECHA_CREA_ACTIVIDAD, rec.FECHA_PROG_ACTIVIDAD, rec.FECHA_RESP_ACTIVIDAD,
-      rec.RESULTADO_ACTIVIDAD, rec.FORMA_CONTACTO, rec.MEDIO_CONTACTO, rec.SUBMEDIO_CONTACTO,
-      rec.NUM_FACTURA, rec.FACTURADO_A, rec.PRODUCTO_VENDIDO, rec.FECHA_FACTURA, rec.VIN,
-      rec.FECHA_ENTREGA, rec.VENDEDOR,
-    ]);
-    if (batch.length >= BATCH_SIZE) {
-      insertMany(batch);
-      total += batch.length;
-      batch = [];
-      if (total % 100000 === 0) console.log(`  ${total.toLocaleString()} filas...`);
-    }
-  }
-  if (batch.length) { insertMany(batch); total += batch.length; }
+  const ext = path.extname(sourcePath).toLowerCase();
+  console.log('Cargando', sourcePath, '...');
+  const { total, skipped } = ext === '.xlsx' || ext === '.xls'
+    ? loadFromXlsx(sourcePath, insertMany)
+    : await loadFromCsv(sourcePath, insertMany);
 
   console.log('Creando índices...');
   db.exec(`
@@ -176,6 +247,7 @@ async function run() {
     contactos: db.prepare('SELECT COUNT(DISTINCT id_contacto) AS n FROM crm_actividades').get().n,
     ciclos: db.prepare('SELECT COUNT(DISTINCT id_ciclo) AS n FROM crm_actividades').get().n,
     facturas: db.prepare("SELECT COUNT(DISTINCT num_factura) AS n FROM crm_actividades WHERE num_factura IS NOT NULL").get().n,
+    comprasConVin: db.prepare("SELECT COUNT(DISTINCT vin) AS n FROM crm_actividades WHERE vin IS NOT NULL AND trim(vin) <> ''").get().n,
   };
   db.close();
 

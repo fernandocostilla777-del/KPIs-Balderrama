@@ -6,7 +6,7 @@
 <title>Seguimiento 360 | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=65" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="seguimiento">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -15,7 +15,6 @@
 <header class="top-bar">
 <div class="top-bar-actions">
 <span class="top-bar-title">Seguimiento 360</span>
-<span id="statusBadge" class="top-bar-meta">Listo</span>
 </div>
 <div class="top-bar-actions">
 <span id="crmDbInfo" class="top-bar-meta"></span>
@@ -26,9 +25,16 @@
 <section class="section-panel dashboard-section">
 <div class="table-header-row" style="margin-bottom:8px">
 <div>
-<h3 class="section-title" style="margin-bottom:4px">Vista 360 del cliente</h3>
+<h3 class="section-title" style="margin-bottom:4px">Vista 360</h3>
+<p class="section-subtitle" style="margin:0">Consulta por cliente o el acumulado de actividad por vendedor</p>
 </div>
 </div>
+<div class="filter-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+<button type="button" class="chip active" data-vista="cliente" id="chipVistaCliente">Por cliente</button>
+<button type="button" class="chip" data-vista="vendedor" id="chipVistaVendedor">Por vendedor</button>
+</div>
+
+<div id="vistaClienteWrap">
 <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
 <input id="searchInput" type="search" class="filter-input" style="flex:1;min-width:260px;max-width:520px"
   placeholder="ID CRM, nombre, VIN, teléfono o correo..." autocomplete="off"/>
@@ -38,8 +44,26 @@ Buscar
 </button>
 <span id="searchCount" class="top-bar-meta"></span>
 </div>
+</div>
+
+<div id="vistaVendedorWrap" class="hidden">
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+<label class="filter-label" style="display:flex;align-items:center;gap:8px;flex:1;min-width:260px;max-width:520px">
+<span class="material-symbols-outlined" style="font-size:18px;color:#64748b">badge</span>
+<input id="vendedorInput" list="vendedorDatalist" type="search" class="filter-input" style="flex:1"
+  placeholder="Escribe o elige un vendedor..." autocomplete="off"/>
+</label>
+<datalist id="vendedorDatalist"></datalist>
+<button type="button" id="btnVendedor" class="btn-glass btn-primary">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-4px">insights</span>
+Ver acumulado
+</button>
+<span id="vendedorHint" class="top-bar-meta"></span>
+</div>
+</div>
+
 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(148,163,184,0.2)">
-<span class="filter-label" style="font-weight:700">Periodo taller:</span>
+<span class="filter-label" style="font-weight:700">Periodo:</span>
 <label class="filter-label" style="display:flex;align-items:center;gap:6px">Desde
 <input id="fechaInicioOrdenes" type="date" class="filter-input"/>
 </label>
@@ -57,6 +81,98 @@ Buscar
 <button type="button" class="chip" data-periodo="anio-actual">Año actual</button>
 <button type="button" class="chip" data-periodo="anio-anterior">Año anterior</button>
 <button type="button" class="chip" data-periodo="todo">Todo el histórico</button>
+</div>
+</section>
+
+<section id="vendedorPanel" class="section-panel table-panel dashboard-section hidden">
+<div class="table-header-row">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Acumulado por vendedor</h3>
+<p id="vendedorSubtitle" class="section-subtitle" style="margin:0">Seleccione un vendedor</p>
+</div>
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+<span id="vendedorCount" class="top-bar-meta"></span>
+</div>
+</div>
+<div class="kpi-grid" style="margin:14px 0">
+<div class="kpi-card kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Clientes</span></div>
+<div id="kVendClientes" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Ciclos</span></div>
+<div id="kVendCiclos" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--amber">
+<div class="kpi-card-head"><span class="kpi-title">Leads</span></div>
+<div id="kVendLeads" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--magenta">
+<div class="kpi-card-head"><span class="kpi-title">Solicitudes F&amp;I</span></div>
+<div id="kVendSolicitudes" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--slate">
+<div class="kpi-card-head"><span class="kpi-title">Pruebas de manejo</span></div>
+<div id="kVendPruebas" class="kpi-value">—</div>
+</div>
+</div>
+
+<div class="client-360-divider"><span>Desempeño comercial</span></div>
+<div class="kpi-grid" style="margin:14px 0">
+<button type="button" class="kpi-card kpi-card--blue kpi-card--clickable" data-vend-kpi="libro" aria-expanded="false" title="Clic para ver detalle de unidades vendidas">
+<div class="kpi-card-head"><span class="kpi-title">Unidades vendidas</span><span class="material-symbols-outlined kpi-icon">menu_book</span></div>
+<div id="kVendLibro" class="kpi-value">—</div>
+<p id="kVendLibroSub" class="kpi-subtitle">Libro ADE_VTAFI</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+</button>
+<button type="button" class="kpi-card kpi-card--green kpi-card--clickable" data-vend-kpi="contratos" aria-expanded="false" title="Clic para ver contratos F&amp;I">
+<div class="kpi-card-head"><span class="kpi-title">Contratos F&amp;I</span><span class="material-symbols-outlined kpi-icon">description</span></div>
+<div id="kVendContratos" class="kpi-value">—</div>
+<p id="kVendContratosSub" class="kpi-subtitle">Financiamiento colocado</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+</button>
+<div class="kpi-card kpi-card--amber">
+<div class="kpi-card-head"><span class="kpi-title">Monto a financiar</span></div>
+<div id="kVendMontoFin" class="kpi-value money">—</div>
+<p class="kpi-subtitle">Promedio por contrato</p>
+</div>
+<button type="button" class="kpi-card kpi-card--violet kpi-card--clickable" data-vend-kpi="plazos" aria-expanded="false" title="Clic para ver distribución de plazos">
+<div class="kpi-card-head"><span class="kpi-title">Plazo promedio</span><span class="material-symbols-outlined kpi-icon">calendar_month</span></div>
+<div id="kVendPlazo" class="kpi-value">—</div>
+<p id="kVendPlazoSub" class="kpi-subtitle">Meses a crédito</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+</button>
+<button type="button" class="kpi-card kpi-card--magenta kpi-card--clickable" data-vend-kpi="pvas" aria-expanded="false" title="Clic para ver PVAs por producto">
+<div class="kpi-card-head"><span class="kpi-title">Promedio PVAs</span><span class="material-symbols-outlined kpi-icon">add_shopping_cart</span></div>
+<div id="kVendPvas" class="kpi-value">—</div>
+<p id="kVendPvasSub" class="kpi-subtitle">Cantidad promedio de PVAs por contrato</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+</button>
+<div class="kpi-card kpi-card--rose">
+<div class="kpi-card-head"><span class="kpi-title">Retorno a taller</span></div>
+<div id="kVendRetorno" class="kpi-value">—</div>
+<p id="kVendRetornoSub" class="kpi-subtitle">Clientes con compra que regresan</p>
+</div>
+</div>
+
+<div id="vendedorComercialDetail" class="kpi-detail-panel section-panel hidden" style="margin-bottom:16px"></div>
+
+<div class="table-scroll" style="max-height:480px">
+<table class="data-table">
+<thead><tr>
+<th>ID CRM</th>
+<th>Cliente</th>
+<th class="cell-num">Leads</th>
+<th class="cell-num">Ciclos</th>
+<th class="cell-num">Solicitudes</th>
+<th class="cell-num">Pruebas</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">Actividades</th>
+<th>Última actividad</th>
+<th></th>
+</tr></thead>
+<tbody id="vendedorClientesTable"></tbody>
+</table>
 </div>
 </section>
 
@@ -146,7 +262,20 @@ Buscar
 <div id="clientBadges" style="display:flex;gap:8px;flex-wrap:wrap"></div>
 </section>
 
-<section class="kpi-grid">
+<section id="secFicha360" class="client-360-shell dashboard-section">
+<div class="client-360-hero">
+<div>
+<span class="client-360-eyebrow">CRM 360°</span>
+<h3 class="client-360-title">Radiografía 360 del cliente</h3>
+<p class="client-360-subtitle">Indicadores, historia y detalle operativo conectados en un solo expediente.</p>
+</div>
+<div id="ficha360Vehicle" class="client-360-vehicle"></div>
+</div>
+<div id="ficha360Grid" class="client-360-grid"></div>
+
+<div class="client-360-divider"><span>Volumen del expediente</span></div>
+
+<section class="kpi-grid client-360-kpis">
 <div class="kpi-card kpi-card--amber kpi-card--clickable" data-kpi="leads" data-goto="secLeads" role="button" tabindex="0" title="Clic para ver desglose">
 <div class="kpi-card-head"><span class="kpi-title">Leads</span><span class="material-symbols-outlined kpi-icon">campaign</span></div>
 <div id="kLeads" class="kpi-value">—</div>
@@ -156,13 +285,7 @@ Buscar
 <div class="kpi-card kpi-card--blue kpi-card--clickable" data-kpi="ciclos" data-goto="secTimeline" role="button" tabindex="0" title="Clic para ver desglose">
 <div class="kpi-card-head"><span class="kpi-title">Ciclos de venta</span><span class="material-symbols-outlined kpi-icon">autorenew</span></div>
 <div id="kCiclos" class="kpi-value">—</div>
-<p class="kpi-subtitle">Ciclos en CRM</p>
-<div class="kpi-accent"></div>
-</div>
-<div class="kpi-card kpi-card--green kpi-card--clickable" data-kpi="compras" data-goto="secCompras" role="button" tabindex="0" title="Clic para ver desglose">
-<div class="kpi-card-head"><span class="kpi-title">Compras</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
-<div id="kCompras" class="kpi-value">—</div>
-<p class="kpi-subtitle">VIN asignado en ciclo (col. T)</p>
+<p class="kpi-subtitle">Historia comercial en la línea de tiempo</p>
 <div class="kpi-accent"></div>
 </div>
 <div class="kpi-card kpi-card--slate kpi-card--clickable" data-kpi="unidades" data-goto="secUnidades" role="button" tabindex="0" title="Clic para ver desglose">
@@ -171,7 +294,7 @@ Buscar
 <p class="kpi-subtitle">A nombre del cliente en el DMS</p>
 <div class="kpi-accent"></div>
 </div>
-<div class="kpi-card kpi-card--magenta kpi-card--clickable" data-kpi="solicitudes" data-goto="secSolicitudes" role="button" tabindex="0" title="Clic para ver desglose">
+<div class="kpi-card kpi-card--magenta kpi-card--clickable" data-kpi="solicitudes" role="button" tabindex="0" title="Clic para ver desglose">
 <div class="kpi-card-head"><span class="kpi-title">Solicitudes F&amp;I</span><span class="material-symbols-outlined kpi-icon">request_quote</span></div>
 <div id="kSolicitudes" class="kpi-value">—</div>
 <p class="kpi-subtitle">Crédito / financiamiento</p>
@@ -199,6 +322,25 @@ Buscar
 
 <div id="clientKpiDetail" class="kpi-detail-panel hidden"></div>
 
+<div class="client-360-divider">
+<span>Historia del cliente</span>
+<span id="timeline360Count" class="top-bar-meta"></span>
+</div>
+
+<div id="secTimeline" class="client-360-timeline">
+<div id="timeline360Filters" class="timeline-360-filters"></div>
+<div id="timeline360List" class="timeline-360-list"></div>
+</div>
+
+<div id="ficha360Method" class="client-360-method hidden"></div>
+</section>
+
+<section class="client-360-detail-intro dashboard-section">
+<span class="client-360-eyebrow">DETALLE OPERATIVO</span>
+<h3 class="section-title" style="margin:4px 0">Desglose por dominio</h3>
+<p class="section-subtitle" style="margin:0">Las tablas amplían lo que ya resume el expediente: misma unidad, mismo cliente y mismos eventos.</p>
+</section>
+
 <section class="chart-grid">
 <div class="section-panel">
 <h3 class="section-title">Actividad del cliente por año</h3>
@@ -207,13 +349,6 @@ Buscar
 <div id="panelChartTaller" class="section-panel">
 <h3 class="section-title">Importe de taller por año</h3>
 <div class="chart-card"><div class="chart-wrap"><canvas id="chartTallerAnual"></canvas></div></div>
-</div>
-</section>
-
-<section class="chart-grid">
-<div id="panelChartOrdenesTipo" class="section-panel">
-<h3 class="section-title">Órdenes por tipo de servicio</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="chartOrdenesTipo"></canvas></div></div>
 </div>
 </section>
 
@@ -249,16 +384,43 @@ Buscar
 <table class="data-table">
 <thead><tr>
 <th>VIN (CRM)</th>
-<th>Serie SQL</th>
 <th>Producto</th>
 <th>Modelo SQL</th>
 <th>Factura CRM</th>
-<th>Factura SQL</th>
 <th>Fecha factura</th>
 <th>Vendedor</th>
 <th class="cell-num">Órdenes serv.</th>
 </tr></thead>
 <tbody id="comprasTable"></tbody>
+</table>
+</div>
+</section>
+
+<section id="secFinanciamiento" class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Financiamiento y PVA</h3>
+<span id="financiamientoCount" class="top-bar-meta"></span>
+</div>
+<p class="section-subtitle">Contratos de “Historico de contratos” relacionados por número de serie (VIN) al cliente</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr>
+<th>VIN</th>
+<th>No. contrato</th>
+<th>Unidad</th>
+<th>Fecha compra</th>
+<th class="cell-num">Plazo</th>
+<th>Enganche %</th>
+<th class="cell-money">Enganche $</th>
+<th>GAP</th>
+<th>Garantía extendida</th>
+<th>OnStar</th>
+<th>Mantenimientos</th>
+<th>Aseguradora</th>
+<th>Robo parcial</th>
+<th>Tipo de plan</th>
+</tr></thead>
+<tbody id="financiamientoTable"></tbody>
 </table>
 </div>
 </section>
@@ -279,7 +441,6 @@ Buscar
 <th>Modelo</th>
 <th>Ingreso</th>
 <th>Cierre</th>
-<th>Status</th>
 <th>Asesor</th>
 <th>Factura taller</th>
 <th class="cell-money">Importe</th>
@@ -311,31 +472,6 @@ Buscar
 </div>
 </section>
 
-<section id="secSolicitudes" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Solicitudes de crédito (F&amp;I)</h3>
-<span id="solicitudesCount" class="top-bar-meta"></span>
-</div>
-<p class="section-subtitle">Solicitudes de financiamiento ligadas al ID CRM (columna "Contacto CRM")</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>Fecha</th>
-<th>No.</th>
-<th>Financiera</th>
-<th>Unidad / paquete</th>
-<th>Estatus</th>
-<th>Asesor</th>
-<th>F&amp;I</th>
-<th>Aprobación</th>
-<th>Fecha compra</th>
-<th class="cell-money">Enganche</th>
-</tr></thead>
-<tbody id="solicitudesTable"></tbody>
-</table>
-</div>
-</section>
-
 <section id="secLeads" class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
 <h3 class="section-title" style="margin-bottom:0">Leads (interesado)</h3>
@@ -358,31 +494,24 @@ Buscar
 </div>
 </section>
 
-<section id="secTimeline" class="section-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Línea de tiempo (actividades CRM)</h3>
-<span id="timelineCount" class="top-bar-meta"></span>
-</div>
-<div id="timelineList" class="custom-scrollbar" style="max-height:420px;overflow-y:auto"></div>
-</section>
-
 </div>
 
 <div id="emptyState" class="section-panel dashboard-section" style="text-align:center;padding:48px 24px">
 <span class="material-symbols-outlined" style="font-size:44px;color:#94a3b8">person_search</span>
-<p style="color:#64748b;font-weight:600;margin-top:12px">Busca un cliente para ver su seguimiento 360</p>
-<p style="color:#94a3b8;font-size:13px">Leads → ciclos → solicitud F&amp;I → compra (VIN) → factura → órdenes de servicio</p>
+<p style="color:#64748b;font-weight:600;margin-top:12px">Busca un cliente o elige un vendedor</p>
+<p style="color:#94a3b8;font-size:13px">Por cliente: expediente 360 · Por vendedor: acumulado de actividad de su cartera</p>
 </div>
 
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/sidebar.js?v=8"></script>
+<script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/assistant-bubble.js?v=3"></script>
-<script src="/js/seguimiento.js?v=16"></script>
+<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/assistant-bubble.js?v=4"></script>
+<script src="/js/seguimiento.js?v=34"></script>
 </body>
 </html>

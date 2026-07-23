@@ -1,8 +1,9 @@
 let trendChart, estadoChart;
 
-function kpiCard(title, value, sub, cls) {
+function kpiCard(title, value, sub, cls, id) {
   const money = String(value).includes('$');
-  return `<div class="kpi-card kpi-card--${cls || 'blue'}"><span class="kpi-title">${title}</span><div class="kpi-value${money ? ' money' : ''}">${value}</div>${sub ? `<p class="kpi-subtitle">${sub}</p>` : ''}</div>`;
+  const idAttr = id ? ` id="${id}"` : '';
+  return `<div class="kpi-card kpi-card--${cls || 'blue'}"${idAttr}><span class="kpi-title">${title}</span><div class="kpi-value${money ? ' money' : ''}">${value}</div>${sub ? `<p class="kpi-subtitle">${sub}</p>` : ''}</div>`;
 }
 
 function kpiGroup(title, cards) {
@@ -159,16 +160,34 @@ function renderSalesAnalytics(a, fmt) {
   ].join('');
 }
 
-function renderFinancialSummary(f, salesAnalytics) {
+function renderFinancialSummary(f, salesAnalytics, operaciones = {}) {
   const { fmt } = Dashboard;
-  const { service, inventory, consolidated } = f;
+  const { sales, service, inventory, consolidated } = f;
+  const ops = operaciones;
+
+  const unidades = ops.unidadesVendidas ?? sales.units;
+  const retail = ops.retail ?? ops.retailUnits ?? sales.retailUnits ?? 0;
+  const flotilla = ops.flotillas ?? ops.flotillaUnits ?? sales.flotillaUnits ?? 0;
+  const entregasSofia = ops.entregasSofia ?? 0;
+  const sinTimbrar = ops.sinTimbrar ?? 0;
+  const entregasSinPrevias = ops.entregasSinPrevias ?? 0;
 
   document.getElementById('financialSummary').innerHTML = [
-    kpiGroup('Consolidado · periodo', [
-      kpiCard('Ingreso ventas nuevos', fmt.currency(consolidated.ingresoTotal - consolidated.facturacionServicio), 'venta subtotal · sin IVA', 'blue'),
-      kpiCard('Facturación servicio', fmt.currency(consolidated.facturacionServicio), `${service.pctFacturado}% órdenes facturadas`, 'violet'),
-      kpiCard('Utilidad ventas', fmt.currency(consolidated.utilidadVentas), `${f.sales.marginPct}% sobre subtotal`, 'green'),
-      kpiCard('Valor inventario (lista)', fmt.currency(consolidated.valorInventario), `${fmt.number(inventory.availableUnits)} uds. disponibles`, 'amber'),
+    kpiGroup('Tablero ejecutivo · alta dirección', [
+      kpiCard('Unidades vendidas', fmt.number(unidades), `${fmt.number(retail)} retail · ${fmt.number(flotilla)} flotilla`, 'blue', 'ovUnidades'),
+      kpiCard('Utilidad bruta', fmt.currency(consolidated.utilidadVentas), `${sales.marginPct}% margen`, 'green', 'ovUtilidadBruta'),
+      kpiCard('Ingreso ventas', fmt.currency(sales.revenue), 'venta subtotal · sin IVA', 'blue'),
+      kpiCard('Ingreso consolidado', fmt.currency(consolidated.ingresoTotal), 'ventas + facturación taller', 'violet'),
+      kpiCard('Ticket promedio', fmt.currency(sales.ticketPromedio), 'por unidad vendida', 'violet'),
+      kpiCard('Entregas SOFIA', fmt.number(entregasSofia), `${fmt.number(sinTimbrar)} sin timbrar`, 'amber', 'ovEntregasSofia'),
+      kpiCard('Entregas sin previa', fmt.number(entregasSinPrevias), 'de entregas SOFIA del periodo', 'amber', 'ovEntregasSinPrevias'),
+      kpiCard('Facturación taller', fmt.currency(consolidated.facturacionServicio), `${fmt.number(service.ingresadas)} órdenes · ${service.pctFacturado}% facturadas`, 'violet', 'ovFacturacionTaller'),
+      kpiCard('Inventario disponible', fmt.number(inventory.availableUnits), `${fmt.number(inventory.availableLibres ?? 0)} libres · ${fmt.number(inventory.availableApartadas ?? 0)} apartadas`, 'green'),
+      kpiCard('Sin previas (stock)', fmt.number(inventory.sinPrevias), `${fmt.number(inventory.conPrevias ?? 0)} con previas`, 'amber', 'ovStockSinPrevias'),
+      kpiCard('Plan piso', fmt.currency(inventory.planPisoTotal), `${fmt.number(inventory.planPisoUnits ?? 0)} unidades`, 'rose', 'ovPlanPiso'),
+      kpiCard('Envejecidas 60+', fmt.number(inventory.ageingAlertsCount), 'alertas de aging en inventario', 'rose', 'ovAging'),
+      kpiCard('Valor inventario', fmt.currency(consolidated.valorInventario), `${fmt.number(inventory.availableUnits)} uds. disponibles`, 'amber'),
+      kpiCard('Días prom. inventario', `${inventory.avgDaysInventory || 0} días`, 'antigüedad promedio disponibles', 'blue'),
     ]),
     renderSalesAnalytics(salesAnalytics, fmt),
     kpiGroup('Servicio y postventa · <a href="/post-sales.html">ver detalle</a>', [
@@ -177,13 +196,12 @@ function renderFinancialSummary(f, salesAnalytics) {
       kpiCard('Importe facturado', fmt.currency(service.importeFacturado), `ticket prom. ${fmt.currency(service.ticketFacturado)}`, 'violet'),
       kpiCard('Mano de obra', fmt.currency(service.manoObra), `${pct(service.manoObra, service.importeFacturado)}% del facturado`, 'green'),
       kpiCard('Refacciones', fmt.currency(service.refacciones), `${pct(service.refacciones, service.importeFacturado)}% del facturado`, 'amber'),
-      kpiCard('Otros conceptos', fmt.currency(service.otros), `${pct(service.otros, service.importeFacturado)}% del facturado`, 'rose'),
     ]),
     kpiGroup('Inventario nuevos · <a href="/inventory.html">ver detalle</a>', [
       kpiCard('Unidades totales', fmt.number(inventory.totalUnits), 'registradas en stock', 'blue'),
       kpiCard('Disponibles', fmt.number(inventory.availableUnits), `${pct(inventory.availableUnits, inventory.totalUnits)}% del total`, 'green'),
-      kpiCard('Valor inventario', fmt.currency(inventory.inventoryValue), inventory.inventoryValue === inventory.inventoryCost ? `costo catálogo · ${fmt.number(inventory.availableUnits)} uds.` : 'precio lista en stock', 'violet'),
-      kpiCard('Costo catálogo', fmt.currency(inventory.inventoryCost), `${fmt.number(inventory.availableUnits)} unidades disponibles`, 'amber'),
+      kpiCard('Sin previas', fmt.number(inventory.sinPrevias), `${fmt.number(inventory.conPrevias ?? 0)} con previas`, 'amber'),
+      kpiCard('Plan piso', fmt.currency(inventory.planPisoTotal), `${fmt.number(inventory.planPisoUnits ?? 0)} unidades`, 'rose'),
       kpiCard('Días prom. inventario', `${inventory.avgDaysInventory} días`, 'rotación ventas periodo', 'blue'),
     ]),
   ].join('');
@@ -199,7 +217,7 @@ async function renderOverview(fechaInicio, fechaFin) {
       salesAnalytics = await api(`/overview/analytics?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`);
     }
 
-    renderFinancialSummary(data.financial, salesAnalytics);
+    renderFinancialSummary(data.financial, salesAnalytics, data.operaciones || data.kpis || {});
 
   setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
 
@@ -237,6 +255,22 @@ async function renderOverview(fechaInicio, fechaFin) {
     },
     options: chartOptions({ plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } }),
   });
+
+  if (window.KpiInsights?.apply) {
+    const f = data.financial || {};
+    window.KpiInsights.apply('overview', {
+      fechaInicio,
+      fechaFin,
+      operaciones: data.operaciones || data.kpis || {},
+      financial: {
+        sales: f.sales || {},
+        service: f.service || {},
+        inventory: f.inventory || {},
+        consolidated: f.consolidated || {},
+      },
+      salesAnalytics: salesAnalytics || null,
+    });
+  }
   } finally {
     showLoading(false);
   }

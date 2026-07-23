@@ -140,6 +140,9 @@ function mapRow(row, { snapshot = false } = {}) {
   const antiguedad = calcAntiguedadBucket(dias, isOpen);
   const excluido = incompleto || status === 'C';
   const { letra: letraOrden, tipo: tipoPorLetra } = mapTipoPorLetra(row.orden);
+  const refaccionesLineas = Math.max(0, Number(row.refaccionesLineas ?? row.RefaccionesLineas ?? 0));
+  // "Cargadas" = hay líneas RE en el detalle de la orden
+  const conRefacciones = refaccionesLineas > 0;
 
   return {
     orden: row.orden,
@@ -174,6 +177,8 @@ function mapRow(row, { snapshot = false } = {}) {
     critica,
     incompleto,
     excluido,
+    refaccionesLineas,
+    conRefacciones,
     sinImporte: importe <= 0,
     sinAseguradora: !String(row.aseguradora || '').trim(),
     abiertaSinPromesa: isOpen && !promesaDate,
@@ -209,6 +214,7 @@ async function loadOrders({ fechaInicio, fechaFin } = {}) {
       ISNULL(tcx.importe, 0) AS importeTcx,
       ISNULL(det.subtotal, 0) AS importeDetSub,
       ISNULL(det.iva, 0) AS importeDetIva,
+      ISNULL(det.refaccionesLineas, 0) AS refaccionesLineas,
       LTRIM(RTRIM(COALESCE(fac.asegFac, sg.PAR_DESCRIP1, ''))) AS aseguradora,
       LTRIM(RTRIM(c.PER_EMAIL)) AS correo,
       LTRIM(RTRIM(COALESCE(asr.PAR_DESCRIP1, o.ORE_IDASESOR, ''))) AS asesor
@@ -233,7 +239,8 @@ async function loadOrders({ fechaInicio, fechaFin } = {}) {
     LEFT JOIN (
       SELECT ORD_IDORDEN AS idorden,
         SUM(ORD_SUBTOTAL) AS subtotal,
-        SUM(ORD_IVATOT) AS iva
+        SUM(ORD_IVATOT) AS iva,
+        SUM(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(ORD_CLASIFIC, '')))) = 'RE' THEN 1 ELSE 0 END) AS refaccionesLineas
       FROM SER_ORDENDET
       GROUP BY ORD_IDORDEN
     ) det ON det.idorden = o.ORE_IDORDEN
@@ -269,6 +276,7 @@ const OPEN_SNAPSHOT_SQL = `
     ISNULL(tcx.importe, 0) AS importeTcx,
     ISNULL(det.subtotal, 0) AS importeDetSub,
     ISNULL(det.iva, 0) AS importeDetIva,
+    ISNULL(det.refaccionesLineas, 0) AS refaccionesLineas,
     LTRIM(RTRIM(COALESCE(fac.asegFac, sg.PAR_DESCRIP1, ''))) AS aseguradora,
     LTRIM(RTRIM(c.PER_EMAIL)) AS correo,
     LTRIM(RTRIM(COALESCE(asr.PAR_DESCRIP1, o.ORE_IDASESOR, ''))) AS asesor
@@ -293,7 +301,8 @@ const OPEN_SNAPSHOT_SQL = `
   LEFT JOIN (
     SELECT ORD_IDORDEN AS idorden,
       SUM(ORD_SUBTOTAL) AS subtotal,
-      SUM(ORD_IVATOT) AS iva
+      SUM(ORD_IVATOT) AS iva,
+      SUM(CASE WHEN UPPER(LTRIM(RTRIM(ISNULL(ORD_CLASIFIC, '')))) = 'RE' THEN 1 ELSE 0 END) AS refaccionesLineas
     FROM SER_ORDENDET
     GROUP BY ORD_IDORDEN
   ) det ON det.idorden = o.ORE_IDORDEN
@@ -308,6 +317,240 @@ const OPEN_SNAPSHOT_SQL = `
 async function loadOpenSnapshot() {
   const rows = await query(OPEN_SNAPSHOT_SQL);
   return rows.map((row) => mapRow(row, { snapshot: true }));
+}
+
+function classifyDetBucket(clasific) {
+  const c = String(clasific || '').trim().toUpperCase();
+  if (c === 'RE') return 'refacciones';
+  if (c.startsWith('MO')) return 'manoObra';
+  if (c === 'HP' || c === 'TTHP' || c.startsWith('HP')) return 'hyp';
+  if (c === 'VA') return 'valuacion';
+  return 'otros';
+}
+
+function bucketLabel(bucket) {
+  return ({
+    refacciones: 'Refacciones',
+    manoObra: 'Mano de obra',
+    hyp: 'HYP / Pintura',
+    valuacion: 'Valuación',
+    otros: 'Otros',
+  })[bucket] || 'Otros';
+}
+
+function lineAmounts(row) {
+  const subtotal = Number(row.subtotal || 0);
+  const ivaAmt = Number(row.ivaAmount || 0);
+  const ivaRate = Number(row.ivaRate || 0);
+  let iva = ivaAmt;
+  if (iva <= 0 && ivaRate > 0 && ivaRate <= 100 && subtotal > 0) {
+    iva = Math.round(subtotal * ivaRate) / 100;
+  }
+  return {
+    subtotal,
+    iva,
+    total: subtotal + iva,
+    ivaRate: ivaRate > 0 && ivaRate <= 100 ? ivaRate : null,
+  };
+}
+
+async function loadOrderDetail(ordenId) {
+  const id = String(ordenId || '').trim();
+  if (!id) {
+    const err = new Error('Orden requerida');
+    err.status = 400;
+    throw err;
+  }
+
+  const headerRows = await query(`
+    SELECT
+      o.ORE_IDORDEN AS orden,
+      LTRIM(RTRIM(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))) AS nombre,
+      COALESCE(NULLIF(LTRIM(RTRIM(o.ORE_DOCTO)), ''), fac.factura) AS factura,
+      LTRIM(RTRIM(c.PER_TELEFONO1)) AS telefono,
+      LTRIM(RTRIM(c.PER_TELCELULAR)) AS celular,
+      o.ORE_STATUS AS status,
+      LTRIM(RTRIM(ISNULL(o.ORE_MARCA, ''))) AS auto,
+      LTRIM(RTRIM(COALESCE(NULLIF(v.VEH_TIPOAUTO, ''), fac.autoFac, ''))) AS modelo,
+      LTRIM(RTRIM(o.ORE_NUMSERIE)) AS serie,
+      o.ORE_FECHAORD AS ingreso,
+      o.ORE_FECHACIE AS cierre,
+      o.ORE_FECHAPROM AS promesa,
+      o.ORE_TPOORDEN AS tipoOrden,
+      o.ORE_TIPSERVICIO AS tipoServicio,
+      DATEDIFF(day, CONVERT(DATE, o.ORE_FECHAORD, 103), CAST(GETDATE() AS DATE)) AS dias,
+      ISNULL(fac.importe, 0) AS importeFac,
+      ISNULL(tcx.importe, 0) AS importeTcx,
+      ISNULL(det.subtotal, 0) AS importeDetSub,
+      ISNULL(det.iva, 0) AS importeDetIva,
+      LTRIM(RTRIM(COALESCE(fac.asegFac, sg.PAR_DESCRIP1, ''))) AS aseguradora,
+      LTRIM(RTRIM(c.PER_EMAIL)) AS correo,
+      LTRIM(RTRIM(COALESCE(asr.PAR_DESCRIP1, o.ORE_IDASESOR, ''))) AS asesor
+    FROM SER_ORDEN o
+    LEFT JOIN PER_PERSONAS c ON c.PER_IDPERSONA = o.ORE_IDCLIENTE
+    LEFT JOIN SER_VEHICULO v ON v.VEH_NUMSERIE = o.ORE_NUMSERIE
+    LEFT JOIN (
+      SELECT fos_idorden,
+        MAX(fos_docto) AS factura,
+        MAX(fos_qctipoauto) AS autoFac,
+        SUM(fos_total) AS importe,
+        MAX(NULLIF(LTRIM(RTRIM(fos_aseguradora)), '')) AS asegFac
+      FROM SER_FACORDEN
+      GROUP BY fos_idorden
+    ) fac ON fac.fos_idorden = o.ORE_IDORDEN
+    LEFT JOIN (
+      SELECT TCX_IDORDEN AS fos_idorden, SUM(TCX_TOTAL) AS importe
+      FROM SER_ORDTOTCXP
+      WHERE TCX_STATUS IN ('T', 'A')
+      GROUP BY TCX_IDORDEN
+    ) tcx ON tcx.fos_idorden = o.ORE_IDORDEN
+    LEFT JOIN (
+      SELECT ORD_IDORDEN AS idorden,
+        SUM(ORD_SUBTOTAL) AS subtotal,
+        SUM(CASE
+          WHEN ISNULL(ORD_IVA, 0) > 0 THEN ORD_IVA
+          WHEN ISNULL(ORD_IVATOT, 0) > 0 AND ISNULL(ORD_IVATOT, 0) <= 100
+            THEN ROUND(ORD_SUBTOTAL * ORD_IVATOT / 100.0, 2)
+          ELSE ISNULL(ORD_IVATOT, 0)
+        END) AS iva
+      FROM SER_ORDENDET
+      GROUP BY ORD_IDORDEN
+    ) det ON det.idorden = o.ORE_IDORDEN
+    LEFT JOIN PNC_PARAMETR sg ON sg.PAR_TIPOPARA = 'SG' AND sg.PAR_IDENPARA = o.ORE_IDASEGURADORA
+    LEFT JOIN PNC_PARAMETR asr ON asr.PAR_TIPOPARA = 'AS' AND asr.PAR_IDENPARA = o.ORE_IDASESOR
+    WHERE o.ORE_IDORDEN = @orden
+  `, { orden: id });
+
+  if (!headerRows.length) {
+    const err = new Error(`Orden ${id} no encontrada`);
+    err.status = 404;
+    throw err;
+  }
+
+  const header = mapRow(headerRows[0], {
+    snapshot: ['A', 'T', 'D', 'P'].includes(String(headerRows[0].status || '').trim().toUpperCase()),
+  });
+
+  const detailRows = await query(`
+    SELECT
+      ORD_CONSE AS conse,
+      LTRIM(RTRIM(ISNULL(ORD_CODIGO, ''))) AS codigo,
+      LTRIM(RTRIM(ISNULL(ORD_DESCRIP, ''))) AS descripcion,
+      LTRIM(RTRIM(ISNULL(ORD_CLASIFIC, ''))) AS clasific,
+      ISNULL(ORD_CANTIDAD, 0) AS cantidad,
+      ISNULL(ORD_CANTSURT, 0) AS surtido,
+      ISNULL(ORD_SURTIDO, 0) AS surtidoFlag,
+      ISNULL(ORD_PRECUNITARIO, 0) AS precio,
+      ISNULL(ORD_SUBTOTAL, 0) AS subtotal,
+      ISNULL(ORD_IVA, 0) AS ivaAmount,
+      ISNULL(ORD_IVATOT, 0) AS ivaRate,
+      ISNULL(ORD_COSTO, 0) AS costo,
+      LTRIM(RTRIM(ISNULL(ORD_STATUS, ''))) AS status,
+      LTRIM(RTRIM(ISNULL(ORD_MECANICO, ''))) AS mecanico,
+      LTRIM(RTRIM(ISNULL(ORD_FECHSUR, ''))) AS fechaSurtido,
+      LTRIM(RTRIM(ISNULL(ord_comentarios, ''))) AS comentarios,
+      LTRIM(RTRIM(ISNULL(ord_observaciones, ''))) AS observaciones
+    FROM SER_ORDENDET
+    WHERE ORD_IDORDEN = @orden
+    ORDER BY ORD_CONSE
+  `, { orden: id });
+
+  const lines = detailRows.map((row) => {
+    const bucket = classifyDetBucket(row.clasific);
+    const amounts = lineAmounts(row);
+    return {
+      conse: Number(row.conse || 0),
+      codigo: row.codigo || '',
+      descripcion: row.descripcion || '',
+      clasific: row.clasific || '',
+      bucket,
+      bucketLabel: bucketLabel(bucket),
+      cantidad: Number(row.cantidad || 0),
+      surtido: Number(row.surtido || 0),
+      precio: Number(row.precio || 0),
+      subtotal: amounts.subtotal,
+      iva: amounts.iva,
+      ivaRate: amounts.ivaRate,
+      total: amounts.total,
+      costo: Number(row.costo || 0),
+      status: row.status || '',
+      mecanico: row.mecanico || '',
+      fechaSurtido: row.fechaSurtido || '',
+      comentarios: row.comentarios || '',
+      observaciones: row.observaciones || '',
+    };
+  });
+
+  const cargo = {
+    refacciones: { label: 'Refacciones', lineas: 0, subtotal: 0, iva: 0, total: 0 },
+    manoObra: { label: 'Mano de obra', lineas: 0, subtotal: 0, iva: 0, total: 0 },
+    hyp: { label: 'HYP / Pintura', lineas: 0, subtotal: 0, iva: 0, total: 0 },
+    valuacion: { label: 'Valuación', lineas: 0, subtotal: 0, iva: 0, total: 0 },
+    otros: { label: 'Otros', lineas: 0, subtotal: 0, iva: 0, total: 0 },
+  };
+
+  for (const line of lines) {
+    const bucket = cargo[line.bucket] || cargo.otros;
+    bucket.lineas += 1;
+    bucket.subtotal += line.subtotal;
+    bucket.iva += line.iva;
+    bucket.total += line.total;
+  }
+
+  // Siempre incluir Mano de obra en el desglose (aunque venga en 0).
+  const cargoOrder = ['manoObra', 'refacciones', 'hyp', 'valuacion', 'otros'];
+  const cargoList = cargoOrder
+    .map((key) => cargo[key])
+    .filter((b) => b.label === 'Mano de obra' || (b.lineas > 0 && (b.total > 0 || b.subtotal > 0)))
+    .map((b) => ({
+      ...b,
+      subtotal: Math.round(b.subtotal * 100) / 100,
+      iva: Math.round(b.iva * 100) / 100,
+      total: Math.round(b.total * 100) / 100,
+    }));
+
+  const refacciones = lines.filter((l) => l.bucket === 'refacciones');
+  const manoObra = lines.filter((l) => l.bucket === 'manoObra');
+  const hyp = lines.filter((l) => l.bucket === 'hyp');
+  const lineTotals = lines.reduce(
+    (acc, l) => ({
+      lineas: acc.lineas + 1,
+      subtotal: acc.subtotal + l.subtotal,
+      iva: acc.iva + l.iva,
+      total: acc.total + l.total,
+    }),
+    { lineas: 0, subtotal: 0, iva: 0, total: 0 },
+  );
+  const totals = {
+    lineas: lineTotals.lineas,
+    subtotal: Math.round(lineTotals.subtotal * 100) / 100,
+    iva: Math.round(lineTotals.iva * 100) / 100,
+    total: Math.round(lineTotals.total * 100) / 100,
+    refacciones: refacciones.length,
+    manoObra: manoObra.length,
+    hyp: hyp.length,
+  };
+
+  // Montos del detalle por número de orden (SER_ORDENDET), no por factura.
+  if (totals.total > 0) {
+    header.importe = totals.total;
+    if (header.status === 'I') {
+      header.importeFacturado = totals.total;
+      header.importeAbierto = 0;
+    } else if (['A', 'T', 'D', 'P'].includes(header.status)) {
+      header.importeAbierto = totals.total;
+    }
+  }
+
+  return {
+    orden: header,
+    cargo: cargoList,
+    totals,
+    refacciones,
+    manoObra,
+    hyp,
+    lineas: lines,
+  };
 }
 
 function toIsoDate(d) {
@@ -413,6 +656,7 @@ async function loadMesCursoNomenclatura(asOf = new Date()) {
 module.exports = {
   loadOrders,
   loadOpenSnapshot,
+  loadOrderDetail,
   loadMesCursoNomenclatura,
   mapRow,
   mapTipoPorLetra,

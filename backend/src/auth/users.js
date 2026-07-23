@@ -11,4 +11,5 @@ module.exports = {
   updateUser: userStore.updateUser,
   deleteUser: userStore.deleteUser,
   getAssignableRoles: userStore.getAssignableRoles,
+  revealPassword: userStore.revealPassword,
 };

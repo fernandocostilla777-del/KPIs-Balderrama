@@ -1,0 +1,72 @@
+<ion-header [translucent]="true" class="glass-header">
+  <ion-toolbar>
+    <ion-title>Seguimiento 360</ion-title>
+    <ion-buttons slot="end">
+      <ion-button fill="clear" (click)="load()">
+        <ion-icon slot="icon-only" name="refresh-outline"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="liquid-bg page-pad">
+  <ion-refresher slot="fixed" (ionRefresh)="load($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
+  <div *ngIf="loading" class="center-msg"><ion-spinner name="crescent"></ion-spinner></div>
+  <div *ngIf="error && !loading" class="glass-card error-card">{{ error }}</div>
+
+  <ng-container *ngIf="!loading && !error">
+    <section class="glass-card hero-card seguimiento-hero">
+      <div class="hero-top">
+        <span class="label-upper">Leads del periodo</span>
+        <span class="badge-trend">
+          <ion-icon name="cloud-done-outline"></ion-icon>
+          Actualizado
+        </span>
+      </div>
+      <div class="hero-value">{{ leads | number }}</div>
+      <p class="muted" *ngIf="syncedAt">
+        Última sincronización: {{ syncedAt | date:'dd/MM/yyyy HH:mm' }}
+      </p>
+    </section>
+
+    <section class="glass-card">
+      <h3>Actividad comercial</h3>
+      <div class="kpi-grid">
+        <div class="kpi-tile" *ngFor="let kpi of kpis">
+          <span class="kpi-label">{{ kpi.label }}</span>
+          <strong>{{ kpi.value | number }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-card" *ngIf="conversiones.length">
+      <h3>Conversiones</h3>
+      <div class="conversion-list">
+        <div class="conversion-row" *ngFor="let item of conversiones">
+          <div class="conversion-meta">
+            <span>{{ item.label }}</span>
+            <strong>{{ formatConversion(item) }}</strong>
+          </div>
+          <div class="progress-track" *ngIf="item.suffix === '%'">
+            <div class="progress-fill" [style.width.%]="conversionWidth(item)"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-card" *ngIf="pvas.length">
+      <h3>Productos de valor agregado</h3>
+      <div class="conversion-list">
+        <div class="conversion-row" *ngFor="let item of pvas">
+          <div class="conversion-meta">
+            <span>{{ item.label }}</span>
+            <strong>{{ formatConversion(item) }}</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+  </ng-container>
+</ion-content>

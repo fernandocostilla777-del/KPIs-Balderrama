@@ -1,0 +1,74 @@
+<ion-header [translucent]="true" class="glass-header">
+  <ion-toolbar>
+    <ion-title>Métricas detalladas</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="liquid-bg page-pad">
+  <ion-refresher slot="fixed" (ionRefresh)="load($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
+  <section class="glass-card selector-card">
+    <span class="label-upper">Módulo</span>
+    <ion-item lines="none" class="glass-select">
+      <ion-select
+        interface="action-sheet"
+        placeholder="Selecciona módulo"
+        [(ngModel)]="selectedSection"
+        (ngModelChange)="onSectionChange()"
+        [interfaceOptions]="{ header: 'Menú de métricas' }"
+      >
+        <ion-select-option *ngFor="let section of sections" [value]="section.id">
+          {{ section.label }}
+        </ion-select-option>
+      </ion-select>
+    </ion-item>
+  </section>
+
+  <div *ngIf="loading" class="center-msg"><ion-spinner name="crescent"></ion-spinner></div>
+  <div *ngIf="error && !loading" class="glass-card error-card">{{ error }}</div>
+
+  <ng-container *ngIf="!loading && !error">
+    <section class="glass-card hero-card">
+      <span class="label-upper">{{ heroLabel }}</span>
+      <div class="hero-value">{{ formatHeroValue() }}</div>
+      <p class="muted">{{ heroHint }}</p>
+    </section>
+
+    <section class="glass-card" *ngIf="kpis.length">
+      <h3>{{ title }}</h3>
+      <div class="kpi-grid">
+        <div class="kpi-tile" *ngFor="let kpi of kpis">
+          <span class="kpi-label">{{ kpi.label }}</span>
+          <strong>{{ formatValue(kpi) }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-card" *ngFor="let list of lists">
+      <h3>{{ list.title }}</h3>
+
+      <div class="bar-list" *ngIf="list.type === 'bars' && list.items.length">
+        <div class="bar-row" *ngFor="let item of list.items">
+          <div class="bar-meta">
+            <span>{{ item.label }}</span>
+            <strong>{{ formatValue(item) }}</strong>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" [style.width.%]="barWidth(item.count || 0, list.items)"></div>
+          </div>
+        </div>
+      </div>
+
+      <ion-list lines="none" class="glass-list" *ngIf="list.type === 'list' && list.items.length">
+        <ion-item *ngFor="let item of list.items" class="glass-list-item">
+          <ion-label>{{ item.label }}</ion-label>
+          <ion-note slot="end">{{ formatValue(item) }}</ion-note>
+        </ion-item>
+      </ion-list>
+
+      <p class="muted" *ngIf="!list.items.length">Sin datos en este módulo.</p>
+    </section>
+  </ng-container>
+</ion-content>

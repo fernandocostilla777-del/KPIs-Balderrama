@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -16,10 +16,6 @@
 <header class="top-bar">
 <div class="top-bar-actions">
 <span class="top-bar-title">Gestión de Inventario</span>
-<span id="statusBadge" class="top-bar-meta">Listo</span>
-</div>
-<div class="top-bar-actions">
-<span id="lastUpdated" class="top-bar-meta"></span>
 </div>
 </header>
 <div class="main-content custom-scrollbar">
@@ -46,13 +42,27 @@
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
 </button>
-<div class="kpi-card kpi-card--violet">
+<button type="button" class="kpi-card kpi-card--slate kpi-card--interactive" id="kpiSinPrevias" data-autos-kpi="sinPrevias" aria-expanded="false" title="Clic para ver desglose">
+<div class="kpi-card-head"><span class="kpi-title">Sin previas (stock)</span><span class="material-symbols-outlined kpi-icon">visibility_off</span></div>
+<div id="sSinPrevias" class="kpi-value">—</div>
+<p id="sSinPreviasSub" class="kpi-subtitle">Sin órdenes S por VIN</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiEntregasSinPrevias" aria-expanded="false" aria-controls="panelEntregasSinPreviasInv" title="Entregas SOFIA del mes sin órdenes de previa">
+<div class="kpi-card-head"><span class="kpi-title">Entregas sin previa</span><span class="material-symbols-outlined kpi-icon">no_photography</span></div>
+<div id="sEntregasSinPrevias" class="kpi-value">—</div>
+<p id="sEntregasSinPreviasSub" class="kpi-subtitle">SOFIA · mes en curso</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<div class="kpi-card kpi-card--violet" id="kpiDaysStock">
 <div class="kpi-card-head"><span class="kpi-title">Días Prom. Stock</span><span class="material-symbols-outlined kpi-icon">schedule</span></div>
 <div id="sDays" class="kpi-value">—</div>
 <p class="kpi-subtitle">Desde fecha de remisión</p>
 <div class="kpi-accent"></div>
 </div>
-<div class="kpi-card kpi-card--rose">
+<div class="kpi-card kpi-card--rose" id="kpiAgeingAlerts">
 <div class="kpi-card-head"><span class="kpi-title">Unidades envejecidas</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
 <div id="sAlerts" class="kpi-value">—</div>
 <p id="sAlertsSub" class="kpi-subtitle">Físico · 60+ días</p>
@@ -71,6 +81,33 @@
 </section>
 
 <div id="autosKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+
+<section id="panelEntregasSinPreviasInv" class="section-panel dashboard-section kpi-detail-panel hidden" aria-labelledby="kpiEntregasSinPrevias">
+<div class="kpi-detail-header">
+<div>
+<h3 class="section-title" style="margin-bottom:6px">Entregas SOFIA sin previa</h3>
+<p id="invSinPreviasPanelResumen" class="section-subtitle" style="margin:0">Mes en curso</p>
+</div>
+<button type="button" id="btnCerrarInvSinPreviasPanel" class="btn-glass btn-icon-close" aria-label="Cerrar detalle sin previas">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="kpi-detail-toolbar">
+<label class="kpi-detail-search" for="buscarInvSinPrevias">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarInvSinPrevias" type="search" placeholder="Buscar factura, VIN, cliente..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+<span id="invSinPreviasSearchMeta" class="kpi-detail-search-meta hidden"></span>
+</div>
+<div class="table-scroll kpi-detail-table-wrap">
+<table class="data-table">
+<thead><tr>
+<th>Fecha fact.</th><th>Registro</th><th>Hora</th><th>Factura</th><th>VIN</th><th class="cell-num">Previas</th><th>Cliente</th><th>Estatus</th><th>Usuario</th>
+</tr></thead>
+<tbody id="tablaInvSinPreviasBody"></tbody>
+</table>
+</div>
+</section>
 
 <section class="chart-grid-2-1">
 <div class="section-panel table-panel plan-piso-section">
@@ -133,6 +170,7 @@
 <th>Familia</th>
 <th>Año</th>
 <th>Serie</th>
+<th class="cell-num">Previas</th>
 <th>Inv.</th>
 <th>Color ext.</th>
 <th>Color int.</th>
@@ -267,11 +305,12 @@
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/sidebar.js?v=8"></script>
+<script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/assistant-bubble.js?v=3"></script>
-<script src="/js/inventory.js?v=12"></script>
+<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/assistant-bubble.js?v=4"></script>
+<script src="/js/inventory.js?v=16"></script>
 </body>
 </html>

@@ -1,0 +1,92 @@
+:host {
+  display: block;
+}
+
+.cobertura-badge {
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.sofia-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sofia-body {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 1.1fr;
+  gap: 1rem;
+  align-items: center;
+}
+
+.sofia-ring {
+  width: min(100%, 168px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  position: relative;
+  box-shadow: 0 0 24px rgba(224, 86, 253, 0.22);
+}
+
+.sofia-ring::before {
+  content: '';
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  background: rgba(18, 19, 28, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sofia-ring-center {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+}
+
+.sofia-ring-center strong {
+  font-size: 1.45rem;
+  color: #e056fd;
+  line-height: 1.1;
+}
+
+.sofia-ring-center span {
+  font-size: 0.72rem;
+  color: rgba(227, 225, 239, 0.72);
+}
+
+.sofia-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.sofia-meta-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sofia-meta-item strong {
+  font-size: 1.05rem;
+}
+
+@media (max-width: 420px) {
+  .sofia-body {
+    grid-template-columns: 1fr;
+  }
+
+  .sofia-ring {
+    width: 150px;
+  }
+}

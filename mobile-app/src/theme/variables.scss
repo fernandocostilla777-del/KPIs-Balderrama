@@ -1,0 +1,38 @@
+/** Liquid Analytics — BALDERRAMA mobile (stitch_liquid_glass_analytics) */
+
+:root {
+  --ion-font-family: 'Inter', system-ui, sans-serif;
+
+  --ion-color-primary: #00dbe7;
+  --ion-color-primary-rgb: 0, 219, 231;
+  --ion-color-primary-contrast: #002022;
+  --ion-color-primary-contrast-rgb: 0, 32, 34;
+  --ion-color-primary-shade: #00c1cb;
+  --ion-color-primary-tint: #1adfe9;
+
+  --ion-color-secondary: #7000ff;
+  --ion-color-secondary-rgb: 112, 0, 255;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #6300e0;
+  --ion-color-secondary-tint: #7e1aff;
+
+  --ion-color-tertiary: #ffade2;
+  --ion-color-tertiary-rgb: 255, 173, 226;
+  --ion-color-tertiary-contrast: #3b002f;
+  --ion-color-tertiary-contrast-rgb: 59, 0, 47;
+
+  --ion-background-color: #12131c;
+  --ion-background-color-rgb: 18, 19, 28;
+  --ion-text-color: #e3e1ef;
+  --ion-text-color-rgb: 227, 225, 239;
+
+  --ion-toolbar-background: rgba(255, 255, 255, 0.05);
+  --ion-tab-bar-background: transparent;
+
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-blur: 20px;
+  --liquid-cyan: rgba(0, 242, 255, 0.35);
+  --liquid-purple: rgba(112, 0, 255, 0.28);
+}

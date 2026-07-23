@@ -1,0 +1,27 @@
+<ion-content [fullscreen]="true" class="liquid-bg">
+  <div class="login-wrap">
+    <div class="glass-card login-card">
+      <div class="brand-mark">
+        <ion-icon name="analytics-outline"></ion-icon>
+      </div>
+      <h1>BALDERRAMA</h1>
+      <p class="subtitle">Analytics Pro · Liquid Glass</p>
+
+      <ion-item lines="none" class="glass-input">
+        <ion-label position="stacked">Usuario</ion-label>
+        <ion-input [(ngModel)]="username" autocomplete="username" inputmode="text"></ion-input>
+      </ion-item>
+
+      <ion-item lines="none" class="glass-input">
+        <ion-label position="stacked">Contraseña</ion-label>
+        <ion-input [(ngModel)]="password" type="password" autocomplete="current-password"></ion-input>
+      </ion-item>
+
+      <p class="error" *ngIf="error">{{ error }}</p>
+
+      <ion-button expand="block" class="btn-gradient" (click)="submit()" [disabled]="loading">
+        {{ loading ? 'Entrando…' : 'Iniciar sesión' }}
+      </ion-button>
+    </div>
+  </div>
+</ion-content>

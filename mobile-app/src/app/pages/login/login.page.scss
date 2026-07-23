@@ -1,0 +1,66 @@
+.login-wrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 28px 22px;
+  text-align: center;
+
+  h1 {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 12px 0 4px;
+    color: var(--ion-color-primary);
+  }
+
+  .subtitle {
+    color: rgba(227, 225, 239, 0.65);
+    margin-bottom: 24px;
+    font-size: 0.9rem;
+  }
+}
+
+.brand-mark {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(0, 242, 255, 0.25), rgba(112, 0, 255, 0.25));
+  border: 1px solid var(--glass-border);
+
+  ion-icon {
+    font-size: 2rem;
+    color: #74f5ff;
+  }
+}
+
+.glass-input {
+  --background: rgba(255, 255, 255, 0.05);
+  --border-radius: 999px;
+  margin-bottom: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+}
+
+.error {
+  color: #ffb4ab;
+  font-size: 0.85rem;
+  margin: 8px 0 16px;
+}
+
+.btn-gradient {
+  --background: linear-gradient(90deg, #00f2ff, #7000ff);
+  --border-radius: 999px;
+  font-weight: 600;
+  margin-top: 8px;
+}

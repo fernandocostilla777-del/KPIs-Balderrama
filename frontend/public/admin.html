@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>Administración de usuarios | BALDERRAMA</title>
+<title>Administración | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=61" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="admin">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -14,8 +14,7 @@
 <main class="main-shell">
 <header class="top-bar">
 <div class="top-bar-actions">
-<span class="top-bar-title">Administración de usuarios</span>
-<span id="statusBadge" class="top-bar-meta">Listo</span>
+<span class="top-bar-title">Administración</span>
 </div>
 </header>
 <div class="main-content custom-scrollbar">
@@ -50,6 +49,110 @@
 </div>
 </section>
 
+<section class="section-panel dashboard-section" id="alertPrefsSection">
+<div class="admin-header">
+<div>
+<h2 class="section-title">Alertas por perfil</h2>
+<p class="admin-subtitle">Defina qué tipos de alerta recibe cada rol en el menú de usuario.</p>
+</div>
+<button type="button" class="btn-glass btn-primary" id="btnSaveAlertPrefs">
+<span class="material-symbols-outlined">save</span>
+<span>Guardar alertas</span>
+</button>
+</div>
+<div id="alertPrefsGrid" class="admin-alert-prefs"></div>
+</section>
+
+<section class="section-panel dashboard-section" id="adminProrationSection">
+<div class="admin-header">
+<div>
+<h2 class="section-title">Gastos de administración (EEFF)</h2>
+<p class="admin-subtitle">Reparto del bolsón administrativo entre ventas y postventa. Se aplica al estado de resultados / EEFF.</p>
+</div>
+<div class="admin-header-actions">
+<button type="button" class="btn-glass btn-secondary" id="btnResetProration">
+<span class="material-symbols-outlined">restart_alt</span>
+<span>Restablecer</span>
+</button>
+<button type="button" class="btn-glass btn-primary" id="btnSaveProration">
+<span class="material-symbols-outlined">save</span>
+<span>Guardar prorrateo</span>
+</button>
+</div>
+</div>
+<p id="prorationMeta" class="admin-hint"></p>
+<div class="admin-proration-shares">
+<label class="admin-field">
+<span>Participación ventas</span>
+<div class="admin-pct-input">
+<input type="number" id="prorationVentasShare" min="0" max="100" step="0.1" value="70"/>
+<span>%</span>
+</div>
+</label>
+<label class="admin-field">
+<span>Participación postventa</span>
+<div class="admin-pct-input">
+<input type="number" id="prorationPostventaShare" min="0" max="100" step="0.1" value="30"/>
+<span>%</span>
+</div>
+</label>
+<div class="admin-proration-total">
+<span class="admin-hint">Suma bloques</span>
+<strong id="prorationShareTotal">100%</strong>
+</div>
+</div>
+<div class="admin-proration-grid">
+<div class="admin-proration-block">
+<div class="admin-proration-block-head">
+<h3 class="admin-alert-role-title">Ventas</h3>
+<p class="admin-hint">% dentro del bloque ventas (deben sumar 100%). La columna “Del total” es el impacto real sobre el gasto de administración.</p>
+</div>
+<div class="table-scroll">
+<table class="data-table admin-proration-table">
+<thead>
+<tr>
+<th>Concepto</th>
+<th class="cell-num">% del bloque</th>
+<th class="cell-num">% del total</th>
+</tr>
+</thead>
+<tbody id="prorationVentasBody"></tbody>
+<tfoot>
+<tr>
+<td><strong>Total bloque ventas</strong></td>
+<td class="cell-num" id="prorationVentasBlockSum">—</td>
+<td class="cell-num" id="prorationVentasTotalSum">—</td>
+</tr>
+</tfoot>
+</table>
+</div>
+</div>
+<div class="admin-proration-block">
+<div class="admin-proration-block-head">
+<h3 class="admin-alert-role-title">Postventa</h3>
+<p class="admin-hint">% del total del gasto de administración (deben sumar la participación de postventa).</p>
+</div>
+<div class="table-scroll">
+<table class="data-table admin-proration-table">
+<thead>
+<tr>
+<th>Concepto</th>
+<th class="cell-num">% del total</th>
+</tr>
+</thead>
+<tbody id="prorationPostventaBody"></tbody>
+<tfoot>
+<tr>
+<td><strong>Total postventa</strong></td>
+<td class="cell-num" id="prorationPostventaSum">—</td>
+</tr>
+</tfoot>
+</table>
+</div>
+</div>
+</div>
+</section>
+
 <section class="section-panel dashboard-section admin-form-panel hidden" id="userFormPanel">
 <h3 class="section-title" id="userFormTitle">Nuevo usuario</h3>
 <form id="userForm" class="admin-form">
@@ -62,6 +165,13 @@
 <span>Contraseña</span>
 <input type="password" id="formPassword" autocomplete="new-password" placeholder="Mínimo 8 caracteres"/>
 <p class="admin-hint" id="passwordHint">Obligatoria al crear. Al editar, déjela vacía para no cambiarla.</p>
+<div class="admin-password-reveal hidden" id="passwordRevealWrap">
+<button type="button" class="btn-glass btn-secondary" id="btnRevealPassword">
+<span class="material-symbols-outlined">visibility</span>
+Ver contraseña actual
+</button>
+<p class="admin-hint" id="revealedPassword"></p>
+</div>
 </label>
 <label class="admin-field">
 <span>Rol</span>
@@ -83,10 +193,10 @@ Usuario activo
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/sidebar.js?v=8"></script>
+<script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/admin.js"></script>
+<script src="/js/admin.js?v=3"></script>
 </body>
 </html>

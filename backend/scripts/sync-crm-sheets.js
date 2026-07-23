@@ -89,6 +89,8 @@ async function syncCrmSheets({ quiet = false } = {}) {
     'etl-crm-leads.js',
     'etl-crm-solicitudes.js',
     'etl-crm-pruebas-manejo.js',
+    'etl-crm-financiamiento.js',
+    'etl-crm-csi.js',
   ];
   for (const script of etls) {
     if (!quiet) console.log(`[crm-sheets] Ejecutando ${script}...`);

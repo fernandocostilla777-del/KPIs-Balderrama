@@ -1,12 +1,17 @@
 /**
  * Matriz de prorrateo del bolsón administrativo (0700 / GPO 740-750)
- * hacia centros operativos. Los porcentajes deben sumar 1.0 (100%).
+ * hacia centros operativos.
  *
- * · Años distintos de 2026 → matriz histórica
- * · 2026 → matriz oficial (Piso 38.56%, Foráneos 19.70%, …)
+ * Fuente activa: configuración en Administración (adminExpenseProration.json).
+ * Las matrices legacy / 2026 quedan solo como referencia de respaldo.
  */
 
-/** Matriz histórica (años ≠ 2026) */
+const {
+  getConfiguredProrationFactors,
+  getAdminExpenseProration,
+} = require('../services/adminExpenseProrationStore');
+
+/** Matriz histórica (referencia; ya no se usa por defecto) */
 const PRORATION_MATRIX_LEGACY = {
   piso: 0.22,
   foraneos: 0.10,
@@ -22,11 +27,7 @@ const PRORATION_MATRIX_LEGACY = {
   hyp: 0.06,
 };
 
-/**
- * Matriz 2026:
- * PISO 38.56000% · ZACATELCO 7.46% · FORANEOS 19.70% · CASA 6.03%
- * INTERCAMBIOS 9.34% · SEMINUEVOS 8.00% · CHOLULA 7.06% · FLOTILLAS 3.85%
- */
+/** Matriz 2026 histórica (referencia) */
 const PRORATION_MATRIX_2026 = {
   piso: 0.3856,
   zacatelco: 0.0746,
@@ -38,9 +39,7 @@ const PRORATION_MATRIX_2026 = {
   flotillas: 0.0385,
 };
 
-/** Alias de compatibilidad → matriz histórica */
 const PRORATION_MATRIX = PRORATION_MATRIX_LEGACY;
-
 const PRORATION_YEAR_2026 = 2026;
 
 function resolveProrationYear(yearOrOpts) {
@@ -69,25 +68,32 @@ function validateMatrix(matrix = PRORATION_MATRIX_LEGACY) {
 }
 
 /**
- * Factores de prorrateo según año del periodo (fechaFin).
- * Solo 2026 usa la matriz nueva; el resto conserva la histórica.
+ * Factores de prorrateo desde Administración (70% ventas / 30% postventa).
+ * yearOrOpts se conserva por compatibilidad de firmas; no cambia la fuente.
  */
-function getProrationFactors(yearOrOpts) {
-  const year = resolveProrationYear(yearOrOpts);
-  const matrix = year === PRORATION_YEAR_2026
-    ? PRORATION_MATRIX_2026
-    : PRORATION_MATRIX_LEGACY;
+function getProrationFactors(_yearOrOpts) {
+  const matrix = getConfiguredProrationFactors();
   validateMatrix(matrix);
   return { ...matrix };
 }
 
 function getProrationMatrixMeta(yearOrOpts) {
   const year = resolveProrationYear(yearOrOpts);
-  const is2026 = year === PRORATION_YEAR_2026;
+  let adminMeta = null;
+  try {
+    adminMeta = getAdminExpenseProration();
+  } catch {
+    adminMeta = null;
+  }
+  const cfg = adminMeta?.config;
   return {
     year,
-    key: is2026 ? '2026' : 'legacy',
-    label: is2026 ? 'Matriz 2026' : 'Matriz histórica',
+    key: 'admin',
+    label: 'Configuración administración',
+    source: 'adminExpenseProration',
+    ventasSharePct: cfg?.ventasSharePct ?? 70,
+    postventaSharePct: cfg?.postventaSharePct ?? 30,
+    updatedAt: cfg?.updatedAt || null,
   };
 }
 

@@ -24,11 +24,42 @@
     D: 'Reparación',
     X: 'Reparación Cholula',
     C: 'Reparación Zacatelco',
+    K: 'Tipo K',
+  };
+
+  /** Filtros rápidos Post-Venta: nomenclatura por sección */
+  const AREA_LETRAS = {
+    servicio: ['C', 'D', 'G', 'I', 'K', 'N', 'O', 'Q', 'S', 'X', 'Y', '\u00C1', 'M', 'E', 'R'],
+    hyp: ['A', 'F', 'H', 'J', 'V', 'Z', '\u00D3'],
+    refacciones: null, // pedidos PAR_PEDIDO (no órdenes de taller)
+  };
+
+  const AREA_META = {
+    posventa: {
+      id: 'posventa',
+      label: 'PostVenta',
+      hint: 'Vista principal · conformada por Servicio, Refacciones y HyP',
+    },
+    servicio: {
+      id: 'servicio',
+      label: 'Servicio',
+      hint: 'Órdenes C, D, G, I, K, N, O, Q, S, X, Y, Á, M, E, R',
+    },
+    refacciones: {
+      id: 'refacciones',
+      label: 'Refacciones',
+      hint: 'Todos los pedidos de refacciones (compra a planta/proveedor)',
+    },
+    hyp: {
+      id: 'hyp',
+      label: 'HyP',
+      hint: 'Órdenes A, F, H, J, V, Z, Ó',
+    },
   };
 
   const CATALOGO = [
     'V', 'A', 'F', 'E', '\u00C1', 'G', 'I', 'J', '\u00D3', 'M', 'H', 'O',
-    'N', 'Y', 'Q', 'Z', 'S', 'R', 'D', 'X', 'C',
+    'N', 'Y', 'Q', 'Z', 'S', 'R', 'D', 'X', 'C', 'K',
   ].map((letra) => ({ letra, tipo: TIPO_POR_LETRA[letra] }));
 
   function firstLetter(orden) {
@@ -48,11 +79,35 @@
     return !String(record?.aseguradora || '').trim();
   }
 
+  function letterOfRecord(record) {
+    const fromField = String(record?.letraOrden || '').trim().toUpperCase();
+    if (fromField) return fromField;
+    return firstLetter(record?.orden);
+  }
+
+  function matchesArea(record, area) {
+    const key = String(area || '').toLowerCase();
+    if (!key || key === 'posventa' || key === 'refacciones') return true;
+    const letras = AREA_LETRAS[key];
+    if (!letras) return true;
+    const set = new Set(letras);
+    return set.has(letterOfRecord(record));
+  }
+
+  function areaMeta(area) {
+    return AREA_META[String(area || 'posventa').toLowerCase()] || AREA_META.posventa;
+  }
+
   global.PostSalesOrderTypes = {
     TIPO_POR_LETRA,
+    AREA_LETRAS,
+    AREA_META,
     CATALOGO,
     firstLetter,
     fromOrden,
     isSinAseguradora,
+    letterOfRecord,
+    matchesArea,
+    areaMeta,
   };
 }(typeof window !== 'undefined' ? window : global));

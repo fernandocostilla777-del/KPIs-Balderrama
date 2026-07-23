@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>Post-Venta y Servicio | BALDERRAMA</title>
+<title>PostVenta | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=84" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="post-sales">
@@ -15,10 +15,8 @@
 <main class="main-shell">
 <header class="top-bar">
 <div class="top-bar-actions">
-<span class="top-bar-title">Post-Venta y Servicio</span>
-<span id="statusBadge" class="top-bar-meta">Listo</span>
+<span class="top-bar-title">PostVenta</span>
 </div>
-<span id="lastUpdated" class="top-bar-meta"></span>
 </header>
 <div class="main-content custom-scrollbar">
 
@@ -77,7 +75,20 @@
 <div class="filter-drawer__inner">
 <div class="filter-grid-ops">
 <label class="filter-field"><span class="filter-label">Estatus</span><select id="fStatus" class="filter-select"><option value="">Todos</option></select></label>
-<label class="filter-field"><span class="filter-label">Tipo de orden</span><select id="fTipo" class="filter-select"><option value="">Todos</option></select></label>
+<div class="filter-field filter-field--multi">
+<span class="filter-label">Tipo de orden</span>
+<button type="button" class="filter-select filter-multi__btn" id="fTipoBtn" aria-expanded="false" aria-controls="fTipoPanel" aria-haspopup="listbox">
+<span id="fTipoLabel">Todos</span>
+<span class="material-symbols-outlined filter-multi__chevron" aria-hidden="true">expand_more</span>
+</button>
+<div class="filter-multi__panel hidden" id="fTipoPanel" role="listbox" aria-multiselectable="true" aria-label="Tipos de orden">
+<div class="filter-multi__toolbar">
+<button type="button" class="filter-multi__link" data-tipo-action="all">Seleccionar todos</button>
+<button type="button" class="filter-multi__link" data-tipo-action="none">Limpiar</button>
+</div>
+<div class="filter-multi__options" id="fTipoOptions"></div>
+</div>
+</div>
 <label class="filter-field"><span class="filter-label">Antigüedad</span><select id="fAntiguedad" class="filter-select"><option value="">Todas</option></select></label>
 <label class="filter-field"><span class="filter-label">Asesor</span><select id="fAsesor" class="filter-select"><option value="">Todos</option></select></label>
 </div>
@@ -92,35 +103,69 @@
 </div>
 </section>
 
+<nav class="contabilidad-tabs postventa-main-tabs" id="postVentaMainTabs" aria-label="Secciones de PostVenta">
+<button type="button" class="contabilidad-tab active" data-ps-section="posventa" aria-controls="panelPosVentaHome" aria-selected="true">
+<span class="material-symbols-outlined" aria-hidden="true">handshake</span>
+PostVenta
+</button>
+<button type="button" class="contabilidad-tab" data-ps-section="servicio" aria-controls="panelPostVentaOrdenes" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">build</span>
+Servicio
+</button>
+<button type="button" class="contabilidad-tab" data-ps-section="refacciones" aria-controls="panelPostVentaRefacciones" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">warehouse</span>
+Refacciones
+</button>
+<button type="button" class="contabilidad-tab" data-ps-section="hyp" aria-controls="panelPostVentaOrdenes" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">format_paint</span>
+HyP
+</button>
+</nav>
+
+<section id="panelPosVentaHome" class="postventa-area-panel" data-ps-panel="posventa">
 <section class="section-panel dashboard-section">
-<h3 class="section-title">Resumen directivo</h3>
-<p class="section-subtitle">Indicadores clave del periodo · vista gerencial</p>
-<div class="kpi-grid kpi-grid--eeff" id="kpiExecutive"></div>
+<h3 class="section-title">PostVenta</h3>
+<p class="section-subtitle" id="postSalesAreaHint">Vista principal · Servicio, Refacciones y HyP</p>
+<div id="posVentaHomeSections" class="kpi-grid"></div>
 </section>
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Resumen consolidado</h3>
+<p class="section-subtitle">Indicadores del periodo sin filtrar por sección</p>
+<div class="kpi-grid kpi-grid--eeff" id="kpiPosVentaHome"></div>
+</section>
+</section>
+
+<section id="panelPostVentaOrdenes" class="postventa-area-panel hidden" data-ps-panel="ordenes">
 
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Indicadores operativos</h3>
-<p class="section-subtitle">Volumen, importes, antigüedad y control de taller</p>
+<p class="section-subtitle">Volumen, importes, antigüedad y control de taller · clic en un KPI para ver el detalle</p>
 <div id="kpiOperational"></div>
+<div id="opsKpiDetail" class="kpi-detail-panel hidden" style="margin-top:14px"></div>
 </section>
 
-<section class="section-panel table-panel dashboard-section">
+<section class="chart-grid">
+<div class="section-panel table-panel"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada · clic en una fila para ver el resumen</p><div class="table-scroll"><table class="data-table data-table--selectable"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
+<div class="section-panel table-panel"><h3 class="section-title">Control de órdenes</h3><p class="section-subtitle">Sin aseguradora · tipo por letra del folio</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Tipo de orden</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody></table></div></div>
+</section>
+
+<section id="panelMesCursoNomenclatura" class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Acumulado mes en curso</h3>
+<h3 class="section-title" style="margin-bottom:0">Acumulado de órdenes de reparación</h3>
 <span id="mesCursoNomenLabel" class="top-bar-meta">N · D · Q · C · X · Y</span>
 </div>
-<p class="section-subtitle">Órdenes por fecha de ingreso · nomenclaturas N, D, Q, C, X, Y · excluye canceladas</p>
+<p class="section-subtitle">Órdenes tipo 1 · razón de visita 1, 2, 3, 4</p>
 <div class="table-scroll postventa-mes-curso-wrap">
 <table class="data-table data-table--mes-curso">
 <thead>
 <tr>
 <th>Fecha</th>
-<th class="cell-num" title="Normal">N</th>
-<th class="cell-num" title="Reparación">D</th>
-<th class="cell-num" title="Normal Zacatelco">Q</th>
-<th class="cell-num" title="Reparación Zacatelco">C</th>
-<th class="cell-num" title="Reparación Cholula">X</th>
-<th class="cell-num" title="Normal Cholula">Y</th>
+<th class="cell-num" title="N · Normal">Normal</th>
+<th class="cell-num" title="D · Reparación">Reparación</th>
+<th class="cell-num" title="Q · Normal Zacatelco">Normal Zacatelco</th>
+<th class="cell-num" title="C · Reparación Zacatelco">Reparación Zacatelco</th>
+<th class="cell-num" title="X · Reparación Cholula">Reparación Cholula</th>
+<th class="cell-num" title="Y · Normal Cholula">Normal Cholula</th>
 <th class="cell-num">Total día</th>
 <th class="cell-num">Acum.</th>
 </tr>
@@ -131,19 +176,9 @@
 <p id="mesCursoNomenLegend" class="section-subtitle postventa-mes-curso-legend"></p>
 </section>
 
-<section class="chart-grid">
-<div class="section-panel table-panel"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
-<div class="section-panel table-panel"><h3 class="section-title">Control de órdenes</h3><p class="section-subtitle">Sin aseguradora · tipo por letra del folio</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Tipo de orden</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody></table></div></div>
-</section>
-
-<section class="chart-grid">
-<div class="section-panel"><h3 class="section-title">Órdenes por estatus</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cStatus"></canvas></div></div></div>
-<div class="section-panel"><h3 class="section-title">Antigüedad de abiertas</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cAging"></canvas></div></div></div>
-</section>
-
-<section class="chart-grid">
-<div class="section-panel"><h3 class="section-title">Ritmo mensual operativo</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cMonthlyOps"></canvas></div></div></div>
-<div class="section-panel"><h3 class="section-title">Flujo semanal</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cWeekly"></canvas></div></div></div>
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Flujo semanal</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="cWeekly"></canvas></div></div>
 </section>
 
 <section class="section-panel dashboard-section">
@@ -151,46 +186,156 @@
 <div class="chart-card"><div class="chart-wrap"><canvas id="cStatusWeek"></canvas></div></div>
 </section>
 
-<section class="chart-grid">
-<div class="section-panel"><h3 class="section-title">Tipo de orden</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cTipo"></canvas></div></div></div>
-<div class="section-panel"><h3 class="section-title">Importe abierto por tipo</h3><div class="chart-card"><div class="chart-wrap"><canvas id="cImporteTipo"></canvas></div></div></div>
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Tipo de orden</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="cTipo"></canvas></div></div>
 </section>
 
 <section class="section-panel table-panel dashboard-section">
 <h3 class="section-title">Órdenes críticas</h3>
-<div class="table-scroll"><table class="data-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Asesor</th><th>Días</th><th>Importe</th><th>Semáforo</th><th>Promesa</th></tr></thead><tbody id="tblCriticas"></tbody></table></div>
+<div class="table-scroll"><table class="data-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Asesor</th><th>Días</th><th>Importe</th><th>Promesa</th></tr></thead><tbody id="tblCriticas"></tbody></table></div>
 </section>
 
 <section class="chart-grid">
 <div class="section-panel table-panel"><h3 class="section-title">Productividad por asesor</h3><div class="table-scroll"><table class="data-table"><thead><tr><th>Asesor</th><th>Órdenes</th><th>Facturadas</th><th>Abiertas</th><th>Importe</th></tr></thead><tbody id="tblAsesor"></tbody></table></div></div>
 </section>
 
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Resumen directivo</h3>
+<p class="section-subtitle">Indicadores clave del periodo · vista gerencial</p>
+<div class="kpi-grid kpi-grid--eeff" id="kpiExecutive"></div>
+</section>
+
+</section>
+
+<section id="panelPostVentaRefacciones" class="postventa-area-panel hidden" data-ps-panel="refacciones">
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Refacciones</h3>
+<p class="section-subtitle">Catálogo/existencias · pedidos a planta · pendientes de surtir</p>
+<nav class="eeff-tabs" id="refaccionesSubTabs" aria-label="Subsecciones de Refacciones">
+<button type="button" class="eeff-tab active" data-ref-tab="inventario" aria-pressed="true">
+<span class="material-symbols-outlined" aria-hidden="true">inventory_2</span>
+Inventario
+</button>
+<button type="button" class="eeff-tab" data-ref-tab="pedidos" aria-pressed="false">
+<span class="material-symbols-outlined" aria-hidden="true">local_shipping</span>
+Pedidos
+</button>
+<button type="button" class="eeff-tab" data-ref-tab="pendientes" aria-pressed="false">
+<span class="material-symbols-outlined" aria-hidden="true">pending_actions</span>
+Pendientes
+</button>
+</nav>
+</section>
+
+<section id="refPanelInventario" class="refacciones-subpanel" data-ref-panel="inventario">
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Existencias actuales</h3>
+<p class="section-subtitle">PAR_ALMACEN + PAR_PARTES · stock con existencia &gt; 0</p>
+<div id="kpiRefaccionesInventario" class="kpi-summary"></div>
+</section>
 <section class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Detalle operativo</h3>
-<span id="ordersCount" class="top-bar-meta"></span>
+<h3 class="section-title" style="margin-bottom:0">Top existencias por costo</h3>
+<span id="refaccionesInventarioMeta" class="top-bar-meta">—</span>
 </div>
 <div class="table-scroll">
 <table class="data-table">
-<thead><tr>
-<th>Orden</th><th>Nombre</th><th>Asesor</th><th>Status</th><th>Tipo</th><th>Semáforo</th>
-<th>Ingreso</th><th>Promesa</th><th>Días</th><th>Importe</th><th>Aseguradora</th><th>Serie</th>
-</tr></thead>
-<tbody id="ordersTable"></tbody>
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th>Almacén</th>
+<th>Grupo</th>
+<th>Línea</th>
+<th class="cell-num">Existencia</th>
+<th class="cell-num">Apartada</th>
+<th class="cell-num">Costo</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesInventario"></tbody>
 </table>
 </div>
+</section>
+</section>
+
+<section id="refPanelPedidos" class="refacciones-subpanel hidden" data-ref-panel="pedidos">
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Pedidos de refacciones</h3>
+<p class="section-subtitle">PAR_PEDIDO / PAR_PEDIDETA · compras a planta/proveedor</p>
+<div id="kpiRefaccionesPedidos" class="kpi-summary"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Detalle de pedidos</h3>
+<span id="refaccionesPedidosMeta" class="top-bar-meta">—</span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Pedido</th>
+<th>Fecha</th>
+<th>Proveedor</th>
+<th>Status</th>
+<th>Tipo</th>
+<th class="cell-num">Líneas</th>
+<th class="cell-num">Pedida</th>
+<th class="cell-num">Surtida</th>
+<th class="cell-num">Pend.</th>
+<th class="cell-num">Importe</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesPedidos"></tbody>
+</table>
+</div>
+</section>
+</section>
+
+<section id="refPanelPendientes" class="refacciones-subpanel hidden" data-ref-panel="pendientes">
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Pendientes de surtir / llegar</h3>
+<p class="section-subtitle">Pedidos abiertos con cantidad pedida &gt; surtida</p>
+<div id="kpiRefaccionesPendientes" class="kpi-summary"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Pedidos pendientes</h3>
+<span id="refaccionesPendientesMeta" class="top-bar-meta">—</span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Pedido</th>
+<th>Fecha</th>
+<th>Proveedor</th>
+<th>Status</th>
+<th>Tipo</th>
+<th class="cell-num">Líneas pend.</th>
+<th class="cell-num">Pedida</th>
+<th class="cell-num">Surtida</th>
+<th class="cell-num">Importe</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesPendientes"></tbody>
+</table>
+</div>
+</section>
+</section>
 </section>
 
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js"></script>
-<script src="/js/postSalesOrderTypes.js"></script>
-<script src="/js/postSalesAnalytics.js?v=3"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/postSalesOrderTypes.js?v=4"></script>
+<script src="/js/postSalesAnalytics.js?v=13"></script>
+<script src="/js/sidebar.js?v=9"></script>
+<script src="/js/topbar.js?v=11"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/assistant-bubble.js?v=3"></script>
-<script src="/js/post-sales.js?v=8"></script>
+<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/assistant-bubble.js?v=4"></script>
+<script src="/js/post-sales.js?v=37"></script>
 </body>
 </html>

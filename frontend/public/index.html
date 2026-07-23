@@ -6,7 +6,7 @@
 <title>Resumen Ejecutivo | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=58" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="overview">
@@ -16,10 +16,6 @@
 <header class="top-bar">
 <div class="top-bar-actions">
 <span class="top-bar-title">Resumen Ejecutivo</span>
-<span id="statusBadge" class="top-bar-meta">Listo</span>
-</div>
-<div class="top-bar-actions">
-<span id="lastUpdated" class="top-bar-meta"></span>
 </div>
 </header>
 <div class="main-content custom-scrollbar">
@@ -67,8 +63,8 @@
 </section>
 
 <section class="section-panel dashboard-section">
-<h3 class="section-title">Resumen financiero</h3>
-<p class="section-subtitle">Análisis ejecutivo de ventas · servicio · inventario</p>
+<h3 class="section-title">Tablero ejecutivo</h3>
+<p class="section-subtitle">Resumen ejecutivo para alta dirección · ventas, inventario, taller y rentabilidad</p>
 <div class="kpi-summary" id="financialSummary"></div>
 </section>
 <section class="chart-grid-2-1">
@@ -93,11 +89,12 @@
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js"></script>
-<script src="/js/sidebar.js?v=7"></script>
-<script src="/js/topbar.js?v=3"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/sidebar.js?v=8"></script>
+<script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/assistant-bubble.js?v=3"></script>
-<script src="/js/overview.js?v=3"></script>
+<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/assistant-bubble.js?v=4"></script>
+<script src="/js/overview.js?v=6"></script>
 </body>
 </html>

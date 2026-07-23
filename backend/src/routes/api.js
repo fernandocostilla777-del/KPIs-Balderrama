@@ -4,9 +4,14 @@ const { loadSalesExecutiveAnalytics } = require('../services/salesExecutiveAnaly
 const { getVentas } = require('../services/ventas');
 const { getInventory } = require('../services/inventoryService');
 const { getInventoryPostventa } = require('../services/inventoryPostventaService');
-const { getPostSales } = require('../services/postSalesService');
+const { getPostSales, getPostSalesOrderDetail } = require('../services/postSalesService');
+const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/refaccionesPedidosService');
 const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
+const { getFinanciamientoDashboard } = require('../services/financiamientoService');
+const financiamientoNotes = require('../services/financiamientoNotesStore');
+const gerentesFi = require('../services/gerentesFinanciamientoStore');
+const { getFacturaMovimientos } = require('../services/facturaMovimientosService');
 const { getContabilidad } = require('../services/contabilidadService');
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
@@ -62,6 +67,97 @@ router.get('/ventas', async (req, res, next) => {
   }
 });
 
+router.get('/ventas/financiamiento', (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(getFinanciamientoDashboard({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/financiamiento/gerentes', (_req, res, next) => {
+  try {
+    res.json(gerentesFi.getGerentesPayload());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/ventas/financiamiento/factura/:docto', async (req, res, next) => {
+  try {
+    const data = await getFacturaMovimientos(req.params.docto);
+    const notes = financiamientoNotes.listNotes({ factura: req.params.docto });
+    res.json({ ...data, notes });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/financiamiento/notas', (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, factura, soloFacturas } = req.query;
+    res.json({
+      notes: financiamientoNotes.listNotes({
+        fechaInicio,
+        fechaFin,
+        factura,
+        soloFacturas: soloFacturas === '1' || soloFacturas === 'true',
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/ventas/financiamiento/notas', (req, res, next) => {
+  try {
+    const { text, scope, fechaInicio, fechaFin, factura } = req.body || {};
+    const author = req.session?.username || req.session?.name || 'usuario';
+    const note = financiamientoNotes.createNote({
+      text,
+      author,
+      scope,
+      factura,
+      fechaInicio: fechaInicio || req.query.fechaInicio,
+      fechaFin: fechaFin || req.query.fechaFin,
+    });
+    res.status(201).json({ note });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.put('/ventas/financiamiento/notas/:id', (req, res, next) => {
+  try {
+    const author = req.session?.username || req.session?.name || 'usuario';
+    const note = financiamientoNotes.updateNote(req.params.id, {
+      text: req.body?.text,
+      author,
+    });
+    res.json({ note });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.delete('/ventas/financiamiento/notas/:id', (req, res, next) => {
+  try {
+    financiamientoNotes.deleteNote(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.get('/overview/analytics', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
@@ -109,6 +205,75 @@ router.get('/post-sales', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     res.json(await getPostSales({ fechaInicio, fechaFin }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/post-sales/refacciones-pedidos', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(await getRefaccionesPedidos({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/post-sales/refacciones', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(await getRefaccionesDashboard({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/post-sales/orden/:orden', async (req, res, next) => {
+  try {
+    const data = await getPostSalesOrderDetail(req.params.orden);
+    res.json(data);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.post('/post-sales/export-xlsx', (req, res, next) => {
+  try {
+    const XLSX = require('xlsx');
+    const rawName = String(req.body?.filename || 'export.xlsx').replace(/[^\w.\-áéíóúÁÉÍÓÚñÑ ]+/g, '_');
+    const filename = rawName.toLowerCase().endsWith('.xlsx') ? rawName : `${rawName}.xlsx`;
+    const sheets = Array.isArray(req.body?.sheets) ? req.body.sheets : [];
+    if (!sheets.length) {
+      return res.status(400).json({ error: 'No hay hojas para exportar.' });
+    }
+
+    const wb = XLSX.utils.book_new();
+    let appended = 0;
+    for (const sheet of sheets) {
+      const rows = Array.isArray(sheet?.rows) ? sheet.rows : [];
+      if (!rows.length) continue;
+      const name = String(sheet?.name || `Hoja${appended + 1}`).slice(0, 31) || `Hoja${appended + 1}`;
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, name);
+      appended += 1;
+    }
+    if (!appended) {
+      return res.status(400).json({ error: 'Las hojas no tienen filas para exportar.' });
+    }
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buf);
   } catch (err) {
     next(err);
   }
@@ -240,6 +405,34 @@ router.get('/crm/contactos', (req, res, next) => {
   }
 });
 
+router.get('/crm/vendedores', (req, res, next) => {
+  try {
+    const crm = require('../services/crmCiclosService');
+    const { q, limit } = req.query;
+    res.json({ vendedores: crm.listVendedores({ q, limit }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/crm/vendedores/resumen', async (req, res, next) => {
+  try {
+    const crm = require('../services/crmCiclosService');
+    const { vendedor, fechaInicio, fechaFin, limit } = req.query;
+    if (!vendedor) {
+      return res.status(400).json({ error: 'Parametro requerido: vendedor.' });
+    }
+    res.json(await crm.getVendedorResumen({
+      vendedor,
+      fechaInicio: fechaInicio || null,
+      fechaFin: fechaFin || null,
+      limit,
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/crm/contactos/:idContacto/historico', async (req, res, next) => {
   try {
     const crm = require('../services/crmCiclosService');
@@ -281,6 +474,24 @@ router.get('/crm/cierres-taller', async (req, res, next) => {
   }
 });
 
+router.get('/ai/exports/:fileId', (req, res, next) => {
+  try {
+    const path = require('path');
+    const { resolveExportPath } = require('../services/aiExcelExport');
+    const diskPath = resolveExportPath(req.params.fileId);
+    if (!diskPath) {
+      return res.status(404).json({ error: 'Archivo no encontrado o expirado. Vuelve a pedirle al asistente que genere el Excel.' });
+    }
+    const rawName = String(req.query.name || 'export.xlsx').replace(/[^\w.\-áéíóúÁÉÍÓÚñÑ ]+/g, '_');
+    const filename = rawName.toLowerCase().endsWith('.xlsx') ? rawName : `${rawName}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.sendFile(path.resolve(diskPath));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/ai/status', (_req, res) => {
   res.json({
     ok: true,
@@ -288,6 +499,23 @@ router.get('/ai/status', (_req, res) => {
     model: DEFAULT_MODEL,
     database: process.env.DB_NAME,
   });
+});
+
+router.post('/ai/insights', (req, res) => {
+  try {
+    const { buildInsights } = require('../services/intelligentInsightsService');
+    const body = req.body || {};
+    const insights = buildInsights(body);
+    res.json({
+      ok: true,
+      module: body.module || null,
+      count: insights.length,
+      insights,
+    });
+  } catch (err) {
+    console.error('[AI Insights]', err.message);
+    res.status(500).json({ error: err.message || 'No se pudieron generar insights' });
+  }
 });
 
 router.post('/ai/chat', async (req, res) => {

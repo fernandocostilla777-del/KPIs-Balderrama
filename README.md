@@ -18,6 +18,9 @@ Dashboard ejecutivo conectado a SQL Server (GMOFARRIL): ventas, contabilidad, in
 ├── cloud-api/        # API en la nube (PostgreSQL) — desplegar en Railway
 │   └── DEPLOY_RAILWAY.md  # Guía de despliegue Railway
 │
+├── mobile-app/       # App móvil Ionic (Liquid Glass + Capacitor)
+│   └── README.md
+│
 └── package.json      # Arranca backend + frontend juntos (solo local)
 ```
 
@@ -86,10 +89,14 @@ Checklist pre-revisión: **[CHECKLIST_REVISION.md](./CHECKLIST_REVISION.md)**.
 
 ## Despliegue en servidor (local)
 
-1. Instalar dependencias: `npm run install:all`
-2. Configurar `backend/.env` (BD, auth, OpenAI)
-3. Ejecutar `npm start` o usar un gestor de procesos (PM2, systemd)
-4. Opcional: poner nginx delante con el frontend en `/` y proxy `/api` al backend
+Guía completa de **instalación inicial** y **actualizaciones solo con cambios**:  
+**[DEPLOY_SERVIDOR.md](./DEPLOY_SERVIDOR.md)**
+
+Resumen:
+
+1. Instalación una vez: zip de código + datos + `backend/.env` + `npm run install:all` + `npm start`
+2. Updates: generar delta con `.\scripts\pack-server-update.ps1 -Since "YYYY-MM-DD"` y descomprimir encima en el servidor
+3. Opcional: nginx delante con el frontend en `/` y proxy `/api` al backend
 
 ## Despliegue en Railway (nube — solo réplica intermedia)
 

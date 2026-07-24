@@ -1,7 +1,21 @@
 /* Verifica endpoints móviles contra Railway (sin secretos en logs). */
 const BASE = process.env.CLOUD_API_URL || 'https://kpis-balderrama-production.up.railway.app';
-const USER = process.env.MOBILE_TEST_USER || process.env.MOBILE_USER || '';
-const PASS = process.env.MOBILE_TEST_PASS || process.env.MOBILE_PASS || '';
+
+function credentialsFromEnv() {
+  if (process.env.MOBILE_TEST_USER && process.env.MOBILE_TEST_PASS) {
+    return { user: process.env.MOBILE_TEST_USER, pass: process.env.MOBILE_TEST_PASS };
+  }
+  if (process.env.MOBILE_USER && process.env.MOBILE_PASS) {
+    return { user: process.env.MOBILE_USER, pass: process.env.MOBILE_PASS };
+  }
+  const raw = String(process.env.MOBILE_AUTH_USERS || '').trim();
+  if (!raw) return { user: '', pass: '' };
+  const first = raw.split(';')[0] || '';
+  const [user, pass] = first.split(':');
+  return { user: String(user || ''), pass: String(pass || '') };
+}
+
+const { user: USER, pass: PASS } = credentialsFromEnv();
 
 async function req(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {

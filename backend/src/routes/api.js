@@ -80,6 +80,20 @@ router.get('/ventas/financiamiento', (req, res, next) => {
   }
 });
 
+router.get('/ventas/leads', (req, res, next) => {
+  try {
+    const crm = require('../services/crmCiclosService');
+    const { fechaInicio, fechaFin, limit } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(crm.getLeadsDashboard({ fechaInicio, fechaFin, limit }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.get('/ventas/financiamiento/gerentes', (_req, res, next) => {
   try {
     res.json(gerentesFi.getGerentesPayload());

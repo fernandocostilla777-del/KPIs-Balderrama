@@ -276,6 +276,52 @@ const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'consultar_quejas_csi',
+      description:
+        'OBLIGATORIA para quejas, reclamos, incidencias CSI, NPS bajo o insatisfacción por vendedor/ejecutivo '
+        + 'o por asesor de servicio/taller. Fuente: CSI Posventa (columna asesor) y CSI Ventas (columna ejecutivo). '
+        + 'Sin persona → ranking de asesores y vendedores con más quejas. Con persona → detalle de sus quejas, '
+        + 'área y muestra de comentarios. Por defecto solo Queja/Baja calificación (tipoIncidencia=quejas); '
+        + 'usa tipoIncidencia=todas para incluir solicitudes de info, sugerencias y felicitaciones. '
+        + 'No uses buscar_cliente_crm ni SQL para este caso.',
+      parameters: {
+        type: 'object',
+        properties: {
+          persona: {
+            type: 'string',
+            description: 'Nombre parcial o completo del vendedor/ejecutivo o asesor de servicio. Vacío = ranking general.',
+          },
+          rol: {
+            type: 'string',
+            enum: ['auto', 'vendedor', 'asesor_servicio'],
+            description: 'auto busca en ambos; vendedor=CSI Ventas (ejecutivo); asesor_servicio=CSI Posventa (asesor).',
+          },
+          fuente: {
+            type: 'string',
+            enum: ['todas', 'posventa', 'ventas'],
+            description: 'Filtrar solo posventa/taller, solo ventas, o ambas.',
+          },
+          tipoIncidencia: {
+            type: 'string',
+            enum: ['quejas', 'todas'],
+            description: 'quejas (default) = Queja/Baja calificación; todas = cualquier incidencia CSI.',
+          },
+          periodo: {
+            type: 'string',
+            enum: ['hoy', 'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'ultimos_90_dias', 'trimestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior', 'todo'],
+            description: 'Periodo relativo. Para “mes pasado” usa mes_pasado.',
+          },
+          fechaInicio: { type: 'string', description: 'Inicio YYYY-MM-DD (opcional)' },
+          fechaFin: { type: 'string', description: 'Fin YYYY-MM-DD (opcional)' },
+          area: { type: 'string', description: 'Filtro parcial de área (Garantías, Servicio, HYP, Facturación, etc.)' },
+          limit: { type: 'string', description: 'Máximo de filas de detalle (default 25)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'buscar_cliente_crm',
       description:
         'Busca clientes en Seguimiento 360: Balderrama Ciclos (fuente maestra), leads, solicitudes F&I y pruebas de manejo. '
@@ -339,8 +385,8 @@ const TOOL_DEFINITIONS = [
         properties: {
           periodo: {
             type: 'string',
-            enum: ['hoy', 'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'trimestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior', 'todo'],
-            description: 'Periodo relativo. Para "el mes pasado" usa exactamente mes_pasado.',
+            enum: ['hoy', 'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'ultimos_90_dias', 'trimestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior', 'todo'],
+            description: 'Periodo relativo. Para "el mes pasado" usa exactamente mes_pasado. Para “últimos 90 días” usa ultimos_90_dias.',
           },
           desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD (opcional)' },
           hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD (opcional)' },
@@ -370,8 +416,8 @@ const TOOL_DEFINITIONS = [
         properties: {
           periodo: {
             type: 'string',
-            enum: ['hoy', 'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'trimestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior', 'todo'],
-            description: 'Periodo relativo; usa mes_pasado cuando el usuario diga “mes pasado”.',
+            enum: ['hoy', 'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'ultimos_90_dias', 'trimestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior', 'todo'],
+            description: 'Periodo relativo; usa mes_pasado cuando el usuario diga “mes pasado”; ultimos_90_dias para “últimos 90 días”.',
           },
           desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD (opcional)' },
           hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD (opcional)' },
@@ -637,8 +683,40 @@ async function executeTool(name, args = {}) {
     case 'consultar_pronostico':
       result = shapeForecastForAi(await getForecast({ horizon: args.horizon }));
       break;
-    case 'consultar_objetivos_ventas':
-      result = getGoals(args);
+    case 'consultar_objetivos_ventas': {
+      const goals = getGoals(args);
+      let avance = null;
+      try {
+        if (args.fechaInicio && args.fechaFin) {
+          const ventas = await getVentas({
+            fechaInicio: args.fechaInicio,
+            fechaFin: args.fechaFin,
+          });
+          const r = ventas?.resumen || {};
+          avance = {
+            retail: r.totalRetail ?? null,
+            total: r.totalVentas ?? null,
+            flotilla: r.totalFlotillas ?? null,
+          };
+        }
+      } catch (_) {
+        avance = null;
+      }
+      result = { ...goals, avance };
+      break;
+    }
+    case 'consultar_quejas_csi':
+      result = crmCiclos.getQuejasCsiSummary({
+        persona: args.persona || null,
+        rol: args.rol || 'auto',
+        fuente: args.fuente || 'todas',
+        tipoIncidencia: args.tipoIncidencia || 'quejas',
+        periodo: args.periodo || null,
+        fechaInicio: args.fechaInicio || null,
+        fechaFin: args.fechaFin || null,
+        area: args.area || null,
+        limit: Math.min(50, Math.max(5, Number(args.limit) || 25)),
+      });
       break;
     case 'buscar_cliente_crm':
       result = { resultados: crmCiclos.searchContacts(args) };
@@ -694,6 +772,7 @@ async function executeTool(name, args = {}) {
           retornoBase: retorno.base || null,
           ordenesTaller: retorno.ordenes ?? 0,
         },
+        quejasCsi: raw.quejasCsi || null,
         libroVentas: {
           unidades: Number(libro.unidades || 0),
           fuente: libro.fuente || null,
@@ -712,7 +791,8 @@ async function executeTool(name, args = {}) {
         })),
         nota:
           'Unidades vendidas = libro ADE_VTAFI cuando hay match. '
-          + 'Promedio PVAs = cantidad de productos con monto > 0 por contrato (no monto monetario).',
+          + 'Promedio PVAs = cantidad de productos con monto > 0 por contrato (no monto monetario). '
+          + 'Quejas CSI: asesor de servicio en CSI Posventa y ejecutivo/vendedor en CSI Ventas.',
       };
       break;
     }

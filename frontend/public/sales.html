@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=82" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=87" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -74,6 +74,10 @@ Ventas
 <button type="button" class="contabilidad-tab" data-sales-tab="financiamiento" aria-controls="panelVentasFinanciamiento" aria-selected="false">
 <span class="material-symbols-outlined" aria-hidden="true">account_balance</span>
 Financiamiento
+</button>
+<button type="button" class="contabilidad-tab" data-sales-tab="leads" aria-controls="panelVentasLeads" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">diversity_3</span>
+Leads
 </button>
 </nav>
 
@@ -410,6 +414,98 @@ Financiamiento
 
 </div>
 
+<div id="panelVentasLeads" class="sales-main-panel hidden" data-sales-panel="leads" hidden>
+
+<section id="secLeads" class="section-panel dashboard-section fi-section ld-section" aria-label="Leads">
+<div class="fi-section-header">
+<div>
+<h2 class="section-title" style="margin-bottom:6px">Leads</h2>
+<p id="ldSubtitle" class="section-subtitle" style="margin:0">Seguimiento de conversión de oportunidades a ventas (cohorte por fecha de entrada · compra = VIN en CRM).</p>
+</div>
+</div>
+
+<div id="ldKpiOperational" class="fi-kpi-root"></div>
+
+<section id="ldKpiDetail" class="kpi-detail-panel kpi-detail-panel--fi hidden" aria-labelledby="ldDetailTitle">
+<div class="kpi-detail-header">
+<div>
+<h3 id="ldDetailTitle" class="section-title" style="margin-bottom:6px">Detalle</h3>
+<div id="ldDetailResumen" class="section-subtitle" style="margin:0"></div>
+</div>
+<button type="button" id="btnCerrarLdDetail" class="btn-glass btn-icon-close" aria-label="Cerrar detalle de leads">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+</section>
+
+<section class="section-panel dashboard-section" style="margin-top:12px">
+<h3 class="section-title" style="margin-bottom:8px">Embudo</h3>
+<div id="ldFunnel"></div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row" style="flex-wrap:wrap;gap:10px">
+<h3 class="section-title" style="margin-bottom:0">Conversión por grupo</h3>
+<nav class="eeff-tabs" id="ldGroupTabs" aria-label="Agrupar leads">
+<button type="button" class="eeff-tab active" data-ld-group="canal" aria-pressed="true">Canal</button>
+<button type="button" class="eeff-tab" data-ld-group="ejecutivo" aria-pressed="false">Ejecutivo</button>
+<button type="button" class="eeff-tab" data-ld-group="sucursal" aria-pressed="false">Sucursal</button>
+<button type="button" class="eeff-tab" data-ld-group="resultado" aria-pressed="false">Resultado</button>
+</nav>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Grupo</th>
+<th class="cell-num">Leads</th>
+<th class="cell-num">Contactados</th>
+<th class="cell-num">Citas</th>
+<th class="cell-num">Cotizados</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">Conv. %</th>
+</tr>
+</thead>
+<tbody id="ldGroupsBody">
+<tr class="empty-row"><td colspan="7">Consulte un periodo para ver la conversión.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<div class="kpi-detail-toolbar">
+<label class="kpi-detail-search" for="buscarLdPreview">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarLdPreview" type="search" placeholder="Buscar cliente, ejecutivo, canal, VIN, ID CRM…" class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+<span id="ldPreviewSearchMeta" class="kpi-detail-search-meta hidden"></span>
+</div>
+<div class="table-scroll kpi-detail-table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>Entrada</th>
+<th>Cliente</th>
+<th>Ejecutivo</th>
+<th>Canal</th>
+<th>Interés</th>
+<th>Etapa</th>
+<th>VIN</th>
+<th>Resultado</th>
+<th>ID CRM</th>
+</tr>
+</thead>
+<tbody id="ldTableBody">
+<tr class="empty-row"><td colspan="9">Consulte un periodo para ver leads.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+
+</div>
+
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -420,8 +516,9 @@ Financiamiento
 <script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=2"></script>
-<script src="/js/assistant-bubble.js?v=4"></script>
+<script src="/js/assistant-bubble.js?v=5"></script>
 <script src="/js/financiamiento.js?v=15"></script>
-<script src="/js/sales.js?v=31"></script>
+<script src="/js/leads.js?v=1"></script>
+<script src="/js/sales.js?v=32"></script>
 </body>
 </html>

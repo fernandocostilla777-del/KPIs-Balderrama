@@ -8,7 +8,13 @@ const {
   getAssignableRoles,
   revealPassword,
 } = require('../auth/users');
-const { ROLES, getRole, canManageUsers } = require('../auth/roles');
+const {
+  getRole,
+  canManageUsers,
+  getRolePermissionsPayload,
+  saveRolePermissions,
+  restoreDefaultRolePermissions,
+} = require('../auth/roles');
 const { requireSession, requireUserManager } = require('../auth/middleware');
 const {
   isAuthEnabled,
@@ -27,9 +33,10 @@ const {
 const router = express.Router();
 
 router.get('/config', (_req, res) => {
+  const { listRoles } = require('../auth/roles');
   res.json({
     enabled: isAuthEnabled(),
-    roles: Object.values(ROLES).map((r) => ({ id: r.id, label: r.label, pages: r.pages })),
+    roles: listRoles(),
     assignableRoles: getAssignableRoles(),
   });
 });
@@ -142,6 +149,22 @@ router.get('/alert-prefs', requireUserManager, (_req, res) => {
     roles: getAssignableRoles(),
     byRole: getPrefs(),
   });
+});
+
+router.get('/role-permissions', requireUserManager, (_req, res) => {
+  res.json(getRolePermissionsPayload());
+});
+
+router.put('/role-permissions', requireUserManager, (req, res) => {
+  try {
+    if (req.body?.reset) {
+      return res.json({ ok: true, ...restoreDefaultRolePermissions() });
+    }
+    const payload = saveRolePermissions(req.body?.byRole || req.body || {});
+    res.json({ ok: true, ...payload });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
 });
 
 router.put('/alert-prefs', requireUserManager, (req, res) => {

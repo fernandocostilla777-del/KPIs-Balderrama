@@ -158,7 +158,7 @@ async function buildIncomeLines(segments, scope) {
       }
     }
 
-    if (def.subLines && scope.area === 'todos') {
+    if (def.subLines && (scope.area === 'todos' || key === 'refacciones')) {
       for (const sub of def.subLines) {
         const subVal = await sumLine(segments, [sub.prefix], true);
         if (Math.abs(subVal) > 0.01) {
@@ -416,7 +416,17 @@ async function getCatalogKpis({ fechaInicio, fechaFin, sucursal = 'todos', area 
   };
 }
 
+/**
+ * Suma prefijos de cuentas en un rango de fechas.
+ * @param {boolean} asIncome true = ingresos (acreedor); false = costos/gastos (deudor)
+ */
+async function sumPrefixesForPeriod(fechaInicio, fechaFin, prefixes, asIncome = true) {
+  const segments = yearSegments(fechaInicio, fechaFin);
+  return sumLine(segments, prefixes || [], asIncome);
+}
+
 module.exports = {
   getCatalogKpis,
+  sumPrefixesForPeriod,
   breakEven,
 };

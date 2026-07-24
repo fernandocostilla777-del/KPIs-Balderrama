@@ -20,6 +20,7 @@
   let compactFilters = null;
   let activeSalesTab = 'ventas';
   let pendingFinanciamiento = null;
+  let pendingLeads = null;
 
   const GOAL_STORAGE_KEYS = {
     retail: 'autointel_goal_retail',
@@ -1132,6 +1133,13 @@
           );
         }
       }
+
+      if (window.LeadsVentas?.load) {
+        pendingLeads = { fechaInicio, fechaFin };
+        if (activeSalesTab === 'leads') {
+          await window.LeadsVentas.load(fechaInicio, fechaFin);
+        }
+      }
     } catch (err) {
       console.error('[Sales]', err);
       setStatus(err.message, 'error');
@@ -1220,14 +1228,16 @@
   function getSalesTabFromUrl() {
     const hash = String(location.hash || '').replace(/^#/, '').toLowerCase();
     if (hash === 'financiamiento' || hash === 'financiera' || hash === 'fi') return 'financiamiento';
+    if (hash === 'leads' || hash === 'lead' || hash === 'oportunidades') return 'leads';
     const params = new URLSearchParams(location.search);
     const tab = String(params.get('tab') || '').toLowerCase();
     if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
+    if (tab === 'leads' || tab === 'lead' || tab === 'oportunidades') return 'leads';
     return 'ventas';
   }
 
   async function switchSalesTab(tab) {
-    const next = tab === 'financiamiento' ? 'financiamiento' : 'ventas';
+    const next = ['financiamiento', 'leads'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
 
     document.querySelectorAll('#salesMainTabs [data-sales-tab]').forEach((btn) => {
@@ -1238,6 +1248,7 @@
 
     const panelVentas = document.getElementById('panelVentasUnidades');
     const panelFi = document.getElementById('panelVentasFinanciamiento');
+    const panelLd = document.getElementById('panelVentasLeads');
     if (panelVentas) {
       panelVentas.classList.toggle('hidden', next !== 'ventas');
       panelVentas.hidden = next !== 'ventas';
@@ -1246,10 +1257,16 @@
       panelFi.classList.toggle('hidden', next !== 'financiamiento');
       panelFi.hidden = next !== 'financiamiento';
     }
+    if (panelLd) {
+      panelLd.classList.toggle('hidden', next !== 'leads');
+      panelLd.hidden = next !== 'leads';
+    }
 
     const title = document.querySelector('.top-bar-title');
     if (title) {
-      title.textContent = next === 'financiamiento' ? 'Financiamiento' : 'Ventas de Unidades';
+      title.textContent = next === 'financiamiento'
+        ? 'Financiamiento'
+        : (next === 'leads' ? 'Leads' : 'Ventas de Unidades');
     }
 
     if (next === 'financiamiento') {
@@ -1266,7 +1283,20 @@
           p.entregasSofia,
         );
       }
-    } else if (location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi') {
+    } else if (next === 'leads') {
+      if (location.hash !== '#leads') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#leads`);
+      }
+      if (pendingLeads && window.LeadsVentas?.load) {
+        await window.LeadsVentas.load(pendingLeads.fechaInicio, pendingLeads.fechaFin);
+      } else if (els.fechaInicio?.value && els.fechaFin?.value && window.LeadsVentas?.load) {
+        pendingLeads = { fechaInicio: els.fechaInicio.value, fechaFin: els.fechaFin.value };
+        await window.LeadsVentas.load(pendingLeads.fechaInicio, pendingLeads.fechaFin);
+      }
+    } else if (
+      location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
+      || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
+    ) {
       history.replaceState(null, '', `${location.pathname}${location.search}`);
     }
   }
@@ -1358,6 +1388,7 @@
       bindElements();
       bindEvents();
       window.FinanciamientoVentas?.init?.();
+      window.LeadsVentas?.init?.();
       compactFilters = Dashboard.initCompactFilters();
       setDefaultDates();
       Dashboard.setActivePresetChip('mes-actual');

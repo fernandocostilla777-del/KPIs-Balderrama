@@ -24,7 +24,7 @@ function topItems(items, limit = 6) {
   return items.slice(0, limit);
 }
 
-function barChart(title, items, { labelKey = 'label', valueKey = 'count', horizontal = false } = {}) {
+function barChart(title, items, { labelKey = 'label', valueKey = 'count', horizontal = false, seriesLabel = 'Unidades' } = {}) {
   const data = topItems(items, 8);
   if (!data.length) return null;
   return {
@@ -33,7 +33,7 @@ function barChart(title, items, { labelKey = 'label', valueKey = 'count', horizo
     title,
     labels: data.map((i) => i[labelKey] || i.label || '—'),
     datasets: [{
-      label: 'Unidades',
+      label: seriesLabel,
       data: data.map((i) => Number(i[valueKey] ?? i.count ?? i.units ?? i.value ?? 0)),
       backgroundColor: CHART_COLORS,
     }],
@@ -356,16 +356,630 @@ function blocksFromInventory(data) {
 
 function blocksFromPostventa(data) {
   const blocks = [];
-  const records = data.records?.total ?? data.records;
-  if (!records && !data.openSnapshot) return blocks;
+  const r = data.resumen;
+  const areaLabel = data.interpretacion?.area || data.filtros?.area || 'PostVenta';
 
-  const ingresadas = data.records?.ingresadas ?? data.total ?? 0;
-  const facturadas = data.records?.facturadas ?? 0;
+  if (r) {
+    blocks.push(kpiRow(`PostVenta · ${areaLabel}`, [
+      kpiItem('Órdenes filtradas', fmtNum(r.totalFiltrado), {
+        sub: data.filtros?.estatus || 'todas',
+        icon: 'build',
+        drilldown: data.porEstatus?.length
+          ? drilldownChart('Por estatus', data.porEstatus.map((e) => ({
+            label: e.estatus,
+            count: e.ordenes,
+          })))
+          : null,
+      }),
+      kpiItem('Abiertas en periodo', fmtNum(r.abiertasEnPeriodo), {
+        icon: 'pending',
+        sub: fmtMoney(r.importeAbierto),
+      }),
+      kpiItem('Facturadas', fmtNum(r.facturadasEnPeriodo), {
+        icon: 'check_circle',
+        sub: fmtMoney(r.importeFacturado),
+        trend: r.pctFacturado,
+        trendUp: Number(r.pctFacturado) >= 50,
+      }),
+      kpiItem('% facturado', r.pctFacturado != null ? fmtPct(r.pctFacturado, false) : '—', {
+        icon: 'pie_chart',
+        sub: `Abiertas actuales: ${fmtNum(r.abiertasActualesDelArea)}`,
+      }),
+    ]));
 
-  blocks.push(kpiRow('Post-venta', [
-    { label: 'Órdenes', value: fmtNum(data.total ?? ingresadas), icon: 'build' },
-    { label: 'Abiertas', value: fmtNum(data.openTotal ?? data.openSnapshot?.length ?? 0), icon: 'pending' },
+    blocks.push(kpiRow('Importes', [
+      kpiItem('Importe filtrado', fmtMoney(r.importeFiltrado), { icon: 'payments' }),
+      kpiItem('Importe abierto', fmtMoney(r.importeAbierto), { icon: 'hourglass_empty' }),
+      kpiItem('Importe facturado', fmtMoney(r.importeFacturado), { icon: 'account_balance_wallet' }),
+      kpiItem('Ingresadas área', fmtNum(r.ingresadasAreaPeriodo), { icon: 'login' }),
+    ]));
+  } else {
+    const ingresadas = data.records?.ingresadas ?? data.total ?? 0;
+    if (!ingresadas && !data.openSnapshot) return blocks;
+    blocks.push(kpiRow('Post-venta', [
+      { label: 'Órdenes', value: fmtNum(data.total ?? ingresadas), icon: 'build' },
+      { label: 'Abiertas', value: fmtNum(data.openTotal ?? data.openSnapshot?.length ?? 0), icon: 'pending' },
+    ]));
+  }
+
+  if (data.porEstatus?.length) {
+    const chart = doughnutChart(
+      'Distribución por estatus',
+      data.porEstatus.map((e) => ({ label: e.estatus, count: e.ordenes })),
+    );
+    if (chart) blocks.push(chart);
+  }
+
+  if (data.porLetra?.length) {
+    const chart = barChart(
+      'Órdenes por letra de folio',
+      data.porLetra.map((l) => ({
+        label: l.letra || l.label,
+        count: l.total ?? l.ordenes ?? l.count,
+      })),
+      { horizontal: true, seriesLabel: 'Órdenes' },
+    );
+    if (chart) blocks.push(chart);
+  }
+
+  if (data.porAsesor?.length) {
+    const chart = barChart(
+      'Órdenes por asesor',
+      data.porAsesor.map((a) => ({ label: a.asesor, count: a.ordenes })),
+      { horizontal: true, seriesLabel: 'Órdenes' },
+    );
+    if (chart) blocks.push(chart);
+
+    const table = dataTable(
+      'Asesores · detalle',
+      ['Asesor', 'Órdenes', 'Abiertas', 'Facturadas', 'Importe'],
+      topItems(data.porAsesor, 10).map((a) => [
+        a.asesor,
+        fmtNum(a.ordenes),
+        fmtNum(a.abiertas),
+        fmtNum(a.facturadas),
+        fmtMoney(a.importe),
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (data.muestra?.length) {
+    const table = dataTable(
+      'Muestra de órdenes',
+      ['Orden', 'Estatus', 'Cliente', 'Asesor', 'Importe'],
+      topItems(data.muestra, 10).map((o) => [
+        o.orden,
+        o.statusLabel || o.status || '—',
+        (o.cliente || '—').slice(0, 28),
+        (o.asesor || '—').slice(0, 22),
+        fmtMoney(o.importe),
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (data.advertencia) {
+    blocks.push(insightCard('warning', 'Filtro de área', data.advertencia));
+  } else if (data.interpretacion?.estatus) {
+    blocks.push(insightCard('info', 'Criterio', `${data.interpretacion.area}. ${data.interpretacion.estatus}.`));
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromObjetivos(data) {
+  const blocks = [];
+  const retail = data.retail;
+  const sofia = data.sofia;
+  const avance = data.avance || {};
+  if (retail == null && sofia == null && avance.retail == null) return blocks;
+
+  const retailPct = retail > 0 && avance.retail != null
+    ? Math.round((Number(avance.retail) / Number(retail)) * 1000) / 10
+    : null;
+  const sofiaPct = sofia > 0 && avance.retail != null
+    ? Math.round((Number(avance.retail) / Number(sofia)) * 1000) / 10
+    : null;
+
+  blocks.push(kpiRow('Objetivos de ventas', [
+    kpiItem('Objetivo retail', retail != null ? fmtNum(retail) : '—', {
+      icon: 'flag',
+      sub: data.retailSource === 'historic' ? `Histórico ${data.historicMonth || ''}`.trim() : 'Guardado',
+    }),
+    kpiItem('Objetivo SOFIA', sofia != null ? fmtNum(sofia) : '—', {
+      icon: 'military_tech',
+      sub: data.sofiaSource === 'historic' ? `Histórico ${data.historicMonth || ''}`.trim() : 'Guardado',
+    }),
+    kpiItem('Retail real', avance.retail != null ? fmtNum(avance.retail) : '—', {
+      icon: 'storefront',
+      sub: avance.total != null ? `Total periodo: ${fmtNum(avance.total)}` : undefined,
+      trend: retailPct,
+      trendUp: retailPct == null ? undefined : retailPct >= 100,
+    }),
+    kpiItem('Cobertura SOFIA', sofiaPct != null ? fmtPct(sofiaPct, false) : '—', {
+      icon: 'speed',
+      sub: retailPct != null ? `Avance retail ${fmtPct(retailPct, false)}` : undefined,
+      trend: sofiaPct,
+      trendUp: sofiaPct == null ? undefined : sofiaPct >= 100,
+    }),
   ]));
+
+  const metaItems = [];
+  if (retail != null) metaItems.push({ label: 'Meta retail', count: Number(retail) });
+  if (avance.retail != null) metaItems.push({ label: 'Retail real', count: Number(avance.retail) });
+  if (sofia != null) metaItems.push({ label: 'Meta SOFIA', count: Number(sofia) });
+  if (avance.flotilla != null) metaItems.push({ label: 'Flotilla', count: Number(avance.flotilla) });
+  const metaChart = barChart('Meta vs avance', metaItems, { horizontal: true, seriesLabel: 'Unidades' });
+  if (metaChart) blocks.push(metaChart);
+
+  if (retailPct != null || sofiaPct != null) {
+    let text = '';
+    if (retailPct != null) {
+      text += retailPct >= 100
+        ? `Retail ya cubre la meta (${fmtPct(retailPct, false)}). `
+        : `Retail lleva ${fmtPct(retailPct, false)} de la meta. `;
+    }
+    if (sofiaPct != null) {
+      text += sofiaPct >= 100
+        ? `Cobertura SOFIA alcanzada (${fmtPct(sofiaPct, false)}).`
+        : `Faltan ${fmtNum(Math.max(0, Number(sofia) - Number(avance.retail || 0)))} unidades para SOFIA.`;
+    }
+    blocks.push(insightCard(
+      (sofiaPct ?? retailPct ?? 0) >= 100 ? 'info' : 'warning',
+      'Ritmo del periodo',
+      text.trim(),
+    ));
+  }
+
+  if (data.fechaInicio && data.fechaFin) {
+    blocks.push(insightCard(
+      'info',
+      'Periodo',
+      `Objetivos del ${data.fechaInicio} al ${data.fechaFin}.`,
+    ));
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromVentasDia(data) {
+  const blocks = [];
+  const s = data.summary;
+  const units = Array.isArray(data.units) ? data.units : [];
+  if (!s && !units.length) return blocks;
+
+  const retail = units.filter((u) => !u.flotilla).length;
+  const flotilla = units.filter((u) => u.flotilla).length;
+
+  blocks.push(kpiRow(`Ventas del día · ${data.fecha || ''}`, [
+    kpiItem('Unidades', fmtNum(s?.units ?? units.length), { icon: 'directions_car' }),
+    kpiItem('Venta', fmtMoney(s?.ventaSubtotal), { icon: 'payments' }),
+    kpiItem('Utilidad', fmtMoney(s?.utilidad), { icon: 'savings' }),
+    kpiItem('Margen', s?.margenPct != null ? fmtPct(s.margenPct, false) : '—', {
+      icon: 'percent',
+      sub: `Retail ${fmtNum(retail)} · Flotilla ${fmtNum(flotilla)}`,
+    }),
+  ]));
+
+  const mix = [
+    { label: 'Retail', count: retail },
+    { label: 'Flotilla', count: flotilla },
+  ].filter((x) => x.count > 0);
+  const mixChart = doughnutChart('Mix del día', mix);
+  if (mixChart) blocks.push(mixChart);
+
+  if (units.length) {
+    const byModelo = new Map();
+    for (const u of units) {
+      const key = u.modelo || 'Sin modelo';
+      byModelo.set(key, (byModelo.get(key) || 0) + 1);
+    }
+    const modeloItems = [...byModelo.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+    const modeloChart = barChart('Unidades por modelo', modeloItems, { horizontal: true });
+    if (modeloChart) blocks.push(modeloChart);
+
+    const byEstado = new Map();
+    for (const u of units) {
+      const key = u.estado || '—';
+      byEstado.set(key, (byEstado.get(key) || 0) + 1);
+    }
+    if (byEstado.size > 1) {
+      const estadoChart = doughnutChart(
+        'Por sucursal/estado',
+        [...byEstado.entries()].map(([label, count]) => ({ label, count })),
+      );
+      if (estadoChart) blocks.push(estadoChart);
+    }
+
+    const table = dataTable(
+      'Detalle de unidades',
+      ['Modelo', 'Cliente', 'Canal', 'Venta', 'Utilidad'],
+      topItems(units, 12).map((u) => [
+        (u.modelo || '—').slice(0, 28),
+        (u.cliente || '—').slice(0, 22),
+        u.flotilla ? 'Flotilla' : 'Retail',
+        fmtMoney(u.ventaSubtotal),
+        u.utilidad != null ? fmtMoney(u.utilidad) : '—',
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromAnalytics(data) {
+  const blocks = [];
+  const ren = data.rentabilidad;
+  const aging = data.aging;
+  const fi = data.fi;
+  const fv = data.fuerzaVentas;
+  if (!ren && !aging && !fv) return blocks;
+
+  if (ren) {
+    blocks.push(kpiRow('Analytics · rentabilidad', [
+      kpiItem('Margen bruto', fmtPct(ren.margenBrutoPct, false), { icon: 'percent' }),
+      kpiItem('Utilidad bruta', fmtMoney(ren.utilidadBrutaTotal), { icon: 'savings' }),
+      kpiItem('Margen / unidad', fmtMoney(ren.margenBrutoUnitario), {
+        icon: 'sell',
+        sub: `${fmtNum(ren.unidadesAnalizadas)} unidades`,
+      }),
+      kpiItem('Bonificaciones', fmtMoney(ren.bonificacionesTotal), {
+        icon: 'local_offer',
+        sub: `${fmtPct(ren.bonificacionesPctGanancia, false)} de utilidad potencial`,
+        trend: ren.bonificacionesPctGanancia,
+        trendUp: Number(ren.bonificacionesPctGanancia) < 10,
+      }),
+    ]));
+  }
+
+  if (aging?.buckets?.length) {
+    const agingChart = barChart(
+      'Aging de inventario al vender',
+      aging.buckets.map((b) => ({ label: b.label, count: b.units })),
+      { horizontal: true, seriesLabel: 'Unidades' },
+    );
+    if (agingChart) blocks.push(agingChart);
+
+    const agingTable = dataTable(
+      'Aging · margen y bonificación',
+      ['Bucket', 'Unidades', 'Margen avg', 'Bonif. avg'],
+      aging.buckets.map((b) => [
+        b.label,
+        fmtNum(b.units),
+        fmtPct(b.avgMarginPct, false),
+        fmtMoney(b.avgBonificacion),
+      ]),
+    );
+    if (agingTable) blocks.push(agingTable);
+
+    if (aging.estancadosMayorDescuento) {
+      blocks.push(insightCard(
+        'warning',
+        'Aging',
+        'Las unidades estancadas (+60 días) concentran mayor bonificación promedio vs. sanas.',
+      ));
+    }
+  }
+
+  if (fi && (fi.creditoUnits || fi.contadoUnits)) {
+    const fiMix = doughnutChart('Mix financiamiento', [
+      { label: 'Crédito', count: fi.creditoUnits },
+      { label: 'Contado', count: fi.contadoUnits },
+    ].filter((x) => x.count > 0));
+    if (fiMix) blocks.push(fiMix);
+
+    blocks.push(kpiRow('F&I · margen', [
+      kpiItem('Crédito', fmtPct(fi.creditoAvgMarginPct, false), {
+        icon: 'credit_card',
+        sub: `${fmtNum(fi.creditoUnits)} und · ${fmtMoney(fi.creditoAvgUtilidadUnit)}/u`,
+      }),
+      kpiItem('Contado', fmtPct(fi.contadoAvgMarginPct, false), {
+        icon: 'payments',
+        sub: `${fmtNum(fi.contadoUnits)} und · ${fmtMoney(fi.contadoAvgUtilidadUnit)}/u`,
+      }),
+      kpiItem('Más rentable', fi.masRentable === 'credito' ? 'Crédito' : fi.masRentable === 'contado' ? 'Contado' : 'Empate', {
+        icon: 'emoji_events',
+      }),
+    ]));
+  }
+
+  if (fv?.ranking?.length) {
+    const volChart = barChart(
+      'Fuerza de ventas · volumen',
+      fv.ranking.map((a) => ({ label: a.vendedor, count: a.units })),
+      { horizontal: true, seriesLabel: 'Unidades' },
+    );
+    if (volChart) blocks.push(volChart);
+
+    const marginChart = barChart(
+      'Fuerza de ventas · margen %',
+      fv.ranking.map((a) => ({ label: a.vendedor, count: a.avgMarginPct })),
+      { horizontal: true, seriesLabel: 'Margen %' },
+    );
+    if (marginChart) blocks.push(marginChart);
+
+    const table = dataTable(
+      'Asesores · cuadrante',
+      ['Asesor', 'Unidades', 'Margen %', 'Utilidad', 'Cuadrante'],
+      topItems(fv.ranking, 10).map((a) => [
+        a.vendedor,
+        fmtNum(a.units),
+        fmtPct(a.avgMarginPct, false),
+        fmtMoney(a.utilidadTotal),
+        a.quadrantLabel || a.quadrant || '—',
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (ren?.paretoTop?.length) {
+    const table = dataTable(
+      'Pareto · modelos que más aportan utilidad',
+      ['Modelo', 'Unidades', 'Utilidad', '% acum.'],
+      topItems(ren.paretoTop, 8).map((m) => [
+        m.model || m.modelo,
+        fmtNum(m.units || m.unidades),
+        fmtMoney(m.utilidad ?? m.utilidadReportada),
+        m.cumulativePct != null || m.pctAcum != null
+          ? fmtPct(m.cumulativePct ?? m.pctAcum, false)
+          : '—',
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (Array.isArray(data.recomendaciones) && data.recomendaciones.length) {
+    blocks.push(insightCard(
+      'info',
+      'Recomendaciones',
+      data.recomendaciones.slice(0, 3).join(' '),
+    ));
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromQuejasCsi(data) {
+  const blocks = [];
+  if (!data) return blocks;
+
+  const totales = data.totalesPersona || data.totales || {};
+  const modo = data.modo || (data.encontrado ? 'persona' : 'ranking');
+
+  blocks.push(kpiRow(modo === 'persona' ? 'Quejas CSI · persona' : 'Quejas CSI · panorama', [
+    kpiItem('Total quejas', fmtNum(totales.total ?? data.totales?.total), { icon: 'report' }),
+    kpiItem('Posventa / asesor', fmtNum(totales.posventa ?? data.totales?.posventa), {
+      icon: 'build',
+      sub: 'CSI Posventa',
+    }),
+    kpiItem('Ventas / ejecutivo', fmtNum(totales.ventas ?? data.totales?.ventas), {
+      icon: 'storefront',
+      sub: 'CSI Ventas',
+    }),
+    kpiItem('Área principal', (totales.porArea || data.porArea || [])[0]?.area || '—', {
+      icon: 'category',
+    }),
+  ]));
+
+  if (Array.isArray(data.porPersona) && data.porPersona.length) {
+    const table = dataTable(
+      'Coincidencias por nombre',
+      ['Nombre', 'Rol', 'Quejas', 'Área top'],
+      data.porPersona.map((p) => [
+        p.nombre,
+        p.rol === 'asesor_servicio' ? 'Asesor servicio' : 'Vendedor',
+        fmtNum(p.quejas),
+        p.porArea?.[0]?.area || '—',
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (data.rankingAsesoresServicio?.length) {
+    const chart = barChart(
+      'Ranking asesores de servicio (CSI Posventa)',
+      data.rankingAsesoresServicio.map((r) => ({ label: r.asesor, count: r.quejas })),
+      { horizontal: true, seriesLabel: 'Quejas' },
+    );
+    if (chart) blocks.push(chart);
+  }
+
+  if (data.rankingVendedores?.length) {
+    const chart = barChart(
+      'Ranking vendedores / ejecutivos (CSI Ventas)',
+      data.rankingVendedores.map((r) => ({ label: r.vendedor, count: r.quejas })),
+      { horizontal: true, seriesLabel: 'Quejas' },
+    );
+    if (chart) blocks.push(chart);
+  }
+
+  const areas = totales.porArea || data.porArea || [];
+  if (areas.length) {
+    const chart = doughnutChart(
+      'Quejas por área',
+      areas.map((a) => ({ label: a.area, count: a.count })),
+    );
+    if (chart) blocks.push(chart);
+  }
+
+  if (data.detalle?.length) {
+    const table = dataTable(
+      'Muestra de quejas',
+      ['Fecha', 'Persona', 'Rol', 'Área', 'Cliente', 'Comentario'],
+      topItems(data.detalle, 10).map((q) => [
+        String(q.fecha || '—').slice(0, 10),
+        (q.persona || '—').slice(0, 24),
+        q.rol === 'asesor_servicio' ? 'Asesor' : 'Vendedor',
+        (q.area || '—').slice(0, 22),
+        (q.cliente || '—').slice(0, 20),
+        (q.comentario || '—').slice(0, 50),
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (data.sugerencia) {
+    blocks.push(insightCard('warning', 'Sin coincidencia', data.sugerencia));
+  } else if (data.semantica?.tipoQuejas) {
+    blocks.push(insightCard('info', 'Criterio', data.semantica.tipoQuejas));
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromBuscarCrm(data) {
+  const blocks = [];
+  const rows = Array.isArray(data.resultados) ? data.resultados : (Array.isArray(data) ? data : []);
+  if (!rows.length) return blocks;
+
+  blocks.push(kpiRow('Búsqueda CRM', [
+    kpiItem('Coincidencias', fmtNum(rows.length), { icon: 'search' }),
+    kpiItem('Con compras', fmtNum(rows.filter((r) => Number(r.compras || 0) > 0).length), { icon: 'sell' }),
+    kpiItem('Con leads', fmtNum(rows.filter((r) => Number(r.leads || 0) > 0).length), { icon: 'diversity_3' }),
+    kpiItem('Con solicitudes', fmtNum(rows.filter((r) => Number(r.solicitudes || 0) > 0).length), { icon: 'description' }),
+  ]));
+
+  const table = dataTable(
+    'Resultados de búsqueda',
+    ['ID CRM', 'Nombre', 'Ciclos', 'Actividades', 'Compras', 'Leads', 'Última act.'],
+    topItems(rows, 12).map((r) => [
+      r.id_contacto,
+      (r.nombre || '—').slice(0, 30),
+      fmtNum(r.ciclos),
+      fmtNum(r.actividades),
+      fmtNum(r.compras),
+      fmtNum(r.leads || 0),
+      String(r.ultima_actividad || '—').slice(0, 10),
+    ]),
+  );
+  if (table) blocks.push(table);
+
+  blocks.push(insightCard(
+    'info',
+    'Siguiente paso',
+    'Usa historico_cliente_crm con el id_contacto para ver ficha 360, timeline, compras y taller.',
+  ));
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromHistoricoCrm(data) {
+  const blocks = [];
+  if (!data || data.encontrado === false) return blocks;
+
+  const t = data.resumen || {};
+  const f = data.ficha360 || {};
+  const nombre = data.nombre || `Cliente ${data.idContacto || ''}`.trim();
+
+  blocks.push(kpiRow(`CRM 360 · ${nombre}`, [
+    kpiItem('Compras (VIN)', fmtNum(t.totalCompras ?? f.historialCompras), { icon: 'sell' }),
+    kpiItem('Leads', fmtNum(t.totalLeads), { icon: 'diversity_3' }),
+    kpiItem('Contratos F&I', fmtNum(t.totalContratosFinanciamiento), { icon: 'description' }),
+    kpiItem('Órdenes taller', fmtNum(t.totalOrdenesServicio ?? f.serviciosRealizados), { icon: 'build' }),
+  ]));
+
+  if (f.modeloActual || f.vinActual || f.numeroContrato) {
+    blocks.push(kpiRow('Unidad / contrato actual', [
+      kpiItem('Modelo', f.modeloActual || '—', {
+        icon: 'directions_car',
+        sub: f.anModelo ? `Año ${f.anModelo}` : undefined,
+      }),
+      kpiItem('VIN', f.vinActual ? String(f.vinActual).slice(-8) : '—', {
+        icon: 'pin',
+        sub: f.fechaUltimaCompra || undefined,
+      }),
+      kpiItem('Contrato', f.numeroContrato || '—', {
+        icon: 'receipt_long',
+        sub: [f.tipoCompra, f.plazoContratado ? `${f.plazoContratado}m` : null].filter(Boolean).join(' · ') || undefined,
+      }),
+      kpiItem('Km', f.kilometraje != null ? fmtNum(f.kilometraje) : '—', {
+        icon: 'speed',
+        sub: f.ultimaVisitaTaller ? `Taller ${f.ultimaVisitaTaller}` : undefined,
+      }),
+    ]));
+  }
+
+  if (f.saldoEstimado != null || f.mensualidadesPagadas != null) {
+    blocks.push(kpiRow('Financiamiento estimado', [
+      kpiItem('Mensualidades', f.mensualidadesPagadas != null ? `${fmtNum(f.mensualidadesPagadas)}/${fmtNum(f.plazoContratado)}` : '—', { icon: 'calendar_month' }),
+      kpiItem('Saldo est.', fmtMoney(f.saldoEstimado), { icon: 'account_balance' }),
+      kpiItem('Valor est.', fmtMoney(f.valorEstimadoUnidad), { icon: 'payments' }),
+      kpiItem('Quejas', fmtNum(f.quejasIncidencias ?? t.totalQuejas), {
+        icon: 'report',
+        sub: f.quejasAreaPrincipal || undefined,
+      }),
+    ]));
+  }
+
+  const timeline = Array.isArray(data.timeline360) ? data.timeline360 : [];
+  if (timeline.length) {
+    const byCat = new Map();
+    for (const e of timeline) {
+      const key = e.categoria || 'otro';
+      byCat.set(key, (byCat.get(key) || 0) + 1);
+    }
+    const catChart = doughnutChart(
+      'Timeline 360 · categorías',
+      [...byCat.entries()].map(([label, count]) => ({ label, count })),
+    );
+    if (catChart) blocks.push(catChart);
+
+    const tlTable = dataTable(
+      'Timeline reciente',
+      ['Fecha', 'Categoría', 'Evento', 'Detalle'],
+      topItems(timeline, 10).map((e) => [
+        String(e.fecha || '—').slice(0, 10),
+        e.categoria || '—',
+        (e.titulo || '—').slice(0, 28),
+        (e.detalle || '—').slice(0, 40),
+      ]),
+    );
+    if (tlTable) blocks.push(tlTable);
+  }
+
+  const compras = Array.isArray(data.compras) ? data.compras : [];
+  if (compras.length) {
+    const table = dataTable(
+      'Compras',
+      ['VIN', 'Producto', 'Factura', 'Entrega', 'Vendedor'],
+      topItems(compras, 8).map((c) => [
+        c.vin ? String(c.vin).slice(-8) : '—',
+        (c.producto || '—').slice(0, 28),
+        c.numFactura || '—',
+        String(c.fechaEntrega || c.fechaFactura || '—').slice(0, 10),
+        (c.vendedor || '—').slice(0, 20),
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  const contratos = Array.isArray(data.contratosFinanciamiento) ? data.contratosFinanciamiento : [];
+  if (contratos.length) {
+    const table = dataTable(
+      'Contratos F&I',
+      ['Contrato', 'Unidad', 'Plazo', 'Tipo', 'PVAs'],
+      topItems(contratos, 8).map((c) => [
+        c.no_contrato || c.contrato || '—',
+        (c.unidad || '—').slice(0, 24),
+        c.plazo_meses != null ? `${c.plazo_meses}m` : '—',
+        c.tipo_compra || c.plan_2 || c.plan || '—',
+        fmtNum(Array.isArray(c.pvas) ? c.pvas.length : 0),
+      ]),
+    );
+    if (table) blocks.push(table);
+  }
+
+  if (f.metodologia?.saldo) {
+    blocks.push(insightCard(
+      'warning',
+      'Nota metodológica',
+      'Saldo y mensualidades son estimaciones lineales; no confirman pagos reales ni mora.',
+    ));
+  }
 
   return blocks.filter(Boolean);
 }
@@ -421,12 +1035,36 @@ function blocksFromContabilidad(data) {
 
 function blocksFromSql(data) {
   if (!data.datos?.length) return [];
+  const blocks = [];
   const cols = data.columnas || Object.keys(data.datos[0]);
-  const rows = data.datos.slice(0, 8).map((row) => cols.map((c) => {
+  const sample = data.datos.slice(0, 25);
+
+  const numericCols = cols.filter((c) =>
+    sample.some((row) => typeof row[c] === 'number' && Number.isFinite(row[c])));
+  const labelCol = cols.find((c) => !numericCols.includes(c)) || cols[0];
+  const valueCol = numericCols.find((c) => c !== labelCol) || numericCols[0];
+
+  if (labelCol && valueCol && sample.length >= 2) {
+    const items = sample
+      .map((row) => ({
+        label: String(row[labelCol] ?? '—').slice(0, 28),
+        count: Number(row[valueCol] || 0),
+      }))
+      .filter((i) => Number.isFinite(i.count))
+      .sort((a, b) => Math.abs(b.count) - Math.abs(a.count));
+    const chart = barChart(`SQL · ${valueCol} por ${labelCol}`, items, {
+      horizontal: true,
+      seriesLabel: valueCol,
+    });
+    if (chart) blocks.push(chart);
+  }
+
+  const rows = data.datos.slice(0, 10).map((row) => cols.map((c) => {
     const v = row[c];
     return typeof v === 'number' ? fmtNum(v) : String(v ?? '—');
   }));
-  return [dataTable(`Resultado SQL (${data.filas} filas)`, cols, rows)].filter(Boolean);
+  blocks.push(dataTable(`Resultado SQL (${data.filas} filas)`, cols, rows));
+  return blocks.filter(Boolean);
 }
 
 function blocksFromForecast(data) {
@@ -571,38 +1209,173 @@ function blocksFromVentasPorAuto(data) {
   return blocks.filter(Boolean);
 }
 
+function convPct(num, den) {
+  const d = Number(den || 0);
+  if (!d) return 0;
+  return Math.round((Number(num || 0) / d) * 10000) / 100;
+}
+
+function blocksFromLeads(data) {
+  const blocks = [];
+  const t = data.totales || {};
+  const grupos = Array.isArray(data.grupos) ? data.grupos : [];
+  const leads = Number(t.leads || 0);
+  const contactados = Number(t.contactados || 0);
+  const citas = Number(t.citas || 0);
+  const compras = Number(t.compras || 0);
+  const agrupar = data.agruparPor || 'canal';
+  const dimLabel = {
+    canal: 'canal',
+    sucursal: 'sucursal',
+    ejecutivo: 'ejecutivo',
+    campana: 'campaña',
+    resultado: 'resultado',
+    tipo: 'tipo',
+    mes: 'mes',
+  }[agrupar] || agrupar;
+
+  if (!leads && !grupos.length) return blocks;
+
+  blocks.push(kpiRow('Leads · embudo de conversión', [
+    kpiItem('Leads', fmtNum(leads), { icon: 'diversity_3', sub: data.filtros?.periodo || 'cohorte' }),
+    kpiItem('Contactados', fmtNum(contactados), { icon: 'call', sub: `${convPct(contactados, leads)}%` }),
+    kpiItem('Citas', fmtNum(citas), { icon: 'event', sub: `${convPct(citas, leads)}%` }),
+    kpiItem('Compras (VIN)', fmtNum(compras), {
+      icon: 'sell',
+      sub: `${convPct(compras, leads)}% conversión`,
+      trend: convPct(compras, leads),
+      trendUp: compras > 0,
+    }),
+  ]));
+
+  if (grupos.length) {
+    const leadsChart = barChart(
+      `Leads por ${dimLabel}`,
+      grupos.map((g) => ({ label: g.grupo, count: Number(g.leads || 0) })),
+      { horizontal: true, seriesLabel: 'Leads' },
+    );
+    if (leadsChart) blocks.push(leadsChart);
+
+    if (grupos.some((g) => Number(g.compras || 0) > 0)) {
+      const comprasChart = barChart(
+        `Compras por ${dimLabel}`,
+        grupos.map((g) => ({ label: g.grupo, count: Number(g.compras || 0) })),
+        { horizontal: true, seriesLabel: 'Compras' },
+      );
+      if (comprasChart) blocks.push(comprasChart);
+    }
+
+    const convChart = barChart(
+      `Conversión % por ${dimLabel}`,
+      grupos.map((g) => ({
+        label: g.grupo,
+        count: convPct(g.compras, g.leads),
+      })),
+      { horizontal: true, seriesLabel: 'Conversión %' },
+    );
+    if (convChart) blocks.push(convChart);
+
+    const table = dataTable(
+      `Detalle por ${dimLabel}`,
+      ['Grupo', 'Leads', 'Contactados', 'Citas', 'Compras', 'Conv. %'],
+      topItems(grupos, 10).map((g) => [
+        g.grupo,
+        fmtNum(g.leads),
+        fmtNum(g.contactados),
+        fmtNum(g.citas),
+        fmtNum(g.compras),
+        `${convPct(g.compras, g.leads)}%`,
+      ]),
+    );
+    if (table) blocks.push(table);
+
+    const byVolume = [...grupos].sort((a, b) => Number(b.leads || 0) - Number(a.leads || 0))[0];
+    const byConversion = [...grupos]
+      .filter((g) => Number(g.leads || 0) >= Math.max(20, leads * 0.05))
+      .sort((a, b) => convPct(b.compras, b.leads) - convPct(a.compras, a.leads))[0];
+    if (byVolume) {
+      let text = `${byVolume.grupo} concentra más volumen (${fmtNum(byVolume.leads)} leads, ${convPct(byVolume.compras, byVolume.leads)}% conv.).`;
+      if (byConversion && byConversion.grupo !== byVolume.grupo) {
+        text += ` Mejor conversión relativa: ${byConversion.grupo} (${convPct(byConversion.compras, byConversion.leads)}%).`;
+      }
+      blocks.push(insightCard('info', 'Lectura de canales', text));
+    }
+  }
+
+  if (data.semantica?.compras || data.reglaCompra) {
+    blocks.push(insightCard(
+      'warning',
+      'Nota metodológica',
+      data.semantica?.compras || data.reglaCompra,
+    ));
+  }
+
+  return blocks.filter(Boolean);
+}
+
+function blocksFromSeguimiento360(data) {
+  const blocks = [];
+  const leads = data.leads || {};
+  const solicitudes = data.solicitudes || {};
+  const pruebas = data.pruebasManejo || {};
+  const conv = data.conversiones || {};
+
+  if (!leads.total && !solicitudes.total && !pruebas.total) return blocks;
+
+  blocks.push(kpiRow('Seguimiento 360 · conversiones', [
+    kpiItem('Leads', fmtNum(leads.total), { icon: 'diversity_3', sub: `${fmtNum(leads.conCompra)} con compra` }),
+    kpiItem('Lead → compra', `${Number(conv.leadACompraPct || 0).toFixed(1)}%`, { icon: 'trending_up' }),
+    kpiItem('Solicitudes F&I', fmtNum(solicitudes.total), { icon: 'description', sub: `${fmtNum(solicitudes.conCompra)} con compra` }),
+    kpiItem('Pruebas manejo', fmtNum(pruebas.total), { icon: 'speed', sub: `${fmtNum(pruebas.conCompra)} con compra` }),
+  ]));
+
+  const funnel = [
+    { label: 'Leads', count: Number(leads.total || 0) },
+    { label: 'Contactados', count: Number(leads.contactados || 0) },
+    { label: 'Citas', count: Number(leads.citas || 0) },
+    { label: 'Compras', count: Number(leads.conCompra || 0) },
+  ].filter((x) => x.count > 0);
+  const funnelChart = barChart('Embudo leads', funnel, { horizontal: true, seriesLabel: 'Cantidad' });
+  if (funnelChart) blocks.push(funnelChart);
+
+  const mix = [
+    { label: 'Leads', count: Number(leads.total || 0) },
+    { label: 'Solicitudes', count: Number(solicitudes.total || 0) },
+    { label: 'Pruebas', count: Number(pruebas.total || 0) },
+  ].filter((x) => x.count > 0);
+  const mixChart = doughnutChart('Volumen por fuente 360', mix);
+  if (mixChart) blocks.push(mixChart);
+
+  return blocks.filter(Boolean);
+}
+
 const BUILDERS = {
   consultar_ventas_modelo: blocksFromVentasModelo,
   consultar_ventas: blocksFromVentas,
   consultar_ventas_por_auto: blocksFromVentasPorAuto,
   consultar_resumen_ejecutivo: blocksFromOverview,
-  consultar_analytics_ventas: (data) => {
-    const blocks = [];
-    const matrix = data.modelMatrix || data.matriz || data.quadrants;
-    if (Array.isArray(matrix) && matrix.length) {
-      blocks.push(dataTable(
-        'Matriz modelo (volumen / margen)',
-        ['Modelo', 'Unidades', 'Margen', 'Segmento'],
-        topItems(matrix, 8).map((m) => [
-          m.model || m.modelo,
-          fmtNum(m.units || m.unidades),
-          fmtPct(m.marginPct || m.margen, false),
-          m.segment || m.segmento || '—',
-        ]),
-      ));
-    }
-    return blocks.filter(Boolean);
-  },
+  consultar_analytics_ventas: blocksFromAnalytics,
   consultar_inventario: blocksFromInventory,
   consultar_postventa: blocksFromPostventa,
   consultar_contabilidad: blocksFromContabilidad,
+  consultar_ventas_dia: blocksFromVentasDia,
+  consultar_objetivos_ventas: blocksFromObjetivos,
   consultar_pronostico: blocksFromForecast,
+  consultar_quejas_csi: blocksFromQuejasCsi,
+  buscar_cliente_crm: blocksFromBuscarCrm,
+  historico_cliente_crm: blocksFromHistoricoCrm,
+  resumen_leads: blocksFromLeads,
+  resumen_seguimiento_360: blocksFromSeguimiento360,
   listar_vendedores_360: (data) => {
     const rows = data?.vendedores || [];
     if (!rows.length) return [];
-    return [
+    const blocks = [
+      kpiRow('Vendedores · Seguimiento 360', [
+        kpiItem('Vendedores', fmtNum(rows.length), { icon: 'groups' }),
+        kpiItem('Clientes (top)', fmtNum(Math.max(...rows.map((v) => Number(v.clientes || 0)), 0)), { icon: 'group' }),
+      ]),
       dataTable(
-        'Vendedores · Seguimiento 360',
+        'Ranking de vendedores',
         ['Vendedor', 'Clientes', 'Fuentes'],
         topItems(rows, 12).map((v) => [
           v.vendedor,
@@ -610,12 +1383,20 @@ const BUILDERS = {
           Array.isArray(v.fuentes) ? v.fuentes.join(', ') : '—',
         ]),
       ),
-    ].filter(Boolean);
+    ];
+    const chart = barChart(
+      'Clientes por vendedor',
+      rows.map((v) => ({ label: v.vendedor, count: Number(v.clientes || 0) })),
+      { horizontal: true, seriesLabel: 'Clientes' },
+    );
+    if (chart) blocks.splice(1, 0, chart);
+    return blocks.filter(Boolean);
   },
   resumen_vendedor_360: (data) => {
     if (!data?.vendedor) return [];
     const t = data.totales || {};
     const d = data.desempenoComercial || {};
+    const q = data.quejasCsi || {};
     const blocks = [
       kpiRow(`Seguimiento 360 · ${data.vendedor}`, [
         kpiItem('Unidades vendidas', fmtNum(d.unidadesVendidas), { icon: 'directions_car', sub: d.fuenteUnidades || 'libro' }),
@@ -626,13 +1407,41 @@ const BUILDERS = {
         kpiItem('Retorno taller', d.retornoTallerPct != null ? `${d.retornoTallerPct}%` : '—', { icon: 'build' }),
       ]),
     ];
+    if (Number(q.total || 0) > 0 || q.encontrado) {
+      blocks.push(kpiRow('Quejas CSI vinculadas', [
+        kpiItem('Total', fmtNum(q.total), { icon: 'report' }),
+        kpiItem('Como asesor', fmtNum(q.posventa), { icon: 'build', sub: 'CSI Posventa' }),
+        kpiItem('Como vendedor', fmtNum(q.ventas), { icon: 'storefront', sub: 'CSI Ventas' }),
+        kpiItem('Área top', q.porArea?.[0]?.area || '—', { icon: 'category' }),
+      ]));
+      if (q.muestra?.length) {
+        blocks.push(dataTable(
+          'Muestra de quejas CSI',
+          ['Fecha', 'Rol', 'Área', 'Comentario'],
+          topItems(q.muestra, 8).map((row) => [
+            String(row.fecha || '—').slice(0, 10),
+            row.rol === 'asesor_servicio' ? 'Asesor' : 'Vendedor',
+            (row.area || '—').slice(0, 22),
+            (row.comentario || '—').slice(0, 55),
+          ]),
+        ));
+      }
+    }
     if (Array.isArray(d.plazos) && d.plazos.length) {
       blocks.push(barChart(
         'Distribución de plazos',
         d.plazos.map((p) => ({ label: `${p.plazo}m`, count: p.count })),
+        { seriesLabel: 'Contratos' },
       ));
     }
     if (Array.isArray(d.pvasPorTipo) && d.pvasPorTipo.length) {
+      blocks.push(doughnutChart(
+        'Mix PVAs',
+        d.pvasPorTipo.map((p) => ({
+          label: p.label || p.producto || '—',
+          count: Number(p.contratos ?? p.count ?? 0),
+        })),
+      ));
       blocks.push(dataTable(
         'PVAs por producto',
         ['Producto', 'Contratos', 'Penetración'],
@@ -667,7 +1476,7 @@ function buildVisualizations(toolSnapshots = []) {
     }
   }
 
-  return blocks.slice(0, 8);
+  return blocks.slice(0, 14);
 }
 
 module.exports = { buildVisualizations, fmtNum, fmtMoney, fmtPct };

@@ -227,7 +227,8 @@ function deleteUser(username, requesterUsername) {
 }
 
 function getAssignableRoles() {
-  return Object.values(ROLES).map((r) => ({ id: r.id, label: r.label }));
+  const { listRoles } = require('./roles');
+  return listRoles().map((r) => ({ id: r.id, label: r.label, pages: r.pages }));
 }
 
 function revealPassword(username) {

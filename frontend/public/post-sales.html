@@ -6,7 +6,7 @@
 <title>PostVenta | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=84" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=85" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="post-sales">
@@ -211,9 +211,13 @@ HyP
 <section id="panelPostVentaRefacciones" class="postventa-area-panel hidden" data-ps-panel="refacciones">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Refacciones</h3>
-<p class="section-subtitle">Catálogo/existencias · pedidos a planta · pendientes de surtir</p>
+<p class="section-subtitle">Ventas financieras · catálogo/existencias · pedidos a planta · pendientes</p>
 <nav class="eeff-tabs" id="refaccionesSubTabs" aria-label="Subsecciones de Refacciones">
-<button type="button" class="eeff-tab active" data-ref-tab="inventario" aria-pressed="true">
+<button type="button" class="eeff-tab active" data-ref-tab="ventas" aria-pressed="true">
+<span class="material-symbols-outlined" aria-hidden="true">point_of_sale</span>
+Ventas
+</button>
+<button type="button" class="eeff-tab" data-ref-tab="inventario" aria-pressed="false">
 <span class="material-symbols-outlined" aria-hidden="true">inventory_2</span>
 Inventario
 </button>
@@ -228,7 +232,61 @@ Pendientes
 </nav>
 </section>
 
-<section id="refPanelInventario" class="refacciones-subpanel" data-ref-panel="inventario">
+<section id="refPanelVentas" class="refacciones-subpanel" data-ref-panel="ventas">
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Ventas de refacciones</h3>
+<p class="section-subtitle">Contabilidad CON_CTAS 0481–0484 · margen y canales</p>
+<div id="kpiRefaccionesVentas" class="kpi-summary"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Por canal (0481–0484)</h3>
+<span id="refaccionesVentasCanalesMeta" class="top-bar-meta">—</span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Canal</th>
+<th class="cell-num">Ventas</th>
+<th class="cell-num">% del total</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesVentasCanales"></tbody>
+</table>
+</div>
+</section>
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Mostrador operativo</h3>
+<p class="section-subtitle">PAR_PEDMOST · pedidos del periodo (excluye cotizaciones)</p>
+<div id="kpiRefaccionesMostrador" class="kpi-summary"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Pedidos de mostrador</h3>
+<span id="refaccionesMostradorMeta" class="top-bar-meta">—</span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Pedido</th>
+<th>Fecha</th>
+<th>Status</th>
+<th>Cliente</th>
+<th>Almacén</th>
+<th class="cell-num">Neto</th>
+<th class="cell-num">IVA</th>
+<th class="cell-num">Total</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesMostrador"></tbody>
+</table>
+</div>
+</section>
+</section>
+
+<section id="refPanelInventario" class="refacciones-subpanel hidden" data-ref-panel="inventario">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Existencias actuales</h3>
 <p class="section-subtitle">PAR_ALMACEN + PAR_PARTES · stock con existencia &gt; 0</p>
@@ -264,6 +322,75 @@ Pendientes
 <h3 class="section-title">Pedidos de refacciones</h3>
 <p class="section-subtitle">PAR_PEDIDO / PAR_PEDIDETA · compras a planta/proveedor</p>
 <div id="kpiRefaccionesPedidos" class="kpi-summary"></div>
+</section>
+<section class="section-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Alertas de inventario</h3>
+<span id="refaccionesAlertasMeta" class="top-bar-meta">Dinámicas según periodo y stock</span>
+</div>
+<p class="section-subtitle" style="margin-top:4px">Control de stock trabado · mejores ventas · mejor utilidad · compras pendientes</p>
+<div id="refaccionesAlertas" class="ref-alertas" aria-live="polite"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="ref-intel-grid">
+<div>
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Top vendidos</h3>
+<span class="top-bar-meta">Salidas del periodo</span>
+</div>
+<div class="table-scroll ref-intel-table">
+<table class="data-table">
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th class="cell-num">Cant.</th>
+<th class="cell-num">Venta</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesTopVendidos"></tbody>
+</table>
+</div>
+</div>
+<div>
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Mejor utilidad</h3>
+<span class="top-bar-meta">Margen por parte</span>
+</div>
+<div class="table-scroll ref-intel-table">
+<table class="data-table">
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th class="cell-num">Utilidad</th>
+<th class="cell-num">Margen</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesTopUtilidad"></tbody>
+</table>
+</div>
+</div>
+<div>
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Stock trabado</h3>
+<span class="top-bar-meta">≥ 90 días sin venta</span>
+</div>
+<div class="table-scroll ref-intel-table">
+<table class="data-table">
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th class="cell-num">Días</th>
+<th class="cell-num">Costo</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesStockTrabado"></tbody>
+</table>
+</div>
+</div>
+</div>
 </section>
 <section class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
@@ -335,7 +462,7 @@ Pendientes
 <script src="/js/topbar.js?v=11"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=2"></script>
-<script src="/js/assistant-bubble.js?v=4"></script>
-<script src="/js/post-sales.js?v=37"></script>
+<script src="/js/assistant-bubble.js?v=5"></script>
+<script src="/js/post-sales.js?v=39"></script>
 </body>
 </html>

@@ -79,6 +79,35 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) 
   });
 
   const filtradas = records;
+
+  const porAsesorMap = new Map();
+  for (const r of filtradas) {
+    const name = String(r.asesor || 'Sin asesor').trim() || 'Sin asesor';
+    const cur = porAsesorMap.get(name) || { asesor: name, ordenes: 0, abiertas: 0, facturadas: 0, importe: 0 };
+    cur.ordenes += 1;
+    const st = String(r.status || '').toUpperCase();
+    if (['A', 'T', 'D', 'P'].includes(st)) cur.abiertas += 1;
+    if (st === 'I') cur.facturadas += 1;
+    cur.importe += Number(r.importeAbierto || r.importeFacturado || r.importe || 0);
+    porAsesorMap.set(name, cur);
+  }
+  const porAsesor = [...porAsesorMap.values()]
+    .map((a) => ({ ...a, importe: Math.round(a.importe * 100) / 100 }))
+    .sort((a, b) => b.ordenes - a.ordenes)
+    .slice(0, 15);
+
+  const porEstatusMap = new Map();
+  for (const r of filtradas) {
+    const label = r.statusLabel || r.status || 'Sin estatus';
+    const cur = porEstatusMap.get(label) || { estatus: label, ordenes: 0, importe: 0 };
+    cur.ordenes += 1;
+    cur.importe += Number(r.importeAbierto || r.importeFacturado || r.importe || 0);
+    porEstatusMap.set(label, cur);
+  }
+  const porEstatus = [...porEstatusMap.values()]
+    .map((e) => ({ ...e, importe: Math.round(e.importe * 100) / 100 }))
+    .sort((a, b) => b.ordenes - a.ordenes);
+
   return {
     filtros: {
       fechaInicio,
@@ -117,8 +146,13 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) 
       importeFiltrado: Math.round(sumImporte(filtradas) * 100) / 100,
       importeAbierto: Math.round(sumImporte(openInPeriod, 'importeAbierto') * 100) / 100,
       importeFacturado: Math.round(sumImporte(factInPeriod, 'importeFacturado') * 100) / 100,
+      pctFacturado: filtradas.length
+        ? Math.round((factInPeriod.length / filtradas.length) * 10000) / 100
+        : 0,
     },
     porLetra: countByLetter(filtradas),
+    porAsesor,
+    porEstatus,
     muestra: filtradas.slice(0, 15).map((r) => ({
       orden: r.orden,
       letra: r.letraOrden || String(r.orden || '').charAt(0),

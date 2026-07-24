@@ -101,12 +101,136 @@ window.AssistantChat = (function () {
       </div>`;
   }
 
-  const DEFAULT_PROMPTS = [
-    '¿Cuántos Aveo se vendieron este año?',
-    'Resumen ejecutivo del mes',
-    '¿Cómo va inventario y plan piso?',
-    'Top vendedores retail vs flotilla',
-  ];
+  const PROMPT_POOLS = {
+    overview: [
+      'Resumen ejecutivo del mes actual',
+      '¿Cuáles son las alertas más críticas ahora?',
+      'Compara ventas vs postventa este mes',
+      '¿Cómo va el cumplimiento de metas retail?',
+      'Top 5 hallazgos del tablero para dirección',
+      '¿Qué área está más desviada del presupuesto?',
+    ],
+    sales: [
+      '¿Cuántas unidades retail se vendieron este mes?',
+      'Top vendedores retail vs flotilla',
+      '¿Cómo va la penetración GMF sobre entregas SOFIA?',
+      'Resumen de conversión de leads a compra del mes',
+      '¿Qué canal trae más leads y cuál convierte mejor?',
+      'Compara ventas del mes actual vs mes anterior',
+      '¿Cuántas entregas SOFIA van sin previas de taller?',
+      'Lista oportunidades con cita que aún no compran',
+    ],
+    'post-sales': [
+      'Resumen de órdenes abiertas críticas (+60 días)',
+      '¿Cuántas órdenes de servicio se facturaron este mes?',
+      'Backlog abierto de HyP vs Servicio',
+      '¿Qué inventario de refacciones está trabado (+90 días)?',
+      'Top partes de mejor utilidad en refacciones',
+      'Órdenes abiertas con refacciones cargadas sin facturar',
+      'Productividad por asesor de taller del periodo',
+    ],
+    inventory: [
+      '¿Cómo va inventario y plan piso?',
+      'Unidades envejecidas +60 días disponibles',
+      'Stock sin previas de taller',
+      'Comparar inventario nuevos vs seminuevos',
+      '¿Qué modelos concentran más interés de plan piso?',
+    ],
+    contabilidad: [
+      'Utilidad bruta del mes por área',
+      '¿Cómo van ingresos de refacciones 0481–0484?',
+      'Resumen EEFF del mes actual',
+      'Comparar gastos de operación vs mes anterior',
+      'Margen de postventa vs ventas de unidades',
+    ],
+    forecast: [
+      'Pronóstico de cierre del mes vs meta',
+      '¿Qué falta para llegar a la meta retail?',
+      'Tendencia de ventas de los últimos 3 meses',
+      'Proyección YTD vs año anterior',
+    ],
+    seguimiento: [
+      'Busca el historial 360 del cliente más reciente con compra',
+      'Resumen de actividad comercial por vendedor este mes',
+      'Clientes con cita programada sin compra',
+      '¿Qué vendedor tiene mejor conversión lead → VIN?',
+    ],
+    admin: [
+      '¿Qué roles tienen acceso a PostVenta?',
+      'Resume el estado de alertas configuradas por perfil',
+      '¿Qué módulos debería ver Gerencia Comercial?',
+    ],
+    general: [
+      'Resumen ejecutivo del mes',
+      '¿Qué debo revisar primero hoy?',
+      'Dame 3 insights accionables del negocio',
+      'Explica la variación más relevante del periodo',
+      '¿Dónde se está trabando la operación?',
+      'Compara este mes contra el anterior en lo más importante',
+      `¿Cómo cerramos ${'{mes}'} hasta ahora?`,
+      'Lista riesgos y oportunidades de la semana',
+    ],
+  };
+
+  const LAST_PROMPTS_KEY = 'balderrama-ai-prompts-last';
+
+  function getPageId() {
+    return String(document.body?.dataset?.page || 'overview').toLowerCase();
+  }
+
+  function monthLabel() {
+    return new Date().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  }
+
+  function resolvePromptTemplate(text) {
+    return String(text || '').replace(/\{mes\}/gi, monthLabel());
+  }
+
+  function shuffleWithSeed(items, seed) {
+    const arr = [...items];
+    let s = seed >>> 0;
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      const j = s % (i + 1);
+      const tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  function pickQuickPrompts(count = 4, { forceNew = true } = {}) {
+    const page = getPageId();
+    const pool = [
+      ...(PROMPT_POOLS[page] || []),
+      ...(PROMPT_POOLS.general || []),
+    ].map(resolvePromptTemplate);
+
+    const unique = [...new Set(pool.filter(Boolean))];
+    if (!unique.length) return [];
+
+    let seed = (Date.now() ^ ((Math.random() * 1e9) | 0)) >>> 0;
+    // Variación diaria + página para que no se sienta estático entre sesiones
+    const dayKey = new Date().toISOString().slice(0, 10);
+    seed ^= [...(`${dayKey}:${page}`)].reduce((a, c) => a + c.charCodeAt(0), 0);
+
+    let picked = shuffleWithSeed(unique, seed).slice(0, Math.min(count, unique.length));
+
+    if (forceNew) {
+      try {
+        const last = JSON.parse(sessionStorage.getItem(LAST_PROMPTS_KEY) || '[]');
+        const same = last.length === picked.length && last.every((p, i) => p === picked[i]);
+        if (same && unique.length > count) {
+          picked = shuffleWithSeed(unique, seed + 7919).slice(0, count);
+        }
+        sessionStorage.setItem(LAST_PROMPTS_KEY, JSON.stringify(picked));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return picked;
+  }
 
   function escapeHtml(text) {
     return String(text)
@@ -604,12 +728,36 @@ window.AssistantChat = (function () {
 
       if (suggestedPrompts) {
         suggestedPrompts.style.display = messages.length ? 'none' : 'flex';
+        if (!messages.length && !suggestedPrompts.innerHTML.trim()) {
+          renderSuggestedPrompts();
+        }
       }
 
       requestAnimationFrame(() => {
         initCharts();
         chatMessages.scrollTop = chatMessages.scrollHeight;
       });
+    }
+
+    function renderSuggestedPrompts({ reshuffle = true } = {}) {
+      if (!suggestedPrompts) return;
+      const prompts = options.prompts?.length
+        ? options.prompts
+        : pickQuickPrompts(4, { forceNew: reshuffle });
+      suggestedPrompts.innerHTML = `
+        <div class="assistant-suggestions__head">
+          <span class="assistant-suggestions__label">Preguntas rápidas</span>
+          <button type="button" class="assistant-suggestions__refresh" data-ai-refresh-prompts title="Otras sugerencias">
+            <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+            Otras
+          </button>
+        </div>
+        <div class="assistant-suggestions__list">
+          ${prompts.map((p) =>
+            `<button type="button" class="assistant-suggestion" data-prompt="${escapeHtml(p)}">${escapeHtml(p)}</button>`,
+          ).join('')}
+        </div>`;
+      suggestedPrompts.style.display = messages.length ? 'none' : 'flex';
     }
 
     function setLoading(state) {
@@ -684,11 +832,7 @@ window.AssistantChat = (function () {
       }
     }
 
-    if (suggestedPrompts && !suggestedPrompts.innerHTML.trim()) {
-      suggestedPrompts.innerHTML = (options.prompts || DEFAULT_PROMPTS).map((p) =>
-        `<button type="button" class="assistant-suggestion" data-prompt="${escapeHtml(p)}">${escapeHtml(p)}</button>`,
-      ).join('');
-    }
+    renderSuggestedPrompts({ reshuffle: true });
 
     chatForm.addEventListener('submit', (e) => {
       e.preventDefault();
@@ -717,11 +861,18 @@ window.AssistantChat = (function () {
       expandedKpis.clear();
       drilldownState.clear();
       localStorage.removeItem(STORAGE_KEY);
+      renderSuggestedPrompts({ reshuffle: true });
       renderMessages();
       chatInput.focus();
     });
 
     suggestedPrompts?.addEventListener('click', (e) => {
+      const refreshBtn = e.target.closest('[data-ai-refresh-prompts]');
+      if (refreshBtn) {
+        e.preventDefault();
+        renderSuggestedPrompts({ reshuffle: true });
+        return;
+      }
       const btn = e.target.closest('[data-prompt]');
       if (!btn) return;
       sendMessage(btn.dataset.prompt);
@@ -780,7 +931,12 @@ window.AssistantChat = (function () {
     renderMessages();
     checkStatus();
 
-    return { sendMessage, focus: () => chatInput.focus(), refresh: renderMessages };
+    return {
+      sendMessage,
+      focus: () => chatInput.focus(),
+      refresh: renderMessages,
+      refreshSuggestions: () => renderSuggestedPrompts({ reshuffle: true }),
+    };
   }
 
   return { init, STORAGE_KEY };

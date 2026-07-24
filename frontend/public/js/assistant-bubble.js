@@ -93,7 +93,7 @@
     if (window.AssistantChat) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = '/js/assistant-core.js?v=6';
+      s.src = '/js/assistant-core.js?v=7';
       s.onload = resolve;
       s.onerror = reject;
       document.body.appendChild(s);
@@ -146,6 +146,9 @@
     loadCoreScript().then(() => {
       const api = initChat();
       api?.focus();
+      // Renueva sugerencias al abrir si el chat está vacío
+      const hasMessages = Boolean(panel.querySelector('.assistant-msg'));
+      if (!hasMessages) api?.refreshSuggestions?.();
       if (prompt && autoSend) {
         api?.sendMessage?.(String(prompt));
       } else if (prompt) {

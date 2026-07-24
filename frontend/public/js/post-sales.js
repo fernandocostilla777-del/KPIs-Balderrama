@@ -12,7 +12,7 @@
   let currentArea = 'posventa';
   let refaccionesData = null;
   let refaccionesLoadedKey = '';
-  let refaccionesSubTab = 'inventario';
+  let refaccionesSubTab = 'ventas';
   const charts = {};
   const MES_CURSO_LETRAS = ['N', 'D', 'Q', 'C', 'X', 'Y'];
   const MES_CURSO_LABELS = {
@@ -1797,6 +1797,7 @@
 
     const servicioN = countOrdersByArea('servicio');
     const hypN = countOrdersByArea('hyp');
+    const refVentas = Number(refaccionesData?.ventas?.financieras?.summary?.ventas || 0);
     const refN = Number(refaccionesData?.pedidos?.summary?.totalPedidos || refaccionesData?.summary?.totalPedidos || 0);
     const refLoaded = Boolean(refaccionesData);
 
@@ -1814,7 +1815,7 @@
         </button>`;
       sectionsEl.innerHTML = [
         card('servicio', 'build', 'Servicio', fmt.number(servicioN), OT?.areaMeta?.('servicio')?.hint || 'Órdenes de servicio', 'blue'),
-        card('refacciones', 'warehouse', 'Refacciones', refLoaded ? fmt.number(refN) : '—', OT?.areaMeta?.('refacciones')?.hint || 'Pedidos de compra', 'amber'),
+        card('refacciones', 'warehouse', 'Refacciones', refLoaded ? fmt.money(refVentas) : '—', refLoaded ? `${fmt.number(refN)} pedidos compra · ventas 048x` : (OT?.areaMeta?.('refacciones')?.hint || 'Ventas e inventario'), 'amber'),
         card('hyp', 'format_paint', 'HyP', fmt.number(hypN), OT?.areaMeta?.('hyp')?.hint || 'Órdenes HyP', 'violet'),
       ].join('');
       sectionsEl.querySelectorAll('[data-ps-home-section]').forEach((btn) => {
@@ -1845,7 +1846,7 @@
   }
 
   function setRefaccionesSubTab(tab) {
-    const next = ['inventario', 'pedidos', 'pendientes'].includes(tab) ? tab : 'inventario';
+    const next = ['ventas', 'inventario', 'pedidos', 'pendientes'].includes(tab) ? tab : 'ventas';
     refaccionesSubTab = next;
     document.querySelectorAll('#refaccionesSubTabs [data-ref-tab]').forEach((btn) => {
       const active = btn.getAttribute('data-ref-tab') === next;
@@ -1863,6 +1864,78 @@
     const inv = data?.inventario || {};
     const ped = data?.pedidos || {};
     const pend = data?.pendientes || {};
+    const fin = data?.ventas?.financieras || {};
+    const most = data?.ventas?.mostrador || {};
+
+    const finS = fin.summary || {};
+    const finKpi = document.getElementById('kpiRefaccionesVentas');
+    const canalesMeta = document.getElementById('refaccionesVentasCanalesMeta');
+    const canalesBody = document.getElementById('tblRefaccionesVentasCanales');
+    if (canalesMeta) {
+      canalesMeta.textContent = fin.available === false
+        ? 'Sin CON_CTAS en el periodo'
+        : `${fmt.money(finS.ventas || 0)} ventas · margen ${fmt.number(finS.margenBrutoPct || 0)}%`;
+    }
+    if (finKpi) {
+      finKpi.innerHTML = `
+        <div class="kpi-group">
+          <h4 class="kpi-group-title">Financiero (0481–0484)</h4>
+          <div class="kpi-grid">
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Ventas</span><div class="kpi-value">${fmt.money(finS.ventas || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--rose"><span class="kpi-title">Costo</span><div class="kpi-value">${fmt.money(finS.costo || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Utilidad bruta</span><div class="kpi-value">${fmt.money(finS.utilidadBruta || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Margen bruto</span><div class="kpi-value">${fmt.number(finS.margenBrutoPct || 0)}%</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Utilidad operación</span><div class="kpi-value">${fmt.money(finS.utilidadOperacion || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Margen operación</span><div class="kpi-value">${fmt.number(finS.margenOperacionPct || 0)}%</div><div class="kpi-accent"></div></div>
+          </div>
+        </div>`;
+    }
+    if (canalesBody) {
+      const rows = fin.canales || [];
+      canalesBody.innerHTML = rows.length
+        ? rows.map((c) => `
+          <tr>
+            <td>${escHtml(c.label || c.key)}</td>
+            <td class="cell-num">${fmt.money(c.ingreso || 0)}</td>
+            <td class="cell-num">${fmt.number(c.pctVentas || 0)}%</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="3">Sin movimientos de venta de refacciones en el periodo (0481–0484).</td></tr>';
+    }
+
+    const mostS = most.summary || {};
+    const mostKpi = document.getElementById('kpiRefaccionesMostrador');
+    const mostMeta = document.getElementById('refaccionesMostradorMeta');
+    const mostBody = document.getElementById('tblRefaccionesMostrador');
+    if (mostMeta) mostMeta.textContent = `${fmt.number(mostS.pedidos || 0)} pedido(s) · ${fmt.money(mostS.importe || 0)}`;
+    if (mostKpi) {
+      mostKpi.innerHTML = `
+        <div class="kpi-group">
+          <h4 class="kpi-group-title">Mostrador (PAR_PEDMOST)</h4>
+          <div class="kpi-grid">
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Pedidos</span><div class="kpi-value">${fmt.number(mostS.pedidos || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Importe</span><div class="kpi-value">${fmt.money(mostS.importe || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Pendientes</span><div class="kpi-value">${fmt.number(mostS.pendientes || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Cerrados</span><div class="kpi-value">${fmt.number(mostS.cerrados || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Imp. cerrados</span><div class="kpi-value">${fmt.money(mostS.importeCerrados || 0)}</div><div class="kpi-accent"></div></div>
+          </div>
+        </div>`;
+    }
+    if (mostBody) {
+      const rows = most.detalle || [];
+      mostBody.innerHTML = rows.length
+        ? rows.map((r) => `
+          <tr>
+            <td class="mono">${escHtml(r.numero)}</td>
+            <td>${escHtml(formatPedidoFecha(r.fecha))}</td>
+            <td>${escHtml(r.status || '—')}</td>
+            <td>${escHtml(r.cliente || '—')}</td>
+            <td>${escHtml(r.almacen || '—')}</td>
+            <td class="cell-num">${fmt.money(r.neto || 0)}</td>
+            <td class="cell-num">${fmt.money(r.iva || 0)}</td>
+            <td class="cell-num">${fmt.money(r.total || 0)}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="8">No hay pedidos de mostrador en el periodo.</td></tr>';
+    }
 
     const invS = inv.summary || {};
     const invKpi = document.getElementById('kpiRefaccionesInventario');
@@ -1902,6 +1975,71 @@
     const pedKpi = document.getElementById('kpiRefaccionesPedidos');
     const pedMeta = document.getElementById('refaccionesPedidosMeta');
     const pedBody = document.getElementById('tblRefaccionesPedidos');
+    const alertas = data?.alertas || data?.pedidos?.alertas || {};
+    const alertasEl = document.getElementById('refaccionesAlertas');
+    const alertasMeta = document.getElementById('refaccionesAlertasMeta');
+    const topVendBody = document.getElementById('tblRefaccionesTopVendidos');
+    const topUtilBody = document.getElementById('tblRefaccionesTopUtilidad');
+    const trabBody = document.getElementById('tblRefaccionesStockTrabado');
+
+    const aSum = alertas.summary || {};
+    if (alertasMeta) {
+      alertasMeta.textContent = aSum.trabados90 != null
+        ? `${fmt.number(aSum.trabados90)} trabados · ${fmt.number(aSum.bajoMin || 0)} bajo mín · ${fmt.number(aSum.partesVendidas || 0)} partes vendidas`
+        : 'Dinámicas según periodo y stock';
+    }
+    if (alertasEl) {
+      const list = alertas.alerts || [];
+      alertasEl.innerHTML = list.length
+        ? list.map((a) => `
+          <article class="ref-alerta ref-alerta--${escHtml(a.severity || 'info')}" data-alerta-id="${escHtml(a.id || '')}">
+            <div class="ref-alerta__icon"><span class="material-symbols-outlined" aria-hidden="true">${escHtml(a.icon || 'info')}</span></div>
+            <div class="ref-alerta__body">
+              <h4 class="ref-alerta__title">${escHtml(a.title || 'Alerta')}</h4>
+              <p class="ref-alerta__summary">${escHtml(a.summary || '')}</p>
+              <p class="ref-alerta__detail">${escHtml(a.detail || '')}</p>
+              ${a.action ? `<p class="ref-alerta__action">${escHtml(a.action)}</p>` : ''}
+            </div>
+          </article>`).join('')
+        : '<p class="ref-alertas__empty">Sin alertas relevantes en este periodo.</p>';
+    }
+    if (topVendBody) {
+      const rows = alertas.topVendidos || [];
+      topVendBody.innerHTML = rows.length
+        ? rows.slice(0, 6).map((r) => `
+          <tr>
+            <td class="mono">${escHtml(r.parte)}</td>
+            <td>${escHtml(r.descripcion || '—')}</td>
+            <td class="cell-num">${fmt.number(r.cantidad || 0)}</td>
+            <td class="cell-num">${fmt.money(r.venta || 0)}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="4">Sin salidas de venta en el periodo.</td></tr>';
+    }
+    if (topUtilBody) {
+      const rows = alertas.topUtilidad || [];
+      topUtilBody.innerHTML = rows.length
+        ? rows.slice(0, 6).map((r) => `
+          <tr>
+            <td class="mono">${escHtml(r.parte)}</td>
+            <td>${escHtml(r.descripcion || '—')}</td>
+            <td class="cell-num">${fmt.money(r.utilidad || 0)}</td>
+            <td class="cell-num">${fmt.number(r.margenPct || 0)}%</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="4">Sin utilidad positiva en el periodo.</td></tr>';
+    }
+    if (trabBody) {
+      const rows = alertas.stockTrabado || [];
+      trabBody.innerHTML = rows.length
+        ? rows.slice(0, 6).map((r) => `
+          <tr>
+            <td class="mono">${escHtml(r.parte)}</td>
+            <td>${escHtml(r.descripcion || '—')}</td>
+            <td class="cell-num">${fmt.number(r.diasSinVenta || 0)}</td>
+            <td class="cell-num">${fmt.money(r.costo || 0)}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="4">No hay stock trabado significativo.</td></tr>';
+    }
+
     if (pedMeta) pedMeta.textContent = `${fmt.number(pedS.totalPedidos || 0)} pedido(s)`;
     if (pedKpi) {
       pedKpi.innerHTML = `
@@ -2024,7 +2162,9 @@
           showLoading(true);
           await loadRefaccionesPedidos(fi, ff);
           Dashboard.setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')} · Refacciones`);
-          updateFilterUI(refaccionesData?.pedidos?.summary?.totalPedidos || 0);
+          updateFilterUI(refaccionesData?.ventas?.financieras?.summary?.ventas
+            ? Math.round(Number(refaccionesData.ventas.financieras.summary.ventas))
+            : (refaccionesData?.pedidos?.summary?.totalPedidos || 0));
         } catch (err) {
           console.error(err);
           window.alert(err.message || 'No se pudieron cargar los pedidos de refacciones.');

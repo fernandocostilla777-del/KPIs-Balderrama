@@ -196,6 +196,253 @@ function getCsiQuejasForContact(d, { ordenes = [], vins = [] } = {}) {
   };
 }
 
+function isQuejaIncidencia(incidencia) {
+  const s = String(incidencia || '').trim().toLowerCase();
+  if (!s) return false;
+  return /queja|baja\s*calific|reclamo|inconform/.test(s);
+}
+
+function matchesCsiTipoIncidencia(row, tipoIncidencia = 'quejas') {
+  const key = String(tipoIncidencia || 'quejas').toLowerCase();
+  if (key === 'todas' || key === 'all') return true;
+  if (key === 'quejas') return isQuejaIncidencia(row.incidencia);
+  const wanted = key.replace(/_/g, ' ');
+  return String(row.incidencia || '').trim().toLowerCase() === wanted;
+}
+
+function personNameMatches(stored, query) {
+  const a = normalizeVendedorKey(stored);
+  const b = normalizeVendedorKey(query);
+  if (!a || !b) return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  const ta = personTokenKey(stored);
+  const tb = personTokenKey(query);
+  if (!ta || !tb) return false;
+  if (ta === tb) return true;
+  const aToks = new Set(ta.split(' '));
+  const bToks = tb.split(' ');
+  // Match parcial si el query aporta ≥2 tokens y todos están en el nombre
+  if (bToks.length >= 2 && bToks.every((t) => aToks.has(t))) return true;
+  if (aToks.size >= 2 && [...aToks].every((t) => bToks.includes(t))) return true;
+  return false;
+}
+
+function loadCsiPosventaRows(d) {
+  if (!hasCsiPosventaTable(d)) return [];
+  return d.prepare(`
+    SELECT * FROM crm_csi_posventa
+    ORDER BY fecha DESC, id DESC
+  `).all().map(mapCsiPosventaRow);
+}
+
+function loadCsiVentasRows(d) {
+  if (!hasCsiVentasTable(d)) return [];
+  return d.prepare(`
+    SELECT * FROM crm_csi_ventas
+    ORDER BY fecha_entrega DESC, id DESC
+  `).all().map(mapCsiVentasRow);
+}
+
+function groupCount(rows, keyFn, limit = 20) {
+  const map = new Map();
+  for (const row of rows) {
+    const label = String(keyFn(row) || 'Sin asignar').trim() || 'Sin asignar';
+    const cur = map.get(label) || { label, count: 0 };
+    cur.count += 1;
+    map.set(label, cur);
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count).slice(0, limit);
+}
+
+function summarizeQuejasRows(rows) {
+  const porArea = groupCount(rows, (r) => r.area, 20).map((x) => ({
+    area: x.label,
+    count: x.count,
+  }));
+  const porIncidencia = groupCount(rows, (r) => r.incidencia || '(sin tipo)', 15).map((x) => ({
+    incidencia: x.label,
+    count: x.count,
+  }));
+  return {
+    total: rows.length,
+    porArea,
+    porIncidencia,
+    areaPrincipal: porArea[0]?.area || null,
+  };
+}
+
+/**
+ * Ranking y detalle de quejas/incidencias CSI por vendedor (ejecutivo)
+ * o asesor de servicio.
+ */
+function getQuejasCsiSummary({
+  persona = null,
+  rol = 'auto',
+  fuente = 'todas',
+  tipoIncidencia = 'quejas',
+  periodo = null,
+  fechaInicio = null,
+  fechaFin = null,
+  area = null,
+  limit = 25,
+  rankingLimit = 15,
+} = {}) {
+  const d = getDb();
+  const range = resolveCrmPeriod({
+    periodo,
+    desde: fechaInicio || null,
+    hasta: fechaFin || null,
+  });
+  const fi = range.desde;
+  const ff = range.hasta;
+  const fuenteKey = String(fuente || 'todas').toLowerCase();
+  const rolKey = String(rol || 'auto').toLowerCase();
+  const areaKey = area ? String(area).trim().toLowerCase() : null;
+  const maxDetail = Math.min(50, Math.max(5, Number(limit) || 25));
+  const maxRank = Math.min(30, Math.max(5, Number(rankingLimit) || 15));
+
+  const includePos = fuenteKey === 'todas' || fuenteKey === 'posventa' || fuenteKey === 'servicio';
+  const includeVen = fuenteKey === 'todas' || fuenteKey === 'ventas';
+
+  let posventa = includePos ? loadCsiPosventaRows(d) : [];
+  let ventas = includeVen ? loadCsiVentasRows(d) : [];
+
+  posventa = posventa.filter((r) => matchesCsiTipoIncidencia(r, tipoIncidencia) && inPeriod(r.fecha, fi, ff));
+  ventas = ventas.filter((r) => matchesCsiTipoIncidencia(r, tipoIncidencia) && inPeriod(r.fecha, fi, ff));
+
+  if (areaKey) {
+    posventa = posventa.filter((r) => String(r.area || '').toLowerCase().includes(areaKey));
+    ventas = ventas.filter((r) => String(r.area || '').toLowerCase().includes(areaKey));
+  }
+
+  const rankingAsesores = groupCount(posventa, (r) => r.asesor || 'Sin asesor', maxRank)
+    .map((x) => ({ asesor: x.label, quejas: x.count, fuente: 'posventa' }));
+  const rankingVendedores = groupCount(ventas, (r) => r.ejecutivo || 'Sin ejecutivo', maxRank)
+    .map((x) => ({ vendedor: x.label, quejas: x.count, fuente: 'ventas' }));
+
+  const catalogo = {
+    asesoresServicio: rankingAsesores.map((r) => r.asesor).filter((n) => n !== 'Sin asesor'),
+    vendedores: rankingVendedores.map((r) => r.vendedor).filter((n) => n !== 'Sin ejecutivo'),
+  };
+
+  const base = {
+    filtros: {
+      persona: persona || null,
+      rol: rolKey,
+      fuente: fuenteKey,
+      tipoIncidencia,
+      periodo: range.periodo,
+      fechaInicio: fi,
+      fechaFin: ff,
+      area: area || null,
+    },
+    semantica: {
+      posventa: 'CSI Posventa → columna asesor (asesor de servicio / taller).',
+      ventas: 'CSI Ventas → columna ejecutivo (vendedor / EV).',
+      tipoQuejas: 'Por defecto solo Queja / Baja calificación / reclamo. Usa tipoIncidencia=todas para incluir solicitudes, sugerencias y felicitaciones.',
+    },
+    totales: {
+      total: posventa.length + ventas.length,
+      posventa: posventa.length,
+      ventas: ventas.length,
+    },
+    rankingAsesoresServicio: rankingAsesores,
+    rankingVendedores: rankingVendedores,
+    porArea: summarizeQuejasRows([...posventa, ...ventas]).porArea,
+    catalogo,
+  };
+
+  const q = String(persona || '').trim();
+  if (!q) {
+    return {
+      ...base,
+      modo: 'ranking',
+      coincidencias: [],
+      detalle: [],
+    };
+  }
+
+  const wantAsesor = rolKey === 'auto' || rolKey === 'asesor' || rolKey === 'asesor_servicio' || rolKey === 'servicio';
+  const wantVendedor = rolKey === 'auto' || rolKey === 'vendedor' || rolKey === 'ejecutivo' || rolKey === 'ev';
+
+  const matchesAsesor = wantAsesor
+    ? [...new Set(posventa.map((r) => r.asesor).filter(Boolean))]
+      .filter((name) => personNameMatches(name, q))
+    : [];
+  const matchesVendedor = wantVendedor
+    ? [...new Set(ventas.map((r) => r.ejecutivo).filter(Boolean))]
+      .filter((name) => personNameMatches(name, q))
+    : [];
+
+  const coincidencias = [
+    ...matchesAsesor.map((nombre) => ({ nombre, rol: 'asesor_servicio', fuente: 'posventa' })),
+    ...matchesVendedor.map((nombre) => ({ nombre, rol: 'vendedor', fuente: 'ventas' })),
+  ];
+
+  if (!coincidencias.length) {
+    return {
+      ...base,
+      modo: 'persona',
+      encontrado: false,
+      coincidencias: [],
+      detalle: [],
+      sugerencia: 'No hubo coincidencia exacta. Revisa rankingAsesoresServicio / rankingVendedores o acota el nombre.',
+    };
+  }
+
+  const asesorSet = new Set(matchesAsesor.map((n) => normalizeVendedorKey(n)));
+  const vendedorSet = new Set(matchesVendedor.map((n) => normalizeVendedorKey(n)));
+
+  const posFiltrado = posventa.filter((r) => asesorSet.has(normalizeVendedorKey(r.asesor)));
+  const venFiltrado = ventas.filter((r) => vendedorSet.has(normalizeVendedorKey(r.ejecutivo)));
+  const todas = [...posFiltrado, ...venFiltrado]
+    .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+
+  const resumenPersona = summarizeQuejasRows(todas);
+  const porPersona = coincidencias.map((c) => {
+    const rows = c.rol === 'asesor_servicio'
+      ? posFiltrado.filter((r) => normalizeVendedorKey(r.asesor) === normalizeVendedorKey(c.nombre))
+      : venFiltrado.filter((r) => normalizeVendedorKey(r.ejecutivo) === normalizeVendedorKey(c.nombre));
+    return {
+      ...c,
+      quejas: rows.length,
+      porArea: summarizeQuejasRows(rows).porArea.slice(0, 6),
+    };
+  }).sort((a, b) => b.quejas - a.quejas);
+
+  return {
+    ...base,
+    modo: 'persona',
+    encontrado: true,
+    coincidencias,
+    porPersona,
+    totalesPersona: {
+      total: todas.length,
+      posventa: posFiltrado.length,
+      ventas: venFiltrado.length,
+      ...resumenPersona,
+    },
+    detalle: todas.slice(0, maxDetail).map((r) => ({
+      fuente: r.fuente,
+      fecha: r.fecha,
+      persona: r.asesor || r.ejecutivo || null,
+      rol: r.fuente === 'posventa' ? 'asesor_servicio' : 'vendedor',
+      cliente: r.nombre || r.cliente || null,
+      orden: r.orden || null,
+      serie: r.serie || null,
+      modelo: r.modelo || null,
+      incidencia: r.incidencia || null,
+      area: r.area || null,
+      comentario: (r.comentarios || r.queja || '').slice(0, 220),
+      nps: r.nps ?? r.recomendacion ?? null,
+    })),
+  };
+}
+
+function getQuejasCsiForPersona(persona, opts = {}) {
+  return getQuejasCsiSummary({ ...opts, persona });
+}
+
 function getFinanciamientoByVins(d, vins) {
   if (!hasFinanciamientoTable(d)) return [];
   const normalized = [...new Set((vins || []).map(normalizeVin).filter(Boolean))];
@@ -1851,6 +2098,10 @@ function resolveCrmPeriod({ periodo = null, desde = null, hasta = null } = {}) {
       start = new Date(year, month, now.getDate() - 29);
       end = now;
       break;
+    case 'ultimos_90_dias':
+      start = new Date(year, month, now.getDate() - 89);
+      end = now;
+      break;
     case 'trimestre_actual':
       start = new Date(year, Math.floor(month / 3) * 3, 1);
       end = now;
@@ -1952,6 +2203,212 @@ function getLeadsSummary({
     },
     totales,
     grupos,
+  };
+}
+
+const COMPRA_LEAD_SQL = `
+  CASE WHEN (
+    (vin_comprado IS NOT NULL AND trim(vin_comprado) <> '')
+    OR EXISTS (
+      SELECT 1 FROM crm_actividades a
+      WHERE a.id_contacto = crm_leads.id_crm
+        AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+    )
+  ) THEN 1 ELSE 0 END
+`;
+
+/**
+ * Dashboard de conversión oportunidades → ventas para la sección Leads en Ventas.
+ * Cohorte por fecha_entrada; compra = VIN en ciclo del mismo ID CRM o vin_comprado.
+ */
+function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } = {}) {
+  const d = getDb();
+  if (!hasLeadsTable(d)) {
+    throw Object.assign(
+      new Error('Tabla de leads no cargada. Ejecute: node backend/scripts/etl-crm-leads.js'),
+      { status: 503 },
+    );
+  }
+
+  const desde = fechaInicio || null;
+  const hasta = fechaFin || null;
+  const rango = resolveCrmPeriod({ desde, hasta });
+  const max = Math.min(1000, Math.max(50, Number(limit) || 400));
+
+  const where = [];
+  const params = [];
+  if (rango.desde) { where.push('fecha_entrada >= ?'); params.push(String(rango.desde)); }
+  if (rango.hasta) { where.push('fecha_entrada <= ?'); params.push(String(rango.hasta)); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const totales = d.prepare(`
+    SELECT
+      COUNT(*) AS leads,
+      COUNT(DISTINCT CASE WHEN id_crm IS NOT NULL AND trim(id_crm) <> '' THEN id_crm END) AS oportunidades,
+      SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
+      SUM(CASE WHEN cita_programada = 'SI' THEN 1 ELSE 0 END) AS citas,
+      SUM(CASE WHEN cita_asistida = 'SI' THEN 1 ELSE 0 END) AS citasAsistidas,
+      SUM(CASE WHEN cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0') THEN 1 ELSE 0 END) AS cotizados,
+      SUM(${COMPRA_LEAD_SQL}) AS compras,
+      SUM(CASE WHEN ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '' THEN 1 ELSE 0 END) AS conEjecutivo
+    FROM crm_leads
+    ${whereSql}
+  `).get(...params);
+
+  const n = (k) => Number(totales?.[k] || 0);
+  const leads = n('leads');
+  const contactados = n('contactados');
+  const citas = n('citas');
+  const cotizados = n('cotizados');
+  const compras = n('compras');
+  const pct = (num, den) => (den ? Math.round((num / den) * 10000) / 100 : 0);
+
+  const summary = {
+    leads,
+    oportunidades: n('oportunidades'),
+    contactados,
+    citas,
+    citasAsistidas: n('citasAsistidas'),
+    cotizados,
+    compras,
+    conEjecutivo: n('conEjecutivo'),
+    sinCompra: Math.max(0, leads - compras),
+    conversionContactoPct: pct(contactados, leads),
+    conversionCitaPct: pct(citas, leads),
+    conversionCotizacionPct: pct(cotizados, leads),
+    conversionCompraPct: pct(compras, leads),
+    conversionCitaACompraPct: pct(compras, citas),
+    conversionContactoACompraPct: pct(compras, contactados),
+  };
+
+  const funnel = [
+    { key: 'leads', label: 'Leads / oportunidades', value: leads, pct: 100 },
+    { key: 'contactados', label: 'Contactados', value: contactados, pct: pct(contactados, leads) },
+    { key: 'citas', label: 'Cita programada', value: citas, pct: pct(citas, leads) },
+    { key: 'cotizados', label: 'Cotizados', value: cotizados, pct: pct(cotizados, leads) },
+    { key: 'compras', label: 'Compra (VIN)', value: compras, pct: pct(compras, leads) },
+  ];
+
+  const groupQuery = (expr, maxGroups = 20) => d.prepare(`
+    SELECT
+      COALESCE(NULLIF(trim(${expr}), ''), '(sin dato)') AS grupo,
+      COUNT(*) AS leads,
+      SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
+      SUM(CASE WHEN cita_programada = 'SI' THEN 1 ELSE 0 END) AS citas,
+      SUM(CASE WHEN cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0') THEN 1 ELSE 0 END) AS cotizados,
+      SUM(${COMPRA_LEAD_SQL}) AS compras
+    FROM crm_leads
+    ${whereSql}
+    GROUP BY grupo
+    ORDER BY compras DESC, leads DESC
+    LIMIT ?
+  `).all(...params, maxGroups).map((r) => ({
+    grupo: String(r.grupo || '(sin dato)'),
+    leads: Number(r.leads || 0),
+    contactados: Number(r.contactados || 0),
+    citas: Number(r.citas || 0),
+    cotizados: Number(r.cotizados || 0),
+    compras: Number(r.compras || 0),
+    conversionPct: pct(Number(r.compras || 0), Number(r.leads || 0)),
+  }));
+
+  const porCanal = groupQuery('canal');
+  const porEjecutivo = groupQuery('ejecutivo_asignado', 25);
+  const porResultado = groupQuery('resultado', 15);
+  const porSucursal = groupQuery('sucursal', 15);
+
+  const detalleRows = d.prepare(`
+    SELECT
+      id_crm AS idCrm,
+      id_oportunidad AS idOportunidad,
+      nombre,
+      telefono,
+      fecha_entrada AS fechaEntrada,
+      canal,
+      sucursal,
+      tipo,
+      campana,
+      ejecutivo_asignado AS ejecutivo,
+      fuerza_ventas AS fuerzaVentas,
+      contacto,
+      cita_programada AS citaProgramada,
+      fecha_cita AS fechaCita,
+      cotizacion,
+      auto_interes AS autoInteres,
+      resultado,
+      vin_comprado AS vinComprado,
+      fecha_factura AS fechaFactura,
+      estatus_compra AS estatusCompra,
+      ${COMPRA_LEAD_SQL} AS conCompra,
+      (
+        SELECT a.vin FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      ) AS vinCiclo,
+      (
+        SELECT a.estatus FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+        ORDER BY COALESCE(a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      ) AS estatusCiclo
+    FROM crm_leads
+    ${whereSql}
+    ORDER BY fecha_entrada DESC, id_crm DESC
+    LIMIT ?
+  `).all(...params, max);
+
+  const detalle = detalleRows.map((r) => {
+    const vin = String(r.vinComprado || r.vinCiclo || '').trim() || null;
+    const conCompra = Number(r.conCompra || 0) === 1;
+    return {
+      idCrm: String(r.idCrm || '').trim() || null,
+      idOportunidad: String(r.idOportunidad || '').trim() || null,
+      nombre: String(r.nombre || '').trim() || null,
+      telefono: String(r.telefono || '').trim() || null,
+      fechaEntrada: r.fechaEntrada || null,
+      canal: String(r.canal || '').trim() || null,
+      sucursal: String(r.sucursal || '').trim() || null,
+      tipo: String(r.tipo || '').trim() || null,
+      campana: String(r.campana || '').trim() || null,
+      ejecutivo: String(r.ejecutivo || '').trim() || null,
+      fuerzaVentas: String(r.fuerzaVentas || '').trim() || null,
+      contactado: String(r.contacto || '').trim().toUpperCase() === 'SI',
+      cita: String(r.citaProgramada || '').trim().toUpperCase() === 'SI',
+      fechaCita: r.fechaCita || null,
+      cotizado: !!(r.cotizacion && String(r.cotizacion).trim() && !['NO', 'N', '0'].includes(String(r.cotizacion).trim().toUpperCase())),
+      autoInteres: String(r.autoInteres || '').trim() || null,
+      resultado: String(r.resultado || '').trim() || null,
+      conCompra,
+      vin,
+      fechaFactura: r.fechaFactura || null,
+      estatusCompra: String(r.estatusCompra || '').trim() || null,
+      estatusCiclo: String(r.estatusCiclo || '').trim() || null,
+      etapa: conCompra ? 'compra' : (String(r.citaProgramada || '').trim().toUpperCase() === 'SI' ? 'cita' : (String(r.contacto || '').trim().toUpperCase() === 'SI' ? 'contacto' : 'lead')),
+    };
+  });
+
+  return {
+    filtros: {
+      fechaInicio: rango.desde,
+      fechaFin: rango.hasta,
+      periodo: rango.periodo,
+    },
+    fuente: 'crm_leads · crm_actividades (Balderrama Ciclos)',
+    reglaCompra: 'VIN en ciclo CRM del mismo ID CRM, o vin_comprado en el lead',
+    semantica: {
+      cohorte: 'El periodo filtra fecha_entrada del lead (oportunidad)',
+      compras: 'Compra vinculada por ID CRM; puede ocurrir después del periodo',
+      noEsVentasTotales: 'No equivale al total de facturas DMS del periodo',
+    },
+    summary,
+    funnel,
+    porCanal,
+    porEjecutivo,
+    porResultado,
+    porSucursal,
+    detalle,
   };
 }
 
@@ -3140,6 +3597,15 @@ async function getVendedorResumen({
     totales.comprasFuente = 'crm_vin';
   }
 
+  const quejasCsi = getQuejasCsiSummary({
+    persona: nombre || key,
+    rol: 'auto',
+    tipoIncidencia: 'quejas',
+    fechaInicio: fi,
+    fechaFin: ff,
+    limit: 15,
+  });
+
   return {
     vendedor: nombre || key,
     key,
@@ -3147,6 +3613,16 @@ async function getVendedorResumen({
     totales,
     comercial,
     clientes,
+    quejasCsi: {
+      encontrado: Boolean(quejasCsi.encontrado),
+      total: Number(quejasCsi.totalesPersona?.total || 0),
+      posventa: Number(quejasCsi.totalesPersona?.posventa || 0),
+      ventas: Number(quejasCsi.totalesPersona?.ventas || 0),
+      porArea: quejasCsi.totalesPersona?.porArea || [],
+      porPersona: quejasCsi.porPersona || [],
+      coincidencias: quejasCsi.coincidencias || [],
+      muestra: quejasCsi.detalle || [],
+    },
   };
 }
 
@@ -3157,6 +3633,7 @@ module.exports = {
   searchContacts,
   getContactHistory,
   getLeadsSummary,
+  getLeadsDashboard,
   getSeguimiento360Summary,
   resolveCrmPeriod,
   getCierresTallerPeriodo,
@@ -3169,4 +3646,6 @@ module.exports = {
   resolveIdCrmByTelefono,
   listVendedores,
   getVendedorResumen,
+  getQuejasCsiSummary,
+  getQuejasCsiForPersona,
 };

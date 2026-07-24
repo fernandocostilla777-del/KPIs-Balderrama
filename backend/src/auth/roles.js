@@ -1,30 +1,48 @@
-const ROLES = {
+const {
+  getRoleOverride,
+  resolveHomePath,
+  resolveApiPrefixes,
+  listPageCatalog,
+  getOverrides,
+  updateRolePermissions,
+  resetRolePermissions,
+  readStore,
+} = require('./rolePermissionsStore');
+
+const ROLE_DEFAULTS = {
   administracion: {
     id: 'administracion',
     label: 'Administración',
     pages: ['admin', 'overview', 'sales', 'forecast', 'inventory', 'contabilidad', 'post-sales', 'seguimiento'],
     homePath: '/',
     canManageUsers: true,
+    apiPrefixes: ['*'],
   },
   direccion: {
     id: 'direccion',
     label: 'Dirección',
     pages: ['overview', 'sales', 'forecast', 'inventory', 'contabilidad', 'post-sales', 'seguimiento'],
     homePath: '/',
+    apiPrefixes: ['*'],
   },
   gerencia_comercial: {
     id: 'gerencia_comercial',
     label: 'Gerencia Comercial',
     pages: ['sales', 'forecast', 'seguimiento'],
     homePath: '/sales.html',
+    apiPrefixes: ['/ventas', '/forecast', '/crm', '/ai', '/health'],
   },
   contabilidad: {
     id: 'contabilidad',
     label: 'Contabilidad',
     pages: ['contabilidad'],
     homePath: '/contabilidad.html',
+    apiPrefixes: ['/contabilidad', '/eeff', '/ai', '/health'],
   },
 };
+
+/** @deprecated use ROLE_DEFAULTS — kept for compatibility with require('./roles').ROLES */
+const ROLES = ROLE_DEFAULTS;
 
 const USERNAME_TO_ROLE = {
   admin: 'administracion',
@@ -37,15 +55,67 @@ const USERNAME_TO_ROLE = {
   contraloria: 'contabilidad',
 };
 
-const API_PREFIXES_BY_ROLE = {
-  administracion: ['*'],
-  direccion: ['*'],
-  gerencia_comercial: ['/ventas', '/forecast', '/crm', '/ai', '/health'],
-  contabilidad: ['/contabilidad', '/eeff', '/ai', '/health'],
-};
+const ALWAYS_API_PREFIXES = [
+  '/auth/me',
+  '/auth/logout',
+  '/auth/alerts',
+  '/auth/config',
+  '/health',
+  '/ai',
+];
+
+function getDefaultRole(roleId) {
+  return ROLE_DEFAULTS[roleId] || null;
+}
 
 function getRole(roleId) {
-  return ROLES[roleId] || null;
+  const base = getDefaultRole(roleId);
+  if (!base) return null;
+
+  const override = getRoleOverride(roleId);
+  const pages = Array.isArray(override?.pages) && override.pages.length
+    ? [...override.pages]
+    : [...base.pages];
+
+  // Administración siempre gestiona usuarios y conserva página admin
+  if (base.canManageUsers && !pages.includes('admin')) {
+    pages.unshift('admin');
+  }
+
+  let apiPrefixes;
+  if (base.canManageUsers) {
+    apiPrefixes = ['*'];
+  } else if (!override?.pages && (base.apiPrefixes || []).includes('*')) {
+    apiPrefixes = ['*'];
+  } else if (!override?.pages) {
+    apiPrefixes = [...(base.apiPrefixes || [])];
+  } else {
+    apiPrefixes = resolveApiPrefixes(pages);
+  }
+
+  return {
+    id: base.id,
+    label: base.label,
+    pages,
+    homePath: resolveHomePath(pages) || base.homePath,
+    canManageUsers: !!base.canManageUsers,
+    apiPrefixes,
+    isCustomized: Boolean(override?.pages),
+  };
+}
+
+function listRoles() {
+  return Object.keys(ROLE_DEFAULTS).map((id) => {
+    const role = getRole(id);
+    return {
+      id: role.id,
+      label: role.label,
+      pages: role.pages,
+      homePath: role.homePath,
+      canManageUsers: role.canManageUsers,
+      isCustomized: role.isCustomized,
+    };
+  });
 }
 
 function canAccessPage(roleId, pageId) {
@@ -63,7 +133,10 @@ function canAccessApi(roleId, originalUrl) {
   const role = getRole(roleId);
   if (!role) return false;
   const apiPath = getApiPath(originalUrl);
-  const prefixes = API_PREFIXES_BY_ROLE[roleId] || [];
+  if (ALWAYS_API_PREFIXES.some((p) => apiPath === p || apiPath.startsWith(`${p}/`))) {
+    return true;
+  }
+  const prefixes = role.apiPrefixes || [];
   if (prefixes.includes('*')) return true;
   return prefixes.some((prefix) => apiPath === prefix || apiPath.startsWith(`${prefix}/`));
 }
@@ -77,13 +150,50 @@ function canManageUsers(roleId) {
   return !!getRole(roleId)?.canManageUsers;
 }
 
+function getRolePermissionsPayload() {
+  const store = readStore();
+  const defaults = {};
+  for (const id of Object.keys(ROLE_DEFAULTS)) {
+    defaults[id] = [...ROLE_DEFAULTS[id].pages];
+  }
+  return {
+    pages: listPageCatalog(),
+    roles: listRoles(),
+    defaults,
+    byRole: Object.fromEntries(
+      Object.keys(ROLE_DEFAULTS).map((id) => [id, { pages: getRole(id).pages }]),
+    ),
+    updatedAt: store.updatedAt,
+  };
+}
+
+function saveRolePermissions(byRole) {
+  const defaults = {};
+  for (const id of Object.keys(ROLE_DEFAULTS)) {
+    defaults[id] = ROLE_DEFAULTS[id].pages;
+  }
+  updateRolePermissions(byRole, defaults);
+  return getRolePermissionsPayload();
+}
+
+function restoreDefaultRolePermissions() {
+  resetRolePermissions();
+  return getRolePermissionsPayload();
+}
+
 module.exports = {
   ROLES,
+  ROLE_DEFAULTS,
   USERNAME_TO_ROLE,
   getRole,
+  listRoles,
   canAccessPage,
   canAccessApi,
   getApiPath,
   resolveRoleFromUsername,
   canManageUsers,
+  getRolePermissionsPayload,
+  saveRolePermissions,
+  restoreDefaultRolePermissions,
+  getOverrides,
 };

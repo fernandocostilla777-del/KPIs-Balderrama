@@ -100,6 +100,17 @@ CLOUD_SYNC_API_KEY=la-misma-clave-del-cloud
 
 Los endpoints `/api/sync/*` usan `X-API-Key`. Los endpoints `/api/mobile/*` usan el token devuelto por `/api/auth/login`; la clave de sincronización nunca debe incluirse en la app.
 
+### Asistente IA móvil
+
+Requiere `OPENAI_API_KEY` (y opcionalmente `OPENAI_MODEL`) en Railway.
+
+| Método | Path | Descripción |
+|--------|------|-------------|
+| `GET` | `/api/mobile/ai/status` | Si el asistente está configurado + tools del rol |
+| `POST` | `/api/mobile/ai/chat` | Chat ultra-resumido; tools filtradas por rol |
+
+Las tools leen datos ya sincronizados (`mobileData`), no SQL Server en vivo. El rol del usuario (`MOBILE_AUTH_USERS`) limita módulos y herramientas igual que en el dashboard web.
+
 ## Payload de ingestión
 
 ```json

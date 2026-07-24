@@ -1,13 +1,7 @@
 const crypto = require('crypto');
+const { rolePages, getRoleScope } = require('./mobileRoles');
 
 const TOKEN_TTL_SECONDS = 12 * 60 * 60;
-
-const ROLE_LABELS = {
-  administracion: 'Administración',
-  direccion: 'Dirección',
-  gerencia_comercial: 'Gerencia comercial',
-  contabilidad: 'Contabilidad',
-};
 
 function encode(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -21,19 +15,23 @@ function getSecret() {
   return secret;
 }
 
-function getUsers() {
-  const raw = String(process.env.MOBILE_AUTH_USERS || '').trim();
-  if (!raw) {
-    throw new Error('MOBILE_AUTH_USERS no configurado');
+function normalizeUsername(username) {
+  return String(username || '').trim().toLowerCase();
+}
+
+/** Misma verificación scrypt que el dashboard web (salt:hash). */
+function verifyPassword(password, stored) {
+  if (!stored || !password) return false;
+  if (!String(stored).includes(':')) {
+    return safeEqual(String(password), String(stored));
   }
-  return raw.split(';').map((entry) => {
-    const [username, password, role = 'direccion'] = entry.split(':');
-    return {
-      username: String(username || '').trim(),
-      password: String(password || ''),
-      role: String(role || 'direccion').trim(),
-    };
-  }).filter((user) => user.username && user.password);
+  const [salt, hash] = String(stored).split(':');
+  if (!salt || !hash) return false;
+  const test = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  const hashBuf = Buffer.from(hash, 'hex');
+  const testBuf = Buffer.from(test, 'hex');
+  if (hashBuf.length !== testBuf.length) return false;
+  return crypto.timingSafeEqual(hashBuf, testBuf);
 }
 
 function safeEqual(left, right) {
@@ -42,21 +40,84 @@ function safeEqual(left, right) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/** Fallback legacy: MOBILE_AUTH_USERS=user:pass:role;... */
+function getEnvUsers() {
+  const raw = String(process.env.MOBILE_AUTH_USERS || '').trim();
+  if (!raw) return [];
+  return raw.split(';').map((entry) => {
+    const [username, password, role = 'direccion'] = entry.split(':');
+    return {
+      username: normalizeUsername(username),
+      password: String(password || ''),
+      role: String(role || 'direccion').trim(),
+      active: true,
+      source: 'env',
+    };
+  }).filter((user) => user.username && user.password);
+}
+
+async function getSyncedUsers() {
+  try {
+    const { query } = require('../db');
+    const result = await query(
+      `SELECT external_id, payload
+       FROM sync_entities
+       WHERE domain = 'auth'
+         AND period_key IS NOT DISTINCT FROM 'global'
+       ORDER BY last_seen_at DESC`
+    );
+    return (result.rows || []).map((row) => {
+      const p = row.payload || {};
+      return {
+        username: normalizeUsername(p.username || row.external_id),
+        passwordHash: p.passwordHash || null,
+        role: String(p.role || 'direccion').trim(),
+        active: p.active !== false,
+        source: 'sync',
+      };
+    }).filter((u) => u.username && u.passwordHash);
+  } catch (err) {
+    console.warn('[mobile-auth] No se pudieron leer usuarios sync:', err.message);
+    return [];
+  }
+}
+
 function publicUser(user) {
+  const role = user.role || 'direccion';
+  const scope = getRoleScope(role);
+  const pages = rolePages(role);
   return {
     username: user.username,
-    role: user.role,
-    roleLabel: ROLE_LABELS[user.role] || user.role,
-    pages: ['dashboard', 'metrics', 'profile'],
-    homePath: '/tabs/dashboard',
-    canManageUsers: user.role === 'administracion',
+    role,
+    roleLabel: scope.label,
+    pages,
+    homePath: pages.includes('dashboard')
+      ? '/tabs/dashboard'
+      : pages.includes('metrics')
+        ? '/tabs/metrics'
+        : '/tabs/assistant',
+    canManageUsers: role === 'administracion',
+    metricSections: scope.metricSections,
+    aiTools: scope.tools,
   };
 }
 
-function authenticate(username, password) {
-  const user = getUsers().find((item) => safeEqual(item.username, String(username || '').trim()));
-  if (!user || !safeEqual(user.password, password || '')) return null;
-  return publicUser(user);
+async function authenticate(username, password) {
+  const key = normalizeUsername(username);
+  if (!key || !password) return null;
+
+  const synced = await getSyncedUsers();
+  if (synced.length) {
+    const user = synced.find((u) => u.username === key);
+    if (!user || user.active === false) return null;
+    if (!verifyPassword(password, user.passwordHash)) return null;
+    return publicUser(user);
+  }
+
+  // Fallback temporal si aún no hay sync de auth
+  const envUser = getEnvUsers().find((u) => u.username === key);
+  if (!envUser || !safeEqual(envUser.password, password)) return null;
+  return publicUser(envUser);
 }
 
 function signToken(user) {
@@ -94,4 +155,4 @@ function verifyToken(token) {
   }
 }
 
-module.exports = { authenticate, signToken, verifyToken };
+module.exports = { authenticate, signToken, verifyToken, getSyncedUsers };

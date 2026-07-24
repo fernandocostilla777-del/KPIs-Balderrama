@@ -1,22 +1,27 @@
 <ion-tabs>
 
   <ion-tab-bar slot="bottom" class="glass-tab-bar">
-    <ion-tab-button tab="dashboard" href="/tabs/dashboard">
+    <ion-tab-button *ngIf="can('dashboard')" tab="dashboard" href="/tabs/dashboard">
       <ion-icon name="grid-outline"></ion-icon>
       <ion-label>Inicio</ion-label>
     </ion-tab-button>
 
-    <ion-tab-button tab="metrics" href="/tabs/metrics">
+    <ion-tab-button *ngIf="can('metrics')" tab="metrics" href="/tabs/metrics">
       <ion-icon name="stats-chart-outline"></ion-icon>
       <ion-label>Métricas</ion-label>
     </ion-tab-button>
 
-    <ion-tab-button tab="seguimiento" href="/tabs/seguimiento">
+    <ion-tab-button *ngIf="can('seguimiento')" tab="seguimiento" href="/tabs/seguimiento">
       <ion-icon name="people-outline"></ion-icon>
       <ion-label>360</ion-label>
     </ion-tab-button>
 
-    <ion-tab-button tab="profile" href="/tabs/profile">
+    <ion-tab-button *ngIf="can('assistant')" tab="assistant" href="/tabs/assistant">
+      <ion-icon name="sparkles-outline"></ion-icon>
+      <ion-label>IA</ion-label>
+    </ion-tab-button>
+
+    <ion-tab-button *ngIf="can('profile')" tab="profile" href="/tabs/profile">
       <ion-icon name="person-outline"></ion-icon>
       <ion-label>Perfil</ion-label>
     </ion-tab-button>

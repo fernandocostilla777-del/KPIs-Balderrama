@@ -27,7 +27,14 @@
         <ion-icon name="shield-checkmark-outline" slot="start"></ion-icon>
         <ion-label>
           <p>Módulos autorizados</p>
-          <h3>{{ user?.pages?.length || 0 }}</h3>
+          <h3>{{ user?.pages?.join(', ') || '—' }}</h3>
+        </ion-label>
+      </ion-item>
+      <ion-item class="glass-list-item">
+        <ion-icon name="sparkles-outline" slot="start"></ion-icon>
+        <ion-label>
+          <p>Tools del asistente</p>
+          <h3>{{ user?.aiTools?.length || 0 }} disponibles</h3>
         </ion-label>
       </ion-item>
     </ion-list>

@@ -4,17 +4,31 @@ App móvil con diseño **Liquid Glass** basado en `stitch_liquid_glass_analytics
 
 ## Pantallas
 
-| Tab | Origen Stitch | Datos API |
-|-----|---------------|-----------|
-| **Inicio** | `panel_de_control` | `GET /api/mobile/overview` |
-| **Métricas** | `m_tricas_detalladas` | `GET /api/mobile/ventas` |
-| **Perfil** | `perfil_de_usuario` | `GET /api/auth/me` |
+| Tab | Datos API | Notas |
+|-----|-----------|-------|
+| **Inicio** | `GET /api/mobile/overview` | Solo roles con página `dashboard` |
+| **Métricas** | `GET /api/mobile/metrics/:section` | Secciones filtradas por rol |
+| **360** | `GET /api/mobile/metrics/seguimiento` | Gerencia / Dirección / Admin |
+| **IA** | `POST /api/mobile/ai/chat` | Respuestas ultra-resumidas según rol |
+| **Perfil** | `GET /api/auth/me` | Usuario, páginas y tools |
+
+### Roles → alcance del asistente
+
+| Rol | Tools IA |
+|-----|----------|
+| `administracion` / `direccion` | resumen, ventas, inventario, postventa, contabilidad, pronóstico, 360 |
+| `gerencia_comercial` | ventas, pronóstico, seguimiento 360 |
+| `contabilidad` | contabilidad |
+
+Requiere `OPENAI_API_KEY` en Railway (cloud-api). Los datos son del **sync en la nube**, no SQL en vivo.
 
 ## Requisitos
 
 - Node.js 18+
 - Cloud API desplegada y sincronizada
 - `MOBILE_AUTH_USERS` y `MOBILE_AUTH_SECRET` configurados en Railway
+
+**Login:** mismos usuarios del dashboard web (admin, dirección, etc.). El backend local sincroniza el dominio `auth` a Cloud API; si aún no hay sync, puede usarse el fallback `MOBILE_AUTH_USERS`.
 
 ## Configuración
 
@@ -81,7 +95,9 @@ mobile-app/
 │   ├── pages/login/   # Login
 │   ├── tab1/          # Panel de control
 │   ├── tab2/          # Métricas
-│   └── tab3/          # Perfil
+│   ├── tab3/          # Perfil
+│   ├── tab4/          # Seguimiento 360
+│   └── tab5/          # Asistente IA (resumen por rol)
 ├── capacitor.config.ts
 └── src/environments/  # apiUrl
 ```

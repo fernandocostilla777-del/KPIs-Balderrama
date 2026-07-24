@@ -4,6 +4,26 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AuthService } from './auth.service';
 
+export type AiHighlight = { label: string; value: string };
+
+export type AiChatResult = {
+  reply: string;
+  highlights?: AiHighlight[];
+  toolsUsed?: string[];
+  scope?: { role: string; roleLabel: string; tools: string[] };
+  model?: string;
+  source?: string;
+};
+
+export type AiStatus = {
+  ok: boolean;
+  configured: boolean;
+  model?: string;
+  role?: string;
+  tools?: string[];
+  sections?: string[];
+};
+
 function monthRange(): { fechaInicio: string; fechaFin: string } {
   const now = new Date();
   const y = now.getFullYear();
@@ -63,6 +83,24 @@ export class ApiService {
         params: this.params(range),
         headers: this.auth.authHeaders(),
       }),
+    );
+  }
+
+  getAiStatus() {
+    return firstValueFrom(
+      this.http.get<AiStatus>(`${this.base}/api/mobile/ai/status`, {
+        headers: this.auth.authHeaders(),
+      }),
+    );
+  }
+
+  chatAi(messages: Array<{ role: 'user' | 'assistant'; content: string }>) {
+    return firstValueFrom(
+      this.http.post<AiChatResult>(
+        `${this.base}/api/mobile/ai/chat`,
+        { messages },
+        { headers: this.auth.authHeaders() },
+      ),
     );
   }
 

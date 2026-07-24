@@ -81,6 +81,19 @@ async function syncDomain(domain, options = {}) {
   return pushPayload(payload);
 }
 
+/** Empuja usuarios del dashboard a Cloud API (login móvil unificado). */
+async function syncAuthUsers({ reason = 'manual' } = {}) {
+  try {
+    const result = await syncDomain('auth', {});
+    state.lastResults.auth = { reason, at: new Date().toISOString(), result };
+    return result;
+  } catch (err) {
+    state.lastError = err.message;
+    state.lastResults.auth = { reason, at: new Date().toISOString(), error: err.message };
+    throw err;
+  }
+}
+
 async function runIncrementalSync({ reason = 'schedule' } = {}) {
   const range = getCurrentMonthRange();
   const results = {};
@@ -92,6 +105,8 @@ async function runIncrementalSync({ reason = 'schedule' } = {}) {
       syncType: 'incremental',
     });
   }
+  // Misma fuente de usuarios que el dashboard web
+  results.auth = await syncDomain('auth', {});
   state.lastIncrementalAt = new Date().toISOString();
   state.lastResults.incremental = { reason, ...range, domains: results };
   return results;
@@ -206,7 +221,7 @@ function startScheduler() {
 
   const intervalMin = Number(process.env.CLOUD_SYNC_INTERVAL_MINUTES || 30);
   console.log(
-    `[cloud-sync] Programado: cada ${intervalMin} min (overview/ventas/pronóstico/inventario/contabilidad/crm)`
+    `[cloud-sync] Programado: cada ${intervalMin} min (overview/ventas/pronóstico/inventario/contabilidad/crm/auth)`
     + ` · postventa ${getDailyHour()}:00`
     + ' · cierre mensual día 1 02:00'
   );
@@ -241,4 +256,5 @@ module.exports = {
   getStatus,
   fetchCloudStatus,
   syncDomain,
+  syncAuthUsers,
 };

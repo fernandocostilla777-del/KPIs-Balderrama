@@ -1,0 +1,131 @@
+.assistant-content {
+  --padding-bottom: 140px;
+}
+
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 219, 231, 0.12);
+  border: 1px solid rgba(0, 219, 231, 0.25);
+  color: #9cf3f8;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.chat-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bubble {
+  max-width: 92%;
+  padding: 12px 14px;
+  border-radius: 1.25rem;
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(16px);
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: rgba(0, 219, 231, 0.18);
+  border-color: rgba(0, 219, 231, 0.28);
+}
+
+.bubble.bot {
+  align-self: flex-start;
+  background: var(--glass-bg);
+}
+
+.bubble-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #e8ecf8;
+}
+
+.hl-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hl-chip {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hl-chip span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9aa3b8;
+}
+
+.hl-chip strong {
+  font-size: 14px;
+  color: #fff;
+}
+
+.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9aa3b8;
+}
+
+.prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.prompt-chip {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #d7dceb;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.assistant-footer {
+  background: transparent;
+  padding: 0 12px 10px;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.composer ion-textarea {
+  flex: 1;
+  --background: transparent;
+  --padding-start: 0;
+  --padding-end: 0;
+  --color: #eef2ff;
+  font-size: 14px;
+}
+
+.composer ion-button {
+  --background: #00dbe7;
+  --color: #002022;
+  margin: 0;
+  width: 44px;
+  height: 44px;
+}

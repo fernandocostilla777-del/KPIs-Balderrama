@@ -6,13 +6,46 @@ const {
   getMetricsSection,
 } = require('../services/mobileData');
 const { requireMobileAuth } = require('../middleware/mobileAuth');
+const { isConfigured, runMobileChat, DEFAULT_MODEL } = require('../services/mobileAi');
+const { canAccessMetricSection, canAccessPage, roleMetricSections, roleTools } = require('../services/mobileRoles');
 
 const router = express.Router();
 
 router.use(requireMobileAuth);
 
+router.get('/ai/status', (req, res) => {
+  res.json({
+    ok: true,
+    configured: isConfigured(),
+    model: DEFAULT_MODEL,
+    role: req.mobileUser.role,
+    tools: roleTools(req.mobileUser.role),
+    sections: roleMetricSections(req.mobileUser.role),
+    source: 'cloud-sync',
+  });
+});
+
+router.post('/ai/chat', async (req, res, next) => {
+  try {
+    const messages = req.body?.messages;
+    const result = await runMobileChat({
+      messages,
+      user: req.mobileUser,
+    });
+    res.json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ ok: false, error: err.message });
+    }
+    return next(err);
+  }
+});
+
 router.get('/overview', async (req, res, next) => {
   try {
+    if (!canAccessPage(req.mobileUser.role, 'dashboard')) {
+      return res.status(403).json({ ok: false, error: 'Tu rol no tiene acceso al panel de control' });
+    }
     const period = req.query.periodKey || req.query.fechaInicio;
     res.json(await getLatestOverview(period));
   } catch (err) {
@@ -22,6 +55,9 @@ router.get('/overview', async (req, res, next) => {
 
 router.get('/ventas', async (req, res, next) => {
   try {
+    if (!canAccessMetricSection(req.mobileUser.role, 'ventas')) {
+      return res.status(403).json({ ok: false, error: 'Sin acceso a ventas' });
+    }
     const period = req.query.periodKey || req.query.fechaInicio;
     res.json(await getVentasSummary(period));
   } catch (err) {
@@ -31,6 +67,9 @@ router.get('/ventas', async (req, res, next) => {
 
 router.get('/inventory', async (req, res, next) => {
   try {
+    if (!canAccessMetricSection(req.mobileUser.role, 'inventory')) {
+      return res.status(403).json({ ok: false, error: 'Sin acceso a inventario' });
+    }
     const period = req.query.periodKey || req.query.fechaInicio;
     res.json(await getInventorySummary(period));
   } catch (err) {
@@ -40,6 +79,13 @@ router.get('/inventory', async (req, res, next) => {
 
 router.get('/metrics/:section', async (req, res, next) => {
   try {
+    if (!canAccessMetricSection(req.mobileUser.role, req.params.section)) {
+      return res.status(403).json({
+        ok: false,
+        error: `Sin acceso a ${req.params.section}`,
+        sections: roleMetricSections(req.mobileUser.role),
+      });
+    }
     const period = req.query.periodKey || req.query.fechaInicio;
     res.json(await getMetricsSection(req.params.section, period));
   } catch (err) {

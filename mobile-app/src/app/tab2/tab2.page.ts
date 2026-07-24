@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { ApiService } from '../core/services/api.service';
+import { AuthService } from '../core/services/auth.service';
 
 type MetricItem = {
   label: string;
@@ -21,6 +22,14 @@ type MetricSection = {
   icon: string;
 };
 
+const ALL_SECTIONS: MetricSection[] = [
+  { id: 'ventas', label: 'Ventas', icon: 'bar-chart-outline' },
+  { id: 'forecast', label: 'Pronóstico', icon: 'trending-up-outline' },
+  { id: 'inventory', label: 'Inventario', icon: 'cube-outline' },
+  { id: 'contabilidad', label: 'Contabilidad', icon: 'wallet-outline' },
+  { id: 'post-sales', label: 'Postventa', icon: 'construct-outline' },
+];
+
 @Component({
   selector: 'app-tab2',
   templateUrl: 'tab2.page.html',
@@ -32,13 +41,7 @@ export class Tab2Page implements OnInit {
   error = '';
   selectedSection = 'ventas';
 
-  sections: MetricSection[] = [
-    { id: 'ventas', label: 'Ventas', icon: 'bar-chart-outline' },
-    { id: 'forecast', label: 'Pronóstico', icon: 'trending-up-outline' },
-    { id: 'inventory', label: 'Inventario', icon: 'cube-outline' },
-    { id: 'contabilidad', label: 'Contabilidad', icon: 'wallet-outline' },
-    { id: 'post-sales', label: 'Postventa', icon: 'construct-outline' },
-  ];
+  sections: MetricSection[] = [];
 
   title = 'Ventas';
   heroLabel = 'Ventas del periodo';
@@ -48,9 +51,22 @@ export class Tab2Page implements OnInit {
   kpis: MetricItem[] = [];
   lists: MetricList[] = [];
 
-  constructor(private api: ApiService) {}
+  constructor(
+    private api: ApiService,
+    private auth: AuthService,
+  ) {}
 
   async ngOnInit() {
+    const allowed = new Set(this.auth.session?.metricSections || ALL_SECTIONS.map((s) => s.id));
+    this.sections = ALL_SECTIONS.filter((s) => allowed.has(s.id));
+    if (!this.sections.length) {
+      this.error = 'Tu rol no tiene secciones de métricas.';
+      this.loading = false;
+      return;
+    }
+    if (!this.sections.some((s) => s.id === this.selectedSection)) {
+      this.selectedSection = this.sections[0].id;
+    }
     await this.load();
   }
 

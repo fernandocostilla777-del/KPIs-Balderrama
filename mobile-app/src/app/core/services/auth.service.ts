@@ -10,6 +10,8 @@ export interface SessionUser {
   pages: string[];
   homePath?: string;
   canManageUsers?: boolean;
+  metricSections?: string[];
+  aiTools?: string[];
 }
 
 @Injectable({ providedIn: 'root' })

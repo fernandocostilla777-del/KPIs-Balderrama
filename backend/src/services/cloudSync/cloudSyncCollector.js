@@ -7,6 +7,7 @@ const { getPostSales } = require('../postSalesService');
 const { getForecast } = require('../forecastService');
 const { getGoals } = require('../salesGoals');
 const crmCiclos = require('../crmCiclosService');
+const userStore = require('../../auth/userStore');
 const { getCurrentMonthRange, getMonthRangeForKey, serializeRow } = require('./cloudSyncUtils');
 
 function resolveRange({ periodKey, fechaInicio, fechaFin } = {}) {
@@ -271,6 +272,24 @@ async function collectCrm({ periodKey, fechaInicio, fechaFin, syncType = 'increm
   };
 }
 
+/** Usuarios del dashboard web → Cloud API (mismo login móvil). */
+async function collectAuth(_options = {}) {
+  const records = userStore.exportCloudSyncRecords();
+  return {
+    domain: 'auth',
+    // monthly + period global: elimina en nube a quien ya no exista en el dashboard
+    syncType: 'monthly',
+    periodKey: 'global',
+    periodStart: null,
+    periodEnd: null,
+    records,
+    meta: {
+      userCount: records.length,
+      activeCount: records.filter((r) => r.data?.active !== false).length,
+    },
+  };
+}
+
 const COLLECTORS = {
   overview: collectOverview,
   ventas: collectVentas,
@@ -279,6 +298,7 @@ const COLLECTORS = {
   postventa: collectPostventa,
   forecast: collectForecast,
   crm: collectCrm,
+  auth: collectAuth,
 };
 
 async function collectDomain(domain, options = {}) {
@@ -295,5 +315,6 @@ module.exports = {
   collectPostventa,
   collectForecast,
   collectCrm,
+  collectAuth,
   collectDomain,
 };

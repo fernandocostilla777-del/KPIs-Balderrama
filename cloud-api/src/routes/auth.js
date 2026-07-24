@@ -4,10 +4,10 @@ const { authenticate, signToken } = require('../services/mobileAuth');
 
 const router = express.Router();
 
-router.post('/login', (req, res, next) => {
+router.post('/login', async (req, res, next) => {
   try {
     const { username, password } = req.body || {};
-    const user = authenticate(username, password);
+    const user = await authenticate(username, password);
     if (!user) {
       return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
     }

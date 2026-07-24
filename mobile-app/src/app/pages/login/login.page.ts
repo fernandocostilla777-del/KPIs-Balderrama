@@ -24,7 +24,8 @@ export class LoginPage {
     this.loading = true;
     try {
       await this.auth.login(this.username.trim(), this.password);
-      await this.router.navigateByUrl('/tabs/dashboard', { replaceUrl: true });
+      const home = this.auth.session?.homePath || '/tabs/dashboard';
+      await this.router.navigateByUrl(home, { replaceUrl: true });
     } catch {
       this.error = 'Usuario o contraseña incorrectos.';
     } finally {

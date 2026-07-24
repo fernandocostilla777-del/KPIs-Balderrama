@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { withTransaction } = require('../db');
 
-const VALID_DOMAINS = new Set(['overview', 'ventas', 'forecast', 'inventario', 'contabilidad', 'postventa', 'crm']);
+const VALID_DOMAINS = new Set(['overview', 'ventas', 'forecast', 'inventario', 'contabilidad', 'postventa', 'crm', 'auth']);
 const VALID_SYNC_TYPES = new Set(['incremental', 'daily', 'monthly']);
 
 function stableStringify(value) {

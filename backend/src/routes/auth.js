@@ -86,29 +86,47 @@ router.get('/users', requireUserManager, (_req, res) => {
   res.json({ users: listUsers(), roles: getAssignableRoles() });
 });
 
-router.post('/users', requireUserManager, (req, res) => {
+router.post('/users', requireUserManager, async (req, res) => {
   try {
     const { username, password, role } = req.body || {};
     const user = createUser({ username, password, role });
+    try {
+      const { syncAuthUsers } = require('../services/cloudSync/cloudSyncScheduler');
+      await syncAuthUsers({ reason: 'user-create' });
+    } catch (syncErr) {
+      console.warn('[auth] sync usuarios a cloud:', syncErr.message);
+    }
     res.status(201).json({ ok: true, user });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-router.put('/users/:username', requireUserManager, (req, res) => {
+router.put('/users/:username', requireUserManager, async (req, res) => {
   try {
     const { password, role, active } = req.body || {};
     const user = updateUser(req.params.username, { password, role, active });
+    try {
+      const { syncAuthUsers } = require('../services/cloudSync/cloudSyncScheduler');
+      await syncAuthUsers({ reason: 'user-update' });
+    } catch (syncErr) {
+      console.warn('[auth] sync usuarios a cloud:', syncErr.message);
+    }
     res.json({ ok: true, user });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-router.delete('/users/:username', requireUserManager, (req, res) => {
+router.delete('/users/:username', requireUserManager, async (req, res) => {
   try {
     deleteUser(req.params.username, req.session.username);
+    try {
+      const { syncAuthUsers } = require('../services/cloudSync/cloudSyncScheduler');
+      await syncAuthUsers({ reason: 'user-delete' });
+    } catch (syncErr) {
+      console.warn('[auth] sync usuarios a cloud:', syncErr.message);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });

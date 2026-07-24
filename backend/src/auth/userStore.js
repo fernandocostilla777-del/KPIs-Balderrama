@@ -252,6 +252,21 @@ function revealPassword(username) {
   return { available: true, username: user.username, password };
 }
 
+/** Snapshot para Cloud API (hashes scrypt; sin passwordEnc). */
+function exportCloudSyncRecords() {
+  const store = loadStore();
+  return store.users.map((user) => ({
+    id: user.username,
+    data: {
+      username: user.username,
+      passwordHash: user.passwordHash,
+      role: user.role,
+      active: user.active !== false,
+      updatedAt: user.updatedAt || null,
+    },
+  }));
+}
+
 module.exports = {
   listUsers,
   findUser,
@@ -261,4 +276,5 @@ module.exports = {
   deleteUser,
   getAssignableRoles,
   revealPassword,
+  exportCloudSyncRecords,
 };

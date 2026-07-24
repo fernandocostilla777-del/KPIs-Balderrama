@@ -398,8 +398,8 @@ router.post('/cloud-sync/run', async (req, res, next) => {
   try {
     const cloudSync = require('../services/cloudSync/cloudSyncScheduler');
     const type = String(req.body?.type || req.query?.type || 'incremental').toLowerCase();
-    if (!['incremental', 'daily', 'monthly'].includes(type)) {
-      return res.status(400).json({ error: 'type debe ser incremental, daily o monthly' });
+    if (!['incremental', 'daily', 'monthly', 'full'].includes(type)) {
+      return res.status(400).json({ error: 'type debe ser incremental, daily, monthly o full' });
     }
     const result = await cloudSync.runSync({ type, reason: 'api' });
     res.status(result.ok ? 200 : (result.skipped ? 409 : 500)).json(result);

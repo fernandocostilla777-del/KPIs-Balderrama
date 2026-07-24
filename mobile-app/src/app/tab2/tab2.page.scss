@@ -4,6 +4,38 @@
   margin-bottom: 16px;
 }
 
+.area-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.area-chip {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #d7dceb;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.area-chip.active {
+  background: rgba(0, 219, 231, 0.18);
+  border-color: rgba(0, 219, 231, 0.4);
+  color: #9cf3f8;
+}
+
+.kpi-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-style: normal;
+  color: #9aa3b8;
+  font-weight: 500;
+}
+
 .glass-select {
   --background: rgba(255, 255, 255, 0.04);
   --border-radius: 1rem;

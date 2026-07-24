@@ -1,22 +1,30 @@
 /**
  * Scheduler de sincronización local → API en la nube (PostgreSQL).
  *
- * - Cada 30 min: ventas, inventario, contabilidad, CRM/leads (solo mes en curso)
- * - Inicio del día: postventa
- * - Día 1 del mes (02:00): cierre mensual con detección de bajas
+ * - Cada N min (default 30): TODOS los dominios juntos
+ *   (overview, ventas, forecast, inventario, contabilidad, crm, postventa, auth)
+ * - Día 1 del mes (02:00): cierre mensual del mes anterior (mismos dominios)
  */
 const { collectDomain } = require('./cloudSyncCollector');
 const { pushPayload, getCloudConfig, fetchCloudStatus } = require('./cloudSyncClient');
 const { getCurrentMonthRange, getMonthRangeForKey } = require('./cloudSyncUtils');
 
-const THIRTY_MIN_MS = 30 * 60 * 1000;
-const INCREMENTAL_DOMAINS = ['overview', 'ventas', 'forecast', 'inventario', 'contabilidad', 'crm'];
+/** Dominios que siempre viajan juntos en cada ciclo de sync. */
+const SYNC_DOMAINS = [
+  'overview',
+  'ventas',
+  'forecast',
+  'inventario',
+  'contabilidad',
+  'crm',
+  'postventa',
+  'auth',
+];
 
 const state = {
   enabled: false,
   running: false,
   incrementalTimer: null,
-  dailyTimer: null,
   monthlyTimer: null,
   lastIncrementalAt: null,
   lastDailyAt: null,
@@ -30,18 +38,6 @@ const state = {
 
 function isEnabled() {
   return getCloudConfig().enabled;
-}
-
-function getDailyHour() {
-  const h = Number(process.env.CLOUD_SYNC_DAILY_HOUR ?? 6);
-  return Number.isFinite(h) && h >= 0 && h <= 23 ? Math.floor(h) : 6;
-}
-
-function msUntilNextDailyRun(now = new Date()) {
-  const target = new Date(now);
-  target.setHours(getDailyHour(), 0, 0, 0);
-  if (target <= now) target.setDate(target.getDate() + 1);
-  return target.getTime() - now.getTime();
 }
 
 function msUntilNextMonthlyRun(now = new Date()) {
@@ -58,9 +54,10 @@ function getStatus() {
     enabled: state.enabled,
     configured: Boolean(cfg.baseUrl && cfg.apiKey),
     cloudUrl: cfg.baseUrl || null,
-    incrementalDomains: INCREMENTAL_DOMAINS,
+    syncDomains: SYNC_DOMAINS,
+    /** @deprecated alias — todos los dominios van en el mismo ciclo */
+    incrementalDomains: SYNC_DOMAINS.filter((d) => d !== 'auth' && d !== 'postventa'),
     dailyDomain: 'postventa',
-    dailyHour: getDailyHour(),
     running: state.running,
     lastIncrementalAt: state.lastIncrementalAt,
     lastDailyAt: state.lastDailyAt,
@@ -68,7 +65,7 @@ function getStatus() {
     lastResults: state.lastResults,
     lastError: state.lastError,
     nextIncrementalAt: state.nextIncrementalAt,
-    nextDailyAt: state.nextDailyAt,
+    nextDailyAt: null,
     nextMonthlyAt: state.nextMonthlyAt,
   };
 }
@@ -94,35 +91,40 @@ async function syncAuthUsers({ reason = 'manual' } = {}) {
   }
 }
 
-async function runIncrementalSync({ reason = 'schedule' } = {}) {
+/**
+ * Sincroniza TODOS los dominios del mes en curso en el mismo ciclo.
+ */
+async function runFullSync({ reason = 'schedule', syncType = 'incremental' } = {}) {
   const range = getCurrentMonthRange();
   const results = {};
-  for (const domain of INCREMENTAL_DOMAINS) {
+  const at = new Date().toISOString();
+
+  for (const domain of SYNC_DOMAINS) {
+    const domainSyncType = domain === 'auth' ? 'monthly' : syncType;
     results[domain] = await syncDomain(domain, {
       ...range,
       fechaInicio: range.fechaInicio,
       fechaFin: range.fechaFin,
-      syncType: 'incremental',
+      syncType: domainSyncType,
+      periodKey: domain === 'auth' ? undefined : range.periodKey,
     });
   }
-  // Misma fuente de usuarios que el dashboard web
-  results.auth = await syncDomain('auth', {});
-  state.lastIncrementalAt = new Date().toISOString();
-  state.lastResults.incremental = { reason, ...range, domains: results };
+
+  state.lastIncrementalAt = at;
+  state.lastDailyAt = at;
+  state.lastResults.full = { reason, syncType, at, ...range, domains: results };
+  state.lastResults.incremental = state.lastResults.full;
+  state.lastResults.daily = state.lastResults.full;
   return results;
 }
 
+async function runIncrementalSync({ reason = 'schedule' } = {}) {
+  return runFullSync({ reason, syncType: 'incremental' });
+}
+
+/** Alias: daily = mismo sync completo (ya no solo postventa). */
 async function runDailySync({ reason = 'daily' } = {}) {
-  const range = getCurrentMonthRange();
-  const result = await syncDomain('postventa', {
-    ...range,
-    fechaInicio: range.fechaInicio,
-    fechaFin: range.fechaFin,
-    syncType: 'daily',
-  });
-  state.lastDailyAt = new Date().toISOString();
-  state.lastResults.daily = { reason, ...range, postventa: result };
-  return result;
+  return runFullSync({ reason, syncType: 'daily' });
 }
 
 async function runMonthlySync({ reason = 'monthly' } = {}) {
@@ -130,9 +132,9 @@ async function runMonthlySync({ reason = 'monthly' } = {}) {
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const range = getMonthRangeForKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
   const results = {};
-  for (const domain of [...INCREMENTAL_DOMAINS, 'postventa']) {
+  for (const domain of SYNC_DOMAINS) {
     results[domain] = await syncDomain(domain, {
-      periodKey: range.periodKey,
+      periodKey: domain === 'auth' ? undefined : range.periodKey,
       fechaInicio: range.fechaInicio,
       fechaFin: range.fechaFin,
       syncType: 'monthly',
@@ -153,11 +155,11 @@ async function runSync({ type = 'incremental', reason = 'manual' } = {}) {
 
   state.running = true;
   state.lastError = null;
-  console.log(`[cloud-sync] Inicio type=${type} (${reason})`);
+  console.log(`[cloud-sync] Inicio type=${type} (${reason}) — dominios: ${SYNC_DOMAINS.join(', ')}`);
 
   try {
     let result;
-    if (type === 'daily') result = await runDailySync({ reason });
+    if (type === 'daily' || type === 'full') result = await runDailySync({ reason });
     else if (type === 'monthly') result = await runMonthlySync({ reason });
     else result = await runIncrementalSync({ reason });
 
@@ -180,18 +182,6 @@ function scheduleIncremental() {
   }, intervalMs);
   if (typeof state.incrementalTimer.unref === 'function') state.incrementalTimer.unref();
   state.nextIncrementalAt = new Date(Date.now() + intervalMs).toISOString();
-}
-
-function scheduleDaily() {
-  if (state.dailyTimer) clearTimeout(state.dailyTimer);
-  const delay = msUntilNextDailyRun();
-  state.dailyTimer = setTimeout(() => {
-    runSync({ type: 'daily', reason: 'daily' })
-      .catch(() => {})
-      .finally(() => scheduleDaily());
-  }, delay);
-  if (typeof state.dailyTimer.unref === 'function') state.dailyTimer.unref();
-  state.nextDailyAt = new Date(Date.now() + delay).toISOString();
 }
 
 function scheduleMonthly() {
@@ -221,13 +211,12 @@ function startScheduler() {
 
   const intervalMin = Number(process.env.CLOUD_SYNC_INTERVAL_MINUTES || 30);
   console.log(
-    `[cloud-sync] Programado: cada ${intervalMin} min (overview/ventas/pronóstico/inventario/contabilidad/crm/auth)`
-    + ` · postventa ${getDailyHour()}:00`
+    `[cloud-sync] Programado: cada ${intervalMin} min TODOS los dominios juntos`
+    + ` (${SYNC_DOMAINS.join(', ')})`
     + ' · cierre mensual día 1 02:00'
   );
 
   scheduleIncremental();
-  scheduleDaily();
   scheduleMonthly();
 
   if (String(process.env.CLOUD_SYNC_ON_START || 'false').toLowerCase() === 'true') {
@@ -241,10 +230,8 @@ function startScheduler() {
 
 function stopScheduler() {
   if (state.incrementalTimer) clearInterval(state.incrementalTimer);
-  if (state.dailyTimer) clearTimeout(state.dailyTimer);
   if (state.monthlyTimer) clearTimeout(state.monthlyTimer);
   state.incrementalTimer = null;
-  state.dailyTimer = null;
   state.monthlyTimer = null;
   state.enabled = false;
 }
@@ -257,4 +244,5 @@ module.exports = {
   fetchCloudStatus,
   syncDomain,
   syncAuthUsers,
+  SYNC_DOMAINS,
 };

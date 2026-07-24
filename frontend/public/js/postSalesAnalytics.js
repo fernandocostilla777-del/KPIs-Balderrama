@@ -9,6 +9,48 @@
     return arr.reduce((s, r) => s + fn(r), 0);
   }
 
+  function avgNums(nums) {
+    if (!nums.length) return 0;
+    return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10;
+  }
+
+  function medianNums(nums) {
+    if (!nums.length) return 0;
+    const sorted = [...nums].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[mid]
+      : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+  }
+
+  /** Días de ciclo ingreso → cierre (facturadas). */
+  function cycleDaysOf(r) {
+    if (r.diasCiclo != null && Number.isFinite(Number(r.diasCiclo))) {
+      return Math.max(0, Number(r.diasCiclo));
+    }
+    if (r.ingresoDate && r.cierreDate) {
+      const a = new Date(`${r.ingresoDate}T12:00:00`);
+      const b = new Date(`${r.cierreDate}T12:00:00`);
+      if (!Number.isNaN(a) && !Number.isNaN(b)) {
+        return Math.max(0, Math.round((b - a) / 86400000));
+      }
+    }
+    return null;
+  }
+
+  function daysVsPromesaOf(r) {
+    if (r.diasVsPromesa != null && Number.isFinite(Number(r.diasVsPromesa))) {
+      return Number(r.diasVsPromesa);
+    }
+    if (!r.promesaDate) return null;
+    const ref = r.cierreDate || null;
+    if (!ref) return null;
+    const p = new Date(`${r.promesaDate}T12:00:00`);
+    const c = new Date(`${ref}T12:00:00`);
+    if (Number.isNaN(p) || Number.isNaN(c)) return null;
+    return Math.round((c - p) / 86400000);
+  }
+
   function groupCount(arr, keyFn) {
     const map = new Map();
     for (const r of arr) {
@@ -242,6 +284,61 @@
       excluidos: filtered.filter((r) => r.excluido).length,
     };
 
+    // Operación de taller: tiempos de ciclo, estancia y cumplimiento de promesa
+    const ciclosFacturados = facturadas
+      .map(cycleDaysOf)
+      .filter((d) => d != null && Number.isFinite(d));
+    const estanciaAbiertas = filteredOpen
+      .map((r) => Number(r.dias))
+      .filter((d) => Number.isFinite(d) && d >= 0);
+    const factConPromesa = facturadas.filter((r) => r.promesaDate && (r.cierreDate || r.diasCiclo != null));
+    const vsPromesa = factConPromesa
+      .map(daysVsPromesaOf)
+      .filter((d) => d != null && Number.isFinite(d));
+    const cumplidasPromesa = vsPromesa.filter((d) => d <= 0);
+    const retrasadas = vsPromesa.filter((d) => d > 0);
+    const facturasPorSemana = weekly.length
+      ? Math.round((facturadas.length / weekly.length) * 10) / 10
+      : 0;
+
+    // Tiempos por etapa operativa (snapshot de abiertas)
+    // Mecánica: Servicio en taller/activa · Espera RE: Detenida o Pendiente con refacciones · Pintura: HyP abierta
+    const matchArea = (r, area) =>
+      Boolean(global.PostSalesOrderTypes?.matchesArea?.(r, area));
+    const stageDias = (rows) =>
+      avgNums(rows.map((r) => Number(r.dias)).filter((d) => Number.isFinite(d) && d >= 0));
+    const enMecanica = filteredOpen.filter(
+      (r) => matchArea(r, 'servicio') && (r.status === 'T' || r.status === 'A'),
+    );
+    const enEsperaRefacc = filteredOpen.filter(
+      (r) => r.status === 'D' || (r.status === 'P' && hasRefacciones(r)),
+    );
+    const enPintura = filteredOpen.filter((r) => matchArea(r, 'hyp'));
+
+    const operations = {
+      tiempoPromCiclo: avgNums(ciclosFacturados),
+      tiempoMedCiclo: medianNums(ciclosFacturados),
+      ciclosConDato: ciclosFacturados.length,
+      estanciaPromAbiertas: avgNums(estanciaAbiertas),
+      estanciaMedAbiertas: medianNums(estanciaAbiertas),
+      diasPromMecanica: stageDias(enMecanica),
+      ordenesMecanica: enMecanica.length,
+      diasPromEsperaRefacc: stageDias(enEsperaRefacc),
+      ordenesEsperaRefacc: enEsperaRefacc.length,
+      diasPromPintura: stageDias(enPintura),
+      ordenesPintura: enPintura.length,
+      cumplimientoPromesaPct: vsPromesa.length
+        ? Math.round((cumplidasPromesa.length / vsPromesa.length) * 1000) / 10
+        : 0,
+      cumplimientoBase: vsPromesa.length,
+      retrasoPromDias: avgNums(retrasadas),
+      retrasadas: retrasadas.length,
+      promesasVencidas: risk.promesasVencidas,
+      facturasPorSemana,
+      criticas60: risk.criticas60,
+      ingresoPorSemana: risk.promedioSemanal,
+    };
+
     const monthly = buildMonthlyMap(filtered);
     const monthlyYtd = buildMonthlyMap(ytdFiltered);
     const lastMonth = monthly[monthly.length - 1];
@@ -408,6 +505,7 @@
       executive,
       aging,
       risk,
+      operations,
       finance,
       charts,
       tables,

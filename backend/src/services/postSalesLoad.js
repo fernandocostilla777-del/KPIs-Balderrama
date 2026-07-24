@@ -122,6 +122,22 @@ function mapRow(row, { snapshot = false } = {}) {
     dias = Math.max(0, dias || 0);
   }
 
+  // Ciclo real de taller: ingreso → cierre (facturadas/cerradas). Abiertas usan estancia (días).
+  let diasCiclo = null;
+  if (ingresoDate && cierreDate) {
+    diasCiclo = Math.max(0, Math.round((cierreDate - ingresoDate) / 86400000));
+  } else if (!isOpen && ingresoDate) {
+    diasCiclo = dias;
+  }
+
+  let diasVsPromesa = null;
+  if (promesaDate) {
+    const ref = cierreDate || (isOpen ? today : null);
+    if (ref) {
+      diasVsPromesa = Math.round((ref - promesaDate) / 86400000);
+    }
+  }
+
   const importeFac = Number(row.importeFac || 0);
   const importeTcx = Number(row.importeTcx || 0);
   const importeDet = Number(row.importeDetSub || 0) + Number(row.importeDetIva || 0);
@@ -162,6 +178,8 @@ function mapRow(row, { snapshot = false } = {}) {
     promesa: row.promesa || '',
     promesaDate: promesaDate ? promesaDate.toISOString().slice(0, 10) : null,
     dias,
+    diasCiclo,
+    diasVsPromesa,
     importe,
     importeFacturado,
     importeAbierto,

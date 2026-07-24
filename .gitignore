@@ -29,3 +29,9 @@ scripts/*.txt
 scripts/*.xls
 scripts/*.xlsx
 Thumbs.db
+mobile-app/.angular/
+stitch_liquid_glass_analytics/
+*.db
+*.db-shm
+*.db-wal
+

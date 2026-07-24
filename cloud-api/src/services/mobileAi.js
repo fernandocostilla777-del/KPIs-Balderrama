@@ -1,18 +1,22 @@
 const OpenAI = require('openai');
 const mobileData = require('./mobileData');
 const { roleTools, canUseTool, getRoleScope } = require('./mobileRoles');
+const { buildSharedIdentity } = require('../config/aiReasoningPrompt');
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const MAX_MESSAGES = 12;
-const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_ROUNDS = 8;
 
+/** Nombres alineados con el asistente web (misma intención / mismo razonamiento). */
 const TOOL_META = {
-  resumen_ejecutivo: {
-    description: 'Resumen ejecutivo del periodo: ventas, inventario, servicio y cobertura SOFIA.',
+  consultar_resumen_ejecutivo: {
+    description:
+      'Resumen ejecutivo consolidado del periodo: ventas, inventario, servicio/postventa y cobertura SOFIA.',
     mapsTo: 'overview',
   },
   consultar_ventas: {
-    description: 'KPIs y desglose de ventas del periodo (unidades, canales, top modelos/vendedores).',
+    description:
+      'Consulta ventas: totales, canales, top modelos/vendedores del periodo sincronizado.',
     mapsTo: 'ventas',
   },
   consultar_inventario: {
@@ -20,22 +24,40 @@ const TOOL_META = {
     mapsTo: 'inventory',
   },
   consultar_postventa: {
-    description: 'Órdenes de taller / postventa e importes facturados.',
+    description:
+      'Órdenes de taller / postventa. OBLIGATORIO usar area="hyp" para HyP/hojalatería '
+      + '(folios A,F,H,J,V,Z,Ó) y area="servicio" para taller. '
+      + 'Para abiertas usa estatus="abiertas". '
+      + 'Ejemplo: “órdenes HyP abiertas” → area=hyp, estatus=abiertas. '
+      + 'Responde con kpis Abiertas o hero.value; no digas que no tienes acceso si la tool funciona.',
     mapsTo: 'post-sales',
   },
   consultar_contabilidad: {
-    description: 'Indicadores contables / EEFF del periodo sincronizado.',
+    description: 'Contabilidad / EEFF del periodo sincronizado: márgenes, gastos, utilidad.',
     mapsTo: 'contabilidad',
   },
   consultar_pronostico: {
-    description: 'Pronóstico de ventas (proyección del periodo).',
+    description:
+      'Pronóstico de ventas / proyección / forecast (misma lógica que la página Pronóstico). '
+      + 'Usar para “próximo mes”, horizonte o unidades futuras.',
     mapsTo: 'forecast',
   },
-  consultar_seguimiento: {
-    description: 'Seguimiento 360: leads, solicitudes F&I, pruebas, conversiones y PVAs.',
+  resumen_seguimiento_360: {
+    description:
+      'Seguimiento 360 agregado: leads, solicitudes F&I, pruebas, conversiones y PVAs del periodo.',
     mapsTo: 'seguimiento',
   },
 };
+
+const MOBILE_CHANNEL_RULES = `
+## Canal móvil (mismos criterios que web; datos sync)
+- Fuente: sync PostgreSQL en la nube (snapshot), no SQL Server en vivo. Indica periodo sincronizado si aporta.
+- En ### Resultado: sé conciso (hallazgo + 2–4 cifras + 1 acción), pero **no omitas** ### Razonamiento.
+- No inventes tools de CRM 360, Excel o SQL si no están en tu lista.
+- Leads / F&I / pruebas → resumen_seguimiento_360.
+- Ventas generales → consultar_ventas; overview → consultar_resumen_ejecutivo.
+- No digas “no tengo acceso a HyP” si puedes llamar consultar_postventa con area=hyp.
+`;
 
 function isConfigured() {
   return Boolean(String(process.env.OPENAI_API_KEY || '').trim());
@@ -48,22 +70,41 @@ function getClient() {
 }
 
 function buildToolDefinitions(allowedTools) {
-  return allowedTools.map((name) => ({
-    type: 'function',
-    function: {
-      name,
-      description: TOOL_META[name]?.description || name,
-      parameters: {
-        type: 'object',
-        properties: {
-          periodo: {
-            type: 'string',
-            description: 'Periodo YYYY-MM (opcional). Vacío = último disponible.',
-          },
+  return allowedTools.map((name) => {
+    const properties = {
+      periodo: {
+        type: 'string',
+        description: 'Periodo YYYY-MM (opcional). Vacío = último disponible. También acepta mes_pasado / ultimos_90_dias si aplica.',
+      },
+      fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD (opcional)' },
+      fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD (opcional)' },
+    };
+
+    if (name === 'consultar_postventa') {
+      properties.area = {
+        type: 'string',
+        description: 'Área PostVenta: hyp | servicio | posventa (default posventa = ambas)',
+        enum: ['hyp', 'servicio', 'posventa'],
+      };
+      properties.estatus = {
+        type: 'string',
+        description: 'Filtro de estatus: abiertas | facturadas | canceladas | todas',
+        enum: ['abiertas', 'facturadas', 'canceladas', 'todas'],
+      };
+    }
+
+    return {
+      type: 'function',
+      function: {
+        name,
+        description: TOOL_META[name]?.description || name,
+        parameters: {
+          type: 'object',
+          properties,
         },
       },
-    },
-  }));
+    };
+  });
 }
 
 function trimPayload(value, depth = 0) {
@@ -92,7 +133,14 @@ async function executeMobileTool(name, args = {}) {
   if (meta.mapsTo === 'overview') {
     return trimPayload(await mobileData.getLatestOverview(period));
   }
-  return trimPayload(await mobileData.getMetricsSection(meta.mapsTo, period));
+
+  const options = {};
+  if (meta.mapsTo === 'post-sales') {
+    if (args.area) options.area = args.area;
+    if (args.estatus) options.estatus = args.estatus;
+  }
+
+  return trimPayload(await mobileData.getMetricsSection(meta.mapsTo, period, options));
 }
 
 function extractHighlights(toolResult) {
@@ -136,7 +184,6 @@ function extractHighlights(toolResult) {
     items.push({ label: 'Cobertura', value: `${Number(sofia.coberturaPct).toFixed(1)}%` });
   }
 
-  // unique by label
   const seen = new Set();
   return items.filter((item) => {
     const key = item.label.toLowerCase();
@@ -157,20 +204,13 @@ function buildSystemPrompt(user) {
   const scope = getRoleScope(user.role);
   const tools = roleTools(user.role);
   return [
-    'Eres el asistente ejecutivo BALDERRAMA para la app móvil.',
-    `Usuario: ${user.username}. Rol: ${scope.label} (${user.role}).`,
-    `Solo puedes usar estas herramientas: ${tools.join(', ') || 'ninguna'}.`,
-    'Los datos vienen del sync en la nube (PostgreSQL), no del SQL Server en vivo.',
-    '',
-    'REGLAS DE RESPUESTA (móvil — máximo resumen):',
-    '1. Responde SIEMPRE en español.',
-    '2. Máximo 5 líneas o 3 viñetas. Sin secciones ###. Sin párrafos largos.',
-    '3. Empieza con el hallazgo principal en 1 frase.',
-    '4. Luego 2–3 cifras clave. Cierra con 1 acción sugerida si aplica.',
-    '5. No listes tablas completas ni rankings largos; solo el top 1–2.',
-    '6. Si el usuario pide algo fuera de su rol, dilo en 1 frase y ofrece lo que sí puede ver.',
-    '7. No inventes cifras: usa herramientas antes de afirmar números.',
-    `8. Hoy es ${new Date().toISOString().slice(0, 10)}.`,
+    buildSharedIdentity({
+      channel: 'mobile',
+      roleNote: `Usuario: ${user.username}. Rol: ${scope.label} (${user.role}).`,
+      dataSourceNote: 'Fuente de datos: sync en la nube (PostgreSQL). Mismos criterios de negocio que el asistente web.',
+      toolsList: tools.join(', ') || 'ninguna',
+    }),
+    MOBILE_CHANNEL_RULES,
   ].join('\n');
 }
 
@@ -218,8 +258,8 @@ async function runMobileChat({ messages, user }) {
       messages: openaiMessages,
       tools: toolDefs.length ? toolDefs : undefined,
       tool_choice: toolDefs.length ? 'auto' : undefined,
-      temperature: 0.2,
-      max_tokens: 350,
+      temperature: 0.35,
+      max_tokens: 900,
     });
 
     const u = response.usage || {};
@@ -283,9 +323,8 @@ async function runMobileChat({ messages, user }) {
     reply = 'No pude generar un resumen. Intenta de nuevo con una pregunta más concreta.';
   }
 
-  // Compactar respuesta: máximo ~700 chars
-  if (reply.length > 700) {
-    reply = `${reply.slice(0, 697)}…`;
+  if (reply.length > 2200) {
+    reply = `${reply.slice(0, 2197)}…`;
   }
 
   return {
@@ -307,4 +346,5 @@ module.exports = {
   isConfigured,
   runMobileChat,
   DEFAULT_MODEL,
+  buildSystemPrompt,
 };

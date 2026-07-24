@@ -26,6 +26,16 @@
     </ion-item>
   </section>
 
+  <section class="area-chips" *ngIf="isPostventa && !loading">
+    <button
+      type="button"
+      class="area-chip"
+      *ngFor="let area of postventaAreas"
+      [class.active]="selectedArea === area.id"
+      (click)="onAreaChange(area.id)"
+    >{{ area.label }}</button>
+  </section>
+
   <div *ngIf="loading" class="center-msg"><ion-spinner name="crescent"></ion-spinner></div>
   <div *ngIf="error && !loading" class="glass-card error-card">{{ error }}</div>
 
@@ -37,11 +47,23 @@
     </section>
 
     <section class="glass-card" *ngIf="kpis.length">
-      <h3>{{ title }}</h3>
+      <h3>Indicadores</h3>
       <div class="kpi-grid">
         <div class="kpi-tile" *ngFor="let kpi of kpis">
           <span class="kpi-label">{{ kpi.label }}</span>
           <strong>{{ formatValue(kpi) }}</strong>
+          <em class="kpi-sub" *ngIf="kpi.sub">{{ kpi.sub }}</em>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-card" *ngFor="let group of kpiGroups">
+      <h3>{{ group.title }}</h3>
+      <div class="kpi-grid">
+        <div class="kpi-tile" *ngFor="let kpi of group.items">
+          <span class="kpi-label">{{ kpi.label }}</span>
+          <strong>{{ formatValue(kpi) }}</strong>
+          <em class="kpi-sub" *ngIf="kpi.sub">{{ kpi.sub }}</em>
         </div>
       </div>
     </section>
@@ -56,7 +78,7 @@
             <strong>{{ formatValue(item) }}</strong>
           </div>
           <div class="progress-track">
-            <div class="progress-fill" [style.width.%]="barWidth(item.count || 0, list.items)"></div>
+            <div class="progress-fill" [style.width.%]="barWidth(item.count || item.value || 0, list.items)"></div>
           </div>
         </div>
       </div>

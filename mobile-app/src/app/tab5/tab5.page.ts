@@ -10,16 +10,20 @@ type ChatMessage = {
   toolsUsed?: string[];
 };
 
+const WELCOME_MESSAGE =
+  'Soy tu asistente de Administración IA.\n'
+  + 'Analizo tu duda para obtener respuestas claras, precisas y útiles para la toma de decisiones.';
+
 const PROMPT_BY_ROLE: Record<string, string[]> = {
   administracion: [
     'Resumen ejecutivo del mes',
+    '¿Cuántas órdenes HyP hay abiertas?',
     '¿Cómo va la cobertura SOFIA?',
-    'Top hallazgo de ventas',
     'Estado de postventa',
   ],
   direccion: [
     'Resumen ejecutivo del mes',
-    '¿Cómo va la cobertura SOFIA?',
+    '¿Cuántas órdenes HyP hay abiertas?',
     'Ventas vs inventario',
     'Conversión de leads',
   ],
@@ -72,7 +76,7 @@ export class Tab5Page implements OnInit {
       } else {
         this.messages = [{
           role: 'assistant',
-          content: `Hola${user?.username ? `, ${user.username}` : ''}. Soy tu asistente móvil (${this.roleLabel}). Pregúntame en corto; te respondo solo con lo esencial de tu alcance.`,
+          content: WELCOME_MESSAGE,
         }];
       }
     } catch {
@@ -124,8 +128,25 @@ export class Tab5Page implements OnInit {
   clearChat() {
     this.messages = [{
       role: 'assistant',
-      content: `Chat limpio. ¿Qué necesitas ver de ${this.roleLabel || 'tu rol'}?`,
+      content: WELCOME_MESSAGE,
     }];
+  }
+
+  /** Render ligero tipo web: ### secciones, **negrita**, listas. */
+  formatReply(text: string): string {
+    const escaped = String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    let html = escaped;
+    html = html.replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>[\s\S]*?<\/li>\s*)+/g, (block) => `<ul class="md-list">${block}</ul>`);
+    html = html.replace(/\n{2,}/g, '<br/><br/>');
+    html = html.replace(/\n/g, '<br/>');
+    return html;
   }
 
   private async scrollBottom() {

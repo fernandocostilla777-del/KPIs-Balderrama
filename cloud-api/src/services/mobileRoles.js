@@ -1,6 +1,6 @@
 /**
  * Permisos móviles alineados con el dashboard web.
- * Las tools del asistente se filtran por rol.
+ * Las tools del asistente usan los mismos nombres que en web.
  */
 
 const ROLE_SCOPES = {
@@ -8,13 +8,13 @@ const ROLE_SCOPES = {
     pages: ['dashboard', 'metrics', 'seguimiento', 'assistant', 'profile'],
     metricSections: ['ventas', 'forecast', 'inventory', 'contabilidad', 'post-sales', 'seguimiento'],
     tools: [
-      'resumen_ejecutivo',
+      'consultar_resumen_ejecutivo',
       'consultar_ventas',
       'consultar_inventario',
       'consultar_postventa',
       'consultar_contabilidad',
       'consultar_pronostico',
-      'consultar_seguimiento',
+      'resumen_seguimiento_360',
     ],
     label: 'Administración',
   },
@@ -22,13 +22,13 @@ const ROLE_SCOPES = {
     pages: ['dashboard', 'metrics', 'seguimiento', 'assistant', 'profile'],
     metricSections: ['ventas', 'forecast', 'inventory', 'contabilidad', 'post-sales', 'seguimiento'],
     tools: [
-      'resumen_ejecutivo',
+      'consultar_resumen_ejecutivo',
       'consultar_ventas',
       'consultar_inventario',
       'consultar_postventa',
       'consultar_contabilidad',
       'consultar_pronostico',
-      'consultar_seguimiento',
+      'resumen_seguimiento_360',
     ],
     label: 'Dirección',
   },
@@ -38,7 +38,7 @@ const ROLE_SCOPES = {
     tools: [
       'consultar_ventas',
       'consultar_pronostico',
-      'consultar_seguimiento',
+      'resumen_seguimiento_360',
     ],
     label: 'Gerencia comercial',
   },
@@ -78,10 +78,8 @@ function canAccessMetricSection(roleId, section) {
   const key = String(section || '').toLowerCase();
   const normalized = key === 'pronostico' ? 'forecast'
     : key === 'inventario' ? 'inventory'
-      : key === 'postventa' ? 'post-sales'
-        : key === 'crm' ? 'seguimiento'
-          : key === 'sales' ? 'ventas'
-            : key;
+    : key === 'postventa' || key === 'post-sales' ? 'post-sales'
+    : key;
   return roleMetricSections(roleId).includes(normalized);
 }
 

@@ -38,6 +38,54 @@ function grouped(rows, fields, limit = 8) {
     .slice(0, limit);
 }
 
+/** Primera letra del folio → área (misma lógica que backend postSalesOrderTypes). */
+const AREA_LETRAS = {
+  servicio: ['C', 'D', 'G', 'I', 'K', 'N', 'O', 'Q', 'S', 'X', 'Y', 'Á', 'M', 'E', 'R'],
+  hyp: ['A', 'F', 'H', 'J', 'V', 'Z', 'Ó'],
+};
+const OPEN_STATUSES = new Set(['A', 'T', 'D', 'P']);
+
+function normalizeArea(area) {
+  const key = String(area || 'posventa').trim().toLowerCase();
+  if (key === 'hyp' || key === 'h&p' || key === 'hojalateria' || key === 'hojalatería') return 'hyp';
+  if (key === 'servicio' || key === 'taller') return 'servicio';
+  return 'posventa';
+}
+
+function letterOfPayload(payload = {}) {
+  const fromField = String(payload.letraOrden || payload.letra || '').trim().toUpperCase();
+  if (fromField) return fromField;
+  return String(payload.orden || payload.ORE_IDORDEN || '').trim().charAt(0).toUpperCase();
+}
+
+function matchesAreaPayload(payload, area) {
+  const key = normalizeArea(area);
+  if (key === 'posventa') return true;
+  const letras = AREA_LETRAS[key];
+  if (!letras) return true;
+  return letras.includes(letterOfPayload(payload));
+}
+
+function matchesEstatusPayload(payload, estatus) {
+  const key = String(estatus || 'todas').trim().toLowerCase();
+  if (!key || key === 'todas') return true;
+  const status = String(payload.status || '').trim().toUpperCase();
+  if (key === 'abiertas' || key === 'abierta' || key === 'open') {
+    if (payload.snapshotTipo === 'abierta') return true;
+    return OPEN_STATUSES.has(status);
+  }
+  if (key === 'facturadas' || key === 'facturada') return status === 'I';
+  if (key === 'canceladas' || key === 'cancelada') return status === 'C';
+  return status === key.toUpperCase();
+}
+
+function filterPostventaRows(rows, { area = 'posventa', estatus = 'todas' } = {}) {
+  return (rows || []).filter((row) => {
+    const payload = row.payload || {};
+    return matchesAreaPayload(payload, area) && matchesEstatusPayload(payload, estatus);
+  });
+}
+
 async function getPayloads(domain, period) {
   const params = [domain];
   let filter = '';
@@ -168,28 +216,42 @@ async function getVentasSummary(period) {
   ]);
   if (!rows.length && requested) rows = await getPayloads('ventas', null);
   if (!ventasMeta && requested) ventasMeta = await getLatestMeta('ventas', null);
+
   const syncedSummary = ventasMeta?.meta?.resumen;
+  const fromRowsFlotilla = rows.filter((row) => {
+    const tipo = String(row.payload?.TIPOVENTA || row.payload?.tipoventa || '').toUpperCase();
+    return tipo === 'FLOTILLA' || tipo.includes('FLOT');
+  }).length;
+  const fromRowsRetail = Math.max(0, rows.length - fromRowsFlotilla);
+
   const resumen = syncedSummary || {
     totalVentas: rows.length,
-    totalRetail: 0,
-    totalFlotillas: 0,
+    totalRetail: fromRowsRetail,
+    totalFlotillas: fromRowsFlotilla,
     totalNotificacionesEntrega: 0,
     porCanal: grouped(rows, ['CANAL_LABEL', 'CANAL_VENTA', 'canal']),
     porVendedor: grouped(rows, ['VENDEDOR', 'vendedor']),
   };
+
+  const sofia = buildSofia(ventasMeta?.meta || {});
+  const retail = Number(resumen.totalRetail ?? fromRowsRetail);
+  const flotillas = Number(resumen.totalFlotillas ?? fromRowsFlotilla);
+  const entregasGmmx = Number(resumen.totalNotificacionesEntrega || sofia.notificaciones || 0);
+  const coberturaPct = Number(sofia.coberturaPct || 0);
+
   return {
     section: 'ventas',
     title: 'Ventas',
     hero: {
-      label: 'Ventas del periodo',
-      value: Number(resumen.totalVentas || rows.length || 0),
-      hint: 'Unidades · mes en curso',
+      label: 'Ventas Retail',
+      value: retail,
+      hint: 'Unidades retail · mes en curso',
     },
     kpis: [
-      { label: 'Total ventas', value: Number(resumen.totalVentas || rows.length || 0) },
-      { label: 'Retail', value: Number(resumen.totalRetail || 0) },
-      { label: 'Flotillas', value: Number(resumen.totalFlotillas || 0) },
-      { label: 'Entregas GMMX', value: Number(resumen.totalNotificacionesEntrega || 0) },
+      { label: 'Ventas Retail', value: retail },
+      { label: 'Flotillas', value: flotillas },
+      { label: 'Entregas GMMX', value: entregasGmmx },
+      { label: 'Cobertura', value: coberturaPct, suffix: '%' },
     ],
     lists: [
       {
@@ -205,7 +267,7 @@ async function getVentasSummary(period) {
     ],
     resumen,
     goals: ventasMeta?.meta?.goals || {},
-    sofia: buildSofia(ventasMeta?.meta || {}),
+    sofia,
     cloud: {
       periodKey: ventasMeta?.period_key || rows[0]?.period_key || requested,
       syncedAt: ventasMeta?.created_at || rows[0]?.last_seen_at || null,
@@ -301,8 +363,137 @@ async function getContabilidadSummary(period) {
   };
 }
 
-async function getPostventaSummary(period) {
+function sumPayload(rows, field) {
+  return (rows || []).reduce((sum, row) => {
+    const p = row.payload || {};
+    return sum + Number(p[field] ?? p.importe ?? 0);
+  }, 0);
+}
+
+function agingBucket(payload = {}) {
+  const known = String(payload.antiguedad || '').trim();
+  if (known) return known;
+  const d = Number(payload.dias || 0);
+  if (d <= 30) return '0-30';
+  if (d <= 60) return '31-60';
+  if (d <= 90) return '61-90';
+  if (d <= 120) return '91-120';
+  return '+120';
+}
+
+function hasRefacciones(payload = {}) {
+  if (payload.conRefacciones === true || payload.conRefacciones === 1) return true;
+  return Number(payload.refaccionesLineas || 0) > 0;
+}
+
+/** Misma lógica operativa que PostSalesAnalytics.computeDashboard (web). */
+function buildPostventaDashboard(periodoRows, abiertasRows, area) {
+  const periodo = filterPostventaRows(periodoRows, { area, estatus: 'todas' });
+  const abiertas = filterPostventaRows(abiertasRows, { area, estatus: 'abiertas' });
+  const facturadas = periodo.filter((row) => String(row.payload?.status || '').toUpperCase() === 'I');
+  const canceladas = periodo.filter((row) => String(row.payload?.status || '').toUpperCase() === 'C');
+  const cerradas = periodo.filter((row) => {
+    const st = String(row.payload?.status || '').toUpperCase();
+    return !OPEN_STATUSES.has(st);
+  });
+
+  const importeIngresado = sumPayload(periodo, 'importe');
+  const importeFacturado = sumPayload(facturadas, 'importeFacturado');
+  const importeAbierto = sumPayload(abiertas, 'importeAbierto');
+
+  const pctFacturado = periodo.length
+    ? Math.round((facturadas.length / periodo.length) * 1000) / 10
+    : 0;
+  const pctImporteFacturado = importeIngresado > 0
+    ? Math.round((importeFacturado / importeIngresado) * 1000) / 10
+    : 0;
+  const pctCerrado = periodo.length
+    ? Math.round((cerradas.length / periodo.length) * 1000) / 10
+    : 0;
+
+  const agingCounts = { '0-30': 0, '31-60': 0, '61-90': 0, '91-120': 0, '+120': 0 };
+  for (const row of abiertas) {
+    const b = agingBucket(row.payload || {});
+    if (agingCounts[b] != null) agingCounts[b] += 1;
+    else agingCounts['+120'] += 1;
+  }
+
+  const openPlus120 = abiertas.filter((row) => agingBucket(row.payload || {}) === '+120');
+  const conRef = abiertas.filter((row) => hasRefacciones(row.payload || {}));
+
+  const avgDias = (rows) => {
+    const vals = rows
+      .map((row) => Number(row.payload?.dias))
+      .filter((d) => Number.isFinite(d) && d >= 0);
+    if (!vals.length) return 0;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  };
+  const enMecanica = abiertas.filter((row) => {
+    const p = row.payload || {};
+    const st = String(p.status || '').toUpperCase();
+    return matchesAreaPayload(p, 'servicio') && (st === 'T' || st === 'A');
+  });
+  const enEsperaRefacc = abiertas.filter((row) => {
+    const p = row.payload || {};
+    const st = String(p.status || '').toUpperCase();
+    return st === 'D' || (st === 'P' && hasRefacciones(p));
+  });
+  const enPintura = abiertas.filter((row) => matchesAreaPayload(row.payload || {}, 'hyp'));
+
+  const operations = {
+    diasPromMecanica: avgDias(enMecanica),
+    ordenesMecanica: enMecanica.length,
+    diasPromEsperaRefacc: avgDias(enEsperaRefacc),
+    ordenesEsperaRefacc: enEsperaRefacc.length,
+    diasPromPintura: avgDias(enPintura),
+    ordenesPintura: enPintura.length,
+  };
+
+  const summary = {
+    totalOrdenes: periodo.length,
+    facturadas: facturadas.length,
+    canceladas: canceladas.length,
+    cerradas: cerradas.length,
+    abiertas: abiertas.length,
+    importeIngresado,
+    importeFacturado,
+    importeAbierto,
+    pctFacturado,
+    pctImporteFacturado,
+    pctCerrado,
+    ticketPromFacturado: facturadas.length ? importeFacturado / facturadas.length : 0,
+    ticketPromIngresado: periodo.length ? importeIngresado / periodo.length : 0,
+    riesgo120: sumPayload(openPlus120, 'importeAbierto'),
+  };
+
+  const aging = {
+    b0_30: agingCounts['0-30'],
+    b31_60: agingCounts['31-60'],
+    b61_90: agingCounts['61-90'],
+    b91_120: agingCounts['91-120'],
+    b120p: agingCounts['+120'],
+  };
+
+  const risk = {
+    criticas60: abiertas.filter((row) => row.payload?.critica).length,
+    conRefacciones: conRef.length,
+    conRefaccionesImporte: sumPayload(conRef, 'importeAbierto'),
+    promesasVencidas: abiertas.filter((row) => row.payload?.promesaVencida).length,
+    sinImporte: abiertas.filter((row) => row.payload?.sinImporte).length,
+    sinAseguradora: abiertas.filter((row) => row.payload?.sinAseguradora).length,
+    abiertasSinPromesa: abiertas.filter((row) => row.payload?.abiertaSinPromesa).length,
+    sinFechaIngreso: abiertas.filter((row) => row.payload?.sinFechaIngreso).length,
+    excluidos: periodo.filter((row) => row.payload?.excluido).length,
+  };
+
+  return { periodo, abiertas, facturadas, summary, aging, risk, operations };
+}
+
+async function getPostventaSummary(period, options = {}) {
   const requested = normalizePeriod(period);
+  const area = normalizeArea(options.area);
+  const estatus = String(options.estatus || 'todas').trim().toLowerCase() || 'todas';
+
   let [rows, meta] = await Promise.all([
     getPayloads('postventa', requested),
     getLatestMeta('postventa', requested),
@@ -310,46 +501,198 @@ async function getPostventaSummary(period) {
   if (!rows.length && requested) rows = await getPayloads('postventa', null);
   if (!meta && requested) meta = await getLatestMeta('postventa', null);
 
-  const periodo = rows.filter((row) => row.payload?.snapshotTipo === 'periodo');
-  const abiertas = rows.filter((row) => row.payload?.snapshotTipo === 'abierta');
-  const facturadas = periodo.filter((row) => String(row.payload?.status || '').toUpperCase() === 'I');
-  const importeFacturado = Number(
-    meta?.meta?.importeFacturado
-      ?? facturadas.reduce((sum, row) => sum + Number(row.payload?.importeFacturado || 0), 0)
-  );
+  const periodoAll = rows.filter((row) => row.payload?.snapshotTipo === 'periodo');
+  const abiertasAll = rows.filter((row) => row.payload?.snapshotTipo === 'abierta');
+
+  const dash = buildPostventaDashboard(periodoAll, abiertasAll, area);
+  const { summary: s, aging: a, risk: r, operations: o } = dash;
+
+  const servicioN = filterPostventaRows(periodoAll, { area: 'servicio' }).length;
+  const hypN = filterPostventaRows(periodoAll, { area: 'hyp' }).length;
+
+  const areaLabel = area === 'hyp' ? 'HyP' : area === 'servicio' ? 'Servicio' : 'PostVenta';
+  const areaHint = area === 'hyp'
+    ? 'Folios A, F, H, J, V, Z, Ó'
+    : area === 'servicio'
+      ? 'Taller / reparación'
+      : 'Vista consolidada · Servicio y HyP';
+
+  const areas = [
+    { id: 'posventa', label: 'PostVenta' },
+    { id: 'servicio', label: 'Servicio' },
+    { id: 'hyp', label: 'HyP' },
+  ];
+
+  const cloud = {
+    periodKey: meta?.period_key || rows[0]?.period_key || requested,
+    syncedAt: meta?.created_at || rows[0]?.last_seen_at || null,
+  };
+
+  const wantAbiertas = ['abiertas', 'abierta', 'open'].includes(estatus);
+  const hero = wantAbiertas
+    ? { label: `Órdenes abiertas · ${areaLabel}`, value: s.abiertas, hint: areaHint }
+    : { label: 'Órdenes ingresadas', value: s.totalOrdenes, hint: areaHint };
+
+  if (area === 'posventa') {
+    return {
+      section: 'post-sales',
+      title: 'PostVenta',
+      area,
+      areas,
+      hero,
+      kpis: [
+        { label: 'Órdenes ingresadas', value: s.totalOrdenes },
+        { label: 'Facturadas', value: s.facturadas, sub: `${s.pctFacturado}% del total` },
+        { label: 'Importe facturado', value: s.importeFacturado, money: true },
+        { label: 'Backlog abierto', value: s.importeAbierto, money: true, sub: `${s.abiertas} en taller` },
+      ],
+      kpiGroups: [
+        {
+          title: 'Secciones',
+          items: [
+            { label: 'Servicio', value: servicioN, sub: 'Órdenes de servicio' },
+            { label: 'HyP', value: hypN, sub: 'Órdenes HyP' },
+          ],
+        },
+        {
+          title: 'Resumen directivo',
+          items: [
+            { label: 'Tasa de facturación', value: s.pctImporteFacturado, suffix: '%' },
+            { label: 'Abiertas hoy', value: s.abiertas },
+            { label: 'Riesgo +120 días', value: s.riesgo120, money: true },
+            { label: 'Canceladas', value: s.canceladas },
+          ],
+        },
+        {
+          title: 'Operación de taller',
+          items: [
+            {
+              label: 'Reparación mecánica',
+              value: o.diasPromMecanica,
+              suffix: ' d',
+              sub: `${o.ordenesMecanica} abiertas Servicio`,
+            },
+            {
+              label: 'Espera de refacciones',
+              value: o.diasPromEsperaRefacc,
+              suffix: ' d',
+              sub: `${o.ordenesEsperaRefacc} detenidas / pend. RE`,
+            },
+            {
+              label: 'Pintura / HyP',
+              value: o.diasPromPintura,
+              suffix: ' d',
+              sub: `${o.ordenesPintura} abiertas HyP`,
+            },
+          ],
+        },
+      ],
+      lists: [
+        { title: 'Por estatus', type: 'bars', items: grouped(dash.periodo, ['statusLabel', 'status']) },
+        { title: 'Por asesor', type: 'list', items: grouped(dash.periodo, ['asesor']) },
+      ],
+      summary: s,
+      aging: a,
+      risk: r,
+      operations: o,
+      estatus,
+      cloud,
+    };
+  }
 
   return {
     section: 'post-sales',
-    title: 'Postventa',
-    hero: {
-      label: 'Órdenes del periodo',
-      value: Number(meta?.meta?.totalPeriodo ?? periodo.length),
-      hint: 'Servicio y taller',
-    },
+    title: areaLabel,
+    area,
+    areas,
+    hero,
     kpis: [
-      { label: 'Órdenes', value: Number(meta?.meta?.totalPeriodo ?? periodo.length) },
-      { label: 'Facturadas', value: Number(meta?.meta?.facturadas ?? facturadas.length) },
-      { label: 'Abiertas', value: Number(meta?.meta?.totalAbiertas ?? abiertas.length) },
-      { label: 'Importe facturado', value: importeFacturado, money: true },
+      { label: 'Importe facturado', value: s.importeFacturado, money: true, sub: `${s.facturadas} órdenes · ${s.pctFacturado}%` },
+      { label: 'Tasa de facturación', value: s.pctImporteFacturado, suffix: '%' },
+      { label: 'Backlog abierto', value: s.importeAbierto, money: true, sub: `${s.abiertas} en taller` },
+      { label: 'Riesgo +120 días', value: s.riesgo120, money: true },
+    ],
+    kpiGroups: [
+      {
+        title: 'Volumen del periodo',
+        items: [
+          { label: 'Órdenes ingresadas', value: s.totalOrdenes },
+          { label: 'Facturadas', value: s.facturadas, sub: `${s.pctFacturado}%` },
+          { label: 'Cerradas', value: s.cerradas, sub: `${s.pctCerrado}%` },
+          { label: 'Abiertas hoy', value: s.abiertas },
+          { label: 'Canceladas', value: s.canceladas },
+        ],
+      },
+      {
+        title: 'Importes y tickets',
+        items: [
+          { label: 'Importe ingresado', value: s.importeIngresado, money: true },
+          { label: 'Ticket prom. facturado', value: s.ticketPromFacturado, money: true },
+          { label: 'Ticket prom. ingresado', value: s.ticketPromIngresado, money: true },
+          { label: 'Importe facturado', value: s.importeFacturado, money: true },
+        ],
+      },
+      {
+        title: 'Antigüedad de abiertas',
+        items: [
+          { label: '0-30 días', value: a.b0_30 },
+          { label: '31-60 días', value: a.b31_60 },
+          { label: '61-90 días', value: a.b61_90 },
+          { label: '91-120 días', value: a.b91_120 },
+          { label: '+120 días', value: a.b120p },
+        ],
+      },
+      {
+        title: 'Operación de taller',
+        items: [
+          {
+            label: 'Reparación mecánica',
+            value: o.diasPromMecanica,
+            suffix: ' d',
+            sub: `${o.ordenesMecanica} abiertas Servicio`,
+          },
+          {
+            label: 'Espera de refacciones',
+            value: o.diasPromEsperaRefacc,
+            suffix: ' d',
+            sub: `${o.ordenesEsperaRefacc} detenidas / pend. RE`,
+          },
+          {
+            label: 'Pintura / HyP',
+            value: o.diasPromPintura,
+            suffix: ' d',
+            sub: `${o.ordenesPintura} abiertas HyP`,
+          },
+          { label: 'Con refacciones', value: r.conRefacciones },
+          { label: 'Promesas vencidas', value: r.promesasVencidas },
+          { label: 'Críticas +60', value: r.criticas60 },
+        ],
+      },
+      {
+        title: 'Control de taller',
+        items: [
+          { label: 'Sin importe', value: r.sinImporte },
+          { label: 'Sin aseguradora', value: r.sinAseguradora },
+          { label: 'Abiertas sin promesa', value: r.abiertasSinPromesa },
+          { label: 'Sin fecha ingreso', value: r.sinFechaIngreso },
+          { label: 'Registros excluidos', value: r.excluidos },
+        ],
+      },
     ],
     lists: [
-      {
-        title: 'Por estatus',
-        type: 'bars',
-        items: grouped(periodo, ['statusLabel', 'status']),
-      },
-      {
-        title: 'Por asesor',
-        type: 'list',
-        items: grouped(periodo, ['asesor']),
-      },
+      { title: 'Por estatus', type: 'bars', items: grouped(dash.periodo, ['statusLabel', 'status']) },
+      { title: 'Por asesor', type: 'list', items: grouped(dash.periodo, ['asesor']) },
+      { title: 'Por tipo de orden', type: 'bars', items: grouped(dash.periodo, ['tipoPorLetra', 'tipoOrden', 'letraOrden']) },
     ],
-    cloud: {
-      periodKey: meta?.period_key || rows[0]?.period_key || requested,
-      syncedAt: meta?.created_at || rows[0]?.last_seen_at || null,
-    },
+    summary: s,
+    aging: a,
+    risk: r,
+    operations: o,
+    estatus,
+    cloud,
   };
 }
+
 
 async function getForecastSummary(period) {
   const requested = normalizePeriod(period);
@@ -464,7 +807,7 @@ async function getSeguimientoSummary(period) {
   };
 }
 
-async function getMetricsSection(section, period) {
+async function getMetricsSection(section, period, options = {}) {
   switch (String(section || 'ventas').toLowerCase()) {
     case 'forecast':
     case 'pronostico':
@@ -476,7 +819,7 @@ async function getMetricsSection(section, period) {
       return getContabilidadSummary(period);
     case 'post-sales':
     case 'postventa':
-      return getPostventaSummary(period);
+      return getPostventaSummary(period, options);
     case 'seguimiento':
     case 'crm':
       return getSeguimientoSummary(period);

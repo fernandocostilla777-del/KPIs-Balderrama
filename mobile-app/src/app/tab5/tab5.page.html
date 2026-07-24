@@ -21,7 +21,14 @@
       [class.user]="msg.role === 'user'"
       [class.bot]="msg.role === 'assistant'"
     >
-      <p class="bubble-text">{{ msg.content }}</p>
+      <div
+        class="bubble-text md-prose"
+        *ngIf="msg.role === 'assistant'; else userText"
+        [innerHTML]="formatReply(msg.content)"
+      ></div>
+      <ng-template #userText>
+        <p class="bubble-text">{{ msg.content }}</p>
+      </ng-template>
 
       <div class="hl-row" *ngIf="msg.highlights?.length">
         <div class="hl-chip" *ngFor="let h of msg.highlights">
@@ -29,11 +36,15 @@
           <strong>{{ h.value }}</strong>
         </div>
       </div>
+
+      <div class="tools-row" *ngIf="msg.toolsUsed?.length">
+        <span class="tool-badge" *ngFor="let t of msg.toolsUsed">{{ t }}</span>
+      </div>
     </div>
 
     <div class="bubble bot typing" *ngIf="loading">
       <ion-spinner name="dots"></ion-spinner>
-      <span>Resumiendo…</span>
+      <span>Pensando…</span>
     </div>
   </div>
 

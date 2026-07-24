@@ -87,7 +87,10 @@ router.get('/metrics/:section', async (req, res, next) => {
       });
     }
     const period = req.query.periodKey || req.query.fechaInicio;
-    res.json(await getMetricsSection(req.params.section, period));
+    const options = {};
+    if (req.query.area) options.area = String(req.query.area);
+    if (req.query.estatus) options.estatus = String(req.query.estatus);
+    res.json(await getMetricsSection(req.params.section, period, options));
   } catch (err) {
     next(err);
   }

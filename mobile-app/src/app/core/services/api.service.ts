@@ -77,10 +77,13 @@ export class ApiService {
     );
   }
 
-  getMetricsSection(section: string, range = monthRange()) {
+  getMetricsSection(section: string, range = monthRange(), extras: { area?: string; estatus?: string } = {}) {
+    let params = this.params(range);
+    if (extras.area) params = params.set('area', extras.area);
+    if (extras.estatus) params = params.set('estatus', extras.estatus);
     return firstValueFrom(
       this.http.get<Record<string, unknown>>(`${this.base}/api/mobile/metrics/${section}`, {
-        params: this.params(range),
+        params,
         headers: this.auth.authHeaders(),
       }),
     );

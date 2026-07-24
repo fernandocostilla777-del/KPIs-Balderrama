@@ -1,5 +1,8 @@
 window.AssistantChat = (function () {
   const STORAGE_KEY = 'balderrama-ai-chat-v2';
+  const WELCOME_MESSAGE =
+    'Soy tu asistente de Administración IA.\n'
+    + 'Analizo tu duda para obtener respuestas claras, precisas y útiles para la toma de decisiones.';
   const chartInstances = new Map();
   const expandedKpis = new Set();
   const drilldownState = new Map();
@@ -566,6 +569,19 @@ window.AssistantChat = (function () {
       } catch {
         messages = [];
       }
+      if (!messages.length) {
+        messages = [{ role: 'assistant', content: WELCOME_MESSAGE }];
+      }
+    }
+
+    function isOnlyWelcome() {
+      return messages.length === 1
+        && messages[0]?.role === 'assistant'
+        && messages[0]?.content === WELCOME_MESSAGE;
+    }
+
+    function resetToWelcome() {
+      messages = [{ role: 'assistant', content: WELCOME_MESSAGE }];
     }
 
     function saveHistory() {
@@ -727,8 +743,8 @@ window.AssistantChat = (function () {
       }
 
       if (suggestedPrompts) {
-        suggestedPrompts.style.display = messages.length ? 'none' : 'flex';
-        if (!messages.length && !suggestedPrompts.innerHTML.trim()) {
+        suggestedPrompts.style.display = (messages.length && !isOnlyWelcome()) ? 'none' : 'flex';
+        if ((!messages.length || isOnlyWelcome()) && !suggestedPrompts.innerHTML.trim()) {
           renderSuggestedPrompts();
         }
       }
@@ -757,7 +773,7 @@ window.AssistantChat = (function () {
             `<button type="button" class="assistant-suggestion" data-prompt="${escapeHtml(p)}">${escapeHtml(p)}</button>`,
           ).join('')}
         </div>`;
-      suggestedPrompts.style.display = messages.length ? 'none' : 'flex';
+      suggestedPrompts.style.display = (messages.length && !isOnlyWelcome()) ? 'none' : 'flex';
     }
 
     function setLoading(state) {
@@ -857,7 +873,7 @@ window.AssistantChat = (function () {
     });
 
     btnClearChat?.addEventListener('click', () => {
-      messages = [];
+      resetToWelcome();
       expandedKpis.clear();
       drilldownState.clear();
       localStorage.removeItem(STORAGE_KEY);

@@ -276,6 +276,7 @@
     const filtered = dash?.filtered || [];
     const open = PostSalesAnalytics.applyFilters(openSnapshot, getFilters());
     const s = dash?.summary || {};
+    const OT = window.PostSalesOrderTypes;
     switch (kpi) {
       case 'ingresadas': return filtered;
       case 'facturadas': return filtered.filter((r) => r.status === 'I');
@@ -302,6 +303,32 @@
       case 'conRefacciones': return open.filter((r) => r.conRefacciones || Number(r.refaccionesLineas || 0) > 0);
       case 'promesasVencidas': return open.filter((r) => r.promesaVencida);
       case 'promedioSemanal': return filtered;
+      case 'tiempoPromCiclo':
+      case 'tiempoMedCiclo':
+        return filtered.filter((r) => r.status === 'I' && (r.cierreDate || r.diasCiclo != null));
+      case 'estanciaPromAbiertas':
+        return open;
+      case 'diasPromMecanica':
+        return open.filter(
+          (r) => OT?.matchesArea?.(r, 'servicio') && (r.status === 'T' || r.status === 'A'),
+        );
+      case 'diasPromEsperaRefacc':
+        return open.filter(
+          (r) => r.status === 'D' || (r.status === 'P' && (r.conRefacciones || Number(r.refaccionesLineas || 0) > 0)),
+        );
+      case 'diasPromPintura':
+        return open.filter((r) => OT?.matchesArea?.(r, 'hyp'));
+      case 'cumplimientoPromesa':
+        return filtered.filter((r) => r.status === 'I' && r.promesaDate && (r.cierreDate || r.diasCiclo != null));
+      case 'retrasoPromesa':
+        return filtered.filter((r) => {
+          if (r.status !== 'I' || !r.promesaDate || !r.cierreDate) return false;
+          const p = new Date(`${r.promesaDate}T12:00:00`);
+          const c = new Date(`${r.cierreDate}T12:00:00`);
+          return !Number.isNaN(p) && !Number.isNaN(c) && c > p;
+        });
+      case 'facturasPorSemana':
+        return filtered.filter((r) => r.status === 'I');
       case 'sinImporte': return open.filter((r) => r.sinImporte);
       case 'sinAseguradora': return open.filter((r) => r.sinAseguradora);
       case 'sinPromesa': return open.filter((r) => r.abiertaSinPromesa);
@@ -313,6 +340,7 @@
 
   function opsKpiMeta(kpi, dash) {
     const s = dash?.summary || {};
+    const o = dash?.operations || {};
     const map = {
       ingresadas: { title: 'Órdenes ingresadas', hint: 'Todas las órdenes del periodo filtrado' },
       facturadas: { title: 'Facturadas', hint: 'Status I · importe facturado' },
@@ -333,10 +361,46 @@
       aging61_90: { title: 'Abiertas 61-90 días', hint: 'Riesgo creciente' },
       aging91_120: { title: 'Abiertas 91-120 días', hint: 'Backlog crítico' },
       aging120p: { title: 'Abiertas +120 días', hint: 'Riesgo máximo de cartera' },
-      criticas60: { title: 'Críticas +60 días', hint: 'Órdenes abiertas marcadas como críticas' },
+      criticas60: { title: 'Críticas +60 días', hint: 'Órdenes abiertas con más de 60 días en taller' },
       conRefacciones: { title: 'Con refacciones', hint: 'Abiertas con líneas de refacciones (RE) cargadas' },
       promesasVencidas: { title: 'Promesas vencidas', hint: 'Fecha promesa menor a hoy' },
       promedioSemanal: { title: 'Promedio semanal', hint: 'Ritmo de ingreso por semana del periodo' },
+      tiempoPromCiclo: {
+        title: 'Tiempo promedio de ciclo',
+        hint: `Promedio ingreso → cierre en facturadas (${o.ciclosConDato || 0} con fechas)`,
+      },
+      tiempoMedCiclo: {
+        title: 'Tiempo mediano de ciclo',
+        hint: 'Mediana de días ingreso → cierre en facturadas',
+      },
+      estanciaPromAbiertas: {
+        title: 'Estancia promedio abiertas',
+        hint: 'Días promedio desde ingreso hasta hoy en el backlog abierto',
+      },
+      diasPromMecanica: {
+        title: 'Reparación mecánica',
+        hint: 'Días promedio de abiertas Servicio en taller/activas (T/A)',
+      },
+      diasPromEsperaRefacc: {
+        title: 'Espera de refacciones',
+        hint: 'Días promedio de detenidas (D) o pendientes con refacciones',
+      },
+      diasPromPintura: {
+        title: 'Pintura / HyP',
+        hint: 'Días promedio de abiertas en Hojalatería y Pintura',
+      },
+      cumplimientoPromesa: {
+        title: 'Cumplimiento de promesa',
+        hint: '% de facturadas cerradas en o antes de la fecha promesa',
+      },
+      retrasoPromesa: {
+        title: 'Retraso promedio vs promesa',
+        hint: 'Días promedio de atraso solo en facturadas fuera de promesa',
+      },
+      facturasPorSemana: {
+        title: 'Facturación por semana',
+        hint: 'Órdenes facturadas ÷ semanas con ingreso en el periodo',
+      },
       sinImporte: { title: 'Sin importe', hint: 'Abiertas sin monto capturado' },
       sinAseguradora: { title: 'Sin aseguradora', hint: 'Abiertas sin aseguradora registrada' },
       sinPromesa: { title: 'Abiertas sin promesa', hint: 'Sin fecha de promesa de entrega' },
@@ -363,7 +427,7 @@
       },
     ];
 
-    if (kpi === 'promedioSemanal') {
+    if (kpi === 'promedioSemanal' || kpi === 'facturasPorSemana') {
       const weekly = dash?.charts?.weeklyFlow || [];
       sections.push({
         titulo: 'Flujo semanal',
@@ -374,7 +438,37 @@
           }))
           : [{ label: 'Sin semanas en el periodo', value: '—' }],
       });
-      return { title: meta.title, value: num(dash?.risk?.promedioSemanal || 0), sections };
+      const value = kpi === 'facturasPorSemana'
+        ? num(dash?.operations?.facturasPorSemana || 0)
+        : num(dash?.risk?.promedioSemanal || 0);
+      return { title: meta.title, value, sections };
+    }
+
+    if (['tiempoPromCiclo', 'tiempoMedCiclo', 'estanciaPromAbiertas', 'diasPromMecanica', 'diasPromEsperaRefacc', 'diasPromPintura', 'cumplimientoPromesa', 'retrasoPromesa'].includes(kpi)) {
+      const o = dash?.operations || {};
+      const valueMap = {
+        tiempoPromCiclo: `${num(o.tiempoPromCiclo || 0)} d`,
+        tiempoMedCiclo: `${num(o.tiempoMedCiclo || 0)} d`,
+        estanciaPromAbiertas: `${num(o.estanciaPromAbiertas || 0)} d`,
+        diasPromMecanica: `${num(o.diasPromMecanica || 0)} d`,
+        diasPromEsperaRefacc: `${num(o.diasPromEsperaRefacc || 0)} d`,
+        diasPromPintura: `${num(o.diasPromPintura || 0)} d`,
+        cumplimientoPromesa: `${num(o.cumplimientoPromesaPct || 0)}%`,
+        retrasoPromesa: `${num(o.retrasoPromDias || 0)} d`,
+      };
+      sections[0].rows.push(
+        { label: 'Tiempo prom. ciclo', value: `${num(o.tiempoPromCiclo || 0)} d` },
+        { label: 'Estancia prom. abiertas', value: `${num(o.estanciaPromAbiertas || 0)} d` },
+        { label: 'Reparación mecánica', value: `${num(o.diasPromMecanica || 0)} d · ${num(o.ordenesMecanica || 0)} órd.` },
+        { label: 'Espera refacciones', value: `${num(o.diasPromEsperaRefacc || 0)} d · ${num(o.ordenesEsperaRefacc || 0)} órd.` },
+        { label: 'Pintura / HyP', value: `${num(o.diasPromPintura || 0)} d · ${num(o.ordenesPintura || 0)} órd.` },
+        { label: 'Cumplimiento promesa', value: `${num(o.cumplimientoPromesaPct || 0)}%` },
+      );
+      sections.push({
+        titulo: 'Por asesor',
+        rows: countBy(rows, (r) => r.asesor).slice(0, 8).map((x) => ({ label: x.label, value: num(x.value) })),
+      });
+      return { title: meta.title, value: valueMap[kpi], sections };
     }
 
     sections.push({
@@ -385,7 +479,7 @@
       titulo: 'Por tipo de orden',
       rows: countBy(rows, (r) => r.tipoOrden || r.tipo).slice(0, 8).map((x) => ({ label: x.label, value: num(x.value) })),
     });
-    if (['importeIngresado', 'ticketFacturado', 'facturadoUltimoMes', 'mejorMes', 'abiertas', 'aging120p', 'criticas60', 'conRefacciones'].includes(kpi)) {
+    if (['importeIngresado', 'ticketFacturado', 'facturadoUltimoMes', 'mejorMes', 'abiertas', 'aging120p', 'criticas60', 'conRefacciones', 'tiempoPromCiclo', 'retrasoPromesa'].includes(kpi)) {
       sections.push({
         titulo: 'Importe por asesor',
         rows: sumBy(rows, (r) => r.asesor, (r) => r.importeAbierto || r.importeFacturado || r.importe)
@@ -949,8 +1043,12 @@
       if ([
         'abiertas', 'aging0_30', 'aging31_60', 'aging61_90', 'aging91_120', 'aging120p',
         'criticas60', 'conRefacciones', 'promesasVencidas', 'sinImporte', 'sinAseguradora', 'sinPromesa', 'sinFecha',
+        'estanciaPromAbiertas',
       ].includes(kpi)) {
         return Number(r.importeAbierto || r.importe || 0);
+      }
+      if (['tiempoPromCiclo', 'tiempoMedCiclo', 'cumplimientoPromesa', 'retrasoPromesa', 'facturasPorSemana'].includes(kpi)) {
+        return Number(r.importeFacturado || r.importe || 0);
       }
       return Number(r.importeAbierto || r.importeFacturado || r.importe || 0);
     }
@@ -1356,6 +1454,15 @@
       conRefacciones: 'build',
       promesasVencidas: 'event_busy',
       promedioSemanal: 'trending_up',
+      tiempoPromCiclo: 'timer',
+      tiempoMedCiclo: 'av_timer',
+      estanciaPromAbiertas: 'hourglass_top',
+      diasPromMecanica: 'handyman',
+      diasPromEsperaRefacc: 'inventory_2',
+      diasPromPintura: 'format_paint',
+      cumplimientoPromesa: 'verified',
+      retrasoPromesa: 'schedule',
+      facturasPorSemana: 'speed',
       sinImporte: 'money_off',
       sinAseguradora: 'policy',
       sinPromesa: 'event_available',
@@ -1449,6 +1556,7 @@
     const s = d.summary || { ...d.executive, ...d.finance };
     const a = d.aging;
     const r = d.risk;
+    const o = d.operations || {};
 
     document.getElementById('kpiExecutive').innerHTML = [
       executiveCard('Importe facturado', fmt.currency(s.importeFacturado), `${fmt.number(s.facturadas)} órdenes · ${s.pctFacturado}% del total`, 'green', 'payments', 'psImporteFacturado'),
@@ -1506,15 +1614,71 @@
         kpiCard('91-120 días', fmt.number(a.b91_120), '', 'rose', 'psAging91', 'aging91_120'),
         kpiCard('+120 días', fmt.number(a.b120p), '', 'rose', 'psAging120', 'aging120p'),
       ]),
-      kpiGroup('Control de taller', [
-        kpiCard('Con refacciones', fmt.number(r.conRefacciones), fmt.currency(r.conRefaccionesImporte || 0), 'amber', 'psConRefacciones', 'conRefacciones'),
-        kpiCard('Promesas vencidas', fmt.number(r.promesasVencidas), '', 'amber', 'psPromesasVencidas', 'promesasVencidas'),
-        kpiCard('Promedio semanal', fmt.number(r.promedioSemanal), 'órdenes/semana', 'blue', null, 'promedioSemanal'),
-        kpiCard('Sin importe', fmt.number(r.sinImporte), '', 'violet', 'psSinImporte', 'sinImporte'),
-        kpiCard('Sin aseguradora', fmt.number(r.sinAseguradora), '', 'amber', null, 'sinAseguradora'),
-        kpiCard('Abiertas sin promesa', fmt.number(r.abiertasSinPromesa), '', 'rose', 'psSinPromesa', 'sinPromesa'),
-        kpiCard('Sin fecha ingreso', fmt.number(r.sinFechaIngreso), '', 'rose', null, 'sinFecha'),
-        kpiCard('Registros excluidos', fmt.number(r.excluidos), '', 'violet', null, 'excluidos'),
+      kpiGroup('Operación de taller', [
+        kpiCard(
+          'Tiempo prom. ciclo',
+          `${fmt.number(o.tiempoPromCiclo || 0)} d`,
+          `${fmt.number(o.ciclosConDato || 0)} facturadas con ingreso/cierre`,
+          'blue',
+          'psTiempoCiclo',
+          'tiempoPromCiclo',
+        ),
+        kpiCard(
+          'Estancia prom. abiertas',
+          `${fmt.number(o.estanciaPromAbiertas || 0)} d`,
+          'días promedio en backlog actual',
+          'amber',
+          null,
+          'estanciaPromAbiertas',
+        ),
+        kpiCard(
+          'Reparación mecánica',
+          `${fmt.number(o.diasPromMecanica || 0)} d`,
+          `${fmt.number(o.ordenesMecanica || 0)} abiertas Servicio en taller`,
+          'blue',
+          'psDiasMecanica',
+          'diasPromMecanica',
+        ),
+        kpiCard(
+          'Espera de refacciones',
+          `${fmt.number(o.diasPromEsperaRefacc || 0)} d`,
+          `${fmt.number(o.ordenesEsperaRefacc || 0)} detenidas / pend. con RE`,
+          'amber',
+          'psDiasEsperaRefacc',
+          'diasPromEsperaRefacc',
+        ),
+        kpiCard(
+          'Pintura / HyP',
+          `${fmt.number(o.diasPromPintura || 0)} d`,
+          `${fmt.number(o.ordenesPintura || 0)} abiertas en Hojalatería y Pintura`,
+          'violet',
+          'psDiasPintura',
+          'diasPromPintura',
+        ),
+        kpiCard(
+          'Retraso prom. vs promesa',
+          `${fmt.number(o.retrasoPromDias || 0)} d`,
+          `${fmt.number(o.retrasadas || 0)} órdenes fuera de promesa`,
+          (o.retrasoPromDias || 0) > 0 ? 'rose' : 'green',
+          null,
+          'retrasoPromesa',
+        ),
+        kpiCard(
+          'Promesas vencidas',
+          fmt.number(o.promesasVencidas || r.promesasVencidas || 0),
+          'abiertas con fecha promesa menor a hoy',
+          'amber',
+          'psPromesasVencidas',
+          'promesasVencidas',
+        ),
+        kpiCard(
+          'Facturación / semana',
+          fmt.number(o.facturasPorSemana || 0),
+          'órdenes facturadas por semana del periodo',
+          'green',
+          null,
+          'facturasPorSemana',
+        ),
       ]),
     ].join('');
 

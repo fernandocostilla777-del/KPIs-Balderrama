@@ -15,6 +15,9 @@ app.use(express.json({ limit: '25mb' }));
 
 const defaultOrigins = [
   'http://localhost:8100',
+  'http://localhost:4200',
+  'http://127.0.0.1:8100',
+  'http://127.0.0.1:4200',
   'http://localhost',
   'https://localhost',
   'capacitor://localhost',

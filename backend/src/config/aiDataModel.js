@@ -17,7 +17,8 @@ const AI_DATA_MODEL = `
   - VEH_SITUACION = 'VEN' → ya vendida
   - VEH_VENDEDOR → PER_PERSONAS (vendedor)
 - **UNI_CATALOGO**: catálogo por modelo (VEH_ANMODELO + VEH_CATALOGO)
-  - UNC_FAMILIA → familia GM (útil para agrupar variantes)
+  - UNC_FAMILIA → **carline** / familia GM (AVEO, ONIX, CAPTIVA…)
+  - Versión comercial = TIPOAUTO / VEH_TIPOAUTO (paquete/trim completo)
 - **PER_PERSONAS**: clientes (VTE_IDCLIENTE) y vendedores (VEH_VENDEDOR)
 
 Para "¿cuántos Aveo se vendieron?":
@@ -51,6 +52,19 @@ Para "¿cuántos Aveo se vendieron?":
 - Vista **por vendedor**: listar_vendedores_360 → resumen_vendedor_360.
 - **Unidades vendidas del vendedor** = facturas ADE_VTAFI de los VIN de su cartera (no el conteo CRM de VIN como fuente primaria).
 - **Promedio PVAs** = conteo de productos PVA con monto > 0 por contrato (GAP, garantía, etc.), no importe.
+
+### Financiamiento F&I (CRM)
+- Tabla **crm_financiamiento**: contratos colocados.
+- **Modalidad**:
+  - **Leasing / arrendamiento** → \`plan_2\` o \`especial\` contiene LEASING (también “FLOTILLA - LEASING”).
+  - **Crédito** → el resto (TRADICIONAL, SUBSIDIADO, DIAMANTE, SEMINUEVO…).
+- **Vendedor F&I** en rankings = campo **asesor** (no FI/AFI).
+- Herramienta: **consultar_financiamiento** (default periodo = mes en curso).
+
+### Utilidad por carline
+- Agrupa ventas por **UNC_FAMILIA** (carline) y elige la **versión** (TIPOAUTO) con mejor utilidad.
+- Reporta utilidad (promedio/total) y **margen bruto %** = utilidad / subtotal.
+- Herramienta: **consultar_utilidad_carline** (default periodo = mes en curso).
 `;
 
 module.exports = { AI_DATA_MODEL };

@@ -2,14 +2,35 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const XLSX = require('xlsx');
-const { loadOrders } = require('./postSalesLoad');
-const { filterRecords } = require('./postSalesOrderTypes');
+const { loadOrders, loadOpenSnapshot } = require('./postSalesLoad');
+const { filterRecords, resolveNomenclatura } = require('./postSalesOrderTypes');
 const { getVentas } = require('./ventas');
 const { getInventory } = require('./inventoryService');
 
 const EXPORT_DIR = path.join(__dirname, '../../data/ai-exports');
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_ROWS = 20000;
+
+function normalizeEstatus(estatus) {
+  const key = String(estatus || 'todas').trim().toLowerCase();
+  if (['abierta', 'abiertas', 'open', 'activas', 'activa'].includes(key)) return 'abiertas';
+  if (['facturada', 'facturadas'].includes(key)) return 'facturadas';
+  if (['cancelada', 'canceladas'].includes(key)) return 'canceladas';
+  if (!key || key === 'todas' || key === 'all') return 'todas';
+  return key;
+}
+
+function toIsoDate(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function defaultYtdRange() {
+  const now = new Date();
+  return { fechaInicio: `${now.getFullYear()}-01-01`, fechaFin: toIsoDate(now) };
+}
 
 function ensureDir() {
   if (!fs.existsSync(EXPORT_DIR)) fs.mkdirSync(EXPORT_DIR, { recursive: true });
@@ -147,28 +168,71 @@ function mapInventarioRows(data) {
 async function generateExcelExport(args = {}) {
   const fuente = String(args.fuente || 'manual').toLowerCase();
   const filename = args.filename || args.titulo || `export_${fuente}`;
-  const fechaInicio = args.fechaInicio;
-  const fechaFin = args.fechaFin;
+  let fechaInicio = args.fechaInicio;
+  let fechaFin = args.fechaFin;
 
   if (fuente === 'postventa' || fuente === 'hyp' || fuente === 'servicio') {
-    if (!fechaInicio || !fechaFin) {
-      throw new Error('generar_excel postventa requiere fechaInicio y fechaFin');
-    }
     const area = fuente === 'hyp' || fuente === 'servicio'
       ? fuente
       : (args.area || 'posventa');
-    const estatus = args.estatus || 'todas';
-    const records = filterRecords(await loadOrders({ fechaInicio, fechaFin }), { area, estatus });
-    const sheetName = area === 'hyp' ? 'HyP' : area === 'servicio' ? 'Servicio' : 'PostVenta';
-    return writeWorkbook(
-      [{ name: sheetName, rows: mapPostventaRows(records) }],
-      filename || `postventa_${area}_${estatus}_${fechaInicio}_${fechaFin}`,
-    );
+    const estatus = normalizeEstatus(args.estatus || 'todas');
+    const tipo = args.tipo || args.nomenclatura || null;
+
+    let records;
+    if (estatus === 'abiertas') {
+      // Snapshot real de abiertas actuales (todas las que siguen abiertas hoy)
+      records = filterRecords(await loadOpenSnapshot(), { area, estatus: 'abiertas', tipo });
+      if (args.filtrarPorIngreso && fechaInicio && fechaFin) {
+        records = records.filter((r) => {
+          const d = String(r.ingresoDate || '').slice(0, 10);
+          if (!d) return true;
+          return d >= fechaInicio && d <= fechaFin;
+        });
+      }
+    } else {
+      if (!fechaInicio || !fechaFin) {
+        const ytd = defaultYtdRange();
+        fechaInicio = fechaInicio || ytd.fechaInicio;
+        fechaFin = fechaFin || ytd.fechaFin;
+      }
+      records = filterRecords(await loadOrders({ fechaInicio, fechaFin }), { area, estatus, tipo });
+    }
+
+    if (!records.length) {
+      const err = new Error(
+        `No hay órdenes para exportar (área=${area}, estatus=${estatus}`
+        + `${tipo ? `, tipo=${tipo}` : ''}`
+        + `${fechaInicio ? `, ${fechaInicio}→${fechaFin}` : ', snapshot abiertas'})`,
+      );
+      err.status = 400;
+      throw err;
+    }
+
+    const sheetName = (() => {
+      const nomen = resolveNomenclatura(tipo);
+      if (nomen?.label) return String(nomen.label).slice(0, 31);
+      return area === 'hyp' ? 'HyP' : area === 'servicio' ? 'Servicio' : 'PostVenta';
+    })();
+    const hint = filename
+      || `postventa_${area}_${estatus}${tipo ? `_${String(tipo).replace(/\s+/g, '_')}` : ''}_${fechaInicio || 'abiertas'}_${fechaFin || 'hoy'}`;
+    const result = writeWorkbook([{ name: sheetName, rows: mapPostventaRows(records) }], hint);
+    const nomen = resolveNomenclatura(tipo);
+    return {
+      ...result,
+      nomenclatura: nomen
+        ? { id: nomen.id, label: nomen.label, letras: nomen.letras }
+        : null,
+      mensaje: nomen
+        ? `${result.mensaje} Nomenclatura: ${nomen.label} (letras ${nomen.letras.join(', ')}).`
+        : result.mensaje,
+    };
   }
 
   if (fuente === 'ventas') {
     if (!fechaInicio || !fechaFin) {
-      throw new Error('generar_excel ventas requiere fechaInicio y fechaFin');
+      const ytd = defaultYtdRange();
+      fechaInicio = fechaInicio || ytd.fechaInicio;
+      fechaFin = fechaFin || ytd.fechaFin;
     }
     const data = await getVentas({ fechaInicio, fechaFin });
     return writeWorkbook(

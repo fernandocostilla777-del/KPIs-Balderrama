@@ -376,6 +376,220 @@ function buildContabilidadInsights(payload = {}) {
     });
   }
 
+  pushAll(list, buildLiquidezInsights(payload));
+
+  return list;
+}
+
+function moneyMx(n) {
+  return Number(n || 0).toLocaleString('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function pushAll(list, items) {
+  for (const item of items || []) push(list, item);
+}
+
+/**
+ * Alertas de liquidez desde Balance General:
+ * Capital de trabajo, razón circulante y prueba ácida.
+ */
+function buildLiquidezInsights(payload = {}) {
+  const L = payload.liquidez || payload.summary?.liquidez || null;
+  if (!L?.disponible) return [];
+
+  const list = [];
+  const fi = payload.fechaInicio || null;
+  const ff = payload.fechaFin || null;
+  const ac = Number(L.activoCirculante || 0);
+  const pc = Number(L.pasivoCirculante || 0);
+  const ct = Number(L.capitalTrabajo || 0);
+  const razon = L.razonCirculante != null ? Number(L.razonCirculante) : null;
+  const acida = L.pruebaAcida != null ? Number(L.pruebaAcida) : null;
+  const inv = Number(L.inventariosYProceso || 0);
+  const ant = Number(L.pagosAnticipados || 0);
+  const rapidos = Number(L.activosRapidos || 0);
+  const deficit = Number(L.deficitAcido || 0);
+  const margenPct = L.margenSobreAcPct != null ? Number(L.margenSobreAcPct) : null;
+  const band = L.interpretacion?.band || null;
+  const periodo = `${fi || '—'} → ${ff || '—'}`;
+
+  // Capital de trabajo
+  if (ct < 0) {
+    push(list, {
+      id: 'bg-capital-trabajo-negativo',
+      kpiId: 'kpiBgCapitalTrabajo',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Capital de trabajo negativo',
+      summary: `CT ${moneyMx(ct)}: el pasivo circulante supera al activo circulante.`,
+      analysis:
+        `Activo circulante ${moneyMx(ac)} − pasivo circulante ${moneyMx(pc)} = ${moneyMx(ct)}. `
+        + 'No hay colchón de corto plazo: riesgo de presión de caja, proveedores o plan piso.',
+      recommendations: [
+        'Priorizar cobranza de CxC y liberar inventarios lentos.',
+        'Revisar vencimientos de pasivo circulante (proveedores, IVA, créditos CP).',
+        'Evitar nuevos compromisos de corto plazo sin fondeo asegurado.',
+      ],
+      metrics: { capitalTrabajo: ct, activoCirculante: ac, pasivoCirculante: pc },
+      chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Capital de trabajo negativo', [
+        `Periodo / corte: ${periodo}`,
+        `Activo circulante: ${moneyMx(ac)}`,
+        `Pasivo circulante: ${moneyMx(pc)}`,
+        `Capital de trabajo: ${moneyMx(ct)}`,
+        `Razón circulante: ${razon ?? '—'}`,
+        `Prueba ácida: ${acida ?? '—'}`,
+      ]),
+    });
+  } else if (margenPct != null && margenPct < 10 && pc > 0) {
+    push(list, {
+      id: 'bg-capital-trabajo-ajustado',
+      kpiId: 'kpiBgCapitalTrabajo',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'Capital de trabajo muy ajustado',
+      summary: `CT ${moneyMx(ct)} (${round1(margenPct)}% del activo circulante).`,
+      analysis:
+        'Hay capital de trabajo positivo, pero el margen sobre el activo circulante es bajo (<10%). '
+        + 'Cualquier retraso de cobranza o alza de pasivo CP puede volverlo negativo.',
+      recommendations: [
+        'Monitorear semanalmente AC vs PC.',
+        'Acelerar rotación de inventarios y contratos en tránsito.',
+        'Negociar plazos con proveedores críticos.',
+      ],
+      metrics: { capitalTrabajo: ct, margenSobreAcPct: margenPct, activoCirculante: ac, pasivoCirculante: pc },
+      chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Capital de trabajo ajustado', [
+        `Periodo / corte: ${periodo}`,
+        `CT: ${moneyMx(ct)}`,
+        `Margen CT/AC: ${round1(margenPct)}%`,
+        `AC: ${moneyMx(ac)}`,
+        `PC: ${moneyMx(pc)}`,
+      ]),
+    });
+  }
+
+  // Razón circulante
+  if (razon != null && razon < 1) {
+    push(list, {
+      id: 'bg-razon-insuficiente',
+      kpiId: 'kpiBgRazonCirculante',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Razón circulante insuficiente',
+      summary: `Razón ${razon.toFixed(2)} (< 1.00): AC no cubre PC.`,
+      analysis:
+        (L.interpretacion?.summary || 'Los activos circulantes no alcanzan a cubrir el pasivo de corto plazo.')
+        + ` AC ${moneyMx(ac)} / PC ${moneyMx(pc)}.`,
+      recommendations: [
+        'Elaborar plan de caja a 30/60/90 días.',
+        'Reducir pasivo CP no esencial y priorizar cobros.',
+        'Validar si hay partidas de inventario o CxC de difícil realización.',
+      ],
+      metrics: { razonCirculante: razon, band, activoCirculante: ac, pasivoCirculante: pc },
+      chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Razón circulante < 1', [
+        `Periodo / corte: ${periodo}`,
+        `Razón: ${razon.toFixed(2)}`,
+        `AC: ${moneyMx(ac)}`,
+        `PC: ${moneyMx(pc)}`,
+        `Banda: ${band || '—'}`,
+      ]),
+    });
+  } else if (razon != null && razon < 1.2) {
+    push(list, {
+      id: 'bg-razon-ajustada',
+      kpiId: 'kpiBgRazonCirculante',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'Liquidez circulante muy ajustada',
+      summary: `Razón ${razon.toFixed(2)} (banda 1.00–1.20).`,
+      analysis:
+        (L.interpretacion?.summary || 'Margen de seguridad bajo frente al pasivo circulante.')
+        + ' Contablemente cubre, pero sin holgura operativa.',
+      recommendations: [
+        'No comprometer más pasivo CP hasta subir la razón > 1.20.',
+        'Revisar mix de activo circulante (rápido vs inventarios).',
+      ],
+      metrics: { razonCirculante: razon, band, activoCirculante: ac, pasivoCirculante: pc },
+      chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Razón circulante ajustada', [
+        `Periodo / corte: ${periodo}`,
+        `Razón: ${razon.toFixed(2)}`,
+        `AC: ${moneyMx(ac)}`,
+        `PC: ${moneyMx(pc)}`,
+      ]),
+    });
+  }
+
+  // Prueba ácida
+  if (acida != null && acida < 1) {
+    push(list, {
+      id: 'bg-prueba-acida-deficit',
+      kpiId: 'kpiBgPruebaAcida',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Prueba ácida en déficit',
+      summary: `Ácida ${acida.toFixed(2)}: faltan ${moneyMx(Math.abs(deficit))} sin inventarios ni anticipados.`,
+      analysis:
+        `Activos rápidos ${moneyMx(rapidos)} (AC − inventarios ${moneyMx(inv)} − anticipados ${moneyMx(ant)}) `
+        + `no cubren el pasivo circulante ${moneyMx(pc)}. `
+        + 'La liquidez “de libro” puede estar inflada por inventarios o pagos anticipados no disponibles como efectivo.',
+      recommendations: [
+        'Separar qué parte del inventario es realizable en < 30 días.',
+        'Acelerar CxC y no contar anticipados como liquidez inmediata.',
+        'Preparar fondeo o renegociación si el déficit ácido persiste.',
+      ],
+      metrics: {
+        pruebaAcida: acida,
+        deficitAcido: deficit,
+        activosRapidos: rapidos,
+        inventariosYProceso: inv,
+        pagosAnticipados: ant,
+        pasivoCirculante: pc,
+      },
+      chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Prueba ácida < 1', [
+        `Periodo / corte: ${periodo}`,
+        `Prueba ácida: ${acida.toFixed(2)}`,
+        `Activos rápidos: ${moneyMx(rapidos)}`,
+        `Inventarios/WIP: ${moneyMx(inv)}`,
+        `Pagos anticipados: ${moneyMx(ant)}`,
+        `Pasivo circulante: ${moneyMx(pc)}`,
+        `Déficit ácido: ${moneyMx(deficit)}`,
+        `Razón circulante: ${razon ?? '—'}`,
+      ]),
+    });
+  } else if (acida != null && acida < 1.1) {
+    push(list, {
+      id: 'bg-prueba-acida-ajustada',
+      kpiId: 'kpiBgPruebaAcida',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'Prueba ácida apenas suficiente',
+      summary: `Ácida ${acida.toFixed(2)}: cubre PC con poco margen sin inventarios.`,
+      analysis:
+        'Sin inventarios ni anticipados la cobertura es mínima. Un atraso de cobranza puede abrir déficit inmediato.',
+      recommendations: [
+        'Vigilar CxC vencidas y calidad de cartera.',
+        'No depender de liquidar inventario para pagar pasivo CP.',
+      ],
+      metrics: {
+        pruebaAcida: acida,
+        activosRapidos: rapidos,
+        inventariosYProceso: inv,
+        pagosAnticipados: ant,
+        pasivoCirculante: pc,
+      },
+      chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Prueba ácida ajustada', [
+        `Periodo / corte: ${periodo}`,
+        `Prueba ácida: ${acida.toFixed(2)}`,
+        `Activos rápidos: ${moneyMx(rapidos)}`,
+        `PC: ${moneyMx(pc)}`,
+      ]),
+    });
+  }
+
   return list;
 }
 
@@ -1350,6 +1564,7 @@ module.exports = {
   buildInsights,
   buildVentasInsights,
   buildContabilidadInsights,
+  buildLiquidezInsights,
   buildOverviewInsights,
   buildInventoryInsights,
   buildForecastInsights,

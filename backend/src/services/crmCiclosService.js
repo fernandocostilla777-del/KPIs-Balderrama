@@ -1436,7 +1436,7 @@ async function getContactHistory(idContacto, {
   const solicitudes = hasSolicitudesTable(d)
     ? d.prepare(`
         SELECT no_solicitud, fecha_solicitud, financiera, fuerza_venta, asesor,
-               estatus, respuesta_financiera, unidad_paquete, fuente, origen,
+               estatus, respuesta_financiera, biometrico, unidad_paquete, fuente, origen,
                fecha_aprobacion, fecha_firma, num_contrato, fecha_compra,
                mes_compra, fi, afi, enganche, nombre_cliente, rfc
         FROM crm_solicitudes
@@ -2104,6 +2104,10 @@ function resolveCrmPeriod({ periodo = null, desde = null, hasta = null } = {}) {
       break;
     case 'trimestre_actual':
       start = new Date(year, Math.floor(month / 3) * 3, 1);
+      end = now;
+      break;
+    case 'semestre_actual':
+      start = new Date(year, month < 6 ? 0 : 6, 1);
       end = now;
       break;
     case 'acumulado_anio':

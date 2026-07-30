@@ -24,28 +24,57 @@ const INTERCAMBIOS_BRANCH = {
   expenseGpo: '717', prorationKey: 'intercambios',
 };
 
+/** Seminuevos: autos (0446/0646) + comerciales (0450/0650) */
+const SEMINUEVOS_BRANCHES = [
+  {
+    id: 'autos',
+    label: 'Seminuevos autos',
+    revenuePrefixes: ['0446%'],
+    costPrefixes: ['0646%'],
+  },
+  {
+    id: 'comerciales',
+    label: 'Seminuevos comerciales',
+    revenuePrefixes: ['0450%'],
+    costPrefixes: ['0650%'],
+  },
+];
+
 const POSTVENTA_SECTIONS = [
   {
     id: 'servicio',
     label: 'Servicio',
-    revenuePrefixes: ['0460%'],
-    costPrefixes: ['0643%', '0646%', '0650%'],
+    /** MO mecánica: servicio, garantías, internas, prep. previa, otros talleres, materiales */
+    revenuePrefixes: ['0460%', '0462%', '0463%', '0464%', '0466%', '0469%'],
+    costPrefixes: ['0660%', '0662%', '0663%', '0664%', '0666%'],
     expenseGpo: '731',
     prorationKey: 'servicio',
   },
   {
     id: 'refacciones',
     label: 'Refacciones',
-    revenuePrefixes: ['0481%', '0482%', '0483%', '0484%'],
-    costPrefixes: ['0662%', '0663%', '0664%', '0666%', '0667%', '0670%', '0676%', '0677%', '0679%', '0680%', '0681%', '0682%', '0683%', '0684%', '0691%'],
+    /**
+     * Partes a servicio/HYP/garantías + internas, mostrador, mayoreo, accesorios, llantas, lubricantes.
+     */
+    revenuePrefixes: [
+      '0467%', '0477%', '0480%',
+      '0481%', '0482%', '0483%', '0484%',
+      '0490%', '0491%',
+    ],
+    costPrefixes: [
+      '0667%', '0677%', '0680%',
+      '0681%', '0682%', '0683%', '0684%',
+      '0690%', '0691%',
+    ],
     expenseGpo: '733',
     prorationKey: 'refacciones',
   },
   {
     id: 'hyp',
     label: 'HYP',
-    revenuePrefixes: ['0480%', '0466%'],
-    costPrefixes: ['0660%'],
+    /** MO HYP + otros talleres HYP + pintura (sin partes: van en Refacciones) */
+    revenuePrefixes: ['0470%', '0476%', '0479%'],
+    costPrefixes: ['0670%', '0676%', '0679%'],
     expenseGpo: '732',
     prorationKey: 'hyp',
   },
@@ -84,6 +113,11 @@ const ADMIN_GROUPS = ['740', '750'];
 const FINANCIAL_PRODUCT_GROUPS = ['812', '813', '814', '815', '816', '817', '821', '822'];
 const FINANCIAL_EXPENSE_ADD = ['901', '938', '940', '941'];
 const FINANCIAL_EXPENSE_SUB = ['823', '942'];
+/** Intereses financieros en 0700 (también forman parte del gasto operativo) */
+const FINANCIAL_INTEREST_PREFIXES = {
+  planPiso: ['0700-0076%'],
+  moratorios: ['0700-0077%'],
+};
 
 const EEFF_CATEGORIES = [
   { id: 'balanceGeneral', label: 'Balance General', sheet: 'BALANCE GRAL' },
@@ -96,6 +130,7 @@ module.exports = {
   MENUDEO_BRANCHES,
   FLOTILLAS_BRANCH,
   INTERCAMBIOS_BRANCH,
+  SEMINUEVOS_BRANCHES,
   POSTVENTA_SECTIONS,
   BALANCE_SECTIONS,
   BALANCE_MAJOR_ACCOUNTS,
@@ -103,5 +138,6 @@ module.exports = {
   FINANCIAL_PRODUCT_GROUPS,
   FINANCIAL_EXPENSE_ADD,
   FINANCIAL_EXPENSE_SUB,
+  FINANCIAL_INTEREST_PREFIXES,
   EEFF_CATEGORIES,
 };

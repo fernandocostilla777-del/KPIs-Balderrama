@@ -1,31 +1,32 @@
-const path = require('path');
 const { query } = require('../db');
 const { getProrationFactors, getProrationMatrixMeta } = require('../config/prorationMatrix');
-const { getBalanceAtDate } = require('./accountingEeffService');
 const {
   MENUDEO_BRANCHES,
   FLOTILLAS_BRANCH,
   INTERCAMBIOS_BRANCH,
+  SEMINUEVOS_BRANCHES,
   POSTVENTA_SECTIONS,
-  BALANCE_MAJOR_ACCOUNTS,
   ADMIN_GROUPS,
   FINANCIAL_PRODUCT_GROUPS,
   FINANCIAL_EXPENSE_ADD,
   FINANCIAL_EXPENSE_SUB,
+  FINANCIAL_INTEREST_PREFIXES,
   EEFF_CATEGORIES,
 } = require('../config/eeffSummaryConfig');
-const { buildEeffComparativa } = require('./eeffComparativaService');
 const {
-  getNomenclaturaAccountsBySection,
-  getAllNomenclaturaAccounts,
-  resolveNomenclaturaPath,
-} = require('./eeffNomenclaturaService');
+  getAccountsForGpo,
+  getDepartmentByGpo,
+} = require('../config/departmentExpenseMapping');
+const { buildEeffComparativa } = require('./eeffComparativaService');
+const { getBalanceGeneral } = require('./balanceGeneralService');
 
 const ACUM_DET = 'DETA';
-const BALANCE_MAYOR_ACUMDET = 'ACUM';
-const SEMINUEVOS_INCOME = ['0446%'];
-const SEMINUEVOS_COST = ['0646%', '0650%'];
 const SEMINUEVOS_EXPENSE_GPO = '720';
+/** GPO de operación a reportar en el drill de gastos (sin verificentro). */
+const OPERATING_DEPARTMENT_GPOS = [
+  '711', '712', '713', '714', '715', '716', '717', '718',
+  '720', '730', '731', '732', '733',
+];
 
 function parseDate(value) {
   const d = new Date(`${value}T12:00:00`);
@@ -124,6 +125,36 @@ async function sumByGroup(table, startMonth, endMonth, group, asIncome) {
   return Number(rows[0]?.total || 0);
 }
 
+/**
+ * Suma movimiento DETA de cuentas explícitas del departamento,
+ * restringidas a su GPOCONT (evita mezclar productos financieros 81x/82x).
+ * Si no hay lista, cae a suma por GPO.
+ */
+async function sumByDepartmentAccounts(table, startMonth, endMonth, gpoCont) {
+  const accounts = getAccountsForGpo(gpoCont);
+  if (!accounts.length) {
+    return sumByGroup(table, startMonth, endMonth, gpoCont, false);
+  }
+  const mov = movementExpr(startMonth, endMonth);
+  const sign = expenseExpr(mov);
+  let total = 0;
+  for (let i = 0; i < accounts.length; i += 80) {
+    const batch = accounts.slice(i, i + 80);
+    const params = { gpo: String(gpoCont) };
+    const ph = batch.map((_, j) => `@a${j}`).join(', ');
+    batch.forEach((acc, j) => { params[`a${j}`] = acc; });
+    const rows = await query(`
+      SELECT SUM(${sign}) AS total
+      FROM [${table}]
+      WHERE CTA_ACUMDET = '${ACUM_DET}'
+        AND CTA_GPOCONT = @gpo
+        AND CTA_NUMCTA IN (${ph})
+    `, params);
+    total += Number(rows[0]?.total || 0);
+  }
+  return total;
+}
+
 async function sumByGroups(table, startMonth, endMonth, groups, asIncome) {
   if (!groups.length) return 0;
   const mov = movementExpr(startMonth, endMonth);
@@ -146,12 +177,31 @@ async function sumLine(segments, prefixes, asIncome) {
 
 async function sumGpoLine(segments, gpo) {
   return sumAcrossSegments(segments, (table, ms, me) =>
-    sumByGroup(table, ms, me, gpo, false));
+    sumByDepartmentAccounts(table, ms, me, gpo));
 }
 
 async function sumAdminTotal(segments) {
-  return sumAcrossSegments(segments, (table, ms, me) =>
-    sumByGroups(table, ms, me, ADMIN_GROUPS, false));
+  let total = 0;
+  for (const gpo of ADMIN_GROUPS) {
+    total += await sumGpoLine(segments, gpo);
+  }
+  return total;
+}
+
+async function buildDepartmentExpenseBreakdown(segments) {
+  const rows = [];
+  for (const gpo of OPERATING_DEPARTMENT_GPOS) {
+    const dept = getDepartmentByGpo(gpo);
+    const value = await sumGpoLine(segments, gpo);
+    rows.push({
+      id: dept?.id || `gpo_${gpo}`,
+      label: dept?.label || `GPO ${gpo}`,
+      gpoCont: gpo,
+      accountCount: dept?.accounts?.length || 0,
+      value,
+    });
+  }
+  return rows;
 }
 
 function pct(num, den) {
@@ -307,99 +357,79 @@ async function buildPostventaSection(segments, adminTotal, prorationFactors) {
 }
 
 async function buildSeminuevosSection(segments, adminTotal, prorationFactors) {
-  const ventas = await sumLine(segments, SEMINUEVOS_INCOME, true);
-  const costo = await sumLine(segments, SEMINUEVOS_COST, false);
+  const factor = prorationFactors.seminuevos || 0;
+  const gastosTotal = await sumGpoLine(segments, SEMINUEVOS_EXPENSE_GPO);
+  const gastosAdministracionTotal = adminTotal * factor;
+
+  const branches = [];
+  for (const def of SEMINUEVOS_BRANCHES) {
+    const ventas = await sumLine(segments, def.revenuePrefixes, true);
+    const costo = await sumLine(segments, def.costPrefixes, false);
+    const utilidadBruta = ventas - costo;
+    const share = 0; // gastos se asignan al total, no por rama
+    branches.push({
+      id: def.id,
+      label: def.label,
+      ventas,
+      costo,
+      utilidadBruta,
+      gastos: 0,
+      gastosAdministracion: 0,
+      sumaGastos: 0,
+      utilidadOperacion: utilidadBruta,
+      margenBrutoPct: pct(utilidadBruta, ventas),
+      margenOperacionPct: pct(utilidadBruta, ventas),
+      share,
+    });
+  }
+
+  const ventas = branches.reduce((s, b) => s + b.ventas, 0);
+  const costo = branches.reduce((s, b) => s + b.costo, 0);
   const utilidadBruta = ventas - costo;
-  const gastos = await sumGpoLine(segments, SEMINUEVOS_EXPENSE_GPO);
-  const gastosAdministracion = adminTotal * (prorationFactors.seminuevos || 0);
-  const sumaGastos = gastos + gastosAdministracion;
+  const sumaGastos = gastosTotal + gastosAdministracionTotal;
   const utilidadOperacion = utilidadBruta - sumaGastos;
+
   const summary = {
-    ventas, costo, utilidadBruta, gastos, gastosAdministracion, sumaGastos, utilidadOperacion,
+    ventas,
+    costo,
+    utilidadBruta,
+    gastos: gastosTotal,
+    gastosAdministracion: gastosAdministracionTotal,
+    sumaGastos,
+    utilidadOperacion,
     margenBrutoPct: pct(utilidadBruta, ventas),
     margenOperacionPct: pct(utilidadOperacion, ventas),
   };
-  return { summary, lines: pnlToLines(summary, 'seminuevos_') };
-}
-
-async function queryMajorAccountBalance(table, balanceExprSql, cuenta) {
-  const rows = await query(`
-    SELECT SUM(CASE WHEN CTA_NATURALEZA = 'DEUD' THEN (${balanceExprSql}) ELSE -(${balanceExprSql}) END) AS saldo
-    FROM [${table}]
-    WHERE CTA_ACUMDET = '${BALANCE_MAYOR_ACUMDET}' AND CTA_NUMCTA LIKE @p
-  `, { p: `${cuenta}%` });
-  return Number(rows[0]?.saldo || 0);
-}
-
-async function buildBalanceGeneral(fechaFin) {
-  const balance = await getBalanceAtDate(fechaFin, {
-    balanceConsolidated: true,
-    balancePatterns: null,
-    scopeLabel: 'Consolidado',
-  });
-
-  const end = parseDate(fechaFin);
-  const year = end.getFullYear();
-  const month = end.getMonth() + 1;
-  const table = ctasTable(year);
-  const bal = balanceExpr(month);
-  const nomenclaturaBySection = getNomenclaturaAccountsBySection() || {};
-  const allAccounts = getAllNomenclaturaAccounts();
-  const accountsBySection = {};
-  const majorLines = [];
-
-  if (await tableExists(table) && allAccounts.length) {
-    for (const [sectionKey, accounts] of Object.entries(nomenclaturaBySection)) {
-      const sectionLines = [];
-      for (const acc of accounts) {
-        const value = await queryMajorAccountBalance(table, bal, acc.cuenta);
-        const line = {
-          cuenta: acc.cuenta,
-          label: acc.label,
-          sectionKey,
-          value,
-        };
-        sectionLines.push(line);
-        if (Math.abs(value) > 0.01) {
-          majorLines.push(line);
-        }
-      }
-      accountsBySection[sectionKey] = sectionLines;
-    }
-  } else if (await tableExists(table)) {
-    for (const acc of BALANCE_MAJOR_ACCOUNTS) {
-      const value = await queryMajorAccountBalance(table, bal, acc.cuenta);
-      if (Math.abs(value) > 0.01) {
-        const line = {
-          cuenta: acc.cuenta,
-          label: acc.label,
-          group: acc.group,
-          sectionKey: acc.group === 'pasivo' ? 'pasivoCortoPlazo' : acc.group,
-          value,
-        };
-        majorLines.push(line);
-        const sk = line.sectionKey;
-        if (!accountsBySection[sk]) accountsBySection[sk] = [];
-        accountsBySection[sk].push(line);
-      }
-    }
-  }
 
   return {
-    available: balance.available,
-    asOf: fechaFin,
-    nomenclaturaSource: resolveNomenclaturaPath() ? path.basename(resolveNomenclaturaPath()) : null,
-    sections: balance.sections || [],
-    accountsBySection,
-    majorAccounts: majorLines,
-    totals: balance.totals || {},
-    lines: (balance.sections || []).map((s) =>
-      line(s.key, s.label, s.value, { group: s.pertenece, highlight: s.key === 'capital' }),
-    ),
+    branches,
+    summary,
+    lines: [
+      line('seminuevos_total', 'Total seminuevos', ventas, { group: 'ingreso', highlight: true }),
+      ...branches.map((b) =>
+        line(`seminuevos_${b.id}_ventas`, `  ${b.label}`, b.ventas, { group: 'ingreso', level: 1 })),
+      ...pnlToLines(summary, 'seminuevos_'),
+    ],
   };
 }
 
-async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, adminTotal) {
+async function buildBalanceGeneral(fechaFin) {
+  const bg = await getBalanceGeneral({ fechaFin });
+  return {
+    available: bg.available,
+    asOf: fechaFin,
+    nomenclaturaSource: 'balanceGeneralAccounts.js',
+    sections: bg.sections || [],
+    accountsBySection: bg.accountsBySection || {},
+    majorAccounts: bg.majorAccounts || [],
+    totals: bg.totals || {},
+    liquidez: bg.liquidez,
+    lines: bg.lines || [],
+    methodology: bg.methodology,
+  };
+}
+
+async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, adminTotal, gastosPorDepartamento = []) {
   const productosFinancieros = await sumAcrossSegments(segments, (table, ms, me) =>
     sumByGroups(table, ms, me, FINANCIAL_PRODUCT_GROUPS, true));
 
@@ -408,6 +438,9 @@ async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, ad
   const gastosFinSub = await sumAcrossSegments(segments, (table, ms, me) =>
     sumByGroups(table, ms, me, FINANCIAL_EXPENSE_SUB, false));
   gastosFinancieros -= gastosFinSub;
+
+  const interesesPlanPiso = await sumLine(segments, FINANCIAL_INTEREST_PREFIXES.planPiso, false);
+  const interesesMoratorios = await sumLine(segments, FINANCIAL_INTEREST_PREFIXES.moratorios, false);
 
   const ventasTotales = ventas.totalVentasAutos.summary.ventas
     + seminuevos.summary.ventas
@@ -425,6 +458,10 @@ async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, ad
   const sumaGastos = gastosOperacion + gastosAdministracion;
   const utilidadOperacion = utilidadBruta - sumaGastos;
   const utilidadFinanciera = productosFinancieros - gastosFinancieros;
+  const perdidaFinanciera = productosFinancieros
+    - gastosFinancieros
+    - interesesPlanPiso
+    - interesesMoratorios;
   const utilidad = utilidadOperacion + utilidadFinanciera;
 
   const lines = [
@@ -433,6 +470,8 @@ async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, ad
     line('ventasFlotillas', '  Flotillas', ventas.flotillas.summary.ventas, { group: 'ingreso', level: 1 }),
     line('ventasIntercambios', '  Intercambios', ventas.intercambios.summary.ventas, { group: 'ingreso', level: 1 }),
     line('ventasSeminuevos', 'Ventas seminuevos', seminuevos.summary.ventas, { group: 'ingreso' }),
+    ...(seminuevos.branches || []).map((b) =>
+      line(`ventasSeminuevos_${b.id}`, `  ${b.label}`, b.ventas, { group: 'ingreso', level: 1 })),
     line('ventasPostventa', 'Ventas PostVenta', postventa.summary.ventas, { group: 'ingreso' }),
     ...postventa.sections.map((s) =>
       line(`pv_${s.id}`, `  ${s.label}`, s.ventas, { group: 'ingreso', level: 1 })),
@@ -445,6 +484,9 @@ async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, ad
     line('utilidadOperacion', 'Utilidad de operación', utilidadOperacion, { group: 'resultado', highlight: true }),
     line('productosFinancieros', 'Productos financieros', productosFinancieros, { group: 'financiero' }),
     line('gastosFinancieros', 'Gastos financieros', gastosFinancieros, { group: 'financiero' }),
+    line('interesesPlanPiso', 'Intereses Plan Piso', interesesPlanPiso, { group: 'financiero' }),
+    line('interesesMoratorios', 'Intereses moratorios', interesesMoratorios, { group: 'financiero' }),
+    line('perdidaFinanciera', 'Pérdida financiera', perdidaFinanciera, { group: 'financiero', highlight: true }),
     line('utilidadFinanciera', 'Utilidad / pérdida financiera', utilidadFinanciera, { group: 'financiero' }),
     line('utilidad', 'Utilidad', utilidad, { group: 'resultado', highlight: true }),
   ];
@@ -460,11 +502,15 @@ async function buildEstadoFinanciero(segments, ventas, postventa, seminuevos, ad
       utilidadOperacion,
       productosFinancieros,
       gastosFinancieros,
+      interesesPlanPiso,
+      interesesMoratorios,
+      perdidaFinanciera,
       utilidadFinanciera,
       utilidad,
       margenBrutoPct: pct(utilidadBruta, ventasTotales),
       margenOperacionPct: pct(utilidadOperacion, ventasTotales),
     },
+    gastosPorDepartamento,
     lines,
   };
 }
@@ -476,15 +522,16 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
   const prorationMeta = getProrationMatrixMeta({ fechaFin });
   const adminTotal = await sumAdminTotal(segments);
 
-  const [ventas, postventa, seminuevos, balanceGeneral] = await Promise.all([
+  const [ventas, postventa, seminuevos, balanceGeneral, gastosPorDepartamento] = await Promise.all([
     buildVentasSection(segments, adminTotal, prorationFactors),
     buildPostventaSection(segments, adminTotal, prorationFactors),
     buildSeminuevosSection(segments, adminTotal, prorationFactors),
     buildBalanceGeneral(fechaFin),
+    buildDepartmentExpenseBreakdown(segments),
   ]);
 
   const estadoFinanciero = await buildEstadoFinanciero(
-    segments, ventas, postventa, seminuevos, adminTotal,
+    segments, ventas, postventa, seminuevos, adminTotal, gastosPorDepartamento,
   );
 
   const payload = {
@@ -505,8 +552,8 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
     },
     methodology: {
       ventas: 'Menudeo (sucursales) + Flotillas + Intercambios = total autos nuevos',
-      postventa: 'Servicio (0460) + Refacciones (0481–84) + HYP (0480/0466)',
-      gastos: 'GPOCONT por departamento + prorrateo administración (740/750) según configuración en Administración (ventas/postventa)',
+      postventa: 'Servicio + Refacciones + HYP (prefijos Contpaq)',
+      gastos: 'Cuentas Contpaq por departamento (listas) restringidas a CTA_GPOCONT + prorrateo administración (740/750)',
       balance: 'Saldos al cierre · GPOCONT 110–190 + cuentas mayor ACUM',
     },
   };

@@ -6,7 +6,7 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=92" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -87,7 +87,7 @@
 <select id="filtroArea" class="filter-input">
 <option value="todos">Todas las áreas</option>
 <option value="autosNuevos">Autos nuevos (0400)</option>
-<option value="seminuevos">Seminuevos (0446)</option>
+<option value="seminuevos">Seminuevos (0446 + 0450)</option>
 <option value="servicio">Servicio (0460)</option>
 <option value="refacciones">Refacciones (048x)</option>
 <option value="postventa">Postventa</option>
@@ -101,6 +101,7 @@
 
 <nav class="contabilidad-tabs" id="contabilidadMainTabs" aria-label="Secciones de contabilidad">
 <button type="button" class="contabilidad-tab active" data-tab="catalogo">Catálogo de cuentas</button>
+<button type="button" class="contabilidad-tab" data-tab="balance">Balance General</button>
 <button type="button" class="contabilidad-tab" data-tab="eeff">EEFF</button>
 </nav>
 
@@ -218,8 +219,10 @@
 </div>
 </div>
 <div class="section-panel table-panel">
-<h3 class="section-title">Ratios financieros</h3>
+<h3 class="section-title">Ratios financieros · Liquidez</h3>
+<p class="section-subtitle">Capital de trabajo, razón circulante y prueba ácida (sin inventarios ni anticipados)</p>
 <div id="ratiosEeff" class="kpi-summary"></div>
+<div id="liquidezInterpretacion" class="liquidez-note hidden" aria-live="polite"></div>
 </div>
 </section>
 
@@ -236,43 +239,46 @@
 
 </div>
 
+<div id="panelContabilidadBalance" class="contabilidad-main-panel hidden">
+
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Balance General</h3>
+<p class="section-subtitle" id="balanceGeneralMethodology">Saldos SQL (CON_CTAS · cuentas mayor ACUM) · Activo (circulante + fijo + diferido) · Pasivo (circulante + largo plazo) · Capital</p>
+</section>
+
+<section class="kpi-grid kpi-grid--eeff" id="kpiBalanceGeneral" aria-label="KPIs Balance General"></section>
+<div id="bgKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
+<aside id="bgKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="bgKpiFloatTitle"></aside>
+
+<section class="section-panel table-panel dashboard-section">
+<h3 class="section-title">Liquidez (desde Balance General)</h3>
+<p class="section-subtitle">Capital de trabajo, razón circulante y prueba ácida</p>
+<div id="bgLiquidezKpis" class="kpi-summary"></div>
+<div id="bgLiquidezInterpretacion" class="liquidez-note hidden" aria-live="polite"></div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<h3 class="section-title">Resumen · Ecuación contable</h3>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
+<tbody id="bgResumenTable"></tbody>
+</table>
+</div>
+</section>
+
+</div>
+
 <div id="panelContabilidadEeff" class="contabilidad-main-panel hidden">
 
 <nav class="eeff-tabs" id="eeffTabs" aria-label="Categorías EEFF">
-<button type="button" class="eeff-tab active" data-categoria="balanceGeneral">Balance General</button>
-<button type="button" class="eeff-tab" data-categoria="estadoFinanciero">Edo. Financiero</button>
+<button type="button" class="eeff-tab active" data-categoria="estadoFinanciero">Edo. Financiero</button>
 <button type="button" class="eeff-tab" data-categoria="ventas">Ventas</button>
 <button type="button" class="eeff-tab" data-categoria="postventa">PostVenta</button>
 <button type="button" class="eeff-tab" data-categoria="comparativa">Comparativa PPTO</button>
 </nav>
 
-<section id="panelBalance" class="eeff-panel" data-panel="balanceGeneral">
-<section class="kpi-grid kpi-grid--eeff" id="kpiBalance"></section>
-<div id="eeffKpiDetailBalance" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
-<div class="section-panel table-panel">
-<h3 class="section-title">Balance general · Secciones</h3>
-<p class="section-subtitle">Saldos al cierre del periodo · GPOCONT 110–190</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr><th>Concepto</th><th class="cell-money">Saldo</th></tr></thead>
-<tbody id="balanceSectionsTable"></tbody>
-<tfoot id="balanceSectionsFoot"></tfoot>
-</table>
-</div>
-</div>
-<div class="section-panel table-panel dashboard-section">
-<h3 class="section-title">Cuentas mayor · Activo</h3>
-<p class="section-subtitle">Cuentas acumuladas de activo al cierre</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr><th>Cuenta</th><th>Descripción</th><th class="cell-money">Saldo</th></tr></thead>
-<tbody id="balanceMajorTable"></tbody>
-</table>
-</div>
-</div>
-</section>
-
-<section id="panelEdoFin" class="eeff-panel hidden" data-panel="estadoFinanciero">
+<section id="panelEdoFin" class="eeff-panel" data-panel="estadoFinanciero">
 <section class="kpi-grid kpi-grid--eeff" id="kpiEdoFin"></section>
 <div id="eeffKpiDetailEdoFin" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
 <div class="section-panel table-panel">
@@ -470,13 +476,13 @@ Exportar CSV
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js?v=5"></script>
+<script src="/js/shared.js?v=6"></script>
 <script src="/js/sidebar.js?v=8"></script>
 <script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=2"></script>
-<script src="/js/assistant-bubble.js?v=5"></script>
-<script src="/js/eeff.js?v=12"></script>
-<script src="/js/contabilidad.js?v=19"></script>
+<script src="/js/kpi-insights.js?v=3"></script>
+<script src="/js/assistant-bubble.js?v=6"></script>
+<script src="/js/eeff.js?v=25"></script>
+<script src="/js/contabilidad.js?v=36"></script>
 </body>
 </html>

@@ -1,22 +1,33 @@
 /**
- * Sección Financiamiento en Ventas — KPIs dinámicos + notas persistentes.
+ * Sección Financiamiento en Ventas — KPIs dinámicos.
  * Penetración GMF = entregas SOFIA con GMF / total entregas SOFIA (no facturación).
  */
 (function () {
   const CONTADO = new Set(['CONTADO']);
   const EXCLUDE = new Set(['FLOTILLA', 'PERDIDA']);
-  const MIX_KEYS = new Set(['facturasGmf', 'gmfDispTimbrar', 'penGmf', 'gmfSofia', 'noGmfSofia', 'mixFinanciera']);
+  const MIX_KEYS = new Set(['facturasGmf', 'gmfDispTimbrar', 'penGmf', 'gmfSofia', 'noGmfSofia']);
+  const ONSTAR_KEYS = new Set(['onstarTech']);
+  const PVA_KEYS = new Set(['conPva', 'pvaGap', 'pvaGarantia', 'pvaAccesorios', 'pvaOnstar', 'pvaMant']);
+  const PVA_SERIES_KEY = {
+    conPva: 'conPva',
+    pvaGap: 'gap',
+    pvaGarantia: 'garantia',
+    pvaAccesorios: 'accesorios',
+    pvaOnstar: 'onstar',
+    pvaMant: 'mantenimiento',
+  };
 
   let state = {
     data: null,
     retailMix: null,
+    onstarTech: null,
+    pvaTrimestreYtd: null,
     sofiaRegistros: [],
     facturasGmfRegistros: [],
     facturaNotesByDocto: {},
     gerentesCatalog: null,
     openKpi: null,
     mixSearch: '',
-    notes: [],
     fechaInicio: null,
     fechaFin: null,
     search: '',
@@ -29,6 +40,12 @@
   function money(n) {
     if (n == null || !Number.isFinite(Number(n))) return '—';
     return fmt.money(Number(n));
+  }
+
+  /** Montos en KPI: compactos para que no se partan/encimen en la tarjeta. */
+  function moneyKpi(n) {
+    if (n == null || !Number.isFinite(Number(n))) return '—';
+    return fmt.currency(Number(n));
   }
 
   function num(n) {
@@ -319,9 +336,19 @@
         'gmfDispTimbrar'
       ),
       kpiCard('GMF en SOFIA', num(mix.gmf), `${pct(mix.penetracionGmfPct)} de entregas`, 'green', 'gmfSofia'),
-      kpiCard('Sin GMF', num(mix.noGmf), 'entregas SOFIA no GMF', 'slate', 'noGmfSofia'),
+      kpiCard('Contado', num(mix.noGmf), 'entregas SOFIA de contado', 'slate', 'noGmfSofia'),
       kpiCard('Penetración GMF', pct(mix.penetracionGmfPct), `${num(mix.gmf)} de ${num(mix.totalSofia)} entregas`, 'violet', 'penGmf'),
-      kpiCard('Mix por tipo', num(mix.porTipo?.length || 0), 'sobre entregas SOFIA', 'amber', 'mixFinanciera'),
+      (() => {
+        const os = state.onstarTech || {};
+        const mesLabel = os.periodo?.label ? `mes ${os.periodo.label}` : 'mes actual';
+        return kpiCard(
+          'OnStar',
+          pct(os.penetracionPct),
+          `${num(os.conContrato)} de ${num(os.elegibles)} elegibles SOFIA · ${mesLabel}`,
+          'amber',
+          'onstarTech'
+        );
+      })(),
     ]);
   }
 
@@ -344,7 +371,6 @@
       case 'gmfDispTimbrar':
         return facturasGmfDisponiblesTimbrar();
       case 'penGmf':
-      case 'mixFinanciera':
         return sofiaRows();
       case 'gmfSofia':
         return sofiaRows().filter(isGmfRow);
@@ -356,9 +382,17 @@
   }
 
   function rowsForKpi(key) {
-    const list = contracts();
+    const list = contracts().map((c) => ({
+      ...c,
+      gerenteFi: String(c.fi || '').trim() || 'Sin gerente F&I',
+    }));
     const sol = state.data?.solicitudes;
     switch (key) {
+      case 'onstarTech':
+        return (state.onstarTech?.muestra || []).map((c) => ({
+          ...c,
+          gerenteFi: String(c.fi || c.gerenteFi || '').trim() || 'Sin gerente F&I',
+        }));
       case 'contratos':
       case 'montoTotal':
       case 'montoPromedio':
@@ -392,11 +426,20 @@
           fecha: r.fecha,
           cliente: r.cliente,
           vin: r.vin,
+          idCrm: r.idCrm || null,
+          noSolicitud: r.noSolicitud || null,
           contrato: r.contrato,
-          asesor: r.asesor || r.financiera,
-          unidad: r.unidad || r.estatus,
+          asesor: r.asesor || null,
+          financiera: r.financiera || null,
+          unidad: r.unidad || null,
           tipoCompra: r.estatus,
           plan: r.financiera,
+          estatus: r.estatus || null,
+          respuestaFinanciera: r.respuestaFinanciera || null,
+          biometrico: r.biometrico || null,
+          fi: r.fi || null,
+          afi: r.afi || null,
+          gerenteFi: String(r.fi || '').trim() || 'Sin gerente F&I',
           plazoMeses: null,
           engancheMonto: r.enganche,
           montoFinanciar: null,
@@ -405,7 +448,7 @@
         }));
       case 'aprobadas':
         return rowsForKpi('solicitudes').filter((r) =>
-          String(r.tipoCompra || '').toUpperCase().includes('APROBADA')
+          String(r.estatus || r.tipoCompra || '').toUpperCase().includes('APROBADA')
         );
       default:
         return list;
@@ -422,8 +465,15 @@
       },
       penGmf: { title: 'Penetración GMF', hint: `GMF / entregas SOFIA · ${num(mix.gmf)} de ${num(mix.totalSofia)}` },
       gmfSofia: { title: 'Entregas GMF (SOFIA)', hint: 'Entregas SOFIA con forma de pago GMF' },
-      noGmfSofia: { title: 'Entregas sin GMF', hint: 'Entregas SOFIA que no son GMF (contado u otras)' },
-      mixFinanciera: { title: 'Mix por tipo (SOFIA)', hint: 'Distribución de tipo de venta en entregas SOFIA' },
+      noGmfSofia: { title: 'Entregas de contado', hint: 'Entregas SOFIA sin GMF · ventas de contado' },
+      onstarTech: {
+        title: 'OnStar',
+        hint: (() => {
+          const os = state.onstarTech || {};
+          const mes = os.periodo?.label || 'mes actual';
+          return `Contrato OnStar (Sheets) ÷ entregas SOFIA con tech OnStar · ${mes}`;
+        })(),
+      },
       contratos: { title: 'Contratos colocados', hint: 'Contratos F&I en el periodo (CRM)' },
       unidades: { title: 'Unidades financiadas', hint: 'VIN distintos con contrato' },
       montoTotal: { title: 'Monto a financiar', hint: 'Suma de monto_financiar' },
@@ -460,9 +510,35 @@
       penGmf: 'percent',
       gmfSofia: 'notifications_active',
       noGmfSofia: 'payments',
-      mixFinanciera: 'pie_chart',
+      onstarTech: 'cell_tower',
+      contratos: 'description',
+      unidades: 'directions_car',
+      montoTotal: 'payments',
+      montoPromedio: 'payments',
+      enganche: 'account_balance_wallet',
+      plazo: 'schedule',
+      conPva: 'workspace_premium',
+      pvaGap: 'security',
+      pvaGarantia: 'verified',
+      pvaAccesorios: 'build',
+      pvaOnstar: 'sensors',
+      pvaMant: 'car_repair',
+      solicitudes: 'request_quote',
+      aprobadas: 'check_circle',
     };
     return map[key] || 'analytics';
+  }
+
+  function isMixKpi(key) {
+    return MIX_KEYS.has(key);
+  }
+
+  function isOnstarKpi(key) {
+    return ONSTAR_KEYS.has(key);
+  }
+
+  function isPvaKpi(key) {
+    return PVA_KEYS.has(key);
   }
 
   function downloadMixCsv(rows, title) {
@@ -478,6 +554,34 @@
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     const safe = String(title || 'penetracion_gmf_sofia').replace(/[^\w.\-áéíóúÁÉÍÓÚñÑ]+/gi, '_').slice(0, 40);
+    a.href = URL.createObjectURL(blob);
+    a.download = `${safe}_${state.fechaInicio || 'periodo'}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function downloadCrmCsv(rows, title) {
+    const isOnstar = String(title || '').toLowerCase().includes('onstar') || state.openKpi === 'onstarTech';
+    const headers = isOnstar
+      ? ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'OnStar', 'Plazo OnStar', 'Monto OnStar', 'GerenteFI']
+      : ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'Tipo', 'Plan', 'Plazo', 'Enganche', 'Monto', 'PVAs'];
+    const lines = [headers.join(',')];
+    for (const r of rows || []) {
+      const vals = isOnstar
+        ? [
+          r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato,
+          r.hasOnstarContrato ? 'SI' : 'NO', r.plazoOnstar, r.onstarMonto, r.gerenteFi || r.fi,
+        ]
+        : [
+          r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato,
+          r.tipoCompra, r.plan, r.plazoMeses, r.engancheMonto, r.montoFinanciar,
+          (r.pvas || []).map((p) => p.label).join(' | '),
+        ];
+      lines.push(vals.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    const safe = String(title || 'financiamiento').replace(/[^\w.\-áéíóúÁÉÍÓÚñÑ]+/gi, '_').slice(0, 40);
     a.href = URL.createObjectURL(blob);
     a.download = `${safe}_${state.fechaInicio || 'periodo'}.csv`;
     a.click();
@@ -528,6 +632,15 @@
         <button type="button" class="ops-orders-drawer__filter-chip" data-fi-mix-filter-chip hidden title="Quitar filtro"></button>
         <span class="ops-orders-drawer__meta" data-fi-mix-meta></span>
       </div>
+      <div class="fi-pva-ytd-panel hidden" data-fi-pva-ytd-panel>
+        <div class="fi-pva-ytd-panel__head">
+          <h5 data-fi-pva-ytd-title>YTD trimestre en curso</h5>
+          <span class="fi-pva-ytd-panel__meta" data-fi-pva-ytd-meta></span>
+        </div>
+        <div class="fi-pva-ytd-panel__chart">
+          <canvas data-fi-pva-ytd-chart aria-label="Gráfica YTD PVA trimestre"></canvas>
+        </div>
+      </div>
       <div class="ops-orders-drawer__main">
         <aside class="ops-orders-drawer__summary custom-scrollbar" data-fi-mix-summary></aside>
         <div class="ops-orders-drawer__body custom-scrollbar" data-fi-mix-body></div>
@@ -548,6 +661,10 @@
     const downloadBtn = panel.querySelector('[data-fi-mix-download]');
     const titleEl = panel.querySelector('[data-fi-mix-title]');
     const logoEl = panel.querySelector('[data-fi-mix-logo]');
+    const pvaYtdPanel = panel.querySelector('[data-fi-pva-ytd-panel]');
+    const pvaYtdTitle = panel.querySelector('[data-fi-pva-ytd-title]');
+    const pvaYtdMeta = panel.querySelector('[data-fi-pva-ytd-meta]');
+    const pvaYtdCanvas = panel.querySelector('[data-fi-pva-ytd-chart]');
 
     let expanded = false;
     let activeFilter = null;
@@ -555,6 +672,7 @@
     let lastExportRows = [];
     let currentMeta = { kpi: '', title: 'Penetración GMF', hint: '', icon: 'account_balance' };
     let lastCard = null;
+    let pvaYtdChart = null;
 
     const FILTER_DIM_LABEL = {
       tipo: 'Tipo',
@@ -563,6 +681,10 @@
       gmf: 'GMF',
       gerente: 'Gerente F&I',
       sofia: 'SOFIA',
+      asesor: 'Asesor',
+      plan: 'Plan',
+      plazo: 'Plazo',
+      onstar: 'OnStar',
     };
 
     function placeNearKpi(card) {
@@ -614,6 +736,24 @@
 
     function matchesActiveFilter(r) {
       if (!activeFilter) return true;
+      if (!isMixKpi(currentMeta.kpi)) {
+        if (activeFilter.dim === 'asesor') return String(r.asesor || 'Sin asesor') === activeFilter.value;
+        if (activeFilter.dim === 'tipo') return String(r.tipoCompra || r.plan || 'Sin tipo') === activeFilter.value;
+        if (activeFilter.dim === 'plan') return String(r.plan || 'Sin plan') === activeFilter.value;
+        if (activeFilter.dim === 'gerente') {
+          return String(r.gerenteFi || r.fi || 'Sin gerente F&I') === activeFilter.value;
+        }
+        if (activeFilter.dim === 'plazo') {
+          const label = r.plazoMeses != null ? `${r.plazoMeses} mes` : 'Sin plazo';
+          return label === activeFilter.value;
+        }
+        if (activeFilter.dim === 'onstar') {
+          return activeFilter.value === 'CON'
+            ? Boolean(r.hasOnstarContrato)
+            : !r.hasOnstarContrato;
+        }
+        return true;
+      }
       if (activeFilter.dim === 'tipo') return tipoOf(r) === activeFilter.value;
       if (activeFilter.dim === 'vendedor') return String(r.VENDEDOR || 'Sin vendedor') === activeFilter.value;
       if (activeFilter.dim === 'canal') return String(r.CANAL_LABEL || 'Sin canal') === activeFilter.value;
@@ -643,10 +783,6 @@
     function renderSummary(rows) {
       const mix = state.retailMix || {};
       const isFacturas = currentMeta.kpi === 'facturasGmf' || currentMeta.kpi === 'gmfDispTimbrar';
-      const porGerente = countByField(rows, (r) => r.GERENTE_FI || 'Sin gerente F&I');
-      const porTipo = countByField(rows, (r) => tipoOf(r)).slice(0, 10);
-      const porVendedor = countByField(rows, (r) => r.VENDEDOR || 'Sin vendedor').slice(0, 8);
-      const porCanal = countByField(rows, (r) => r.CANAL_LABEL || 'Sin canal').slice(0, 8);
       const isActive = (dim, value) => activeFilter && activeFilter.dim === dim && activeFilter.value === value;
 
       const block = (titulo, dim, items) => `
@@ -664,6 +800,83 @@
               </button>`).join('')
             : '<p class="ops-orders-drawer__hint">Sin datos</p>'}
         </div>`;
+
+      if (!isMixKpi(currentMeta.kpi)) {
+        const s = state.data?.summary || {};
+        const isSolicitudes = currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas';
+        const isOnstar = isOnstarKpi(currentMeta.kpi);
+        const porGerente = countByField(rows, (r) => r.gerenteFi || r.fi || 'Sin gerente F&I');
+        const porAsesor = countByField(rows, (r) => r.asesor || 'Sin asesor').slice(0, 10);
+        const porTipo = countByField(rows, (r) => r.tipoCompra || r.plan || 'Sin tipo').slice(0, 10);
+        const porPlan = countByField(rows, (r) => r.plan || 'Sin plan').slice(0, 8);
+        const porPlazo = countByField(rows, (r) => (r.plazoMeses != null ? `${r.plazoMeses} mes` : 'Sin plazo')).slice(0, 8);
+        const monto = rows.reduce((acc, r) => acc + Number(r.montoFinanciar || 0), 0);
+        const enganche = rows.reduce((acc, r) => acc + Number(r.engancheMonto || 0), 0);
+
+        if (isOnstar) {
+          const os = state.onstarTech || {};
+          const con = rows.filter((r) => r.hasOnstarContrato).length;
+          const sin = rows.length - con;
+          const porUnidad = countByField(rows, (r) => r.unidad || 'Sin unidad').slice(0, 10);
+          summaryEl.innerHTML = `
+            <div class="ops-orders-drawer__group">
+              <h5>Resumen</h5>
+              <div class="ops-orders-drawer__row"><span class="lbl">Elegibles (tech OnStar)</span><span class="val">${num(os.elegibles ?? rows.length)}</span></div>
+              <div class="ops-orders-drawer__row"><span class="lbl">Con contrato OnStar</span><span class="val">${num(os.conContrato ?? con)}</span></div>
+              <div class="ops-orders-drawer__row"><span class="lbl">Sin contrato</span><span class="val">${num(os.sinContrato ?? sin)}</span></div>
+              <div class="ops-orders-drawer__row"><span class="lbl">Penetración</span><span class="val">${pct(os.penetracionPct)}</span></div>
+              <p class="ops-orders-drawer__hint">Base: entregas SOFIA del mes ${escapeHtml(os.periodo?.label || '')} · contrato desde Sheets (plazo/monto OnStar)</p>
+              <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+            </div>
+            <div class="ops-orders-drawer__group">
+              <h5>Filtro rápido</h5>
+              <button type="button" class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive('onstar', 'CON') ? ' is-active' : ''}"
+                data-fi-filter-dim="onstar" data-fi-filter-value="CON" data-fi-filter-label="Con contrato OnStar"
+                title="Filtrar con contrato OnStar">
+                <span class="lbl">Con contrato</span>
+                <span class="val">${num(con)}</span>
+              </button>
+              <button type="button" class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive('onstar', 'SIN') ? ' is-active' : ''}"
+                data-fi-filter-dim="onstar" data-fi-filter-value="SIN" data-fi-filter-label="Sin contrato OnStar"
+                title="Filtrar sin contrato OnStar">
+                <span class="lbl">Sin contrato</span>
+                <span class="val">${num(sin)}</span>
+              </button>
+            </div>
+            ${block('Por unidad', 'tipo', porUnidad)}
+            ${block('Por gerente F&I', 'gerente', porGerente)}
+            ${block('Por asesor', 'asesor', porAsesor)}
+          `;
+          return;
+        }
+
+        summaryEl.innerHTML = `
+          <div class="ops-orders-drawer__group">
+            <h5>Resumen</h5>
+            <div class="ops-orders-drawer__row"><span class="lbl">Registros</span><span class="val">${num(rows.length)}</span></div>
+            ${isSolicitudes ? '' : `
+            <div class="ops-orders-drawer__row"><span class="lbl">Monto a financiar</span><span class="val">${money(monto)}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Enganche</span><span class="val">${money(enganche)}</span></div>
+            `}
+            ${currentMeta.kpi === 'plazo' && (s.plazos || []).length
+              ? `<p class="ops-orders-drawer__hint">Distribución de plazos del periodo</p>`
+              : ''}
+            <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+          </div>
+          ${block('Por gerente F&I', 'gerente', porGerente)}
+          ${block('Por asesor', 'asesor', porAsesor)}
+          ${block(isSolicitudes ? 'Por estatus' : 'Por tipo', 'tipo', porTipo)}
+          ${isSolicitudes
+            ? block('Por financiera', 'plan', porPlan)
+            : `${block('Por plan', 'plan', porPlan)}${block('Por plazo', 'plazo', porPlazo)}`}
+        `;
+        return;
+      }
+
+      const porGerente = countByField(rows, (r) => r.GERENTE_FI || 'Sin gerente F&I');
+      const porTipo = countByField(rows, (r) => tipoOf(r)).slice(0, 10);
+      const porVendedor = countByField(rows, (r) => r.VENDEDOR || 'Sin vendedor').slice(0, 8);
+      const porCanal = countByField(rows, (r) => r.CANAL_LABEL || 'Sin canal').slice(0, 8);
 
       if (isFacturas) {
         const enSofiaCount = rows.filter((r) => r.enSofia).length;
@@ -707,7 +920,7 @@
           <div class="ops-orders-drawer__row"><span class="lbl">Facturas GMF</span><span class="val">${num(mix.facturasGmf)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Entregas SOFIA</span><span class="val">${num(mix.totalSofia)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">GMF en SOFIA</span><span class="val">${num(mix.gmf)} (${pct(mix.penetracionGmfPct)})</span></div>
-          <div class="ops-orders-drawer__row"><span class="lbl">Sin GMF</span><span class="val">${num(mix.noGmf)}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Contado</span><span class="val">${num(mix.noGmf)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Sin match factura/VIN</span><span class="val">${num(mix.sinMatch)}</span></div>
           <p class="ops-orders-drawer__hint">Penetración = GMF ÷ entregas SOFIA (no facturación)</p>
           <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
@@ -718,7 +931,7 @@
           <button type="button" class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive('gmf', 'GMF') ? ' is-active' : ''}"
             data-fi-filter-dim="gmf" data-fi-filter-value="GMF"><span class="lbl">Solo GMF</span><span class="val">${num(mix.gmf)}</span></button>
           <button type="button" class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive('gmf', 'NO_GMF') ? ' is-active' : ''}"
-            data-fi-filter-dim="gmf" data-fi-filter-value="NO_GMF"><span class="lbl">Sin GMF</span><span class="val">${num(mix.noGmf)}</span></button>
+            data-fi-filter-dim="gmf" data-fi-filter-value="NO_GMF"><span class="lbl">Contado</span><span class="val">${num(mix.noGmf)}</span></button>
         </div>
         ${block('Por tipo', 'tipo', porTipo)}
         ${block('Por vendedor', 'vendedor', porVendedor)}
@@ -728,23 +941,38 @@
 
     function renderList(term = '') {
       const q = String(term || '').trim().toLowerCase();
+      const crmMode = !isMixKpi(currentMeta.kpi);
+
       const searched = !q
         ? sourceRows
-        : sourceRows.filter((r) => [
-          r.VTE_FECHDOCTO, r.FECHA_PERIODO, r.SOF_Factura, r.VTE_DOCTO, r.SOF_VIN, r.VTE_SERIE,
-          r.CLIENTE, r.VENDEDOR, r.GERENTE_FI, r.VEH_TIPOAUTO, r.CANAL_LABEL, r.TIPOVENTA, r.FORMAPAGO_ORIGINAL,
-        ].some((v) => String(v || '').toLowerCase().includes(q)));
+        : sourceRows.filter((r) => {
+          const fields = crmMode
+            ? [r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.plan, r.tipoCompra, r.plazoMeses,
+              r.estatus, r.financiera, r.respuestaFinanciera, r.biometrico, r.idCrm, r.noSolicitud,
+              r.gerenteFi, r.fi, r.afi, r.plazoOnstar, r.onstarMonto,
+              r.hasOnstarContrato ? 'con onstar' : 'sin onstar',
+              ...(r.pvas || []).map((p) => p.label)]
+            : [r.VTE_FECHDOCTO, r.FECHA_PERIODO, r.SOF_Factura, r.VTE_DOCTO, r.SOF_VIN, r.VTE_SERIE,
+              r.CLIENTE, r.VENDEDOR, r.GERENTE_FI, r.VEH_TIPOAUTO, r.CANAL_LABEL, r.TIPOVENTA, r.FORMAPAGO_ORIGINAL];
+          return fields.some((v) => String(v || '').toLowerCase().includes(q));
+        });
 
       const filtered = searched.filter(matchesActiveFilter);
       lastExportRows = filtered;
 
       const isFacturas = currentMeta.kpi === 'facturasGmf' || currentMeta.kpi === 'gmfDispTimbrar';
       const isDisp = currentMeta.kpi === 'gmfDispTimbrar';
-      statusEl.textContent = isDisp
-        ? `${filtered.length.toLocaleString('es-MX')} disponible(s) para timbrar`
-        : isFacturas
-          ? `${filtered.length.toLocaleString('es-MX')} factura(s) GMF`
-          : `${filtered.length.toLocaleString('es-MX')} entrega(s)`;
+      if (crmMode) {
+        statusEl.textContent = isOnstarKpi(currentMeta.kpi)
+          ? `${filtered.length.toLocaleString('es-MX')} unidad(es) elegible(s)`
+          : `${filtered.length.toLocaleString('es-MX')} registro(s)`;
+      } else {
+        statusEl.textContent = isDisp
+          ? `${filtered.length.toLocaleString('es-MX')} disponible(s) para timbrar`
+          : isFacturas
+            ? `${filtered.length.toLocaleString('es-MX')} factura(s) GMF`
+            : `${filtered.length.toLocaleString('es-MX')} entrega(s)`;
+      }
       metaEl.textContent = activeFilter || q
         ? `${filtered.length} de ${sourceRows.length}`
         : `${sourceRows.length} registros`;
@@ -758,10 +986,101 @@
             <span class="material-symbols-outlined">inbox</span>
             <p>${activeFilter || q
               ? 'Sin coincidencias con el filtro actual.'
-              : (isDisp
-                ? 'No hay GMF sin SOFIA con nota CONTRATO COMPRADO.'
-                : (isFacturas ? 'No hay facturas GMF en el periodo.' : 'No hay entregas SOFIA para este indicador.'))}</p>
+              : (crmMode
+                ? 'No hay registros para este indicador.'
+                : (isDisp
+                  ? 'No hay GMF sin SOFIA con nota CONTRATO COMPRADO.'
+                  : (isFacturas ? 'No hay facturas GMF en el periodo.' : 'No hay entregas SOFIA para este indicador.')))}</p>
           </div>`;
+        return;
+      }
+
+      if (crmMode) {
+        const isSolicitudes = currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas';
+        const isOnstar = isOnstarKpi(currentMeta.kpi);
+        bodyEl.innerHTML = `
+          <div class="ops-orders-drawer__list-head">
+            <h5>${isSolicitudes ? 'Detalle solicitudes' : (isOnstar ? 'Entregas SOFIA · tech OnStar' : 'Detalle F&amp;I')}</h5>
+            <span>${filtered.length.toLocaleString('es-MX')}</span>
+          </div>
+          ${filtered.map((r) => {
+            if (r._kind === 'solicitud' || isSolicitudes) {
+              const bioRaw = String(r.biometrico || '').trim().toUpperCase();
+              const bioLabel = bioRaw === 'SI' || bioRaw === 'SÍ' || bioRaw === 'YES'
+                ? 'Con biométrico'
+                : (bioRaw === 'NO'
+                  ? 'Sin biométrico'
+                  : (bioRaw ? bioRaw : 'Biométrico n/d'));
+              const bioClass = bioRaw === 'SI' || bioRaw === 'SÍ' || bioRaw === 'YES'
+                ? 'fi-list-chip--ok'
+                : (bioRaw === 'NO' ? 'fi-list-chip--warn' : '');
+              const idCrm = String(r.idCrm || '').trim();
+              const respuesta = String(r.respuestaFinanciera || '').trim();
+              const estatus = r.estatus || r.tipoCompra || 'Solicitud';
+              return `
+              <div class="ops-orders-drawer__item" style="cursor:default">
+                <div class="ops-orders-drawer__item-head">
+                  <strong>${escapeHtml(dash(r.noSolicitud || r.cliente))}</strong>
+                  <span class="ops-orders-drawer__tag">${escapeHtml(dash(estatus))}</span>
+                </div>
+                ${idCrm ? `
+                  <a class="fi-seguimiento-link" href="/seguimiento.html?id=${encodeURIComponent(idCrm)}" target="_blank" rel="noopener">
+                    <span class="material-symbols-outlined" aria-hidden="true">hub</span>
+                    Ver Seguimiento 360
+                  </a>` : `
+                  <p class="fi-seguimiento-link fi-seguimiento-link--disabled">Sin ID CRM para Seguimiento 360</p>`}
+                <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.cliente))} · ${escapeHtml(dash(r.asesor))}</p>
+                <div class="ops-orders-drawer__facts">
+                  <span>${escapeHtml(dash(r.financiera || r.plan))}</span>
+                  <span class="fi-list-chip ${bioClass}">${escapeHtml(bioLabel)}</span>
+                  <span>${escapeHtml(dash(r.gerenteFi || r.fi))}</span>
+                </div>
+                <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+                  <span>${escapeHtml(dash(r.fecha))}</span>
+                  <span>${r.engancheMonto != null ? `Eng. ${money(r.engancheMonto)}` : '—'}</span>
+                  <span>${idCrm ? `CRM ${escapeHtml(idCrm)}` : 'Sin CRM'}</span>
+                </div>
+                <p class="ops-orders-drawer__sub fi-respuesta-financiera" title="${escapeHtml(respuesta || 'Sin respuesta financiera')}">
+                  <span class="fi-respuesta-financiera__label">Respuesta financiera:</span>
+                  ${escapeHtml(respuesta || 'Sin respuesta registrada')}
+                </p>
+              </div>`;
+            }
+
+            const pva = (r.pvas || []).map((p) => p.label).join(', ') || 'Sin PVA';
+            const isOnstar = isOnstarKpi(currentMeta.kpi) || r._kind === 'onstarTech';
+            const tag = isOnstar
+              ? (r.hasOnstarContrato ? 'Con OnStar' : 'Sin OnStar')
+              : (r.tipoCompra || r.plan || 'Contrato');
+            const onstarFacts = isOnstar
+              ? `<div class="ops-orders-drawer__facts">
+                  <span class="fi-list-chip ${r.hasOnstarContrato ? 'fi-list-chip--ok' : 'fi-list-chip--warn'}">${r.hasOnstarContrato ? 'Contrato OnStar' : 'Sin contrato'}</span>
+                  <span>${r.plazoOnstar ? `Plazo ${escapeHtml(String(r.plazoOnstar))}` : 'Sin plazo OnStar'}</span>
+                  <span>${r.onstarMonto != null && Number(r.onstarMonto) > 0 ? money(r.onstarMonto) : 'Sin monto'}</span>
+                </div>`
+              : `<div class="ops-orders-drawer__facts">
+                  <span>${escapeHtml(dash(r.unidad))}</span>
+                  <span>${r.plazoMeses != null ? `${num(r.plazoMeses)} mes` : '—'}</span>
+                  <span>${escapeHtml(dash(r.gerenteFi || r.fi))}</span>
+                </div>`;
+            return `
+              <div class="ops-orders-drawer__item" style="cursor:default">
+                <div class="ops-orders-drawer__item-head">
+                  <strong>${escapeHtml(dash(r.vin))}</strong>
+                  <span class="ops-orders-drawer__tag">${escapeHtml(dash(tag))}</span>
+                </div>
+                <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.cliente))} · ${escapeHtml(dash(r.asesor))}</p>
+                ${onstarFacts}
+                <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+                  <span>${escapeHtml(dash(r.fecha))}</span>
+                  ${isOnstar
+                    ? `<span>${escapeHtml(dash(r.unidad))}</span><span>${escapeHtml(dash(r.gerenteFi || r.fi))}</span>`
+                    : `<span>${r.montoFinanciar != null ? money(r.montoFinanciar) : '—'}</span>
+                       <span>${r.engancheMonto != null ? `Eng. ${money(r.engancheMonto)}` : '—'}</span>`}
+                </div>
+                <p class="ops-orders-drawer__sub">${escapeHtml(isOnstar ? (r.contrato || pva) : pva)}</p>
+              </div>`;
+          }).join('')}`;
         return;
       }
 
@@ -776,6 +1095,7 @@
           const tipo = tipoOf(r);
           const gmfTag = isGmfRow(r) ? 'GMF' : tipo;
           const docto = String(r.SOF_Factura || r.VTE_DOCTO || '').trim();
+          const serie = String(r.SOF_VIN || r.VTE_SERIE || '').trim();
           const clickable = isFacturas && docto;
           const tag = clickable ? 'button' : 'div';
           const attrs = clickable
@@ -794,15 +1114,15 @@
           return `
             <${tag} ${attrs}>
               <div class="ops-orders-drawer__item-head">
-                <strong>${escapeHtml(dash(docto))}</strong>
+                <strong>${escapeHtml(dash(serie))}</strong>
                 <span class="ops-orders-drawer__tag">${escapeHtml(gmfTag)}</span>
               </div>
               ${clickable ? `<div class="fi-list-meta">${sofiaChip}${noteBlock}</div>` : ''}
               <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.CLIENTE))} · ${escapeHtml(dash(r.VENDEDOR))}</p>
               <div class="ops-orders-drawer__facts">
                 <span>${escapeHtml(dash(r.VEH_TIPOAUTO))}</span>
-                <span class="mono">${escapeHtml(dash(r.SOF_VIN || r.VTE_SERIE))}</span>
                 <span>${escapeHtml(dash(r.CANAL_LABEL))}</span>
+                <span>Doc. ${escapeHtml(dash(docto))}</span>
               </div>
               <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
                 <span>${escapeHtml(dash(r.VTE_FECHDOCTO || r.FECHA_PERIODO))}</span>
@@ -814,8 +1134,104 @@
         }).join('')}`;
     }
 
+    function destroyPvaYtdChart() {
+      if (pvaYtdChart) {
+        try { pvaYtdChart.destroy(); } catch { /* ignore */ }
+        pvaYtdChart = null;
+      }
+      if (pvaYtdPanel) pvaYtdPanel.classList.add('hidden');
+    }
+
+    function renderPvaYtdChart(kpiKey) {
+      destroyPvaYtdChart();
+      if (!isPvaKpi(kpiKey) || !pvaYtdPanel || !pvaYtdCanvas) return;
+
+      const ytd = state.pvaTrimestreYtd || state.data?.pvaTrimestreYtd;
+      const seriesKey = PVA_SERIES_KEY[kpiKey];
+      const serie = ytd?.series?.[seriesKey];
+      if (!ytd || !serie) {
+        pvaYtdPanel.classList.remove('hidden');
+        if (pvaYtdTitle) pvaYtdTitle.textContent = 'YTD trimestre en curso';
+        if (pvaYtdMeta) pvaYtdMeta.textContent = 'Sin datos del trimestre';
+        return;
+      }
+
+      if (typeof Chart === 'undefined') {
+        pvaYtdPanel.classList.remove('hidden');
+        if (pvaYtdMeta) pvaYtdMeta.textContent = 'Chart.js no disponible';
+        return;
+      }
+
+      pvaYtdPanel.classList.remove('hidden');
+      if (pvaYtdTitle) {
+        pvaYtdTitle.textContent = `${ytd.label || 'Trimestre'} · ${currentMeta.title || 'PVA'} por mes`;
+      }
+      const mensual = serie.mensual || [];
+      const totalMeses = mensual.reduce((s, n) => s + Number(n || 0), 0);
+      if (pvaYtdMeta) {
+        pvaYtdMeta.textContent = `${totalMeses.toLocaleString('es-MX')} unidades en el trimestre`;
+      }
+
+      const labels = ytd.labels || [];
+      pvaYtdChart = new Chart(pvaYtdCanvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              type: 'bar',
+              label: 'Unidades del mes',
+              data: mensual,
+              backgroundColor: 'rgba(37, 99, 235, 0.55)',
+              borderColor: '#2563EB',
+              borderWidth: 1,
+              borderRadius: 6,
+              yAxisID: 'y',
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: { boxWidth: 10, font: { size: 11 } },
+            },
+            tooltip: {
+              callbacks: {
+                afterBody(items) {
+                  const idx = items?.[0]?.dataIndex;
+                  if (idx == null) return '';
+                  const pen = serie.penetracionMesPct?.[idx];
+                  return pen != null ? `Penetración del mes: ${pen}%` : '';
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { font: { size: 11 } },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                precision: 0,
+                font: { size: 11 },
+              },
+              grid: { color: 'rgba(148, 163, 184, 0.25)' },
+            },
+          },
+        },
+      });
+    }
+
     function close() {
       closeFacturaDetail();
+      destroyPvaYtdChart();
       panel.classList.remove('ops-orders-drawer--open');
       panel.setAttribute('aria-hidden', 'true');
       backdrop.classList.remove('ops-orders-backdrop--visible');
@@ -828,25 +1244,30 @@
       clearPlacement();
       activeFilter = null;
       lastCard = null;
-      const key = state.openKpi;
-      if (MIX_KEYS.has(key)) state.openKpi = null;
-      els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => {
-        const k = c.getAttribute('data-fi-kpi');
-        if (MIX_KEYS.has(k)) c.classList.remove('is-open');
-      });
+      state.openKpi = null;
+      els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
     }
 
     function open(rows, card, meta = {}) {
       currentMeta = {
         kpi: meta.kpi || '',
-        title: meta.title || 'Penetración GMF',
+        title: meta.title || 'Financiamiento',
         hint: meta.hint || '',
-        icon: meta.icon || 'account_balance',
+        icon: meta.icon || 'analytics',
       };
       lastCard = card || null;
       if (titleEl) titleEl.textContent = currentMeta.title;
       if (logoEl) logoEl.textContent = currentMeta.icon;
       panel.setAttribute('aria-label', currentMeta.title);
+      if (searchEl) {
+        searchEl.placeholder = isMixKpi(currentMeta.kpi)
+          ? 'Buscar factura, VIN, cliente, tipo...'
+          : (currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas'
+            ? 'Buscar cliente, solicitud, financiera, respuesta, CRM...'
+            : (isOnstarKpi(currentMeta.kpi)
+              ? 'Buscar VIN, unidad, cliente, plazo OnStar...'
+              : 'Buscar cliente, VIN, asesor, contrato, PVA...'));
+      }
 
       sourceRows = (rows || []).slice();
       if (searchEl) searchEl.value = '';
@@ -855,6 +1276,7 @@
       placeNearKpi(card);
       setExpanded(true);
       renderList('');
+      renderPvaYtdChart(currentMeta.kpi);
       panel.classList.add('ops-orders-drawer--open');
       panel.setAttribute('aria-hidden', 'false');
       backdrop.classList.add('ops-orders-backdrop--visible');
@@ -869,10 +1291,11 @@
     expandBtn?.addEventListener('click', () => setExpanded(!expanded));
     downloadBtn?.addEventListener('click', () => {
       if (!lastExportRows.length) {
-        window.alert('No hay entregas para descargar.');
+        window.alert('No hay registros para descargar.');
         return;
       }
-      downloadMixCsv(lastExportRows, currentMeta.title);
+      if (isMixKpi(currentMeta.kpi)) downloadMixCsv(lastExportRows, currentMeta.title);
+      else downloadCrmCsv(lastExportRows, currentMeta.title);
     });
     searchEl?.addEventListener('input', () => renderList(searchEl.value));
     filterChip?.addEventListener('click', clearFilter);
@@ -1315,11 +1738,15 @@
 
     root.innerHTML = [
       mixBlock,
+      kpiGroup('Solicitudes F&I', [
+        kpiCard('Solicitudes', num(sol.total), 'en el periodo', 'blue', 'solicitudes'),
+        kpiCard('Aprobadas', num(sol.aprobadas), `tasa ${pct(sol.tasaAprobacionPct)}`, 'green', 'aprobadas'),
+      ]),
       kpiGroup('Volumen F&I', [
         kpiCard('Contratos', num(s.contratos), 'colocados en el periodo', 'blue', 'contratos'),
         kpiCard('Unidades', num(s.unidades), 'VIN distintos', 'green', 'unidades'),
-        kpiCard('Monto a financiar', money(s.montoFinanciarTotal), `prom. ${money(s.montoFinanciarPromedio)}`, 'violet', 'montoTotal'),
-        kpiCard('Enganche prom.', money(s.enganchePromedio), 'por contrato', 'amber', 'enganche'),
+        kpiCard('Monto a financiar', moneyKpi(s.montoFinanciarTotal), `prom. ${moneyKpi(s.montoFinanciarPromedio)}`, 'violet', 'montoTotal'),
+        kpiCard('Enganche prom.', moneyKpi(s.enganchePromedio), 'por contrato', 'amber', 'enganche'),
         kpiCard('Plazo prom.', s.plazoPromedio != null ? `${s.plazoPromedio} mes` : '—', 'meses contratados', 'slate', 'plazo'),
       ]),
       kpiGroup('Productos PVA', [
@@ -1329,10 +1756,6 @@
         kpiCard('Accesorios', num(pva.accesorios?.contratos || 0), pct(pva.accesorios?.penetracionPct), 'amber', 'pvaAccesorios'),
         kpiCard('OnStar', num(pva.onstar?.contratos || 0), pct(pva.onstar?.penetracionPct), 'slate', 'pvaOnstar'),
         kpiCard('Mantenimientos', num(pva.mantenimiento?.contratos || 0), pct(pva.mantenimiento?.penetracionPct), 'rose', 'pvaMant'),
-      ]),
-      kpiGroup('Solicitudes F&I', [
-        kpiCard('Solicitudes', num(sol.total), 'en el periodo', 'blue', 'solicitudes'),
-        kpiCard('Aprobadas', num(sol.aprobadas), `tasa ${pct(sol.tasaAprobacionPct)}`, 'green', 'aprobadas'),
       ]),
     ].join('');
 
@@ -1384,37 +1807,17 @@
     els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
     card?.classList.add('is-open');
 
-    if (MIX_KEYS.has(key)) {
-      if (els.detailPanel) els.detailPanel.classList.add('hidden');
-      const meta = kpiMeta(key);
-      ensureFiMixDrawer().open(rowsForMixKpi(key), card, {
-        kpi: key,
-        title: meta.title,
-        hint: meta.hint,
-        icon: mixKpiIcon(key),
-      });
-      renderTable(contracts());
-      return;
-    }
+    if (els.detailPanel) els.detailPanel.classList.add('hidden');
 
-    closeFiMixDrawer();
     const meta = kpiMeta(key);
-    const rows = rowsForKpi(key);
-    const s = state.data?.summary || {};
-
-    let summaryHtml = `<p class="section-subtitle" style="margin:0">${escapeHtml(meta.hint)}</p>`;
-    if (key === 'plazo') {
-      summaryHtml += `<ul class="fi-detail-stats">${(s.plazos || []).slice(0, 6).map((p) =>
-        `<li><strong>${escapeHtml(p.label)}</strong>: ${num(p.count)} (${pct(p.pct)})</li>`
-      ).join('')}</ul>`;
-    } else if (['conPva', 'pvaGap', 'pvaGarantia', 'pvaAccesorios', 'pvaOnstar', 'pvaMant'].includes(key)) {
-      summaryHtml += `<p class="section-subtitle">Monto PVA total del periodo: <strong>${money(s.montoTotalPvas)}</strong></p>`;
-    }
-
-    if (els.detailTitle) els.detailTitle.textContent = meta.title;
-    if (els.detailResumen) els.detailResumen.innerHTML = summaryHtml;
-    if (els.detailPanel) els.detailPanel.classList.remove('hidden');
-    renderTable(rows);
+    const rows = isMixKpi(key) ? rowsForMixKpi(key) : rowsForKpi(key);
+    ensureFiMixDrawer().open(rows, card, {
+      kpi: key,
+      title: meta.title,
+      hint: meta.hint,
+      icon: mixKpiIcon(key),
+    });
+    renderTable(isMixKpi(key) ? contracts() : rows);
   }
 
   function filteredRows(rows) {
@@ -1458,107 +1861,6 @@
     }).join('');
   }
 
-  function renderNotes() {
-    const list = els.notesList;
-    if (!list) return;
-    if (!state.notes.length) {
-      list.innerHTML = '<p class="section-subtitle fi-notes-empty">Sin notas aún. Escriba una y guárdela.</p>';
-      return;
-    }
-    list.innerHTML = state.notes.map((n) => {
-      const when = n.updatedAt || n.createdAt;
-      const whenLabel = when ? new Date(when).toLocaleString('es-MX') : '';
-      const period = n.periodo
-        ? `<span class="fi-note-period">${escapeHtml(n.periodo.fechaInicio)} → ${escapeHtml(n.periodo.fechaFin)}</span>`
-        : '<span class="fi-note-period">General</span>';
-      return `<article class="fi-note" data-note-id="${escapeHtml(n.id)}">
-        <div class="fi-note-head">
-          <strong>${escapeHtml(n.author || 'usuario')}</strong>
-          ${period}
-          <time datetime="${escapeHtml(when || '')}">${escapeHtml(whenLabel)}</time>
-        </div>
-        <p class="fi-note-text">${escapeHtml(n.text)}</p>
-        <div class="fi-note-actions">
-          <button type="button" class="btn-glass btn-sm" data-note-edit="${escapeHtml(n.id)}">Editar</button>
-          <button type="button" class="btn-glass btn-sm btn-danger-soft" data-note-del="${escapeHtml(n.id)}">Eliminar</button>
-        </div>
-      </article>`;
-    }).join('');
-
-    list.querySelectorAll('[data-note-del]').forEach((btn) => {
-      btn.addEventListener('click', () => deleteNote(btn.getAttribute('data-note-del')));
-    });
-    list.querySelectorAll('[data-note-edit]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-note-edit');
-        const note = state.notes.find((n) => n.id === id);
-        if (!note || !els.noteInput) return;
-        els.noteInput.value = note.text;
-        els.noteInput.dataset.editId = id;
-        els.noteInput.focus();
-        if (els.btnSaveNote) els.btnSaveNote.textContent = 'Actualizar nota';
-      });
-    });
-  }
-
-  async function loadNotes() {
-    if (!state.fechaInicio || !state.fechaFin) return;
-    const qs = `fechaInicio=${encodeURIComponent(state.fechaInicio)}&fechaFin=${encodeURIComponent(state.fechaFin)}`;
-    const res = await fetch(`/api/ventas/financiamiento/notas?${qs}`, { credentials: 'same-origin' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'No se pudieron cargar las notas');
-    state.notes = data.notes || [];
-    renderNotes();
-  }
-
-  async function saveNote() {
-    const text = String(els.noteInput?.value || '').trim();
-    if (!text) return;
-    const editId = els.noteInput?.dataset.editId;
-    const scopeGlobal = !!els.noteScopeGlobal?.checked;
-
-    let res;
-    if (editId) {
-      res = await fetch(`/api/ventas/financiamiento/notas/${encodeURIComponent(editId)}`, {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-    } else {
-      res = await fetch('/api/ventas/financiamiento/notas', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          scope: scopeGlobal ? 'global' : 'periodo',
-          fechaInicio: state.fechaInicio,
-          fechaFin: state.fechaFin,
-        }),
-      });
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'No se pudo guardar la nota');
-    if (els.noteInput) {
-      els.noteInput.value = '';
-      delete els.noteInput.dataset.editId;
-    }
-    if (els.btnSaveNote) els.btnSaveNote.textContent = 'Guardar nota';
-    await loadNotes();
-  }
-
-  async function deleteNote(id) {
-    if (!id || !window.confirm('¿Eliminar esta nota?')) return;
-    const res = await fetch(`/api/ventas/financiamiento/notas/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'No se pudo eliminar');
-    await loadNotes();
-  }
-
   async function loadGerentesCatalog() {
     try {
       const res = await fetch('/api/ventas/financiamiento/gerentes', { credentials: 'same-origin' });
@@ -1598,6 +1900,8 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Error financiamiento (${res.status})`);
       state.data = data;
+      state.onstarTech = data.onstarTech || null;
+      state.pvaTrimestreYtd = data.pvaTrimestreYtd || null;
     } catch (err) {
       console.error('[Financiamiento]', err);
       state.data = {
@@ -1606,19 +1910,14 @@
         contratos: [],
         solicitudes: { total: 0, aprobadas: 0, muestra: [] },
       };
+      state.onstarTech = null;
+      state.pvaTrimestreYtd = null;
       if (els.subtitle) els.subtitle.textContent = err.message;
     }
 
     renderKpis();
     closeKpiDetail();
     renderTable(contracts());
-    try {
-      await loadNotes();
-    } catch (err) {
-      console.warn('[Financiamiento notas]', err.message);
-      state.notes = [];
-      renderNotes();
-    }
   }
 
   function bindDom() {
@@ -1632,25 +1931,15 @@
     els.tableBody = document.getElementById('fiTableBody');
     els.searchInput = document.getElementById('buscarFiPreview');
     els.searchMeta = document.getElementById('fiPreviewSearchMeta');
-    els.notesList = document.getElementById('fiNotesList');
-    els.noteInput = document.getElementById('fiNoteInput');
-    els.btnSaveNote = document.getElementById('btnFiSaveNote');
-    els.noteScopeGlobal = document.getElementById('fiNoteScopeGlobal');
 
     els.btnCloseDetail?.addEventListener('click', closeKpiDetail);
     els.searchInput?.addEventListener('input', () => {
       state.search = els.searchInput.value || '';
-      if (state.openKpi && !MIX_KEYS.has(state.openKpi)) {
+      if (state.openKpi) {
         openKpiDetail(state.openKpi, els.kpiRoot?.querySelector(`[data-fi-kpi="${state.openKpi}"]`));
       } else {
         renderTable(contracts());
       }
-    });
-    els.btnSaveNote?.addEventListener('click', () => {
-      saveNote().catch((err) => {
-        console.error(err);
-        window.alert(err.message || 'Error al guardar nota');
-      });
     });
   }
 

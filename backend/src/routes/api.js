@@ -67,13 +67,13 @@ router.get('/ventas', async (req, res, next) => {
   }
 });
 
-router.get('/ventas/financiamiento', (req, res, next) => {
+router.get('/ventas/financiamiento', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(getFinanciamientoDashboard({ fechaInicio, fechaFin }));
+    res.json(await getFinanciamientoDashboard({ fechaInicio, fechaFin }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -555,7 +555,10 @@ router.post('/ai/chat', async (req, res) => {
       return res.status(400).json({ error: 'El último mensaje debe ser del usuario.' });
     }
 
-    const result = await runChat(sanitized);
+    const result = await runChat(sanitized, {
+      roleId: req.session?.role || null,
+      username: req.session?.username || null,
+    });
     res.json(result);
   } catch (err) {
     console.error('[AI Error]', err.message);

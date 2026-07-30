@@ -567,6 +567,7 @@ const DEPARTMENTS = [
     "label": "GASTOS   HYP",
     "gpoCont": "732",
     "accounts": [
+      "0690-0003-0000-0000",
       "0700-0011-0004-0000",
       "0700-0013-0002-0011",
       "0700-0013-0006-0000",
@@ -931,6 +932,14 @@ function getGpoGroupsForScope(sucursal = 'todos', area = 'todos') {
   return getDepartmentsForScope(sucursal, area).map((d) => d.gpoCont);
 }
 
+function getDepartmentByGpo(gpoCont) {
+  return DEPARTMENTS.find((d) => d.gpoCont === String(gpoCont)) || null;
+}
+
+function getAccountsForGpo(gpoCont) {
+  return getDepartmentByGpo(gpoCont)?.accounts || [];
+}
+
 module.exports = {
   DEPARTMENTS,
   GPO_BY_SECTION,
@@ -939,4 +948,6 @@ module.exports = {
   OPERATING_GPO_GROUPS,
   getDepartmentsForScope,
   getGpoGroupsForScope,
+  getDepartmentByGpo,
+  getAccountsForGpo,
 };

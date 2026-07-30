@@ -4,11 +4,18 @@ const { buildVisualizations } = require('./aiVisualizations');
 const { AI_DATA_MODEL } = require('../config/aiDataModel');
 const { buildSharedIdentity } = require('../config/aiReasoningPrompt');
 const { generateExcelExport } = require('./aiExcelExport');
+const { resolveNomenclatura, NOMENCLATURA_GRUPOS, stripAccents } = require('./postSalesOrderTypes');
+const {
+  filterToolDefinitions,
+  isToolAllowedForRole,
+  buildRoleScopeNote,
+  resolveAiAccess,
+} = require('./aiRoleAccess');
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const MAX_TOOL_ROUNDS = 10;
 
-const EXCEL_INTENT_RE = /excel|xlsx|descargar|exportar|spreadsheet|hoja\s+de\s+c[aá]lculo|archivo\s+descargable|pasame\s+(el\s+)?listado|pásame\s+(el\s+)?listado/i;
+const EXCEL_INTENT_RE = /excel|xlsx|descargar|exportar|spreadsheet|hoja\s+de\s+c[aá]lculo|archivo\s+descargable|pasame\s+(el\s+)?listado|pásame\s+(el\s+)?listado|dame\s+(en\s+)?(un\s+)?excel|en\s+(un\s+)?excel/i;
 
 const WEB_MODULE_RULES = `
 ## Módulos disponibles (herramientas web · SQL Server / CRM en vivo)
@@ -28,6 +35,8 @@ const WEB_MODULE_RULES = `
 - **Seguimiento 360 agregado** → resumen_seguimiento_360
 - **Seguimiento 360 · por vendedor** → listar_vendedores_360 y resumen_vendedor_360
 - **Quejas / incidencias CSI** → consultar_quejas_csi
+- **Financiamiento F&I (crédito vs leasing)** → consultar_financiamiento
+- **Utilidad / margen bruto por carline (mejor versión)** → consultar_utilidad_carline
 - SQL exploratorio solo si nada más cubre la pregunta
 
 ## Reglas adicionales (solo web)
@@ -39,6 +48,8 @@ const WEB_MODULE_RULES = `
 6b.1. Precisión CRM: mensualidades/saldo/valor estimado; menciona “estimado”. PVAs solo de contratosFinanciamiento[].pvas.
 6c. Leads agregados → resumen_leads. “Mes pasado” → periodo: mes_pasado. “Compras” = conversión de cohorte, no total DMS.
 6d. Solicitudes F&I / pruebas / combo 360 → resumen_seguimiento_360.
+6d.1. **Contratos F&I crédito vs leasing** → consultar_financiamiento. Leasing ≠ crédito. Sin periodo → mes_actual. Ofrece trimestre/semestre/YTD.
+6d.2. **Mejor utilidad por carline** → consultar_utilidad_carline. Responde versión completa + margen bruto %. Sin periodo → mes_actual. Ofrece trimestre/semestre/YTD.
 6e. Relaciones 360: lead G, solicitud H, prueba P → ID CRM; compra ciclos → VIN columna T.
 6f. Leads vs ventas: conversión → resumen_leads/360; vs totales → cifras independientes (no llames conversión al cociente ventas/leads).
 6g. Por vendedor → listar_vendedores_360 + resumen_vendedor_360. Unidades = comercial.libroVentas.unidades (ADE_VTAFI).
@@ -50,15 +61,31 @@ const WEB_MODULE_RULES = `
 8. Visualizaciones: el sistema monta KPIs/gráficas; no dupliques listados largos; resume hallazgo + 1–2 acciones.
 `;
 
-function buildWebSystemPrompt() {
+function buildWebSystemPrompt({ roleId = null, username = null } = {}) {
+  const access = resolveAiAccess(roleId);
+  const toolsForPrompt = access.allowedTools == null
+    ? TOOL_DEFINITIONS
+    : filterToolDefinitions(TOOL_DEFINITIONS, roleId);
+  const toolsList = toolsForPrompt
+    .map((t) => t?.function?.name)
+    .filter(Boolean)
+    .join(', ') || '(ninguna)';
+
   return [
     buildSharedIdentity({
       channel: 'web',
       dataSourceNote: 'Fuente de datos: SQL Server GMOFARRIL y CRM en vivo (no sync).',
+      roleNote: buildRoleScopeNote(roleId, username),
+      toolsList,
     }),
     '',
     AI_DATA_MODEL,
     WEB_MODULE_RULES,
+    '',
+    '## Restricción de perfil (obligatoria)',
+    'Cumple estrictamente el alcance de perfil indicado arriba.',
+    'Solo usa herramientas de la lista de esta sesión.',
+    'Si la pregunta sale del perfil: niega el acceso con claridad y redirige a lo que sí puedes consultar.',
   ].join('\n');
 }
 
@@ -100,14 +127,18 @@ function buildAutoExcelArgs(snapshot) {
   if (!snapshot || snapshot.result?.error) return null;
   const args = snapshot.args || {};
   if (snapshot.name === 'consultar_postventa') {
-    return {
+    const estatus = args.estatus || 'todas';
+    const tipo = args.tipo || null;
+    const auto = {
       fuente: 'postventa',
-      fechaInicio: args.fechaInicio,
-      fechaFin: args.fechaFin,
       area: args.area || 'posventa',
-      estatus: args.estatus || 'todas',
-      filename: `postventa_${args.area || 'todas'}_${args.estatus || 'todas'}_${args.fechaInicio || ''}_${args.fechaFin || ''}.xlsx`,
+      estatus,
+      tipo,
+      filename: `postventa_${args.area || 'todas'}_${estatus}${tipo ? `_${tipo}` : ''}_${args.fechaInicio || 'abiertas'}_${args.fechaFin || 'hoy'}.xlsx`,
     };
+    if (args.fechaInicio) auto.fechaInicio = args.fechaInicio;
+    if (args.fechaFin) auto.fechaFin = args.fechaFin;
+    return auto;
   }
   if (['consultar_ventas', 'consultar_ventas_modelo', 'consultar_ventas_por_auto', 'consultar_ventas_dia'].includes(snapshot.name)) {
     const fecha = args.fecha || args.fechaInicio;
@@ -130,11 +161,71 @@ function buildAutoExcelArgs(snapshot) {
   return null;
 }
 
-async function ensureExcelExport(messages, toolSnapshots, toolsUsed) {
-  const existing = collectExports(toolSnapshots);
-  if (existing.length) return existing;
-  if (!userWantsExcel(messages)) return [];
+/** Detecta nomenclatura en el texto del usuario (normales, internas, letra N, etc.). */
+function inferTipoFromText(text) {
+  const t = String(text || '');
+  const norm = stripAccents(t);
 
+  // Preferir grupos por alias más largos primero
+  const ranked = [...NOMENCLATURA_GRUPOS].sort(
+    (a, b) => Math.max(...b.aliases.map((x) => x.length)) - Math.max(...a.aliases.map((x) => x.length)),
+  );
+  for (const g of ranked) {
+    for (const alias of [g.id, g.label, ...g.aliases]) {
+      const a = stripAccents(alias);
+      if (a.length >= 4 && new RegExp(`\\b${a}\\b`, 'i').test(norm)) return g.id;
+      if (a.length >= 4 && norm.includes(a)) return g.id;
+    }
+  }
+
+  // Letra explícita: “letra N”, “tipo N”, “folios N”
+  const letter = t.match(/\b(?:letra|tipo|folio|folios)\s*([A-ZÁÉÍÓÚÑ])\b/i);
+  if (letter) {
+    const resolved = resolveNomenclatura(letter[1]);
+    if (resolved) return resolved.id;
+  }
+
+  return null;
+}
+
+/** Infiera export postventa desde el texto del usuario (fallback si el modelo no llamó generar_excel). */
+function inferExcelArgsFromText(text) {
+  const t = String(text || '');
+  if (!/post.?venta|orden|taller|hyp|servicio|pintura|hojalat|interna|normal|reparac|garant|asegura|excel|xlsx/i.test(t)) {
+    return null;
+  }
+
+  const estatus = /abierta/i.test(t) ? 'abiertas' : /facturada/i.test(t) ? 'facturadas' : 'todas';
+  const tipo = inferTipoFromText(t);
+  let area = 'posventa';
+  if (/hyp|pintura|hojalat/i.test(t) && !tipo) area = 'hyp';
+  else if (/\bservicio\b/i.test(t) && !tipo) area = 'servicio';
+
+  const args = {
+    fuente: 'postventa',
+    area,
+    estatus,
+    filename: `postventa_${area}_${estatus}${tipo ? `_${tipo}` : ''}.xlsx`,
+  };
+  if (tipo) args.tipo = tipo;
+
+  const yearMatch = t.match(/\b(20\d{2})\b/);
+  if (yearMatch && estatus !== 'abiertas') {
+    args.fechaInicio = `${yearMatch[1]}-01-01`;
+    args.fechaFin = `${yearMatch[1]}-12-31`;
+  }
+  return args;
+}
+
+async function ensureExcelExport(messages, toolSnapshots, toolsUsed, roleId = null) {
+  const existing = collectExports(toolSnapshots);
+  if (existing.length) return { exports: existing, lastError: null };
+  if (!userWantsExcel(messages)) return { exports: [], lastError: null };
+  if (!isToolAllowedForRole(roleId, 'generar_excel')) {
+    return { exports: [], lastError: 'Tu perfil no permite exportar Excel.' };
+  }
+
+  let lastError = null;
   const candidates = [...(toolSnapshots || [])].reverse();
   for (const snap of candidates) {
     const autoArgs = buildAutoExcelArgs(snap);
@@ -143,8 +234,9 @@ async function ensureExcelExport(messages, toolSnapshots, toolsUsed) {
       const result = await generateExcelExport(autoArgs);
       toolSnapshots.push({ name: 'generar_excel', args: autoArgs, result });
       toolsUsed.push('generar_excel');
-      return collectExports(toolSnapshots);
+      return { exports: collectExports(toolSnapshots), lastError: null };
     } catch (err) {
+      lastError = err.message;
       toolSnapshots.push({
         name: 'generar_excel',
         args: autoArgs,
@@ -152,7 +244,25 @@ async function ensureExcelExport(messages, toolSnapshots, toolsUsed) {
       });
     }
   }
-  return [];
+
+  const inferred = inferExcelArgsFromText(lastUserText(messages));
+  if (inferred) {
+    try {
+      const result = await generateExcelExport(inferred);
+      toolSnapshots.push({ name: 'generar_excel', args: inferred, result });
+      toolsUsed.push('generar_excel');
+      return { exports: collectExports(toolSnapshots), lastError: null };
+    } catch (err) {
+      lastError = err.message;
+      toolSnapshots.push({
+        name: 'generar_excel',
+        args: inferred,
+        result: { error: err.message },
+      });
+    }
+  }
+
+  return { exports: [], lastError };
 }
 
 function finalizeReply(messageContent, toolSnapshots, toolsUsed, usage) {
@@ -166,12 +276,23 @@ function finalizeReply(messageContent, toolSnapshots, toolsUsed, usage) {
   };
 }
 
-async function runChat(messages) {
+async function runChat(messages, { roleId = null, username = null } = {}) {
   const client = getClient();
+  const allowedTools = filterToolDefinitions(TOOL_DEFINITIONS, roleId);
   const conversation = [
-    { role: 'system', content: buildWebSystemPrompt() },
+    { role: 'system', content: buildWebSystemPrompt({ roleId, username }) },
     ...messages.filter((m) => m.role === 'user' || m.role === 'assistant'),
   ];
+
+  if (!allowedTools.length) {
+    return finalizeReply(
+      `Tu perfil (${resolveAiAccess(roleId).roleLabel}) no tiene módulos de datos habilitados para el asistente. `
+        + 'Contacta a Administración si necesitas acceso.',
+      [],
+      [],
+      { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    );
+  }
 
   const toolsUsed = [];
   const toolSnapshots = [];
@@ -182,7 +303,7 @@ async function runChat(messages) {
     const response = await client.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: conversation,
-      tools: TOOL_DEFINITIONS,
+      tools: allowedTools,
       tool_choice: 'auto',
       temperature: 0.35,
     });
@@ -200,10 +321,12 @@ async function runChat(messages) {
 
     const toolCalls = message.tool_calls || [];
     if (!toolCalls.length) {
-      await ensureExcelExport(messages, toolSnapshots, toolsUsed);
+      const ensured = await ensureExcelExport(messages, toolSnapshots, toolsUsed, roleId);
       const out = finalizeReply(message.content, toolSnapshots, toolsUsed, usage);
       if (userWantsExcel(messages) && !out.exports.length) {
-        out.reply += '\n\nNo pude generar el Excel automáticamente. Indica el módulo (HyP/Servicio/ventas) y el periodo para reintentar.';
+        const detail = ensured.lastError ? ` (${ensured.lastError})` : '';
+        out.reply += `\n\nNo pude generar el Excel automáticamente${detail}. `
+          + 'Prueba de nuevo con: “Excel de órdenes internas abiertas” o indica área (HyP/Servicio) y periodo.';
       } else if (out.exports.length && !/descarga|excel|xlsx/i.test(out.reply || '')) {
         const ex = out.exports[0];
         out.reply += `\n\n### Descarga\nExcel listo: **${ex.filename}** (${Number(ex.rowCount || 0).toLocaleString('es-MX')} filas). Usa el botón de descarga debajo.`;
@@ -223,7 +346,14 @@ async function runChat(messages) {
       toolsUsed.push(fnName);
       let toolResult;
       try {
-        toolResult = await executeTool(fnName, fnArgs);
+        if (!isToolAllowedForRole(roleId, fnName)) {
+          toolResult = {
+            error: `Herramienta "${fnName}" no permitida para tu perfil. Solo puedes consultar áreas autorizadas.`,
+            deniedByRole: true,
+          };
+        } else {
+          toolResult = await executeTool(fnName, fnArgs);
+        }
         toolSnapshots.push({ name: fnName, args: fnArgs, result: toolResult });
       } catch (err) {
         toolResult = { error: err.message };
@@ -238,7 +368,7 @@ async function runChat(messages) {
     }
   }
 
-  await ensureExcelExport(messages, toolSnapshots, toolsUsed);
+  await ensureExcelExport(messages, toolSnapshots, toolsUsed, roleId);
   return finalizeReply(
     lastResponse?.choices?.[0]?.message?.content
       || 'Alcancé el límite de consultas automáticas. Intenta una pregunta más específica.',

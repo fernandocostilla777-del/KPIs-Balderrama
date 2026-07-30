@@ -1257,6 +1257,12 @@
       case 'solicitudes': {
         const aprobadas = solicitudes.filter((s) => String(s.estatus || '').toUpperCase().startsWith('APROBADA')).length;
         const engancheTotal = solicitudes.reduce((acc, s) => acc + Number(s.enganche || 0), 0);
+        const bioLabel = (v) => {
+          const raw = String(v || '').trim().toUpperCase();
+          if (raw === 'SI' || raw === 'SÍ' || raw === 'YES') return 'Con biométrico';
+          if (raw === 'NO') return 'Sin biométrico';
+          return raw || 'n/d';
+        };
         return {
           title: 'Solicitudes de crédito (F&I)',
           value: num(solicitudes.length),
@@ -1268,6 +1274,20 @@
             ] },
             { titulo: 'Por estatus', rows: topN(countBy(solicitudes, (s) => s.estatus)).map((x) => ({ label: x.label, value: num(x.value) })) },
             { titulo: 'Por financiera', rows: topN(countBy(solicitudes, (s) => s.financiera)).map((x) => ({ label: x.label, value: num(x.value) })) },
+            {
+              titulo: 'Detalle de solicitudes',
+              rows: solicitudes.length
+                ? solicitudes.map((s) => ({
+                  label: [
+                    s.no_solicitud || 'Solicitud',
+                    s.estatus || '—',
+                    s.financiera || '—',
+                    bioLabel(s.biometrico),
+                  ].join(' · '),
+                  value: s.respuesta_financiera || 'Sin respuesta financiera',
+                }))
+                : [{ label: 'Sin solicitudes', value: '—' }],
+            },
           ],
         };
       }

@@ -6,7 +6,7 @@
 <title>Iniciar sesión | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=56" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=100" rel="stylesheet"/>
 </head>
 <body class="login-body">
 <main class="login-shell">
@@ -22,7 +22,12 @@
       </label>
       <label class="login-field">
         <span>Contraseña</span>
-        <input type="password" id="password" name="password" required autocomplete="current-password"/>
+        <div class="login-password-wrap">
+          <input type="password" id="password" name="password" required autocomplete="current-password"/>
+          <button type="button" class="login-password-toggle" id="btnTogglePassword" aria-label="Mostrar contraseña" aria-pressed="false" title="Mostrar contraseña">
+            <span class="material-symbols-outlined" data-password-icon>visibility</span>
+          </button>
+        </div>
       </label>
       <p id="loginError" class="login-error hidden" role="alert"></p>
       <button type="submit" class="login-submit" id="btnLogin">
@@ -33,6 +38,6 @@
   </section>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/login.js"></script>
+<script src="/js/login.js?v=2"></script>
 </body>
 </html>

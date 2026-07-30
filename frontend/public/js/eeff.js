@@ -1,4 +1,4 @@
-let activeCategoria = 'balanceGeneral';
+let activeCategoria = 'estadoFinanciero';
 let eeffData = null;
 let activeEeffKpi = null;
 let expandedDrillNodes = new Set();
@@ -17,6 +17,10 @@ function drillNode(id, label, value, opts = {}) {
 
 function drillHeader(label) {
   return { type: 'header', label };
+}
+
+function drillText(label, value) {
+  return { type: 'text', label, value };
 }
 
 function shortCuenta(cuenta) {
@@ -126,7 +130,21 @@ function buildVentasTotalesDrill(data) {
       ],
     }),
     drillNode('seminuevos', 'Ventas seminuevos', sem.ventas, {
-      children: branchPnlChildren(sem, 'seminuevos'),
+      highlight: true,
+      autoExpand: true,
+      children: [
+        ...(data.seminuevos?.branches || []).map((b) => drillNode(`sem-${b.id}`, b.label, b.ventas, {
+          children: [
+            drillRow('Costo de ventas', b.costo, { id: `sem-${b.id}-costo` }),
+            drillRow('Utilidad bruta', b.utilidadBruta, { id: `sem-${b.id}-ub`, highlight: true }),
+          ],
+        })),
+        drillRow('Costo total', sem.costo, { id: 'seminuevos-costo' }),
+        drillRow('Utilidad bruta', sem.utilidadBruta, { id: 'seminuevos-ub', highlight: true }),
+        drillRow('Gastos operación', sem.gastos, { id: 'seminuevos-gop' }),
+        drillRow('Gastos administración', sem.gastosAdministracion, { id: 'seminuevos-gad' }),
+        drillRow('Utilidad operación', sem.utilidadOperacion, { id: 'seminuevos-uo', highlight: true }),
+      ],
     }),
     drillNode('postventa', 'Ventas PostVenta', pv.summary?.ventas, {
       autoExpand: true,
@@ -143,92 +161,171 @@ function buildCostoDrill(data) {
   const sem = data.seminuevos?.summary || data.seminuevos || {};
 
   return [
-    drillNode('costoAutos', 'Autos nuevos', v.totalVentasAutos?.summary?.costo, {
+    drillNode('costoAutos', 'Costo autos nuevos', v.totalVentasAutos?.summary?.costo, {
+      highlight: true,
       autoExpand: true,
       children: [
-        drillRow('Menudeo', v.menudeo?.summary?.costo, { id: 'costo-menudeo' }),
-        ...(v.menudeo?.branches || []).map((b) => drillRow(b.label, b.costo, { id: `costo-${b.id}` })),
+        drillNode('costoMenudeo', 'Menudeo', v.menudeo?.summary?.costo, {
+          autoExpand: true,
+          children: (v.menudeo?.branches || []).map((b) => drillRow(b.label, b.costo, {
+            id: `costo-menudeo-${b.id}`,
+          })),
+        }),
         drillRow('Flotillas', v.flotillas?.summary?.costo, { id: 'costo-flotillas' }),
         drillRow('Intercambios', v.intercambios?.summary?.costo, { id: 'costo-intercambios' }),
       ],
     }),
-    drillRow('Seminuevos', sem.costo, { id: 'costo-seminuevos' }),
-    drillNode('costoPostventa', 'PostVenta', pv.summary?.costo, {
-      children: (pv.sections || []).map((sec) => drillRow(sec.label, sec.costo, { id: `costo-pv-${sec.id}` })),
+    drillNode('costoSeminuevos', 'Costo seminuevos', sem.costo, {
+      autoExpand: true,
+      children: (data.seminuevos?.branches || []).map((b) => drillRow(b.label, b.costo, {
+        id: `costo-sem-${b.id}`,
+      })),
+    }),
+    drillNode('costoPostventa', 'Costo PostVenta', pv.summary?.costo, {
+      autoExpand: true,
+      children: (pv.sections || []).map((sec) => drillRow(sec.label, sec.costo, {
+        id: `costo-pv-${sec.id}`,
+      })),
     }),
   ];
 }
 
-function buildBalanceKpiItems(data) {
-  const sections = data.balanceGeneral?.sections || [];
-  const accountsBySection = data.balanceGeneral?.accountsBySection || {};
-  const totals = data.balanceGeneral?.totals || {};
+function buildGastosDrill(data) {
+  const s = data.estadoFinanciero?.summary || {};
+  const v = data.ventas || {};
+  const pv = data.postventa || {};
+  const sem = data.seminuevos?.summary || data.seminuevos || {};
+  const depts = data.estadoFinanciero?.gastosPorDepartamento || [];
 
-  function accountsForSection(sectionKey) {
-    const rows = accountsBySection[sectionKey] || [];
-    if (rows.length) {
-      return rows.map((acc) => drillRow(`${shortCuenta(acc.cuenta)} · ${acc.label}`, acc.value, {
-        id: `acc-${acc.cuenta}`,
-      }));
-    }
-    return (data.balanceGeneral?.majorAccounts || [])
-      .filter((m) => m.sectionKey === sectionKey || m.group === sectionKey)
-      .map((m) => drillRow(`${shortCuenta(m.cuenta)} · ${m.label}`, m.value, {
-        id: `acc-${m.cuenta}`,
-      }));
+  const shortLabel = {
+    711: 'Piso',
+    712: 'Foráneos',
+    713: 'SuAuto',
+    714: 'Cholula',
+    715: 'Zacatelco',
+    716: 'Flotillas',
+    717: 'Intercambios',
+    718: 'Casa',
+    720: 'Seminuevos',
+    730: 'PostVenta (genérico)',
+    731: 'Servicio',
+    732: 'HYP',
+    733: 'Refacciones',
+  };
+  const deptLabel = (d) => shortLabel[String(d.gpoCont)] || d.label;
+
+  const autosGpos = new Set(['711', '712', '713', '714', '715', '716', '717', '718']);
+  const autosDepts = depts.filter((d) => autosGpos.has(String(d.gpoCont)));
+  const semDept = depts.find((d) => String(d.gpoCont) === '720');
+  const pvGen = depts.find((d) => String(d.gpoCont) === '730');
+  const servicio = depts.find((d) => String(d.gpoCont) === '731');
+  const hyp = depts.find((d) => String(d.gpoCont) === '732');
+  const refacciones = depts.find((d) => String(d.gpoCont) === '733');
+
+  const postventaChildren = [
+    ...(pvGen ? [drillRow(deptLabel(pvGen), pvGen.value, { id: 'gop-pv-gen' })] : []),
+    ...(servicio ? [drillRow(deptLabel(servicio), servicio.value, { id: 'gop-pv-serv' })] : []),
+    ...(refacciones ? [drillRow(deptLabel(refacciones), refacciones.value, { id: 'gop-pv-ref' })] : []),
+    ...(hyp ? [drillRow(deptLabel(hyp), hyp.value, { id: 'gop-pv-hyp' })] : []),
+  ];
+  if (!postventaChildren.length) {
+    postventaChildren.push(
+      ...(pv.sections || []).map((sec) => drillRow(sec.label, sec.gastos, {
+        id: `gop-pv-${sec.id}`,
+      })),
+    );
   }
 
-  function sectionDrilldown(pertenece) {
-    return sections.filter((s) => s.pertenece === pertenece).map((sec) => drillNode(sec.key, sec.label, sec.value, {
-      highlight: true,
-      children: accountsForSection(sec.key),
-    }));
-  }
+  const autosChildren = autosDepts.length
+    ? autosDepts.map((d) => drillRow(deptLabel(d), d.value, { id: `gop-auto-${d.gpoCont}` }))
+    : [drillRow('Autos nuevos', v.totalVentasAutos?.summary?.gastos, { id: 'gop-autos' })];
 
-  const capitalSec = sections.find((s) => s.key === 'capital');
-  const pasivoRows = sectionDrilldown('PASIVO');
+  const postventaTotal = postventaChildren.reduce((a, n) => a + (Number(n.value) || 0), 0)
+    || pv.summary?.gastos
+    || 0;
 
   return [
-    {
-      id: 'activoTotal',
-      label: 'Activo total',
-      value: totals.activoTotal,
-      icon: 'account_balance',
-      color: 'blue',
-      drilldown: sectionDrilldown('ACTIVO'),
-    },
-    {
-      id: 'pasivoTotal',
-      label: 'Pasivo total',
-      value: totals.pasivoTotal,
-      icon: 'credit_card',
-      color: 'slate',
-      drilldown: sectionDrilldown('PASIVO'),
-    },
-    {
-      id: 'capital',
-      label: 'Capital contable',
-      value: totals.capital,
-      icon: 'savings',
-      color: 'green',
-      drilldown: accountsForSection('capital').length
-        ? [drillNode('capital', sections.find((s) => s.key === 'capital')?.label || 'Capital contable', totals.capital, {
-          highlight: true,
-          children: accountsForSection('capital'),
-        })]
-        : [],
-    },
-    {
-      id: 'pasivoMasCapital',
-      label: 'Pasivo + capital',
-      value: totals.pasivoMasCapital,
-      icon: 'balance',
-      color: 'violet',
-      drilldown: [
-        ...pasivoRows,
-        ...(capitalSec ? [drillNode('cap-total', capitalSec.label, capitalSec.value, { highlight: true })] : []),
+    drillNode('gastosOp', 'Gastos de operación', s.gastosOperacion, {
+      highlight: true,
+      autoExpand: true,
+      children: [
+        drillNode('gopAutos', 'Autos nuevos', autosChildren.reduce((a, n) => a + (Number(n.value) || 0), 0)
+          || v.totalVentasAutos?.summary?.gastos, {
+          autoExpand: true,
+          children: autosChildren,
+        }),
+        drillRow(deptLabel(semDept || { gpoCont: '720', label: 'Seminuevos' }), semDept?.value ?? sem.gastos, { id: 'gop-sem' }),
+        drillNode('gopPostventa', 'PostVenta', postventaTotal, {
+          autoExpand: true,
+          children: postventaChildren,
+        }),
       ],
-    },
+    }),
+    drillRow('Gastos administración', s.gastosAdministracion, { id: 'gastos-admin' }),
+  ];
+}
+
+function buildUtilidadBrutaDrill(data) {
+  const s = data.estadoFinanciero?.summary || {};
+  const autos = data.ventas?.totalVentasAutos?.summary || {};
+  const sem = data.seminuevos?.summary || data.seminuevos || {};
+  const pv = data.postventa || {};
+
+  return [
+    drillNode('ubAutos', 'Utilidad bruta autos nuevos', autos.utilidadBruta, {
+      highlight: true,
+      autoExpand: true,
+      children: [
+        drillRow('Ventas', autos.ventas, { id: 'ub-autos-v' }),
+        drillRow('Costo', autos.costo, { id: 'ub-autos-c' }),
+      ],
+    }),
+    drillNode('ubSeminuevos', 'Utilidad bruta seminuevos', sem.utilidadBruta, {
+      highlight: true,
+      autoExpand: true,
+      children: [
+        ...(data.seminuevos?.branches || []).map((b) => drillRow(b.label, b.utilidadBruta, {
+          id: `ub-sem-${b.id}`,
+        })),
+        drillRow('Ventas', sem.ventas, { id: 'ub-sem-v' }),
+        drillRow('Costo', sem.costo, { id: 'ub-sem-c' }),
+      ],
+    }),
+    drillNode('ubPostventa', 'Utilidad bruta PostVenta', pv.summary?.utilidadBruta, {
+      highlight: true,
+      autoExpand: true,
+      children: [
+        ...(pv.sections || []).map((sec) => drillRow(sec.label, sec.utilidadBruta, {
+          id: `ub-pv-${sec.id}`,
+        })),
+        drillRow('Ventas', pv.summary?.ventas, { id: 'ub-pv-v' }),
+        drillRow('Costo', pv.summary?.costo, { id: 'ub-pv-c' }),
+      ],
+    }),
+    drillRow('Utilidad bruta total', s.utilidadBruta, { id: 'utilidad-bruta', highlight: true }),
+  ];
+}
+
+function buildPerdidaFinancieraDrill(data) {
+  const s = data.estadoFinanciero?.summary || {};
+  return [
+    drillRow('Productos financieros', s.productosFinancieros, { id: 'pf-productos' }),
+    drillRow('Gastos financieros', s.gastosFinancieros, { id: 'pf-gastos' }),
+    drillRow('Intereses Plan Piso', s.interesesPlanPiso, { id: 'pf-plan-piso' }),
+    drillRow('Intereses moratorios', s.interesesMoratorios, { id: 'pf-moratorios' }),
+    drillRow('Pérdida financiera', s.perdidaFinanciera, { id: 'pf-total', highlight: true }),
+  ];
+}
+
+function buildFinancieroDrill(data) {
+  const s = data.estadoFinanciero?.summary || {};
+
+  return [
+    drillRow('Productos financieros', s.productosFinancieros, { id: 'fin-pf' }),
+    drillRow('Gastos financieros', s.gastosFinancieros, { id: 'fin-gf' }),
+    drillRow('Intereses Plan Piso', s.interesesPlanPiso, { id: 'fin-plan-piso' }),
+    drillRow('Intereses moratorios', s.interesesMoratorios, { id: 'fin-moratorios' }),
+    drillRow('Pérdida financiera', s.perdidaFinanciera, { id: 'fin-resultado', highlight: true }),
   ];
 }
 
@@ -245,23 +342,35 @@ function buildEdoFinKpiItems(data) {
       drilldown: buildVentasTotalesDrill(data),
     },
     {
+      id: 'costosTotales',
+      label: 'Costos totales',
+      value: s.costoTotal,
+      icon: 'shopping_cart',
+      color: 'rose',
+      sub: s.ventasTotales
+        ? `${Number(((Number(s.costoTotal || 0) / Number(s.ventasTotales)) * 100).toFixed(1))}% de ventas`
+        : 'Costo de ventas',
+      drilldown: buildCostoDrill(data),
+    },
+    {
       id: 'utilidadBruta',
       label: 'Utilidad bruta',
       value: s.utilidadBruta,
       icon: 'savings',
       color: 'green',
       sub: `${s.margenBrutoPct ?? 0}% margen`,
-      drilldown: [
-        drillNode('ingresos', 'Total ventas', s.ventasTotales, {
-          autoExpand: true,
-          children: buildVentasTotalesDrill(data),
-        }),
-        drillNode('costos', 'Costo de ventas', s.costoTotal, {
-          autoExpand: true,
-          children: buildCostoDrill(data),
-        }),
-        drillRow('Utilidad bruta', s.utilidadBruta, { id: 'utilidad-bruta', highlight: true }),
-      ],
+      drilldown: buildUtilidadBrutaDrill(data),
+    },
+    {
+      id: 'gastosTotales',
+      label: 'Gastos totales',
+      value: s.sumaGastos,
+      icon: 'payments',
+      color: 'amber',
+      sub: s.ventasTotales
+        ? `${Number(((Number(s.sumaGastos || 0) / Number(s.ventasTotales)) * 100).toFixed(1))}% de ventas`
+        : 'Operación + administración',
+      drilldown: buildGastosDrill(data),
     },
     {
       id: 'utilidadOperacion',
@@ -272,19 +381,21 @@ function buildEdoFinKpiItems(data) {
       sub: `${s.margenOperacionPct ?? 0}% margen`,
       drilldown: [
         drillRow('Utilidad bruta', s.utilidadBruta, { id: 'uo-ub', highlight: true }),
-        drillNode('gastosOp', 'Gastos de operación', s.gastosOperacion, {
+        drillNode('gastos', 'Suma gastos', s.sumaGastos, {
           autoExpand: true,
-          children: [
-            drillRow('Autos nuevos', data.ventas?.totalVentasAutos?.summary?.gastos, { id: 'gop-autos' }),
-            drillRow('Seminuevos', data.seminuevos?.summary?.gastos || data.seminuevos?.gastos, { id: 'gop-sem' }),
-            drillRow('PostVenta', data.postventa?.summary?.gastos, { id: 'gop-pv' }),
-            ...(data.postventa?.sections || []).map((sec) => drillRow(sec.label, sec.gastos, { id: `gop-${sec.id}` })),
-          ],
+          children: buildGastosDrill(data),
         }),
-        drillRow('Gastos administración', s.gastosAdministracion, { id: 'uo-gad' }),
-        drillRow('Suma gastos', s.sumaGastos, { id: 'uo-sg', highlight: true }),
         drillRow('Utilidad operación', s.utilidadOperacion, { id: 'uo-total', highlight: true }),
       ],
+    },
+    {
+      id: 'perdidaFinanciera',
+      label: 'Pérdida financiera',
+      value: s.perdidaFinanciera,
+      icon: 'account_balance',
+      color: Number(s.perdidaFinanciera || 0) < 0 ? 'rose' : 'green',
+      sub: 'Productos − gastos e intereses',
+      drilldown: buildPerdidaFinancieraDrill(data),
     },
     {
       id: 'utilidad',
@@ -296,7 +407,7 @@ function buildEdoFinKpiItems(data) {
         drillRow('Utilidad operación', s.utilidadOperacion, { id: 'u-uo', highlight: true }),
         drillRow('Productos financieros', s.productosFinancieros, { id: 'u-pf' }),
         drillRow('Gastos financieros', s.gastosFinancieros, { id: 'u-gf' }),
-        drillRow('Utilidad financiera', s.utilidadFinanciera, { id: 'u-uf' }),
+        drillRow('Utilidad financiera', s.utilidadFinanciera, { id: 'u-uf', highlight: true }),
         drillRow('Utilidad', s.utilidad, { id: 'u-total', highlight: true }),
       ],
     },
@@ -480,6 +591,17 @@ function buildComparativaKpiItems(cmp) {
       drilldown: ventasTree,
     },
     {
+      id: 'costosTotales',
+      label: 'Costos totales',
+      value: s.costoTotal?.real,
+      icon: 'shopping_cart',
+      color: 'rose',
+      sub: `PPTO · ${s.costoTotal?.variacionPct ?? 0}%`,
+      drilldown: cmpDrill([
+        ['costoTotal', 'Costo de ventas'],
+      ]),
+    },
+    {
       id: 'utilidadBruta',
       label: 'Utilidad bruta',
       value: s.utilidadBruta?.real,
@@ -488,7 +610,21 @@ function buildComparativaKpiItems(cmp) {
       sub: `Var. ${s.utilidadBruta?.variacion ?? 0}`,
       drilldown: cmpDrill([
         ['ventasTotales', 'Ventas totales'],
+        ['costoTotal', 'Costo de ventas'],
         ['utilidadBruta', 'Utilidad bruta'],
+      ]),
+    },
+    {
+      id: 'gastosTotales',
+      label: 'Gastos totales',
+      value: s.sumaGastos?.real,
+      icon: 'payments',
+      color: 'amber',
+      sub: `PPTO · ${s.sumaGastos?.variacionPct ?? 0}%`,
+      drilldown: cmpDrill([
+        ['gastosOperacion', 'Gastos de operación'],
+        ['gastosAdministracion', 'Gastos administración'],
+        ['sumaGastos', 'Suma gastos'],
       ]),
     },
     {
@@ -746,7 +882,6 @@ function renderEeffKpiDetail(detailPanelId, gridId, items, fmt) {
 
 function renderKpiGrid(containerId, items, fmt) {
   const detailMap = {
-    kpiBalance: 'eeffKpiDetailBalance',
     kpiEdoFin: 'eeffKpiDetailEdoFin',
     kpiVentas: 'eeffKpiDetailVentas',
     kpiPostventa: 'eeffKpiDetailPostventa',
@@ -861,34 +996,6 @@ function renderPostventaTable(data, fmt) {
         <td class="cell-money"><strong>${fmt.money(s.utilidadOperacion)}</strong></td>
         <td class="cell-num"><strong>${s.margenOperacionPct}%</strong></td>
       </tr>`;
-  }
-}
-
-function renderBalance(data, fmt) {
-  const totals = data.balanceGeneral?.totals || {};
-  renderKpiGrid('kpiBalance', buildBalanceKpiItems(data), fmt);
-  renderLinesTable('balanceSectionsTable', data.balanceGeneral?.lines, fmt);
-
-  const foot = document.getElementById('balanceSectionsFoot');
-  if (foot && totals.ecuacionDiferencia != null) {
-    foot.innerHTML = `
-      <tr>
-        <td>Diferencia ecuación contable</td>
-        <td class="cell-money ${moneyClass(totals.ecuacionDiferencia)}">${fmt.money(totals.ecuacionDiferencia)}</td>
-      </tr>`;
-  }
-
-  const major = document.getElementById('balanceMajorTable');
-  if (major) {
-    const lines = data.balanceGeneral?.majorAccounts || [];
-    major.innerHTML = lines.length
-      ? lines.map((r) => `
-        <tr>
-          <td class="cell-num">${r.cuenta}</td>
-          <td>${r.label}</td>
-          <td class="cell-money ${moneyClass(r.value)}">${fmt.money(r.value)}</td>
-        </tr>`).join('')
-      : '<tr class="empty-row"><td colspan="3">Sin cuentas mayor con saldo.</td></tr>';
   }
 }
 
@@ -1064,7 +1171,6 @@ function switchCategoria(categoria) {
 
 function renderAll(data) {
   const { fmt } = Dashboard;
-  renderBalance(data, fmt);
   renderEdoFin(data, fmt);
   renderVentas(data, fmt);
   renderPostventa(data, fmt);

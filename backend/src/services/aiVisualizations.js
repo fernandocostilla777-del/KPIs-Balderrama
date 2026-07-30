@@ -1392,6 +1392,134 @@ const BUILDERS = {
     if (chart) blocks.splice(1, 0, chart);
     return blocks.filter(Boolean);
   },
+  consultar_financiamiento: (data) => {
+    if (!data?.available) {
+      return [insightCard('warn', 'F&I', data?.reason || 'Sin base CRM de financiamiento')].filter(Boolean);
+    }
+    const blocks = [];
+    const mod = data.modalidad?.aplicada || 'todos';
+    const modLabel = mod === 'leasing' ? 'Leasing' : mod === 'credito' ? 'Crédito' : 'F&I';
+    const p = data.periodo || {};
+    const r = data.resumen || {};
+    const lider = data.lider;
+
+    blocks.push(kpiRow(`${modLabel} · ${p.key || 'periodo'}`, [
+      kpiItem('Contratos', fmtNum(r.contratos), {
+        icon: 'description',
+        sub: `${p.fechaInicio || '—'} → ${p.fechaFin || '—'}`,
+      }),
+      kpiItem('Crédito (periodo)', fmtNum(r.creditoEnPeriodo), { icon: 'credit_card' }),
+      kpiItem('Leasing (periodo)', fmtNum(r.leasingEnPeriodo), { icon: 'key' }),
+      kpiItem('Líder', lider?.asesor || '—', {
+        icon: 'emoji_events',
+        sub: lider ? `${fmtNum(lider.contratos)} contratos` : 'sin datos',
+      }),
+    ]));
+
+    const ranking = Array.isArray(data.rankingAsesores) ? data.rankingAsesores : [];
+    if (ranking.length) {
+      const chart = barChart(
+        `Top asesores · ${modLabel}`,
+        ranking.slice(0, 8).map((a) => ({ label: a.asesor, count: Number(a.contratos || 0) })),
+        { horizontal: true, seriesLabel: 'Contratos' },
+      );
+      if (chart) blocks.push(chart);
+      const table = dataTable(
+        'Ranking asesores F&I',
+        ['#', 'Asesor', 'Contratos', '%'],
+        ranking.slice(0, 10).map((a) => [
+          a.rank,
+          a.asesor,
+          fmtNum(a.contratos),
+          a.pct != null ? `${a.pct}%` : '—',
+        ]),
+      );
+      if (table) blocks.push(table);
+    }
+
+    const sugeridos = Array.isArray(data.periodosSugeridos) ? data.periodosSugeridos : [];
+    if (sugeridos.length) {
+      blocks.push(insightCard(
+        'info',
+        'Periodos sugeridos',
+        sugeridos.map((s) => {
+          const top = s.topAsesor ? ` · líder ${s.topAsesor.asesor} (${s.topAsesor.contratos})` : '';
+          return `${s.label}: ${fmtNum(s.contratos)} contratos${top}`;
+        }).join(' · '),
+      ));
+    }
+
+    return blocks.filter(Boolean);
+  },
+  consultar_utilidad_carline: (data) => {
+    if (!data?.available) {
+      return [insightCard('warn', 'Utilidad carline', data?.reason || 'Sin datos')].filter(Boolean);
+    }
+    const blocks = [];
+    const p = data.periodo || {};
+    const r = data.resumen || {};
+    const lider = data.lider;
+    const rows = Array.isArray(data.porCarline) ? data.porCarline : [];
+
+    blocks.push(kpiRow(`Utilidad por carline · ${p.label || p.key || 'periodo'}`, [
+      kpiItem('Carlines', fmtNum(r.carlines), {
+        icon: 'directions_car',
+        sub: `${p.fechaInicio || '—'} → ${p.fechaFin || '—'}`,
+      }),
+      kpiItem('Unidades', fmtNum(r.unidades), { icon: 'inventory_2' }),
+      kpiItem('Utilidad total', fmtMoney(r.utilidadTotal), { icon: 'savings' }),
+      kpiItem('Top versión', lider?.version || '—', {
+        icon: 'emoji_events',
+        sub: lider
+          ? `${lider.carline} · margen ${lider.margenBrutoPct != null ? `${lider.margenBrutoPct}%` : '—'}`
+          : 'sin datos',
+      }),
+    ]));
+
+    if (rows.length) {
+      const chart = barChart(
+        'Mejor utilidad promedio por carline',
+        rows.slice(0, 10).map((c) => ({
+          label: c.carline,
+          count: Number(c.mejorVersion?.utilidadPromedio || 0),
+        })),
+        { horizontal: true, seriesLabel: 'Utilidad prom.' },
+      );
+      if (chart) blocks.push(chart);
+
+      const table = dataTable(
+        'Mejor versión por carline',
+        ['Carline', 'Versión', 'Uds', 'Util. prom.', 'Margen bruto'],
+        rows.slice(0, 15).map((c) => {
+          const m = c.mejorVersion || {};
+          return [
+            c.carline,
+            m.version || '—',
+            fmtNum(m.unidades),
+            fmtMoney(m.utilidadPromedio),
+            m.margenBrutoPct != null ? `${m.margenBrutoPct}%` : '—',
+          ];
+        }),
+      );
+      if (table) blocks.push(table);
+    }
+
+    const sugeridos = Array.isArray(data.periodosSugeridos) ? data.periodosSugeridos : [];
+    if (sugeridos.length) {
+      blocks.push(insightCard(
+        'info',
+        'Periodos sugeridos',
+        sugeridos.map((s) => {
+          const t = s.topVersion
+            ? ` · top ${s.topVersion.carline}: ${s.topVersion.version} (${s.topVersion.margenBrutoPct}% MB)`
+            : '';
+          return `${s.label}${t}`;
+        }).join(' · '),
+      ));
+    }
+
+    return blocks.filter(Boolean);
+  },
   resumen_vendedor_360: (data) => {
     if (!data?.vendedor) return [];
     const t = data.totales || {};

@@ -1,10 +1,5 @@
 const { loadOrders, loadOpenSnapshot, loadOrderDetail, loadMesCursoNomenclatura } = require('./postSalesLoad');
-const {
-  AREA_LETRAS,
-  filterRecords,
-  countByLetter,
-  matchesArea,
-} = require('./postSalesOrderTypes');
+const { AREA_LETRAS, filterRecords, countByLetter, resolveNomenclatura } = require('./postSalesOrderTypes');
 
 function toIsoDate(d) {
   const y = d.getFullYear();
@@ -63,14 +58,21 @@ function sumImporte(rows, field = 'importe') {
  * area: servicio | hyp | posventa
  * estatus: abiertas | facturadas | canceladas | todas
  */
-function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) {
+function summarizePostSales(raw, { area = 'posventa', estatus = 'todas', tipo = null } = {}) {
   const areaKey = normalizeArea(area);
   const estatusKey = normalizeEstatus(estatus);
-  const records = filterRecords(raw.records || [], { area: areaKey, estatus: estatusKey });
-  const openInPeriod = filterRecords(raw.records || [], { area: areaKey, estatus: 'abiertas' });
-  const factInPeriod = filterRecords(raw.records || [], { area: areaKey, estatus: 'facturadas' });
+  const tipoKey = tipo || null;
+  const nomen = resolveNomenclatura(tipoKey);
+  const openBase = filterRecords(raw.openSnapshot || [], { area: areaKey, estatus: 'abiertas', tipo: tipoKey });
+  // “Abiertas” sin periodo (o pidiendo snapshot) → backlog actual; con periodo → abiertas del periodo
+  const useOpenSnap = estatusKey === 'abiertas' && (!raw.filtros?.fechaInicio || !raw.filtros?.fechaFin || raw.useOpenSnapshot);
+  const records = useOpenSnap
+    ? openBase
+    : filterRecords(raw.records || [], { area: areaKey, estatus: estatusKey, tipo: tipoKey });
+  const openInPeriod = filterRecords(raw.records || [], { area: areaKey, estatus: 'abiertas', tipo: tipoKey });
+  const factInPeriod = filterRecords(raw.records || [], { area: areaKey, estatus: 'facturadas', tipo: tipoKey });
 
-  const openSnapArea = (raw.openSnapshot || []).filter((r) => matchesArea(r, areaKey));
+  const openSnapArea = openBase;
   const { fechaInicio, fechaFin } = raw.filtros || {};
   const openSnapInPeriod = openSnapArea.filter((r) => {
     const d = String(r.ingresoDate || r.ingreso || '').slice(0, 10);
@@ -114,6 +116,10 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) 
       fechaFin,
       area: areaKey,
       estatus: estatusKey,
+      tipo: nomen?.id || tipoKey || 'todas',
+      nomenclatura: nomen
+        ? { id: nomen.id, label: nomen.label, letras: nomen.letras }
+        : null,
       letrasArea: AREA_LETRAS[areaKey] || null,
     },
     fuente: 'SER_ORDEN',
@@ -124,9 +130,14 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) 
           : areaKey === 'servicio'
             ? 'Servicio: folios C, D, G, I, K, N, O, Q, S, X, Y, Á, M, E, R'
             : 'PostVenta completa (Servicio + HyP)',
+      tipo: nomen
+        ? `${nomen.label}: letras ${nomen.letras.join(', ')}`
+        : 'Todas las nomenclaturas del área',
       estatus:
         estatusKey === 'abiertas'
-          ? 'Órdenes abiertas (estatus A/T/D/P)'
+          ? (useOpenSnap
+            ? 'Órdenes abiertas actuales (snapshot A/T/D/P)'
+            : 'Órdenes abiertas del periodo (estatus A/T/D/P)')
           : estatusKey === 'facturadas'
             ? 'Órdenes facturadas (estatus I)'
             : estatusKey === 'canceladas'
@@ -138,13 +149,13 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) 
     },
     resumen: {
       totalFiltrado: filtradas.length,
-      ingresadasAreaPeriodo: filterRecords(raw.records || [], { area: areaKey, estatus: 'todas' }).length,
+      ingresadasAreaPeriodo: filterRecords(raw.records || [], { area: areaKey, estatus: 'todas', tipo: tipoKey }).length,
       abiertasEnPeriodo: openInPeriod.length,
       facturadasEnPeriodo: factInPeriod.length,
       abiertasActualesDelArea: openSnapArea.length,
       abiertasActualesDelPeriodo: openSnapInPeriod.length,
       importeFiltrado: Math.round(sumImporte(filtradas) * 100) / 100,
-      importeAbierto: Math.round(sumImporte(openInPeriod, 'importeAbierto') * 100) / 100,
+      importeAbierto: Math.round(sumImporte(useOpenSnap ? filtradas : openInPeriod, 'importeAbierto') * 100) / 100,
       importeFacturado: Math.round(sumImporte(factInPeriod, 'importeFacturado') * 100) / 100,
       pctFacturado: filtradas.length
         ? Math.round((factInPeriod.length / filtradas.length) * 10000) / 100
@@ -171,7 +182,32 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas' } = {}) 
   };
 }
 
-async function getPostSales({ fechaInicio, fechaFin, area, estatus } = {}) {
+async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo } = {}) {
+  const estatusKey = normalizeEstatus(estatus);
+  const areaKey = normalizeArea(area);
+  const wantsOpenSnap = estatusKey === 'abiertas' && (!fechaInicio || !fechaFin);
+
+  if (wantsOpenSnap) {
+    const openSnapshot = await loadOpenSnapshot();
+    const raw = {
+      filtros: { fechaInicio: null, fechaFin: null },
+      fuente: 'SER_ORDEN',
+      records: [],
+      recordsYtd: [],
+      openSnapshot,
+      useOpenSnapshot: true,
+      total: 0,
+      openTotal: openSnapshot.length,
+    };
+    return summarizePostSales(raw, { area: areaKey, estatus: 'abiertas', tipo });
+  }
+
+  if (!fechaInicio || !fechaFin) {
+    const ytd = ytdRange(fechaFin);
+    fechaInicio = fechaInicio || ytd.fechaInicio;
+    fechaFin = fechaFin || ytd.fechaFin;
+  }
+
   const ytd = ytdRange(fechaFin);
   const periodIsYtd = sameRange(fechaInicio, fechaFin, ytd.fechaInicio, ytd.fechaFin);
 
@@ -205,9 +241,9 @@ async function getPostSales({ fechaInicio, fechaFin, area, estatus } = {}) {
     openTotal: openSnapshot.length,
   };
 
-  // Asistente IA: siempre devolver resumen compacto filtrable por área/estatus.
-  if (area || estatus) {
-    return summarizePostSales(raw, { area, estatus });
+  // Asistente IA: siempre devolver resumen compacto filtrable por área/estatus/tipo.
+  if (area || estatus || tipo) {
+    return summarizePostSales(raw, { area: areaKey, estatus: estatusKey, tipo });
   }
 
   return raw;

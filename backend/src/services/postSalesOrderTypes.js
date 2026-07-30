@@ -30,7 +30,85 @@ const AREA_LETRAS = {
   hyp: ['A', 'F', 'H', 'J', 'V', 'Z', 'Ó'],
 };
 
+/** Folios de órdenes internas (Servicio + HyP). */
+const INTERNAS_LETRAS = new Set(['I', 'J', 'Ó', 'M', 'H', 'O']);
+
+/**
+ * Grupos de nomenclatura que el usuario puede pedir en lenguaje natural.
+ * Cada grupo lista letras + alias (sin acentos / plurales).
+ */
+const NOMENCLATURA_GRUPOS = [
+  {
+    id: 'internas',
+    label: 'Internas',
+    letras: ['I', 'J', 'Ó', 'M', 'H', 'O'],
+    aliases: ['interna', 'internas', 'interno', 'internos'],
+  },
+  {
+    id: 'normales',
+    label: 'Normales',
+    letras: ['N', 'Y', 'Q'],
+    aliases: ['normal', 'normales', 'norma'],
+  },
+  {
+    id: 'reparacion',
+    label: 'Reparación',
+    letras: ['D', 'X', 'C'],
+    aliases: ['reparacion', 'reparación', 'reparaciones', 'reparar'],
+  },
+  {
+    id: 'garantias',
+    label: 'Garantías',
+    letras: ['G'],
+    aliases: ['garantia', 'garantía', 'garantias', 'garantías'],
+  },
+  {
+    id: 'aseguradoras',
+    label: 'Aseguradoras',
+    letras: ['A', 'F', 'V'],
+    aliases: ['aseguradora', 'aseguradoras', 'seguro', 'seguros'],
+  },
+  {
+    id: 'particulares',
+    label: 'Particulares Body 31',
+    letras: ['Z'],
+    aliases: ['particular', 'particulares', 'body31', 'body 31'],
+  },
+  {
+    id: 'empleados',
+    label: 'Empleados',
+    letras: ['E'],
+    aliases: ['empleado', 'empleados'],
+  },
+  {
+    id: 'flotilla',
+    label: 'Flotilla',
+    letras: ['Á'],
+    aliases: ['flotilla', 'flotillas'],
+  },
+  {
+    id: 'previas',
+    label: 'Previas',
+    letras: ['S'],
+    aliases: ['previa', 'previas'],
+  },
+  {
+    id: 'reclamaciones',
+    label: 'Reclamaciones',
+    letras: ['R'],
+    aliases: ['reclamacion', 'reclamación', 'reclamaciones'],
+  },
+];
+
 const OPEN_STATUSES = new Set(['A', 'T', 'D', 'P']);
+
+function stripAccents(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
 
 function firstLetter(orden) {
   const s = String(orden || '').trim();
@@ -50,6 +128,94 @@ function matchesArea(record, area) {
   const letras = AREA_LETRAS[key];
   if (!letras) return true;
   return new Set(letras).has(letterOfRecord(record));
+}
+
+function findNomenclaturaGroup(tipo) {
+  const raw = String(tipo || '').trim();
+  if (!raw) return null;
+  const key = stripAccents(raw);
+  if (!key || key === 'todas' || key === 'all' || key === 'posventa') return null;
+
+  for (const g of NOMENCLATURA_GRUPOS) {
+    if (g.id === key || stripAccents(g.label) === key) return g;
+    if (g.aliases.some((a) => stripAccents(a) === key)) return g;
+  }
+  return null;
+}
+
+/**
+ * Resuelve un tipo/nomenclatura a letras concretas.
+ * Acepta: "normales", "internas", "N", "N,Y,Q", "Normal Cholula", etc.
+ * @returns {{ id: string|null, label: string, letras: string[] } | null}
+ */
+function resolveNomenclatura(tipo) {
+  const raw = String(tipo || '').trim();
+  if (!raw) return null;
+  const key = stripAccents(raw);
+  if (!key || key === 'todas' || key === 'all' || key === 'posventa') return null;
+
+  const group = findNomenclaturaGroup(raw);
+  if (group) {
+    return { id: group.id, label: group.label, letras: group.letras.slice() };
+  }
+
+  // Lista de letras: "N,Y,Q" o "N Y Q" (solo tokens de 1 carácter)
+  if (/[,\s]/.test(raw)) {
+    const tokens = raw.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+    if (tokens.length > 1 && tokens.every((t) => t.length === 1)) {
+      const letras = [...new Set(tokens.map((x) => x.toUpperCase()))];
+      return {
+        id: 'letras',
+        label: `Letras ${letras.join(', ')}`,
+        letras,
+      };
+    }
+  }
+
+  // Una sola letra
+  if (raw.length === 1) {
+    const L = raw.toUpperCase();
+    return {
+      id: L,
+      label: TIPO_POR_LETRA[L] || `Tipo ${L}`,
+      letras: [L],
+    };
+  }
+
+  // Coincidencia con etiqueta de letra (ej. "Normal Cholula" → Y)
+  const exactLabel = [];
+  const partialLabel = [];
+  for (const [letra, label] of Object.entries(TIPO_POR_LETRA)) {
+    const lab = stripAccents(label);
+    if (lab === key) exactLabel.push(letra);
+    else if (lab.includes(key) || key.includes(lab)) partialLabel.push(letra);
+  }
+  const matched = exactLabel.length ? exactLabel : partialLabel;
+  if (matched.length) {
+    return {
+      id: key,
+      label: matched.map((L) => TIPO_POR_LETRA[L]).join(' · '),
+      letras: matched,
+    };
+  }
+
+  return null;
+}
+
+function normalizeTipo(tipo) {
+  const resolved = resolveNomenclatura(tipo);
+  if (!resolved) return null;
+  return resolved.id || stripAccents(tipo);
+}
+
+function isInterna(record) {
+  return INTERNAS_LETRAS.has(letterOfRecord(record));
+}
+
+function matchesTipo(record, tipo) {
+  const resolved = resolveNomenclatura(tipo);
+  if (!resolved || !resolved.letras.length) return true;
+  return resolved.letras.includes(letterOfRecord(record));
 }
 
 function isOpen(record) {
@@ -72,8 +238,10 @@ function matchesEstatus(record, estatus) {
   return String(record?.status || '').trim().toUpperCase() === key.toUpperCase();
 }
 
-function filterRecords(records, { area = 'posventa', estatus = 'todas' } = {}) {
-  return (records || []).filter((r) => matchesArea(r, area) && matchesEstatus(r, estatus));
+function filterRecords(records, { area = 'posventa', estatus = 'todas', tipo = null } = {}) {
+  return (records || []).filter(
+    (r) => matchesArea(r, area) && matchesEstatus(r, estatus) && matchesTipo(r, tipo),
+  );
 }
 
 function countByLetter(records) {
@@ -91,16 +259,32 @@ function countByLetter(records) {
     .sort((a, b) => b.total - a.total);
 }
 
+/** Texto corto para prompts / respuestas IA. */
+function nomenclaturaHelpText() {
+  return NOMENCLATURA_GRUPOS.map(
+    (g) => `${g.label} (${g.letras.join(', ')})`,
+  ).join(' · ');
+}
+
 module.exports = {
   TIPO_POR_LETRA,
   AREA_LETRAS,
+  INTERNAS_LETRAS,
+  NOMENCLATURA_GRUPOS,
   OPEN_STATUSES,
   firstLetter,
   letterOfRecord,
   matchesArea,
+  findNomenclaturaGroup,
+  resolveNomenclatura,
+  normalizeTipo,
+  isInterna,
+  matchesTipo,
   isOpen,
   isFacturada,
   matchesEstatus,
   filterRecords,
   countByLetter,
+  nomenclaturaHelpText,
+  stripAccents,
 };

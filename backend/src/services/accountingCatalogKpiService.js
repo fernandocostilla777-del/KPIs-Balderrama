@@ -258,8 +258,32 @@ async function sumGpoLine(segments, groups) {
 }
 
 async function sumDepartmentGasto(segments, dept) {
-  // CTA_GPOCONT es la fuente autoritativa en CON_CTAS; el Excel define el grupo por departamento.
-  return sumGpoLine(segments, [dept.gpoCont]);
+  // Lista Contpaq por departamento, restringida a CTA_GPOCONT del depto
+  // (evita inflar con productos financieros 81x/82x que aparecen en las capturas).
+  return sumAcrossSegments(segments, async (table, ms, me) => {
+    const accounts = dept.accounts || [];
+    if (!accounts.length) {
+      return sumByGpoCont(table, ms, me, [dept.gpoCont]);
+    }
+    const mov = movementExpr(ms, me);
+    const sign = expenseExpr(mov);
+    let total = 0;
+    for (let i = 0; i < accounts.length; i += 80) {
+      const batch = accounts.slice(i, i + 80);
+      const params = { gpo: String(dept.gpoCont) };
+      const ph = batch.map((_, j) => `@a${j}`).join(', ');
+      batch.forEach((acc, j) => { params[`a${j}`] = acc; });
+      const rows = await query(`
+        SELECT SUM(${sign}) AS total
+        FROM [${table}]
+        WHERE CTA_ACUMDET = '${ACUM_DET}'
+          AND CTA_GPOCONT = @gpo
+          AND CTA_NUMCTA IN (${ph})
+      `, params);
+      total += Number(rows[0]?.total || 0);
+    }
+    return total;
+  });
 }
 
 async function buildDepartmentExpenseLines(segments, sucursal, area) {

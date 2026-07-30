@@ -1,10 +1,13 @@
 let selectedDailyFecha = null;
 let activeMainTab = 'catalogo';
+let bgKpiState = { items: [], activeId: null, fmt: null };
 
 function getMainTabFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const tab = params.get('tab');
-  return tab === 'eeff' ? 'eeff' : 'catalogo';
+  if (tab === 'eeff') return 'eeff';
+  if (tab === 'balance') return 'balance';
+  return 'catalogo';
 }
 
 function switchMainTab(tab) {
@@ -13,6 +16,7 @@ function switchMainTab(tab) {
     el.classList.toggle('active', el.dataset.tab === tab);
   });
   document.getElementById('panelContabilidadCatalogo')?.classList.toggle('hidden', tab !== 'catalogo');
+  document.getElementById('panelContabilidadBalance')?.classList.toggle('hidden', tab !== 'balance');
   document.getElementById('panelContabilidadEeff')?.classList.toggle('hidden', tab !== 'eeff');
   const scopePill = document.getElementById('pillScope');
   if (scopePill) scopePill.style.display = tab === 'eeff' ? 'none' : '';
@@ -30,7 +34,7 @@ function switchMainTab(tab) {
   }
 
   const url = new URL(window.location.href);
-  if (tab === 'eeff') url.searchParams.set('tab', 'eeff');
+  if (tab === 'eeff' || tab === 'balance') url.searchParams.set('tab', tab);
   else url.searchParams.delete('tab');
   window.history.replaceState({}, '', url.pathname + url.search);
 }
@@ -46,6 +50,12 @@ function formatKpiAmount(value) {
   const n = Number(value) || 0;
   if (Math.abs(n) >= 1_000_000) return Dashboard.fmt.currency(n);
   return Dashboard.fmt.money(n);
+}
+
+/** Importes completos (sin $313.0M) — Balance General */
+function formatFullMoney(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  return Dashboard.fmt.money(value);
 }
 
 function setSignedKpi(valueId, cardId, value, subId, subText, marginPct) {
@@ -183,19 +193,451 @@ function renderBalanceTable(balance, fmt) {
   `).join('');
 }
 
+function sectionValue(bg, key) {
+  return (bg?.sections || []).find((s) => s.key === key)?.value ?? null;
+}
+
+function formatRatio(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return n.toFixed(2);
+}
+
+function bgAccountsAsRows(accounts) {
+  return (accounts || [])
+    .filter((a) => Math.abs(Number(a.value || 0)) > 0.005)
+    .map((a) => ({
+      cuenta: a.cuenta,
+      label: a.label,
+      value: Number(a.value || 0),
+    }));
+}
+
+function buildBgKpiItems(bg) {
+  if (!bg?.available) return [];
+  const by = bg.accountsBySection || {};
+  const L = bg.liquidez || {};
+  const sec = (key) => by[key] || [];
+  const secLabel = (key) => (bg.sections || []).find((s) => s.key === key)?.label || key;
+
+  const activoCirc = bgAccountsAsRows(sec('activoCirculante'));
+  const activoFijo = bgAccountsAsRows(sec('activoFijo'));
+  const activoDif = bgAccountsAsRows(sec('activoDiferido'));
+  const pasivoCp = bgAccountsAsRows(sec('pasivoCortoPlazo'));
+  const pasivoLp = bgAccountsAsRows(sec('pasivoLargoPlazo'));
+  const capital = bgAccountsAsRows(sec('capital'));
+
+  const items = [
+    {
+      id: 'activoCirculante',
+      label: 'Activo circulante',
+      value: sectionValue(bg, 'activoCirculante'),
+      icon: 'account_balance_wallet',
+      color: 'blue',
+      sub: 'Caja, bancos, CxC, inventarios…',
+      hint: 'Cuentas mayor de activo circulante · saldo Contpaq',
+      groups: [{ title: secLabel('activoCirculante'), rows: activoCirc }],
+    },
+    {
+      id: 'activoFijo',
+      label: 'Activo fijo',
+      value: sectionValue(bg, 'activoFijo'),
+      icon: 'precision_manufacturing',
+      color: 'slate',
+      sub: 'Equipo neto de depreciaciones',
+      hint: 'Activo fijo y depreciaciones acumuladas',
+      groups: [{ title: secLabel('activoFijo'), rows: activoFijo }],
+    },
+    {
+      id: 'activoDiferido',
+      label: 'Activo diferido',
+      value: sectionValue(bg, 'activoDiferido'),
+      icon: 'pending',
+      color: 'violet',
+      sub: 'Inversiones y seguros anticipados',
+      hint: 'Cuentas de activo diferido',
+      groups: [{ title: secLabel('activoDiferido'), rows: activoDif }],
+    },
+    {
+      id: 'activoTotal',
+      label: 'Total activo',
+      value: bg.totals?.activoTotal,
+      icon: 'account_balance',
+      color: 'blue',
+      sub: 'Circulante + fijo + diferido',
+      hint: 'Suma de las tres secciones de activo',
+      groups: [
+        { title: 'Activo circulante', rows: activoCirc, total: sectionValue(bg, 'activoCirculante') },
+        { title: 'Activo fijo', rows: activoFijo, total: sectionValue(bg, 'activoFijo') },
+        { title: 'Activo diferido', rows: activoDif, total: sectionValue(bg, 'activoDiferido') },
+      ],
+    },
+    {
+      id: 'pasivoCirculante',
+      label: 'Pasivo circulante',
+      value: sectionValue(bg, 'pasivoCortoPlazo'),
+      icon: 'credit_card',
+      color: 'amber',
+      sub: 'Proveedores, plan piso, impuestos…',
+      hint: 'Obligaciones de corto plazo',
+      groups: [{ title: secLabel('pasivoCortoPlazo'), rows: pasivoCp }],
+    },
+    {
+      id: 'pasivoLargo',
+      label: 'Pasivo largo plazo',
+      value: sectionValue(bg, 'pasivoLargoPlazo'),
+      icon: 'event_upcoming',
+      color: 'amber',
+      sub: 'Provisiones',
+      hint: 'Obligaciones de largo plazo',
+      groups: [{ title: secLabel('pasivoLargoPlazo'), rows: pasivoLp }],
+    },
+    {
+      id: 'pasivoTotal',
+      label: 'Total pasivo',
+      value: bg.totals?.pasivoTotal,
+      icon: 'payments',
+      color: 'slate',
+      sub: 'Circulante + largo plazo',
+      hint: 'Suma de pasivo circulante y largo plazo',
+      groups: [
+        { title: 'Pasivo circulante', rows: pasivoCp, total: sectionValue(bg, 'pasivoCortoPlazo') },
+        { title: 'Pasivo largo plazo', rows: pasivoLp, total: sectionValue(bg, 'pasivoLargoPlazo') },
+      ],
+    },
+    {
+      id: 'capital',
+      label: 'Capital contable',
+      value: bg.totals?.capital,
+      icon: 'savings',
+      color: 'green',
+      sub: '0360 · 0370 · 0385 · 0386 · Resultado',
+      hint: 'Capital + resultado del ejercicio (PyG YTD)',
+      groups: [{ title: 'Capital contable', rows: capital }],
+    },
+  ];
+
+  if (L.disponible) {
+    const liqFacts = [
+      { label: 'Activo circulante', value: L.activoCirculante },
+      { label: 'Pasivo circulante', value: L.pasivoCirculante },
+      { label: 'Capital de trabajo', value: L.capitalTrabajo },
+      { label: 'Inventarios / WIP', value: L.inventariosYProceso },
+      { label: 'Pagos anticipados', value: L.pagosAnticipados },
+      { label: 'Activos rápidos', value: L.activosRapidos },
+    ];
+    const invRows = (L.desglose?.inventarios || []).map((a) => ({
+      cuenta: a.cuenta, label: a.label, value: a.value,
+    }));
+    const antRows = (L.desglose?.pagosAnticipados || []).map((a) => ({
+      cuenta: a.cuenta, label: a.label, value: a.value,
+    }));
+    const rapRows = (L.desglose?.rapidos || []).map((a) => ({
+      cuenta: a.cuenta, label: a.label, value: a.value,
+    }));
+
+    items.push(
+      {
+        id: 'capitalTrabajo',
+        label: 'Capital de trabajo',
+        value: L.capitalTrabajo,
+        display: formatFullMoney(L.capitalTrabajo),
+        icon: 'account_balance_wallet',
+        color: L.capitalTrabajo < 0 ? 'rose' : 'green',
+        sub: L.margenSobreAcPct != null ? `${L.margenSobreAcPct}% del AC · clic para desglose` : 'AC − PC · clic',
+        hint: L.formula?.capitalTrabajo || 'Activo circulante − Pasivo circulante',
+        hostId: 'kpiBgCapitalTrabajo',
+        facts: liqFacts,
+        groups: [
+          { title: 'Activo circulante (detalle)', rows: activoCirc, total: L.activoCirculante },
+          { title: 'Pasivo circulante (detalle)', rows: pasivoCp, total: L.pasivoCirculante },
+        ],
+      },
+      {
+        id: 'razonCirculante',
+        label: 'Razón circulante',
+        value: L.razonCirculante,
+        display: formatRatio(L.razonCirculante),
+        icon: 'water_drop',
+        color: liquidezToneClass(L.interpretacion?.tone),
+        sub: `${L.interpretacion?.label || 'AC ÷ PC'} · clic`,
+        hint: L.lectura?.razon || L.formula?.razonCirculante || 'AC ÷ PC',
+        hostId: 'kpiBgRazonCirculante',
+        facts: liqFacts,
+        groups: [
+          { title: 'Activo circulante', rows: activoCirc, total: L.activoCirculante },
+          { title: 'Pasivo circulante', rows: pasivoCp, total: L.pasivoCirculante },
+        ],
+      },
+      {
+        id: 'pruebaAcida',
+        label: 'Prueba ácida',
+        value: L.pruebaAcida,
+        display: formatRatio(L.pruebaAcida),
+        icon: 'science',
+        color: liquidezToneClass(L.acidTone),
+        sub: 'Sin inventarios ni anticipados · clic',
+        hint: L.lectura?.acida || L.formula?.pruebaAcida || 'Activos rápidos ÷ PC',
+        hostId: 'kpiBgPruebaAcida',
+        facts: [
+          ...liqFacts,
+          { label: 'Déficit / excedente ácido', value: L.deficitAcido },
+        ],
+        groups: [
+          { title: 'Activos rápidos', rows: rapRows, total: L.activosRapidos },
+          { title: 'Inventarios / WIP excluidos', rows: invRows, total: L.inventariosYProceso },
+          { title: 'Pagos anticipados excluidos', rows: antRows, total: L.pagosAnticipados },
+          { title: 'Pasivo circulante', rows: pasivoCp, total: L.pasivoCirculante },
+        ],
+      },
+    );
+  }
+
+  return items;
+}
+
+function closeBgKpiFloat() {
+  bgKpiState.activeId = null;
+  document.getElementById('bgKpiFloat')?.classList.add('hidden');
+  const backdrop = document.getElementById('bgKpiFloatBackdrop');
+  if (backdrop) {
+    backdrop.classList.add('hidden');
+    backdrop.setAttribute('aria-hidden', 'true');
+  }
+  document.querySelectorAll('#kpiBalanceGeneral .kpi-card--interactive.is-open, #bgLiquidezKpis .kpi-card--interactive.is-open')
+    .forEach((el) => el.classList.remove('is-open'));
+}
+
+function openBgKpiFloat(kpiId) {
+  const fmt = bgKpiState.fmt || Dashboard.fmt;
+  const kpi = bgKpiState.items.find((i) => i.id === kpiId);
+  const panel = document.getElementById('bgKpiFloat');
+  const backdrop = document.getElementById('bgKpiFloatBackdrop');
+  if (!kpi || !panel || !backdrop) return;
+
+  bgKpiState.activeId = kpiId;
+  document.querySelectorAll('#kpiBalanceGeneral .kpi-card--interactive, #bgLiquidezKpis .kpi-card--interactive')
+    .forEach((el) => el.classList.toggle('is-open', el.dataset.bgKpi === kpiId));
+
+  const display = kpi.display != null ? kpi.display : formatFullMoney(kpi.value);
+  const factsHtml = (kpi.facts || []).length
+    ? `<ul class="bg-kpi-float__facts">${kpi.facts.map((f) => `
+        <li><strong>${escHtml(f.label)}</strong><span class="${moneyClass(f.value)}">${fmt.money(f.value || 0)}</span></li>
+      `).join('')}</ul>`
+    : '';
+
+  const rowCount = (kpi.groups || []).reduce((n, g) => n + (g.rows?.length || 0), 0);
+  const groupsHtml = (kpi.groups || []).map((g) => {
+    const rows = g.rows || [];
+    if (!rows.length && g.total == null) {
+      return `<div class="bg-kpi-float__group"><p class="bg-kpi-float__section">${escHtml(g.title)}</p><p class="section-subtitle">Sin partidas con saldo.</p></div>`;
+    }
+    const sum = rows.reduce((a, r) => a + Number(r.value || 0), 0);
+    const total = g.total != null ? Number(g.total) : sum;
+    return `
+      <div class="bg-kpi-float__group">
+        <p class="bg-kpi-float__section">${escHtml(g.title)} · ${rows.length} partida${rows.length === 1 ? '' : 's'}</p>
+        <table class="bg-kpi-float__table">
+          <thead><tr><th>Cuenta</th><th>Concepto</th><th class="cell-money">Saldo</th></tr></thead>
+          <tbody>
+            ${rows.map((r) => `
+              <tr>
+                <td class="cell-mono">${escHtml(r.cuenta || '')}</td>
+                <td>${escHtml(r.label)}</td>
+                <td class="cell-money ${moneyClass(r.value)}"><strong>${fmt.money(r.value)}</strong></td>
+              </tr>
+            `).join('') || '<tr><td colspan="3">Sin detalle de cuentas.</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2"><strong>Total</strong></td>
+              <td class="cell-money"><strong>${fmt.money(total)}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="bg-kpi-float__head">
+      <div class="bg-kpi-float__head-main">
+        <div class="bg-kpi-float__icon" aria-hidden="true">
+          <span class="material-symbols-outlined">${escHtml(kpi.icon || 'payments')}</span>
+        </div>
+        <div>
+          <p class="bg-kpi-float__eyebrow">Balance General · desglose</p>
+          <h3 class="bg-kpi-float__title" id="bgKpiFloatTitle">${escHtml(kpi.label)}</h3>
+          <p class="bg-kpi-float__value ${moneyClass(kpi.value)}">${display}</p>
+          <p class="bg-kpi-float__hint">${escHtml(kpi.hint || '')}</p>
+          <span class="bg-kpi-float__meta">${rowCount} cuenta${rowCount === 1 ? '' : 's'} relacionadas</span>
+        </div>
+      </div>
+      <button type="button" class="bg-kpi-float__close" data-bg-kpi-close aria-label="Cerrar">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="bg-kpi-float__body">
+      ${factsHtml}
+      ${groupsHtml || '<div class="bg-kpi-float__group"><p class="section-subtitle">Sin desglose disponible.</p></div>'}
+    </div>`;
+
+  panel.classList.remove('hidden');
+  backdrop.classList.remove('hidden');
+  backdrop.setAttribute('aria-hidden', 'false');
+}
+
+function renderBgInteractiveKpis(containerId, itemIds, fmt) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const items = bgKpiState.items.filter((i) => itemIds.includes(i.id));
+  if (!items.length) {
+    el.innerHTML = containerId === 'bgLiquidezKpis' ? '' : '<p class="section-subtitle">Sin KPIs para el periodo.</p>';
+    return;
+  }
+
+  el.innerHTML = items.map((k) => {
+    const isOpen = bgKpiState.activeId === k.id;
+    const display = k.display != null ? k.display : formatFullMoney(k.value);
+    const idAttr = k.hostId ? ` id="${k.hostId}"` : '';
+    return `
+    <button type="button"${idAttr}
+      class="kpi-card kpi-card--eeff kpi-card--interactive kpi-card--${k.color || 'blue'}${isOpen ? ' is-open' : ''}"
+      data-bg-kpi="${k.id}"
+      aria-expanded="${isOpen}"
+      title="Clic para ver desglose relacionado">
+      <div class="kpi-card-head">
+        <span class="kpi-title">${escHtml(k.label)}</span>
+        <span class="material-symbols-outlined kpi-icon">${k.icon || 'payments'}</span>
+      </div>
+      <div class="kpi-value money ${moneyClass(k.value)}">${display}</div>
+      ${k.sub ? `<p class="kpi-subtitle">${escHtml(k.sub)}</p>` : ''}
+      <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">open_in_new</span>
+    </button>`;
+  }).join('');
+}
+
+function renderBalanceGeneralPanel(bg, fmt) {
+  const meth = document.getElementById('balanceGeneralMethodology');
+  if (meth) {
+    meth.textContent = bg?.available
+      ? `Saldo final al cierre de ${bg.labelCierre || bg.asOfCierre || bg.asOf || 'periodo'} · SQL CON_CTAS · Clic en un KPI para ver el desglose`
+      : 'Sin datos de CON_CTAS (SQL) para el periodo seleccionado';
+  }
+
+  bgKpiState.fmt = fmt;
+  bgKpiState.items = buildBgKpiItems(bg);
+  if (bgKpiState.activeId && !bgKpiState.items.some((i) => i.id === bgKpiState.activeId)) {
+    closeBgKpiFloat();
+  }
+
+  renderBgInteractiveKpis('kpiBalanceGeneral', [
+    'activoCirculante', 'activoFijo', 'activoDiferido', 'activoTotal',
+    'pasivoCirculante', 'pasivoLargo', 'pasivoTotal', 'capital',
+  ], fmt);
+
+  const resumenBody = document.getElementById('bgResumenTable');
+  if (resumenBody) {
+    if (!bg?.available) {
+      resumenBody.innerHTML = '<tr class="empty-row"><td colspan="2">Sin datos.</td></tr>';
+    } else {
+      const diff = bg.totals?.ecuacionDiferencia;
+      resumenBody.innerHTML = [
+        ['Total activo', bg.totals?.activoTotal],
+        ['Total pasivo', bg.totals?.pasivoTotal],
+        ['Capital contable', bg.totals?.capital],
+        ['Pasivo + capital', bg.totals?.pasivoMasCapital],
+        ['Diferencia ecuación (Activo − Pasivo − Capital)', diff],
+      ].map(([label, value], idx) => `
+        <tr${idx === 4 ? ' class="row-highlight"' : ''}>
+          <td>${label}</td>
+          <td class="cell-money ${moneyClass(value)}"><strong>${fmt.money(value || 0)}</strong></td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  renderBgInteractiveKpis('bgLiquidezKpis', ['capitalTrabajo', 'razonCirculante', 'pruebaAcida'], fmt);
+  renderLiquidezNote(bg?.liquidez, bg?.liquidez, fmt, 'bgLiquidezInterpretacion');
+
+  if (bgKpiState.activeId) openBgKpiFloat(bgKpiState.activeId);
+}
+
+function liquidezToneClass(tone) {
+  if (tone === 'rose') return 'rose';
+  if (tone === 'amber') return 'amber';
+  if (tone === 'green') return 'green';
+  if (tone === 'blue') return 'blue';
+  return 'slate';
+}
+
+function renderLiquidezNote(liquidez, ratios, fmt, targetId = 'liquidezInterpretacion') {
+  const note = document.getElementById(targetId);
+  if (!note) return;
+  const L = liquidez || null;
+  const razon = L?.razonCirculante ?? ratios?.liquidezCorriente;
+  if (razon == null && L?.pruebaAcida == null) {
+    note.classList.add('hidden');
+    note.innerHTML = '';
+    return;
+  }
+
+  const interp = L?.interpretacion || ratios?.interpretacion || {};
+  const lectura = L?.lectura || ratios?.lectura || {};
+  const capital = L?.capitalTrabajo ?? ratios?.capitalTrabajo;
+  const acida = L?.pruebaAcida ?? ratios?.pruebaAcida;
+  const deficit = L?.deficitAcido ?? ratios?.deficitAcido;
+  const inv = L?.inventariosYProceso ?? ratios?.inventariosYProceso;
+  const ant = L?.pagosAnticipados ?? ratios?.pagosAnticipados;
+  const margenPct = L?.margenSobreAcPct ?? ratios?.margenSobreAcPct;
+  const tone = liquidezToneClass(interp.tone || L?.acidTone);
+
+  note.classList.remove('hidden');
+  note.innerHTML = `
+    <div class="liquidez-note__badge liquidez-note__badge--${tone}">${escHtml(interp.label || 'Liquidez')}</div>
+    <p class="liquidez-note__summary">${escHtml(interp.summary || lectura.razon || '')}</p>
+    <ul class="liquidez-note__facts">
+      <li><strong>Capital de trabajo:</strong> ${capital != null ? fmt.money(capital) : '—'}
+        ${margenPct != null ? ` · ${margenPct}% del activo circulante` : ''}</li>
+      <li><strong>Razón circulante:</strong> ${formatRatio(razon)}
+        <span class="liquidez-note__muted">(AC ÷ PC)</span></li>
+      <li><strong>Prueba ácida:</strong> ${formatRatio(acida)}
+        <span class="liquidez-note__muted">(AC − inventarios/WIP − anticipados) ÷ PC</span></li>
+      <li><strong>Inventarios y proceso:</strong> ${inv != null ? fmt.money(inv) : '—'}
+        · <strong>Anticipados:</strong> ${ant != null ? fmt.money(ant) : '—'}</li>
+      ${deficit != null && deficit < 0
+        ? `<li class="liquidez-note__alert"><strong>Déficit rápido:</strong> ${fmt.money(deficit)} sin inventarios ni anticipados</li>`
+        : ''}
+    </ul>
+    <p class="liquidez-note__hint">${escHtml(lectura.acida || '')}</p>
+    <p class="liquidez-note__theory">La liquidez contable puede ser engañosa si gran parte del activo circulante está en inventarios lentos o cuentas por cobrar de difícil recuperación. Los impuestos pagados por anticipado se excluyen de la prueba ácida porque no son efectivo disponible.</p>
+  `;
+}
+
 function renderRatios(ratios, summary, fmt) {
   const el = document.getElementById('ratiosEeff');
   if (!el) return;
+  const L = summary?.liquidez || ratios || {};
+  const razon = L.razonCirculante ?? ratios?.liquidezCorriente;
+  const acida = L.pruebaAcida ?? ratios?.pruebaAcida;
+  const capital = L.capitalTrabajo ?? ratios?.capitalTrabajo;
+  const razonTone = liquidezToneClass(L.interpretacion?.tone);
+  const acidTone = liquidezToneClass(L.acidTone);
+
   el.innerHTML = [
     ratioCard('Margen bruto', summary.margenBrutoPct, 'Utilidad bruta / ventas'),
     ratioCard('Margen operación', summary.margenOperacionPct, 'Utilidad operación / ventas'),
-    kpiCard('Liquidez corriente', ratios?.liquidezCorriente ?? '—', 'Activo circ. / pasivo CP', 'blue'),
+    kpiCard('Capital de trabajo', capital != null ? fmt.money(capital) : '—', 'Activo circ. − pasivo CP', capital != null && capital < 0 ? 'rose' : 'green'),
+    kpiCard('Razón circulante', formatRatio(razon), 'AC ÷ PC · margen de corto plazo', razonTone),
+    kpiCard('Prueba ácida', formatRatio(acida), 'Sin inventarios ni anticipados', acidTone),
     kpiCard('Punto equilibrio', summary.puntoEquilibrio != null ? fmt.currency(summary.puntoEquilibrio) : '—', 'Gastos 0700 ÷ margen bruto %', 'violet'),
   ].join('');
+
+  renderLiquidezNote(summary?.liquidez || ratios, ratios, fmt);
 }
 
-function kpiCard(title, value, sub, cls) {
-  return `<div class="kpi-card kpi-card--${cls || 'blue'}"><span class="kpi-title">${title}</span><div class="kpi-value">${value}</div>${sub ? `<p class="kpi-subtitle">${sub}</p>` : ''}</div>`;
+function kpiCard(title, value, sub, cls, id) {
+  const idAttr = id ? ` id="${id}"` : '';
+  return `<div class="kpi-card kpi-card--${cls || 'blue'}"${idAttr}><span class="kpi-title">${title}</span><div class="kpi-value">${value}</div>${sub ? `<p class="kpi-subtitle">${sub}</p>` : ''}</div>`;
 }
 
 function ratioCard(title, pct, sub) {
@@ -368,7 +810,8 @@ async function loadContabilidad(fechaInicio, fechaFin) {
   renderCatalogLines('costosCatalogTable', catalog.costLines, fmt);
   renderCatalogLines('gastosCatalogTable', catalog.expenseLines, fmt);
   renderBalanceTable(eeff.balance, fmt);
-  renderRatios(eeff.ratios, s, fmt);
+  renderRatios(eeff.ratios, { ...s, liquidez: s.liquidez || eeff.liquidez || data.balanceGeneral?.liquidez }, fmt);
+  renderBalanceGeneralPanel(data.balanceGeneral, fmt);
   renderVtasmenTable(data.ventasAutosNuevosEeff, fmt);
   renderDailySalesTable(data.dailyBreakdown || [], fmt);
 
@@ -387,6 +830,7 @@ async function loadContabilidad(fechaInicio, fechaFin) {
         puntoEquilibrio: s.puntoEquilibrio,
         gastoDepartamento: s.gastoDepartamento,
       },
+      liquidez: data.balanceGeneral?.liquidez || s.liquidez || eeff.liquidez || null,
     });
   }
 }
@@ -404,6 +848,25 @@ document.getElementById('contabilidadMainTabs')?.addEventListener('click', (e) =
   const tab = e.target.closest('.contabilidad-tab');
   if (!tab) return;
   switchMainTab(tab.dataset.tab);
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-bg-kpi-close]') || e.target.closest('#bgKpiFloatBackdrop')) {
+    closeBgKpiFloat();
+    return;
+  }
+  const kpiBtn = e.target.closest('[data-bg-kpi]');
+  if (!kpiBtn) return;
+  if (e.target.closest('.kpi-insight-btn')) return;
+  e.preventDefault();
+  const id = kpiBtn.dataset.bgKpi;
+  if (!id) return;
+  if (bgKpiState.activeId === id) closeBgKpiFloat();
+  else openBgKpiFloat(id);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeBgKpiFloat();
 });
 
 switchMainTab(getMainTabFromUrl());

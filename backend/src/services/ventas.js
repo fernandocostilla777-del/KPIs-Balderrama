@@ -1,7 +1,8 @@
 const { getPool, sql } = require('../db');
 const { enrichVentasRows, countByCanal, CANALES_ORDEN, getCanalLabel } = require('./canales-venta');
 const { getNotificacionesEntrega, computeCoberturaSofia } = require('./sofia-entregas');
-const { getComparativoYtd } = require('./ytd-comparativo');
+const { getComparativoYtd, buildYtdRanges } = require('./ytd-comparativo');
+const { getMejorUtilidadPorCarline } = require('./utilidadCarlineService');
 const { getInventory } = require('./inventoryService');
 
 const TIPO_VENTA_CASE = `
@@ -420,11 +421,21 @@ async function getVentas({ fechaInicio, fechaFin }) {
   request.input('fechaFin', sql.Date, fin);
 
   const incluirPorMes = isAcumuladoAnual(inicio, fin);
-  const [result, sofiaEntregas, comparativoYtd, inventorySnap] = await Promise.all([
+  const ytdRanges = buildYtdRanges(fechaFin);
+  const [result, sofiaEntregas, comparativoYtd, inventorySnap, utilidadCarline] = await Promise.all([
     request.query(buildVentasQuery()),
     getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes }),
     getComparativoYtd(fechaFin),
     getInventory({ planPisoPeriod: 'all' }).catch(() => null),
+    getMejorUtilidadPorCarline({
+      fechaInicio: ytdRanges.inicioActual,
+      fechaFin: ytdRanges.finActual,
+      metric: 'utilidad_promedio',
+      minUnidades: 1,
+    }).catch((err) => {
+      console.warn('[ventas] utilidad carline:', err.message);
+      return { available: false, reason: err.message, porCarline: [] };
+    }),
   ]);
 
   const rows = enrichVentasRows(result.recordset);
@@ -435,6 +446,7 @@ async function getVentas({ fechaInicio, fechaFin }) {
     filtros: { fechaInicio, fechaFin },
     resumen,
     comparativoYtd,
+    utilidadCarline,
     registros: rows,
     entregasSofia: sofiaEntregas.registrosEntrega ?? [],
   };

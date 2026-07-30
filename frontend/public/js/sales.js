@@ -7,6 +7,8 @@
   let entregasActuales = [];
   let apartadasActuales = [];
   let activeVentasKpiType = null;
+  let activeVentasDrawerKpi = null;
+  let ventasDrawerUi = null;
   let lastYtd = null;
   const charts = {};
   let els = null;
@@ -215,6 +217,29 @@
     return `${pct.toFixed(2)}%`;
   }
 
+  const CARRY_OVER_EXCLUDED_APARTADO_POR = [
+    'BALDERRAMA CASA INTERCAMBIOS',
+  ];
+
+  function normalizeApartadoKey(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+
+  function isExcludedCarryOverApartada(unit) {
+    const quien = normalizeApartadoKey(unit?.apartadoPor || unit?.usuarioApartado || '');
+    if (!quien) return false;
+    return CARRY_OVER_EXCLUDED_APARTADO_POR.some((name) => quien === normalizeApartadoKey(name) || quien.includes(normalizeApartadoKey(name)));
+  }
+
+  function filterCarryOverApartadas(units) {
+    return (units || []).filter((u) => (u.isApartada || u.situacion === 'SEP') && !isExcludedCarryOverApartada(u));
+  }
+
   async function ensureApartadasInResumen() {
     if (!resumenActual) return;
     try {
@@ -222,9 +247,8 @@
       const units = Array.isArray(inv?.inventoryTable)
         ? inv.inventoryTable
         : (Array.isArray(inv?.units) ? inv.units : []);
-      apartadasActuales = units.filter((u) => u.isApartada || u.situacion === 'SEP');
-      const apartadas = Number(inv?.summary?.availableApartadas ?? apartadasActuales.length ?? 0);
-      resumenActual.unidadesApartadas = apartadas;
+      apartadasActuales = filterCarryOverApartadas(units);
+      resumenActual.unidadesApartadas = apartadasActuales.length;
     } catch (err) {
       console.warn('[Carry over] No se pudieron cargar apartadas:', err.message);
       if (resumenActual.unidadesApartadas == null) resumenActual.unidadesApartadas = 0;
@@ -266,9 +290,8 @@
     setKpiBarFill('carryOver', goal > 0 ? (numeradorSim / goal) * 100 : 0);
     els.kpiCardCarryOver?.classList.toggle('kpi-card--complete', goal > 0 && numeradorSim >= goal);
 
-    if (!els.panelCarryOver?.classList.contains('hidden')) {
-      renderCarryOverSimPanel();
-      updateCarryOverPanelResumen(apartadasActuales.length);
+    if (activeVentasDrawerKpi === 'carryOver' && ventasDrawerUi?.isOpen?.()) {
+      ventasDrawerUi.refresh();
     }
   }
 
@@ -378,47 +401,20 @@
   }
 
   function closeCarryOverPanelUi() {
-    els.panelCarryOver?.classList.add('hidden');
-    els.kpiCardCarryOver?.classList.remove('is-selected', 'is-open');
-    els.kpiCardCarryOver?.setAttribute('aria-expanded', 'false');
-    clearCarryOverPreviewSearch();
+    ensureVentasKpiDrawer().close();
   }
 
   function setCarryOverPanelOpen(open) {
-    if (!els.panelCarryOver || !els.kpiCardCarryOver) return;
-    const isOpen = Boolean(open);
-    if (isOpen) {
-      closeVentasPanel();
-      els.panelEntregasSofia?.classList.add('hidden');
-      els.kpiCardEntregasSofia?.classList.remove('is-selected');
-      els.kpiCardEntregasSofia?.setAttribute('aria-expanded', 'false');
-      clearSofiaPreviewSearch();
-    }
-    if (!isOpen) {
-      closeCarryOverPanelUi();
+    const drawer = ensureVentasKpiDrawer();
+    if (!open) {
+      drawer.close();
       return;
     }
-
-    const wasOpen = !els.panelCarryOver.classList.contains('hidden');
-    if (wasOpen) {
-      closeCarryOverPanelUi();
-      return;
-    }
-
-    els.panelCarryOver.classList.remove('hidden');
-    els.kpiCardCarryOver.classList.add('is-selected', 'is-open');
-    els.kpiCardCarryOver.setAttribute('aria-expanded', 'true');
-    clearCarryOverPreviewSearch();
-    renderCarryOverSimPanel();
-    renderCarryOverPreview(apartadasActuales);
-    updateCarryOverPanelResumen(apartadasActuales.length);
-    els.panelCarryOver.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    window.setTimeout(() => els.buscarCarryOverPreview?.focus({ preventScroll: true }), 180);
+    drawer.open('carryOver', els.kpiCardCarryOver);
   }
 
   function toggleCarryOverPanel() {
-    const isOpen = !els.panelCarryOver?.classList.contains('hidden');
-    setCarryOverPanelOpen(!isOpen);
+    setCarryOverPanelOpen(true);
   }
 
   function updateTopBarSummary(resumen) {
@@ -717,33 +713,199 @@
     });
   }
 
+  function moneyCell(n) {
+    if (n == null || !Number.isFinite(Number(n))) return '—';
+    return typeof fmt !== 'undefined' && fmt.money
+      ? fmt.money(Number(n))
+      : Number(n).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
+  }
+
+  function pctCell(n) {
+    if (n == null || !Number.isFinite(Number(n))) return '—';
+    return `${Number(n).toFixed(1)}%`;
+  }
+
+  function renderCarlineUtilidad(utilidadCarline, comparativoYtd) {
+    const body = els.carlineUtilidadBody;
+    const sub = els.carlineUtilidadSubtitle;
+    if (!body) return;
+
+    const periodo = utilidadCarline?.periodo || {};
+    const fi = periodo.fechaInicio || (comparativoYtd?.corte ? `${String(comparativoYtd.corte).slice(0, 4)}-01-01` : null);
+    const ff = periodo.fechaFin || comparativoYtd?.corte || null;
+    if (sub) {
+      const rango = fi && ff
+        ? `${String(fi).slice(0, 10).split('-').reverse().join('/')} → ${String(ff).slice(0, 10).split('-').reverse().join('/')}`
+        : 'YTD';
+      sub.textContent = `Mejor versión por utilidad unitaria · ${rango}`;
+    }
+
+    const rows = utilidadCarline?.porCarline || [];
+    if (!utilidadCarline?.available) {
+      body.innerHTML = `<tr><td colspan="4" class="empty-row">${escapeHtml(utilidadCarline?.reason || 'Sin datos de utilidad por carline.')}</td></tr>`;
+      return;
+    }
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="4" class="empty-row">Sin ventas con utilidad en el acumulado anual.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = rows.map((c) => {
+      const m = c.mejorVersion || {};
+      // Siempre utilidad por unidad (promedio), nunca el acumulado total
+      const utilPorUnidad = m.utilidadPromedio != null
+        ? Number(m.utilidadPromedio)
+        : (m.unidades > 0 && m.utilidadTotal != null
+          ? Number(m.utilidadTotal) / Number(m.unidades)
+          : null);
+      const utilClass = utilPorUnidad != null && utilPorUnidad >= 0 ? 'cell-money--pos' : 'cell-money--neg';
+      const titleBits = [
+        m.version || '',
+        m.unidades != null ? `${m.unidades} uds en el periodo` : '',
+        m.utilidadTotal != null ? `utilidad total ${moneyCell(m.utilidadTotal)}` : '',
+      ].filter(Boolean).join(' · ');
+      return `<tr>
+        <td class="carline-utilidad-carline"><strong>${escapeHtml(c.carline || '—')}</strong></td>
+        <td class="carline-utilidad-version" title="${escapeHtml(titleBits)}">
+          <span class="carline-utilidad-version__text">${escapeHtml(m.version || '—')}</span>
+        </td>
+        <td class="cell-num cell-money carline-utilidad-num ${utilClass}">${moneyCell(utilPorUnidad)}</td>
+        <td class="cell-num carline-utilidad-num">${pctCell(m.margenBrutoPct)}</td>
+      </tr>`;
+    }).join('');
+  }
+
   function renderCharts(resumen) {
     const esAcumulado = resumen.mostrarComparativoMensual && resumen.comparativoMensual;
     toggleVistaMensual(Boolean(esAcumulado));
     if (esAcumulado) renderChartsMensuales(resumen.comparativoMensual, resumen);
 
     destroyChart('departamento', 'chartDepartamento');
-    const porCanal = resumen.porCanal?.length ? resumen.porCanal : CanalesVenta.countByCanal(registrosActuales);
+    const porCanal = resumen.porCanal?.length
+      ? resumen.porCanal
+      : (typeof CanalesVenta !== 'undefined' ? CanalesVenta.countByCanal(registrosActuales) : []);
     if (porCanal.length) {
       createChart('departamento', 'chartDepartamento', {
         type: 'bar',
         data: {
           labels: porCanal.map((x) => x.label),
-          datasets: [{ label: 'Ventas', data: porCanal.map((x) => x.count), backgroundColor: porCanal.map((x) => CANAL_COLORS[x.label] || chartColors.slate) }],
+          datasets: [{
+            label: 'Ventas',
+            data: porCanal.map((x) => x.count),
+            backgroundColor: porCanal.map((x) => (CANAL_COLORS && CANAL_COLORS[x.label]) || (chartColors && chartColors.slate) || '#94a3b8'),
+          }],
         },
         options: chartOptions({ plugins: { legend: { display: false } } }),
       });
     }
 
-    const topVendedores = (resumen.porVendedorRetail || []).slice(0, 10);
-    createChart('vendedor', 'chartVendedor', {
-      type: 'bar',
-      data: {
-        labels: topVendedores.map((x) => x.label.split(' ').slice(0, 2).join(' ')),
-        datasets: [{ label: 'Ventas retail', data: topVendedores.map((x) => x.count), backgroundColor: chartColors.primary }],
-      },
-      options: chartOptions({ indexAxis: 'y', plugins: { legend: { display: false } } }),
+    try {
+      const topVendedores = buildTopVendedoresRetailPorFuerza(10);
+      if (topVendedores.labels.length && topVendedores.datasets.length) {
+        createChart('vendedor', 'chartVendedor', {
+          type: 'bar',
+          data: {
+            labels: topVendedores.labels,
+            datasets: topVendedores.datasets,
+          },
+          options: chartOptions({
+            indexAxis: 'y',
+            scales: {
+              x: { stacked: true, beginAtZero: true },
+              y: { stacked: true },
+            },
+            plugins: {
+              legend: { display: true, position: 'bottom' },
+            },
+          }),
+        });
+      } else {
+        destroyChart('vendedor', 'chartVendedor');
+      }
+    } catch (err) {
+      console.error('[Sales] chartVendedor', err);
+      destroyChart('vendedor', 'chartVendedor');
+    }
+  }
+
+  function buildTopVendedoresRetailPorFuerza(limit = 10) {
+    const retail = getRetailRows();
+    const byVendor = new Map();
+
+    for (const row of retail) {
+      const vendedor = String(row.VENDEDOR || '(Sin dato)').trim() || '(Sin dato)';
+      const fuerza = String(row.CANAL_LABEL || 'Otros').trim() || 'Otros';
+      if (!byVendor.has(vendedor)) {
+        byVendor.set(vendedor, { total: 0, byFuerza: new Map() });
+      }
+      const entry = byVendor.get(vendedor);
+      entry.total += 1;
+      entry.byFuerza.set(fuerza, (entry.byFuerza.get(fuerza) || 0) + 1);
+    }
+
+    const canalOrden = (typeof CanalesVenta !== 'undefined' && Array.isArray(CanalesVenta.CANALES_ORDEN))
+      ? CanalesVenta.CANALES_ORDEN
+      : ['PISO', 'FORANEOS', 'CHOLULA', 'ZACATELCO', 'SUAUTO', 'CASA', 'OTROS'];
+    const labelOf = (c) => (typeof CanalesVenta !== 'undefined' && CanalesVenta.getCanalLabel)
+      ? CanalesVenta.getCanalLabel(c)
+      : c;
+    const fuerzaOrder = canalOrden
+      .filter((c) => c !== 'FLOTILLAS' && c !== 'PERDIDA')
+      .map((c) => labelOf(c));
+    const fallbackOrder = ['Piso', 'Foraneos', 'Cholula', 'Zacatelco', 'Suauto', 'Casa', 'Otros'];
+    const order = fuerzaOrder.length ? fuerzaOrder : fallbackOrder;
+    const fuerzaRank = (name) => {
+      const idx = order.indexOf(name);
+      return idx >= 0 ? idx : 999;
+    };
+
+    const ranked = [...byVendor.entries()]
+      .map(([name, stats]) => {
+        let dominante = 'Otros';
+        let max = -1;
+        for (const [f, n] of stats.byFuerza.entries()) {
+          if (n > max || (n === max && fuerzaRank(f) < fuerzaRank(dominante))) {
+            max = n;
+            dominante = f;
+          }
+        }
+        return [name, { total: stats.total, byFuerza: stats.byFuerza, dominante }];
+      })
+      .sort((a, b) =>
+        b[1].total - a[1].total
+        || fuerzaRank(a[1].dominante) - fuerzaRank(b[1].dominante)
+        || a[0].localeCompare(b[0], 'es')
+      )
+      .slice(0, limit);
+
+    const fuerzasPresentes = new Set();
+    for (const [, stats] of ranked) {
+      for (const f of stats.byFuerza.keys()) fuerzasPresentes.add(f);
+    }
+
+    const fuerzas = [
+      ...order.filter((f) => fuerzasPresentes.has(f)),
+      ...[...fuerzasPresentes].filter((f) => !order.includes(f)).sort((a, b) => a.localeCompare(b, 'es')),
+    ];
+
+    // Eje Y = vendedor; cada segmento de color = fuerza de ventas
+    const labels = ranked.map(([name, stats]) => {
+      const short = name.split(/\s+/).filter(Boolean).slice(0, 2).join(' ');
+      return stats.dominante && stats.dominante !== 'Otros'
+        ? `${short} · ${stats.dominante}`
+        : short;
     });
+
+    const datasets = fuerzas.map((fuerza) => ({
+      label: fuerza,
+      data: ranked.map(([, stats]) => stats.byFuerza.get(fuerza) || 0),
+      backgroundColor: (CANAL_COLORS && CANAL_COLORS[fuerza]) || (chartColors && chartColors.slate) || '#94a3b8',
+      borderWidth: 0,
+      borderRadius: 3,
+      stack: 'fuerza',
+    }));
+
+    return { labels, datasets, ranked };
   }
 
   function isFlotillaRow(row) {
@@ -808,12 +970,11 @@
       : `No hay ventas ${label} en el periodo seleccionado.`;
   }
 
-  function clearVentasPreviewSearch() {
-    if (els.buscarVentasPreview) els.buscarVentasPreview.value = '';
-    els.ventasPreviewSearchMeta?.classList.add('hidden');
-  }
-
   function applyVentasPreviewSearch() {
+    if (ventasDrawerUi?.isOpen?.()) {
+      ventasDrawerUi.refresh();
+      return;
+    }
     if (!activeVentasKpiType) return;
     const base = getVentasRowsByType(activeVentasKpiType);
     const term = els.buscarVentasPreview?.value || '';
@@ -822,52 +983,538 @@
     updateVentasPanelResumen(activeVentasKpiType, base.length, term.trim() ? filtered.length : undefined);
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function countByField(rows, keyFn) {
+    const map = new Map();
+    for (const r of rows || []) {
+      const label = String(keyFn(r) || 'Sin dato').trim() || 'Sin dato';
+      map.set(label, (map.get(label) || 0) + 1);
+    }
+    return [...map.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+  }
+
+  function ventasKpiMeta(key) {
+    const map = {
+      retail: {
+        title: 'Ventas retail',
+        hint: 'Unidades retail del periodo (excluye flotilla)',
+        icon: 'storefront',
+        card: () => els.kpiCardRetail,
+      },
+      flotilla: {
+        title: 'Flotillas',
+        hint: 'Unidades flotilla del periodo',
+        icon: 'local_shipping',
+        card: () => els.kpiCardFlotillas,
+      },
+      sofia: {
+        title: 'Notificaciones SOFIA',
+        hint: 'Entregas reportadas en SOFIA en el periodo',
+        icon: 'notifications_active',
+        card: () => els.kpiCardEntregasSofia,
+      },
+      carryOver: {
+        title: 'Carry over para facturar',
+        hint: 'Apartadas SEP + simulación de cobertura',
+        icon: 'pending_actions',
+        card: () => els.kpiCardCarryOver,
+      },
+    };
+    return map[key] || { title: key, hint: '', icon: 'analytics', card: () => null };
+  }
+
+  function rowsForVentasDrawer(key) {
+    if (key === 'retail') return getRetailRows();
+    if (key === 'flotilla') return getFlotillaRows();
+    if (key === 'sofia') return entregasActuales;
+    if (key === 'carryOver') return apartadasActuales;
+    return [];
+  }
+
+  function clearVentasKpiSelection() {
+    [els.kpiCardRetail, els.kpiCardFlotillas, els.kpiCardEntregasSofia, els.kpiCardCarryOver]
+      .forEach((card) => {
+        card?.classList.remove('is-selected', 'is-open');
+        card?.setAttribute('aria-expanded', 'false');
+      });
+  }
+
+  function ensureVentasKpiDrawer() {
+    if (ventasDrawerUi) return ventasDrawerUi;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'ops-orders-backdrop';
+    backdrop.id = 'ventasKpiBackdrop';
+    backdrop.setAttribute('aria-hidden', 'true');
+
+    const panel = document.createElement('div');
+    panel.className = 'ops-orders-drawer';
+    panel.id = 'ventasKpiDrawer';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-hidden', 'true');
+    panel.setAttribute('aria-label', 'Detalle de ventas');
+    panel.innerHTML = `
+      <div class="ops-orders-drawer__header">
+        <div class="ops-orders-drawer__title-wrap">
+          <span class="material-symbols-outlined ops-orders-drawer__logo" data-ventas-kpi-logo>shopping_cart</span>
+          <div>
+            <h2 class="ops-orders-drawer__title" data-ventas-kpi-title>Detalle de ventas</h2>
+            <span class="ops-orders-drawer__status" data-ventas-kpi-status>0 registros</span>
+          </div>
+        </div>
+        <div class="ops-orders-drawer__actions">
+          <button type="button" class="ops-orders-drawer__icon-btn" data-ventas-kpi-download title="Descargar CSV" aria-label="Descargar CSV">
+            <span class="material-symbols-outlined">download</span>
+          </button>
+          <button type="button" class="ops-orders-drawer__icon-btn" data-ventas-kpi-expand title="Expandir" aria-label="Expandir panel">
+            <span class="material-symbols-outlined" data-ventas-kpi-expand-icon>open_in_full</span>
+          </button>
+          <button type="button" class="ops-orders-drawer__icon-btn" data-ventas-kpi-close title="Cerrar" aria-label="Cerrar">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </div>
+      <div class="ops-orders-drawer__toolbar">
+        <label class="ops-orders-drawer__search" for="ventasKpiSearch">
+          <span class="material-symbols-outlined" aria-hidden="true">search</span>
+          <input id="ventasKpiSearch" type="search" placeholder="Buscar..." autocomplete="off"/>
+        </label>
+        <button type="button" class="ops-orders-drawer__filter-chip" data-ventas-kpi-filter-chip hidden title="Quitar filtro"></button>
+        <span class="ops-orders-drawer__meta" data-ventas-kpi-meta></span>
+      </div>
+      <div class="ops-orders-drawer__main">
+        <aside class="ops-orders-drawer__summary custom-scrollbar" data-ventas-kpi-summary></aside>
+        <div class="ops-orders-drawer__body custom-scrollbar" data-ventas-kpi-body></div>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+
+    const statusEl = panel.querySelector('[data-ventas-kpi-status]');
+    const metaEl = panel.querySelector('[data-ventas-kpi-meta]');
+    const bodyEl = panel.querySelector('[data-ventas-kpi-body]');
+    const summaryEl = panel.querySelector('[data-ventas-kpi-summary]');
+    const searchEl = panel.querySelector('#ventasKpiSearch');
+    const filterChip = panel.querySelector('[data-ventas-kpi-filter-chip]');
+    const expandBtn = panel.querySelector('[data-ventas-kpi-expand]');
+    const expandIcon = panel.querySelector('[data-ventas-kpi-expand-icon]');
+    const downloadBtn = panel.querySelector('[data-ventas-kpi-download]');
+    const titleEl = panel.querySelector('[data-ventas-kpi-title]');
+    const logoEl = panel.querySelector('[data-ventas-kpi-logo]');
+
+    let expanded = false;
+    let activeFilter = null;
+    let sourceRows = [];
+    let lastExportRows = [];
+    let currentMeta = { kpi: '', title: 'Detalle', hint: '', icon: 'shopping_cart' };
+    let lastCard = null;
+
+    const FILTER_DIM_LABEL = {
+      canal: 'Canal',
+      vendedor: 'Vendedor',
+      tipo: 'Tipo',
+      estatus: 'Estatus',
+      modelo: 'Modelo',
+      quien: 'Apartó',
+    };
+
+    function placeNearKpi(card) {
+      if (expanded) return;
+      const kpiBlock = document.querySelector('#panelVentasUnidades .kpi-grid');
+      const ref = card || kpiBlock;
+      const rect = ref?.getBoundingClientRect?.();
+      let top = 96;
+      if (rect) top = Math.round(rect.bottom + 12);
+      top = Math.max(72, Math.min(top, Math.round(window.innerHeight * 0.28)));
+      const maxHeight = Math.max(360, window.innerHeight - top - 24);
+      panel.style.top = `${top}px`;
+      panel.style.right = window.innerWidth < 640 ? '12px' : '28px';
+      panel.style.left = window.innerWidth < 640 ? '12px' : 'auto';
+      panel.style.bottom = 'auto';
+      panel.style.height = `${Math.min(680, maxHeight)}px`;
+    }
+
+    function clearPlacement() {
+      panel.style.top = '';
+      panel.style.right = '';
+      panel.style.left = '';
+      panel.style.bottom = '';
+      panel.style.height = '';
+    }
+
+    function setExpanded(next) {
+      expanded = Boolean(next);
+      panel.classList.toggle('ops-orders-drawer--expanded', expanded);
+      if (expandIcon) expandIcon.textContent = expanded ? 'close_fullscreen' : 'open_in_full';
+      if (expandBtn) expandBtn.title = expanded ? 'Contraer' : 'Expandir';
+      if (expanded) clearPlacement();
+      else if (panel.classList.contains('ops-orders-drawer--open')) placeNearKpi(lastCard);
+    }
+
+    function updateFilterChip() {
+      if (!filterChip) return;
+      if (!activeFilter) {
+        filterChip.hidden = true;
+        filterChip.textContent = '';
+        return;
+      }
+      filterChip.hidden = false;
+      filterChip.innerHTML = `
+        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+        ${escapeHtml(FILTER_DIM_LABEL[activeFilter.dim] || activeFilter.dim)}: ${escapeHtml(activeFilter.label || activeFilter.value)}
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
+    }
+
+    function matchesActiveFilter(r) {
+      if (!activeFilter) return true;
+      const { dim, value } = activeFilter;
+      if (currentMeta.kpi === 'retail' || currentMeta.kpi === 'flotilla') {
+        if (dim === 'canal') return String(r.CANAL_LABEL || 'Sin canal') === value;
+        if (dim === 'vendedor') return String(r.VENDEDOR || 'Sin vendedor') === value;
+        if (dim === 'tipo') return String(r.TIPOVENTA || 'Sin tipo') === value;
+        if (dim === 'modelo') return String(r.VEH_TIPOAUTO || 'Sin modelo') === value;
+      }
+      if (currentMeta.kpi === 'sofia') {
+        if (dim === 'estatus') return String(r.SOF_Estatus || 'Sin estatus') === value;
+        if (dim === 'vendedor') return String(r.SOF_CveUSu || 'Sin usuario') === value;
+      }
+      if (currentMeta.kpi === 'carryOver') {
+        if (dim === 'modelo') return String(r.tipoAuto || r.catalogo || r.modelo || 'Sin modelo') === value;
+        if (dim === 'quien') return String(r.apartadoPor || r.usuarioApartado || 'Sin dato') === value;
+      }
+      return true;
+    }
+
+    function setFilter(dim, value, label) {
+      if (activeFilter && activeFilter.dim === dim && activeFilter.value === value) activeFilter = null;
+      else activeFilter = { dim, value, label: label || value };
+      updateFilterChip();
+      renderList(searchEl?.value || '');
+    }
+
+    function clearFilter() {
+      activeFilter = null;
+      updateFilterChip();
+      renderList(searchEl?.value || '');
+    }
+
+    function filterBySearch(term, rows) {
+      if (currentMeta.kpi === 'sofia') return filterEntregasRowsByTerm(term, rows);
+      if (currentMeta.kpi === 'carryOver') return filterApartadasRowsByTerm(term, rows);
+      return filterVentasRowsByTerm(term, rows);
+    }
+
+    function renderSummary(rows) {
+      const isActive = (dim, value) => activeFilter && activeFilter.dim === dim && activeFilter.value === value;
+      const block = (titulo, dim, items) => `
+        <div class="ops-orders-drawer__group">
+          <h5>${escapeHtml(titulo)}</h5>
+          ${items.length
+            ? items.slice(0, 12).map((x) => `
+              <button type="button"
+                class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive(dim, x.label) ? ' is-active' : ''}"
+                data-ventas-filter-dim="${escapeHtml(dim)}"
+                data-ventas-filter-value="${escapeHtml(x.label)}"
+                title="Filtrar por ${escapeHtml(x.label)}">
+                <span class="lbl">${escapeHtml(x.label)}</span>
+                <span class="val">${x.value}</span>
+              </button>`).join('')
+            : '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+        </div>`;
+
+      if (currentMeta.kpi === 'carryOver') {
+        const { apartadas, goal, sofia, sinTimbrar, numeradorActual, numeradorSim } = getCarryOverParts();
+        const simPct = formatCoberturaPct(numeradorSim, goal);
+        const actualPct = formatCoberturaPct(numeradorActual, goal);
+        const pctDisplay = escapeHtml(simPct || (goal ? '—' : String(numeradorSim)));
+        const formula = goal
+          ? `(${sofia} + ${sinTimbrar} + ${apartadas}) / ${goal} = ${simPct || '—'}`
+          : 'Defina el objetivo SOFIA para calcular el porcentaje';
+        summaryEl.innerHTML = `
+          <div class="ops-orders-drawer__group ops-orders-drawer__group--carry-sim">
+            <aside class="carry-over-sim-card carry-over-sim-card--drawer" aria-label="Simulación de cobertura">
+              <span class="carry-over-sim-label">Sim. cobertura</span>
+              <div class="carry-over-sim-pct">${pctDisplay}</div>
+              <p class="carry-over-sim-formula">${escapeHtml(formula)}</p>
+              <ul class="carry-over-sim-breakdown">
+                <li><span>SOFIA</span><strong>${sofia}</strong></li>
+                <li><span>Sin timbrar</span><strong>${sinTimbrar}</strong></li>
+                <li><span>Apartadas SEP</span><strong>${apartadas}</strong></li>
+                <li><span>Numerador simulado</span><strong>${numeradorSim}</strong></li>
+                <li><span>Objetivo SOFIA</span><strong>${goal || '—'}</strong></li>
+                ${actualPct ? `<li><span>Cobertura sin apartadas</span><strong>${escapeHtml(actualPct)}</strong></li>` : ''}
+              </ul>
+            </aside>
+          </div>
+          ${block('Por modelo', 'modelo', countByField(rows, (r) => r.tipoAuto || r.catalogo || r.modelo))}
+          ${block('Quién apartó', 'quien', countByField(rows, (r) => r.apartadoPor || r.usuarioApartado))}
+        `;
+        return;
+      }
+
+      if (currentMeta.kpi === 'sofia') {
+        summaryEl.innerHTML = `
+          <div class="ops-orders-drawer__group">
+            <h5>Resumen</h5>
+            <div class="ops-orders-drawer__row"><span class="lbl">Entregas</span><span class="val">${rows.length}</span></div>
+            <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+          </div>
+          ${block('Estatus', 'estatus', countByField(rows, (r) => r.SOF_Estatus))}
+          ${block('Usuario', 'vendedor', countByField(rows, (r) => r.SOF_CveUSu))}
+        `;
+        return;
+      }
+
+      summaryEl.innerHTML = `
+        <div class="ops-orders-drawer__group">
+          <h5>Resumen</h5>
+          <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length}</span></div>
+          <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+        </div>
+        ${block('Canal', 'canal', countByField(rows, (r) => r.CANAL_LABEL))}
+        ${block('Vendedor', 'vendedor', countByField(rows, (r) => r.VENDEDOR))}
+        ${block('Modelo', 'modelo', countByField(rows, (r) => r.VEH_TIPOAUTO))}
+      `;
+    }
+
+    function renderList(term) {
+      const filtered = filterBySearch(term || '', sourceRows).filter(matchesActiveFilter);
+      lastExportRows = filtered;
+      if (statusEl) {
+        statusEl.textContent = `${filtered.length} registro${filtered.length === 1 ? '' : 's'}`;
+      }
+      if (metaEl) {
+        metaEl.textContent = filtered.length !== sourceRows.length
+          ? `${filtered.length} de ${sourceRows.length}`
+          : `${sourceRows.length} en periodo`;
+      }
+      renderSummary(sourceRows);
+
+      if (!filtered.length) {
+        bodyEl.innerHTML = `
+          <div class="ops-orders-drawer__empty">
+            <span class="material-symbols-outlined">inbox</span>
+            <p>Sin registros para este indicador</p>
+          </div>`;
+        return;
+      }
+
+      if (currentMeta.kpi === 'sofia') {
+        bodyEl.innerHTML = `
+          <div class="ops-orders-drawer__list-head">
+            <span>Entregas SOFIA</span><span>${filtered.length}</span>
+          </div>
+          ${filtered.map((r) => `
+            <div class="ops-orders-drawer__item" style="cursor:default">
+              <div class="ops-orders-drawer__item-head">
+                <strong>${escapeHtml(r.SOF_VIN || 'Sin serie')}</strong>
+                <span class="ops-orders-drawer__tag">${escapeHtml(r.SOF_Estatus || '—')}</span>
+              </div>
+              <p class="ops-orders-drawer__msg">${escapeHtml(r.CLIENTE || '—')} · Factura ${escapeHtml(r.SOF_Factura || '—')}</p>
+              <div class="ops-orders-drawer__facts">
+                <span>${escapeHtml(r.FECHA_PERIODO ?? r.SOF_FechFact ?? '—')}</span>
+                <span>Previas ${Number(r.PREVIAS || 0)}</span>
+                <span>${escapeHtml(r.SOF_CveUSu || '—')}</span>
+              </div>
+            </div>`).join('')}`;
+        return;
+      }
+
+      if (currentMeta.kpi === 'carryOver') {
+        bodyEl.innerHTML = `
+          <div class="ops-orders-drawer__list-head">
+            <span>Apartadas SEP</span><span>${filtered.length}</span>
+          </div>
+          ${filtered.map((r) => `
+            <div class="ops-orders-drawer__item" style="cursor:default">
+              <div class="ops-orders-drawer__item-head">
+                <strong>${escapeHtml(r.serie || r.vin || 'Sin serie')}</strong>
+                <span class="ops-orders-drawer__tag">${escapeHtml(r.situacionLabel || r.situacion || 'SEP')}</span>
+              </div>
+              <p class="ops-orders-drawer__msg">${escapeHtml(r.tipoAuto || r.catalogo || r.modelo || '—')} · ${escapeHtml(r.colorExterior || r.color || '—')}</p>
+              <div class="ops-orders-drawer__facts">
+                <span>${escapeHtml(String(r.daysApartado ?? '—'))} días</span>
+                <span>${escapeHtml(r.apartadoPor || r.usuarioApartado || '—')}</span>
+                <span>Previas ${Number(r.previas || 0)}</span>
+              </div>
+            </div>`).join('')}`;
+        return;
+      }
+
+      bodyEl.innerHTML = `
+        <div class="ops-orders-drawer__list-head">
+          <span>${currentMeta.kpi === 'flotilla' ? 'Flotillas' : 'Retail'}</span><span>${filtered.length}</span>
+        </div>
+        ${filtered.map((r) => `
+          <div class="ops-orders-drawer__item" style="cursor:default">
+            <div class="ops-orders-drawer__item-head">
+              <strong>${escapeHtml(r.VTE_SERIE || 'Sin serie')}</strong>
+              <span class="ops-orders-drawer__tag">${escapeHtml(r.TIPOVENTA || '—')}</span>
+            </div>
+            <p class="ops-orders-drawer__msg">${escapeHtml(r.CLIENTE || '—')} · ${escapeHtml(r.VENDEDOR || '—')}</p>
+            <div class="ops-orders-drawer__facts">
+              <span>${escapeHtml(r.VTE_FECHDOCTO || '—')}</span>
+              <span>${escapeHtml(r.VEH_TIPOAUTO || '—')}</span>
+              <span>${escapeHtml(r.CANAL_LABEL || '—')}</span>
+            </div>
+            <p class="ops-orders-drawer__sub">Doc. ${escapeHtml(r.VTE_DOCTO || '—')} · ${escapeHtml(r.COL_DESCRIPCION || '—')}</p>
+          </div>`).join('')}`;
+    }
+
+    function close() {
+      panel.classList.remove('ops-orders-drawer--open');
+      panel.setAttribute('aria-hidden', 'true');
+      backdrop.classList.remove('ops-orders-backdrop--visible');
+      backdrop.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('ops-orders-drawer-open');
+      setExpanded(false);
+      clearPlacement();
+      activeVentasDrawerKpi = null;
+      activeVentasKpiType = null;
+      clearVentasKpiSelection();
+    }
+
+    function open(kpiKey, card) {
+      const meta = ventasKpiMeta(kpiKey);
+      const resolvedCard = card || meta.card?.() || null;
+      if (activeVentasDrawerKpi === kpiKey && panel.classList.contains('ops-orders-drawer--open')) {
+        close();
+        return;
+      }
+
+      currentMeta = {
+        kpi: kpiKey,
+        title: meta.title,
+        hint: meta.hint,
+        icon: meta.icon,
+      };
+      lastCard = resolvedCard;
+      activeVentasDrawerKpi = kpiKey;
+      activeVentasKpiType = (kpiKey === 'retail' || kpiKey === 'flotilla') ? kpiKey : null;
+
+      if (titleEl) titleEl.textContent = currentMeta.title;
+      if (logoEl) logoEl.textContent = currentMeta.icon;
+      panel.setAttribute('aria-label', currentMeta.title);
+      if (searchEl) {
+        searchEl.placeholder = kpiKey === 'sofia'
+          ? 'Buscar factura, VIN, cliente, estatus...'
+          : kpiKey === 'carryOver'
+            ? 'Buscar serie, modelo, color, quién apartó...'
+            : 'Buscar vendedor, cliente, serie, modelo...';
+        searchEl.value = '';
+      }
+
+      sourceRows = rowsForVentasDrawer(kpiKey).slice();
+      activeFilter = null;
+      updateFilterChip();
+      clearVentasKpiSelection();
+      resolvedCard?.classList.add('is-selected', 'is-open');
+      resolvedCard?.setAttribute('aria-expanded', 'true');
+      placeNearKpi(resolvedCard);
+      setExpanded(true);
+      renderList('');
+      panel.classList.add('ops-orders-drawer--open');
+      panel.setAttribute('aria-hidden', 'false');
+      backdrop.classList.add('ops-orders-backdrop--visible');
+      backdrop.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('ops-orders-drawer-open');
+      window.setTimeout(() => searchEl?.focus({ preventScroll: true }), 180);
+    }
+
+    backdrop.addEventListener('click', close);
+    panel.querySelector('[data-ventas-kpi-close]')?.addEventListener('click', close);
+    expandBtn?.addEventListener('click', () => setExpanded(!expanded));
+    filterChip?.addEventListener('click', clearFilter);
+    searchEl?.addEventListener('input', () => renderList(searchEl.value));
+    downloadBtn?.addEventListener('click', () => {
+      if (!lastExportRows.length) {
+        window.alert('No hay registros para descargar.');
+        return;
+      }
+      const fi = els.fechaInicio?.value || 'inicio';
+      const ff = els.fechaFin?.value || 'fin';
+      if (currentMeta.kpi === 'sofia') {
+        downloadCsv(
+          ['FechaFactura', 'FechaRegistro', 'Hora', 'Factura', 'VIN', 'Previas', 'Pedido', 'NoTransaccion', 'Cliente', 'Estatus', 'Usuario'],
+          ['FECHA_PERIODO', 'SOF_FechAct', 'SOF_HoraAct', 'SOF_Factura', 'SOF_VIN', 'PREVIAS', 'SOF_Pedido', 'SOF_NoTransaccion', 'CLIENTE', 'SOF_Estatus', 'SOF_CveUSu'],
+          lastExportRows,
+          `entregas_sofia_${fi}_${ff}.csv`
+        );
+      } else if (currentMeta.kpi === 'carryOver') {
+        const lines = [['Serie', 'Modelo', 'Anio', 'Color', 'Situacion', 'Dias', 'Aparto', 'Previas'].join(',')];
+        for (const r of lastExportRows) {
+          lines.push([
+            r.serie || r.vin || '',
+            r.tipoAuto || r.catalogo || r.modelo || '',
+            r.anModelo || r.anio || '',
+            r.colorExterior || r.color || '',
+            r.situacionLabel || r.situacion || '',
+            r.daysApartado ?? '',
+            r.apartadoPor || r.usuarioApartado || '',
+            r.previas ?? 0,
+          ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+        }
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `carry_over_${fi}_${ff}.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } else {
+        downloadCsv(
+          ['Fecha', 'Documento', 'Vendedor', 'Cliente', 'Serie', 'Modelo', 'Anio', 'Color', 'Departamento', 'TipoVenta', 'FormaPago'],
+          ['VTE_FECHDOCTO', 'VTE_DOCTO', 'VENDEDOR', 'CLIENTE', 'VTE_SERIE', 'VEH_TIPOAUTO', 'VEH_ANMODELO', 'COL_DESCRIPCION', 'CANAL_LABEL', 'TIPOVENTA', 'FORMAPAGO_ORIGINAL'],
+          lastExportRows,
+          `ventas_${currentMeta.kpi}_${fi}_${ff}.csv`
+        );
+      }
+    });
+    summaryEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-ventas-filter-dim]');
+      if (!btn || !summaryEl.contains(btn)) return;
+      setFilter(btn.dataset.ventasFilterDim, btn.dataset.ventasFilterValue, btn.dataset.ventasFilterValue);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && panel.classList.contains('ops-orders-drawer--open')) close();
+    });
+
+    ventasDrawerUi = {
+      open,
+      close,
+      isOpen: () => panel.classList.contains('ops-orders-drawer--open'),
+      refresh() {
+        if (!panel.classList.contains('ops-orders-drawer--open') || !activeVentasDrawerKpi) return;
+        sourceRows = rowsForVentasDrawer(activeVentasDrawerKpi).slice();
+        renderList(searchEl?.value || '');
+      },
+      getExportRows: () => lastExportRows,
+      getActiveKpi: () => activeVentasDrawerKpi,
+    };
+    return ventasDrawerUi;
+  }
+
   function closeVentasPanel() {
-    activeVentasKpiType = null;
-    els.panelVentasDetalle?.classList.add('hidden');
-    els.kpiCardRetail?.classList.remove('is-selected');
-    els.kpiCardFlotillas?.classList.remove('is-selected');
-    els.kpiCardRetail?.setAttribute('aria-expanded', 'false');
-    els.kpiCardFlotillas?.setAttribute('aria-expanded', 'false');
-    clearVentasPreviewSearch();
+    ensureVentasKpiDrawer().close();
   }
 
   function setVentasPanelOpen(type, open) {
-    if (!els.panelVentasDetalle) return;
+    const drawer = ensureVentasKpiDrawer();
     if (!open) {
-      closeVentasPanel();
+      drawer.close();
       return;
     }
-
-    setSofiaPanelOpen(false);
-    closeCarryOverPanelUi();
-    const isSame = activeVentasKpiType === type && !els.panelVentasDetalle.classList.contains('hidden');
-    if (isSame) {
-      closeVentasPanel();
-      return;
-    }
-
-    activeVentasKpiType = type;
-    const rows = getVentasRowsByType(type);
-    const isFlotilla = type === 'flotilla';
-
-    els.panelVentasDetalle.classList.remove('hidden');
-    els.panelVentasDetalle.classList.toggle('kpi-detail-panel--flotilla', isFlotilla);
-    els.panelVentasDetalle.classList.toggle('kpi-detail-panel--retail', !isFlotilla);
-    els.kpiCardRetail?.classList.toggle('is-selected', !isFlotilla);
-    els.kpiCardFlotillas?.classList.toggle('is-selected', isFlotilla);
-    els.kpiCardRetail?.setAttribute('aria-expanded', !isFlotilla ? 'true' : 'false');
-    els.kpiCardFlotillas?.setAttribute('aria-expanded', isFlotilla ? 'true' : 'false');
-
-    if (els.ventasPanelTitulo) {
-      els.ventasPanelTitulo.textContent = isFlotilla ? 'Detalle flotillas' : 'Detalle ventas retail';
-    }
-
-    clearVentasPreviewSearch();
-    renderVentasPreview(rows);
-    updateVentasPanelResumen(type, rows.length);
-    els.panelVentasDetalle.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    window.setTimeout(() => els.buscarVentasPreview?.focus({ preventScroll: true }), 180);
+    drawer.open(type, type === 'flotilla' ? els.kpiCardFlotillas : els.kpiCardRetail);
   }
 
   function bindKpiCard(card, onToggle) {
@@ -937,55 +1584,30 @@
   }
 
   function setSofiaPanelOpen(open) {
-    if (!els.panelEntregasSofia || !els.kpiCardEntregasSofia) return;
-    const isOpen = Boolean(open);
-    if (isOpen) {
-      closeVentasPanel();
-      closeCarryOverPanelUi();
-    }
-    if (!isOpen) {
-      els.panelEntregasSofia.classList.add('hidden');
-      els.kpiCardEntregasSofia.classList.remove('is-selected');
-      els.kpiCardEntregasSofia.setAttribute('aria-expanded', 'false');
-      clearSofiaPreviewSearch();
+    const drawer = ensureVentasKpiDrawer();
+    if (!open) {
+      drawer.close();
       return;
     }
-
-    const wasOpen = !els.panelEntregasSofia.classList.contains('hidden');
-    if (wasOpen) {
-      els.panelEntregasSofia.classList.add('hidden');
-      els.kpiCardEntregasSofia.classList.remove('is-selected');
-      els.kpiCardEntregasSofia.setAttribute('aria-expanded', 'false');
-      clearSofiaPreviewSearch();
-      return;
-    }
-
-    els.panelEntregasSofia.classList.remove('hidden');
-    els.kpiCardEntregasSofia.classList.add('is-selected');
-    els.kpiCardEntregasSofia.setAttribute('aria-expanded', 'true');
-    clearSofiaPreviewSearch();
-    renderEntregasPreview(entregasActuales);
-    updateSofiaPanelResumen(entregasActuales.length);
-    els.panelEntregasSofia.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    window.setTimeout(() => els.buscarSofiaPreview?.focus({ preventScroll: true }), 180);
+    drawer.open('sofia', els.kpiCardEntregasSofia);
   }
 
   function toggleSofiaPanel() {
-    const isOpen = !els.panelEntregasSofia?.classList.contains('hidden');
-    setSofiaPanelOpen(!isOpen);
+    setSofiaPanelOpen(true);
   }
 
   function getVentasExportRows() {
-    if (!els.panelVentasDetalle?.classList.contains('hidden') && activeVentasKpiType) {
-      const base = getVentasRowsByType(activeVentasKpiType);
-      return filterVentasRowsByTerm(els.buscarVentasPreview?.value || '', base);
+    const drawer = ventasDrawerUi;
+    if (drawer?.isOpen?.() && (drawer.getActiveKpi() === 'retail' || drawer.getActiveKpi() === 'flotilla')) {
+      return drawer.getExportRows() || [];
     }
     return registrosActuales;
   }
 
   function getSofiaExportRows() {
-    if (!els.panelEntregasSofia?.classList.contains('hidden')) {
-      return filterEntregasRowsByTerm(els.buscarSofiaPreview?.value || '', entregasActuales);
+    const drawer = ventasDrawerUi;
+    if (drawer?.isOpen?.() && drawer.getActiveKpi() === 'sofia') {
+      return drawer.getExportRows() || [];
     }
     return entregasActuales;
   }
@@ -1071,14 +1693,9 @@
       renderGoalCharts(resumen);
       renderCharts(resumen);
       renderYtdChart(data.comparativoYtd);
-      if (activeVentasKpiType) {
-        applyVentasPreviewSearch();
-      }
-      if (!els.panelEntregasSofia?.classList.contains('hidden')) {
-        applySofiaPreviewSearch();
-      }
-      if (!els.panelCarryOver?.classList.contains('hidden')) {
-        applyCarryOverPreviewSearch();
+      renderCarlineUtilidad(data.utilidadCarline, data.comparativoYtd);
+      if (ventasDrawerUi?.isOpen?.()) {
+        ventasDrawerUi.refresh();
       }
 
       els.btnExportar.disabled = registrosActuales.length === 0;
@@ -1199,6 +1816,8 @@
       ytdTotalActual: document.getElementById('ytdTotalActual'),
       ytdTotalAnterior: document.getElementById('ytdTotalAnterior'),
       ytdVariacion: document.getElementById('ytdVariacion'),
+      carlineUtilidadBody: document.getElementById('carlineUtilidadBody'),
+      carlineUtilidadSubtitle: document.getElementById('carlineUtilidadSubtitle'),
       chartsMensuales: document.getElementById('chartsMensuales'),
       kpisMensuales: document.getElementById('kpisMensuales'),
       kpiPromedioMes: document.getElementById('kpiPromedioMes'),
@@ -1239,6 +1858,9 @@
   async function switchSalesTab(tab) {
     const next = ['financiamiento', 'leads'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
+    if (next !== 'ventas') {
+      ventasDrawerUi?.close?.();
+    }
 
     document.querySelectorAll('#salesMainTabs [data-sales-tab]').forEach((btn) => {
       const on = btn.dataset.salesTab === next;
@@ -1331,13 +1953,8 @@
 
     bindKpiCard(els.kpiCardRetail, () => setVentasPanelOpen('retail', true));
     bindKpiCard(els.kpiCardFlotillas, () => setVentasPanelOpen('flotilla', true));
-    els.btnCerrarVentasPanel?.addEventListener('click', () => closeVentasPanel());
-
     bindKpiCard(els.kpiCardEntregasSofia, toggleSofiaPanel);
-    els.btnCerrarSofiaPanel?.addEventListener('click', () => setSofiaPanelOpen(false));
-
     bindKpiCard(els.kpiCardCarryOver, toggleCarryOverPanel);
-    els.btnCerrarCarryOverPanel?.addEventListener('click', () => setCarryOverPanelOpen(false));
 
     els.goalRetailInput?.addEventListener('input', () => onGoalInputChange('retail'));
     els.goalRetailInput?.addEventListener('change', () => onGoalInputChange('retail'));

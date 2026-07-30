@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=99" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -49,7 +49,7 @@
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
 </button>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiEntregasSinPrevias" aria-expanded="false" aria-controls="panelEntregasSinPreviasInv" title="Entregas SOFIA del mes sin órdenes de previa">
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiEntregasSinPrevias" data-autos-kpi="entregasSinPrevias" aria-expanded="false" title="Clic para ver entregas SOFIA sin previa">
 <div class="kpi-card-head"><span class="kpi-title">Entregas sin previa</span><span class="material-symbols-outlined kpi-icon">no_photography</span></div>
 <div id="sEntregasSinPrevias" class="kpi-value">—</div>
 <p id="sEntregasSinPreviasSub" class="kpi-subtitle">SOFIA · mes en curso</p>
@@ -62,12 +62,13 @@
 <p class="kpi-subtitle">Desde fecha de remisión</p>
 <div class="kpi-accent"></div>
 </div>
-<div class="kpi-card kpi-card--rose" id="kpiAgeingAlerts">
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiAgeingAlerts" data-autos-kpi="ageing" aria-expanded="false" title="Clic para ver unidades envejecidas">
 <div class="kpi-card-head"><span class="kpi-title">Unidades envejecidas</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
 <div id="sAlerts" class="kpi-value">—</div>
 <p id="sAlertsSub" class="kpi-subtitle">Físico · 60+ días</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
-</div>
+</button>
 <div class="kpi-card-anchor" id="kpiPlanPisoWrap">
 <button type="button" class="kpi-card kpi-card--amber kpi-card--interactive" id="kpiPlanPisoCard" aria-haspopup="listbox" aria-expanded="false" aria-controls="planPisoKpiMenu" title="Clic para elegir periodo acumulado">
 <div class="kpi-card-head"><span class="kpi-title">Plan Piso</span><span class="material-symbols-outlined kpi-icon">payments</span></div>
@@ -77,35 +78,6 @@
 <div class="kpi-accent"></div>
 </button>
 <div id="planPisoKpiMenu" class="kpi-period-menu hidden" role="listbox" aria-label="Periodo Plan Piso"></div>
-</div>
-</section>
-
-<div id="autosKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
-
-<section id="panelEntregasSinPreviasInv" class="section-panel dashboard-section kpi-detail-panel hidden" aria-labelledby="kpiEntregasSinPrevias">
-<div class="kpi-detail-header">
-<div>
-<h3 class="section-title" style="margin-bottom:6px">Entregas SOFIA sin previa</h3>
-<p id="invSinPreviasPanelResumen" class="section-subtitle" style="margin:0">Mes en curso</p>
-</div>
-<button type="button" id="btnCerrarInvSinPreviasPanel" class="btn-glass btn-icon-close" aria-label="Cerrar detalle sin previas">
-<span class="material-symbols-outlined">close</span>
-</button>
-</div>
-<div class="kpi-detail-toolbar">
-<label class="kpi-detail-search" for="buscarInvSinPrevias">
-<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
-<input id="buscarInvSinPrevias" type="search" placeholder="Buscar factura, VIN, cliente..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
-</label>
-<span id="invSinPreviasSearchMeta" class="kpi-detail-search-meta hidden"></span>
-</div>
-<div class="table-scroll kpi-detail-table-wrap">
-<table class="data-table">
-<thead><tr>
-<th>Fecha fact.</th><th>Registro</th><th>Hora</th><th>Factura</th><th>VIN</th><th class="cell-num">Previas</th><th>Cliente</th><th>Estatus</th><th>Usuario</th>
-</tr></thead>
-<tbody id="tablaInvSinPreviasBody"></tbody>
-</table>
 </div>
 </section>
 
@@ -155,37 +127,6 @@
 </div>
 </section>
 
-<section class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Inventario de unidades</h3>
-<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-<input id="buscarInventario" type="search" placeholder="Buscar VIN, modelo, color, ubicación..." class="filter-input" style="min-width:240px;max-width:320px" autocomplete="off"/>
-<span id="tableCount" class="top-bar-meta"></span>
-</div>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>Modelo</th>
-<th>Familia</th>
-<th>Año</th>
-<th>Serie</th>
-<th class="cell-num">Previas</th>
-<th>Inv.</th>
-<th>Color ext.</th>
-<th>Color int.</th>
-<th>Ubicación</th>
-<th>Situación</th>
-<th>Días stock</th>
-<th>Días aparte</th>
-<th>Apartó</th>
-<th>Status</th>
-</tr></thead>
-<tbody id="inventoryTable"></tbody>
-</table>
-</div>
-</section>
-
 <section class="chart-grid">
 <div class="section-panel">
 <h3 class="section-title">Por situación</h3>
@@ -198,8 +139,37 @@
 </section>
 
 <section class="section-panel dashboard-section">
-<h3 class="section-title">Antigüedad por Modelo (días)</h3>
-<div class="chart-card"><div class="chart-wrap" style="height:320px"><canvas id="ageingChart"></canvas></div></div>
+<div class="table-header-row" style="margin-bottom:12px">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Antigüedad por carline</h3>
+<p class="section-subtitle" style="margin:0">Promedio de días en stock · combinaciones que más tardan en salir (versión + color)</p>
+</div>
+</div>
+<div class="table-scroll ageing-slow-table-wrap">
+<table class="data-table ageing-slow-table">
+<colgroup>
+<col class="col-carline"/>
+<col class="col-version"/>
+<col class="col-color"/>
+<col class="col-uds"/>
+<col class="col-avg"/>
+<col class="col-max"/>
+</colgroup>
+<thead>
+<tr>
+<th>Carline</th>
+<th>Versión</th>
+<th>Color</th>
+<th class="cell-num">Uds</th>
+<th class="cell-num">Prom. días</th>
+<th class="cell-num">Máx. días</th>
+</tr>
+</thead>
+<tbody id="ageingSlowBody">
+<tr><td colspan="6" class="empty-row">Cargando antigüedad…</td></tr>
+</tbody>
+</table>
+</div>
 </section>
 
 </div>
@@ -310,7 +280,7 @@
 <script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=2"></script>
-<script src="/js/assistant-bubble.js?v=5"></script>
-<script src="/js/inventory.js?v=16"></script>
+<script src="/js/assistant-bubble.js?v=6"></script>
+<script src="/js/inventory.js?v=19"></script>
 </body>
 </html>

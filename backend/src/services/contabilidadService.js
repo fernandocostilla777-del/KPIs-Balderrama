@@ -4,6 +4,7 @@ const { getAccountingKpis } = require('./accountingEeffService');
 const { getVentasAutosNuevosIncomeStatement } = require('./ventasAutosNuevosEeffService');
 const { runAccountingEtl } = require('./accountingEtlService');
 const { getCatalogKpis } = require('./accountingCatalogKpiService');
+const { getBalanceGeneral } = require('./balanceGeneralService');
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -23,14 +24,25 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
 
   const includeFinanciamiento = includeFi !== 'false' && includeFi !== false;
 
-  const [overview, inventory, catalogKpis, eeff, ventasAutosNuevosEeff, etlConsolidado] = await Promise.all([
+  // Siempre calcular Balance General con cuentas mayor (independiente del alcance EEFF)
+  const [overview, inventory, catalogKpis, eeff, ventasAutosNuevosEeff, etlConsolidado, balanceGeneralRaw] = await Promise.all([
     getOverview({ fechaInicio, fechaFin }),
     getInventory({ planPisoPeriod: period }),
     getCatalogKpis({ fechaInicio, fechaFin, sucursal, area, includeFi: includeFinanciamiento }),
     getAccountingKpis({ fechaInicio, fechaFin, sucursal, area }),
     getVentasAutosNuevosIncomeStatement(fechaInicio, fechaFin, sucursal),
     runAccountingEtl({ fechaInicio, fechaFin, sucursal, area }),
+    getBalanceGeneral({ fechaFin }).catch((err) => {
+      console.error('[contabilidad] balanceGeneral:', err.message);
+      return null;
+    }),
   ]);
+
+  const balanceGeneral = (balanceGeneralRaw?.available && balanceGeneralRaw)
+    || (eeff.balanceGeneral?.available && eeff.balanceGeneral)
+    || balanceGeneralRaw
+    || eeff.balanceGeneral
+    || null;
 
   const { sales, service, inventory: invSnap, consolidated } = overview.financial;
   const invSummary = inventory.summary;
@@ -45,7 +57,8 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
   }));
 
   const dailyBreakdown = overview.dailyBreakdown || [];
-  const balanceTotals = eeff.balance?.totals || {};
+  const balanceTotals = balanceGeneral?.totals || eeff.balance?.totals || {};
+  const liquidez = balanceGeneral?.liquidez || eeff.liquidez || null;
 
   return {
     filtros: {
@@ -59,6 +72,7 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
     },
     catalogKpis,
     eeff,
+    balanceGeneral,
     ventasAutosNuevosEeff,
     etlConsolidado,
     summary: {
@@ -92,7 +106,10 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
       activoTotal: balanceTotals.activoTotal,
       pasivoTotal: balanceTotals.pasivoTotal,
       capitalContable: balanceTotals.capital,
-      liquidezCorriente: eeff.ratios?.liquidezCorriente,
+      liquidezCorriente: liquidez?.razonCirculante ?? eeff.ratios?.liquidezCorriente,
+      capitalTrabajo: liquidez?.capitalTrabajo ?? eeff.ratios?.capitalTrabajo,
+      pruebaAcida: liquidez?.pruebaAcida ?? eeff.ratios?.pruebaAcida,
+      liquidez,
     },
     ventas: {
       lines: [

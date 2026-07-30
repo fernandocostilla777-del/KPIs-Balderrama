@@ -14,6 +14,8 @@ let postventaLoaded = false;
 let chartsReady = false;
 let activeAutosKpi = null;
 let autosKpiFilter = null;
+let autosDrawerUi = null;
+let stockAlertsRows = [];
 
 const PLAN_PISO_MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -149,6 +151,7 @@ function initPlanPisoKpiCard() {
 
 function renderAlerts(alerts, planPisoTotal) {
   const { fmt } = Dashboard;
+  stockAlertsRows = alerts || [];
   const el = document.getElementById('alertsList');
   const totalEl = document.getElementById('ageingPlanPisoTotal');
   if (totalEl) {
@@ -231,12 +234,36 @@ function getInventorySearchTerm() {
   return document.getElementById('buscarInventario')?.value || '';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function dash(value) {
+  const text = String(value ?? '').trim();
+  return text || '—';
+}
+
+function isSofiaKpi(kpiId) {
+  return kpiId === 'entregasSinPrevias';
+}
+
 function rowsForAutosKpi(kpiId) {
   if (kpiId === 'available') {
     return inventoryRows.filter((r) => r.situacion === 'DIS' || r.situacion === 'FIS' || r.situacion === 'SEP');
   }
   if (kpiId === 'sinPrevias') {
     return inventoryRows.filter((r) => Number(r.previas || 0) === 0);
+  }
+  if (kpiId === 'ageing') {
+    return inventoryRows.filter((r) => r.situacion === 'FIS' && Number(r.daysInStock || 0) >= 60);
+  }
+  if (kpiId === 'entregasSinPrevias') {
+    return (window.__invSofiaSinPrevias || []).slice();
   }
   return inventoryRows;
 }
@@ -247,30 +274,107 @@ function autosKpiMeta(kpiId) {
       title: 'Disponibles',
       hint: 'FIS, DIS y Apartadas (SEP) · las apartadas muestran días y quién las apartó',
       scopeLabel: 'disponibles',
+      icon: 'check_circle',
+      card: () => document.getElementById('kpiAvailableUnits'),
     };
   }
   if (kpiId === 'sinPrevias') {
     return {
-      title: 'Sin previas',
+      title: 'Sin previas (stock)',
       hint: 'Unidades sin órdenes de servicio que empiecen con S · Previas = 0',
       scopeLabel: 'sin previas',
+      icon: 'visibility_off',
+      card: () => document.getElementById('kpiSinPrevias'),
+    };
+  }
+  if (kpiId === 'entregasSinPrevias') {
+    const range = currentMonthRange();
+    return {
+      title: 'Entregas sin previa',
+      hint: `Entregas SOFIA del mes (${range.label}) sin órdenes de previa`,
+      scopeLabel: 'entregas',
+      icon: 'no_photography',
+      card: () => document.getElementById('kpiEntregasSinPrevias'),
+    };
+  }
+  if (kpiId === 'ageing') {
+    return {
+      title: 'Unidades envejecidas',
+      hint: 'Unidades en Físico (FIS) con 60 o más días desde remisión',
+      scopeLabel: 'envejecidas',
+      icon: 'warning',
+      card: () => document.getElementById('kpiAgeingAlerts'),
     };
   }
   return {
     title: 'Unidades totales',
     hint: 'Todas las situaciones · las apartadas (SEP) muestran días y quién las apartó',
     scopeLabel: 'unidades',
+    icon: 'directions_car',
+    card: () => document.getElementById('kpiTotalUnits'),
   };
 }
 
-function groupAutosRows(rows, keyFn, labelFn) {
+function countByField(rows, keyFn) {
   const map = new Map();
   for (const r of rows) {
-    const key = keyFn(r) || 'Sin dato';
-    if (!map.has(key)) map.set(key, { id: key, label: labelFn(r, key), units: 0 });
-    map.get(key).units += 1;
+    const label = keyFn(r) || 'Sin dato';
+    map.set(label, (map.get(label) || 0) + 1);
   }
-  return [...map.values()].sort((a, b) => b.units - a.units);
+  return [...map.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function downloadAutosKpiCsv(rows, title, kpi) {
+  const safeName = String(title || 'inventario').replace(/[^\w\-]+/g, '_').slice(0, 48);
+  const stamp = new Date().toISOString().slice(0, 10);
+  let headers;
+  let lines;
+  if (isSofiaKpi(kpi)) {
+    headers = ['Fecha', 'Registro', 'Hora', 'Factura', 'VIN', 'Previas', 'Cliente', 'Estatus', 'Usuario'];
+    lines = rows.map((r) => [
+      r.FECHA_PERIODO || r.SOF_FechFact || '',
+      r.SOF_FechAct || '',
+      r.SOF_HoraAct || '',
+      r.SOF_Factura || '',
+      r.SOF_VIN || '',
+      Number(r.PREVIAS || 0),
+      r.CLIENTE || '',
+      r.SOF_Estatus || '',
+      r.SOF_CveUSu || '',
+    ]);
+  } else {
+    headers = [
+      'Modelo', 'Familia', 'Serie', 'Previas', 'Ubicación', 'Situación',
+      'Días stock', 'Días aparte', 'Apartó', 'Status', 'Color', 'Año',
+    ];
+    lines = rows.map((r) => [
+      r.tipoAuto || '',
+      r.familia || '',
+      r.serie || '',
+      Number(r.previas || 0),
+      r.ubicacion || '',
+      r.situacionLabel || r.situacion || '',
+      r.daysInStock ?? '',
+      r.daysApartado ?? '',
+      r.apartadoPor || r.usuarioApartado || '',
+      r.status || '',
+      r.colorExterior || '',
+      r.anModelo || '',
+    ]);
+  }
+  const escapeCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers.map(escapeCell).join(',')]
+    .concat(lines.map((row) => row.map(escapeCell).join(',')))
+    .join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safeName}_${stamp}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function syncAutosKpiCards() {
@@ -282,166 +386,456 @@ function syncAutosKpiCards() {
   });
 }
 
-function renderAutosKpiDetail() {
-  const panel = document.getElementById('autosKpiDetail');
-  if (!panel) return;
+function ensureAutosKpiDrawer() {
+  if (autosDrawerUi) return autosDrawerUi;
 
-  if (!activeAutosKpi) {
-    panel.classList.add('hidden');
-    panel.innerHTML = '';
-    return;
-  }
+  const backdrop = document.createElement('div');
+  backdrop.className = 'ops-orders-backdrop';
+  backdrop.id = 'autosKpiBackdrop';
+  backdrop.setAttribute('aria-hidden', 'true');
 
-  const { fmt, statusBadge } = Dashboard;
-  const rows = rowsForAutosKpi(activeAutosKpi);
-  const meta = autosKpiMeta(activeAutosKpi);
-  const title = meta.title;
-  const hint = meta.hint;
-
-  const bySituacion = groupAutosRows(
-    rows,
-    (r) => r.situacion,
-    (r, k) => r.situacionLabel || k,
-  );
-
-  const activeFilter = autosKpiFilter?.kpi === activeAutosKpi && autosKpiFilter?.dim === 'situacion'
-    ? autosKpiFilter
-    : null;
-
-  const detailRows = activeFilter
-    ? rows.filter((r) => (r.situacion || '') === activeFilter.id)
-    : rows;
-
-  const situacionRows = bySituacion.map((item) => {
-    const selected = activeFilter?.id === item.id;
-    const isApartada = item.id === 'SEP';
-    return `
-      <tr class="row-selectable${selected ? ' row-active' : ''}${isApartada ? ' row-apartada' : ''}" data-autos-filter-dim="situacion" data-autos-filter-id="${item.id}">
-        <td>${item.label}${isApartada ? ' <span class="badge-tipo badge-flotilla">Apartada</span>' : ''}</td>
-        <td class="cell-num"><strong>${fmt.number(item.units)}</strong></td>
-        <td class="cell-num">${rows.length ? `${Math.round((item.units / rows.length) * 1000) / 10}%` : '—'}</td>
-      </tr>`;
-  }).join('');
-
-  const groups = new Map();
-  for (const r of detailRows) {
-    const key = r.situacion || 'OTRO';
-    if (!groups.has(key)) {
-      groups.set(key, { label: r.situacionLabel || key, units: [] });
-    }
-    groups.get(key).units.push(r);
-  }
-
-  const situacionOrder = bySituacion.map((s) => s.id);
-  const orderedGroups = [...groups.entries()].sort((a, b) => {
-    const ia = situacionOrder.indexOf(a[0]);
-    const ib = situacionOrder.indexOf(b[0]);
-    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-  });
-
-  const detailHtml = orderedGroups.length
-    ? orderedGroups.map(([key, group]) => `
-        <tr class="eeff-kpi-detail__section">
-          <td colspan="10">${group.label} · ${fmt.number(group.units.length)} unidades</td>
-        </tr>
-        ${group.units.map((r) => `
-          <tr class="${r.isApartada || r.situacion === 'SEP' ? 'row-apartada' : ''}">
-            <td><strong>${r.tipoAuto || '—'}</strong></td>
-            <td>${r.familia || '—'}</td>
-            <td>${r.serie || '—'}</td>
-            <td class="cell-num">${Number(r.previas || 0)}</td>
-            <td>${r.ubicacion || '—'}</td>
-            <td>
-              <span class="badge-tipo${r.isApartada || r.situacion === 'SEP' ? ' badge-flotilla' : ''}">${r.situacionLabel || key}</span>
-            </td>
-            <td class="cell-num">${r.daysInStock !== null ? r.daysInStock : '—'}</td>
-            <td class="cell-num">${r.isApartada || r.situacion === 'SEP' ? (r.daysApartado ?? '—') : '—'}</td>
-            <td>${r.isApartada || r.situacion === 'SEP' ? (r.apartadoPor || '—') : '—'}</td>
-            <td>${statusBadge ? statusBadge(r.status) : (r.status || '—')}</td>
-          </tr>
-        `).join('')}
-      `).join('')
-    : '<tr class="empty-row"><td colspan="10">Sin unidades en esta selección.</td></tr>';
-
-  panel.classList.remove('hidden');
+  const panel = document.createElement('div');
+  panel.className = 'ops-orders-drawer';
+  panel.id = 'autosKpiDrawer';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-hidden', 'true');
+  panel.setAttribute('aria-label', 'Detalle de inventario');
   panel.innerHTML = `
-    <div class="eeff-kpi-detail">
-      <div class="eeff-kpi-detail__head">
+    <div class="ops-orders-drawer__header">
+      <div class="ops-orders-drawer__title-wrap">
+        <span class="material-symbols-outlined ops-orders-drawer__logo" data-autos-kpi-logo>directions_car</span>
         <div>
-          <p class="eeff-kpi-detail__eyebrow">Desglose</p>
-          <h4 class="eeff-kpi-detail__title">${title} · ${fmt.number(rows.length)} unidades</h4>
-          <p class="eeff-kpi-detail__hint">${hint}</p>
+          <h2 class="ops-orders-drawer__title" data-autos-kpi-title>Detalle de inventario</h2>
+          <span class="ops-orders-drawer__status" data-autos-kpi-status>0 unidades</span>
         </div>
-        <button type="button" class="eeff-kpi-detail__close" data-autos-kpi-close aria-label="Cerrar desglose">
+      </div>
+      <div class="ops-orders-drawer__actions">
+        <button type="button" class="ops-orders-drawer__icon-btn" data-autos-kpi-download title="Descargar CSV" aria-label="Descargar CSV">
+          <span class="material-symbols-outlined">download</span>
+        </button>
+        <button type="button" class="ops-orders-drawer__icon-btn" data-autos-kpi-expand title="Expandir" aria-label="Expandir panel">
+          <span class="material-symbols-outlined" data-autos-kpi-expand-icon>open_in_full</span>
+        </button>
+        <button type="button" class="ops-orders-drawer__icon-btn" data-autos-kpi-close title="Cerrar" aria-label="Cerrar">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <div style="padding:12px 16px 8px">
-        <h3 class="section-title" style="font-size:14px;margin-bottom:8px">Por situación</h3>
-        <div class="table-scroll" style="max-height:200px">
-          <table class="data-table data-table--selectable">
-            <thead><tr><th>Situación</th><th class="cell-num">Unidades</th><th class="cell-num">%</th></tr></thead>
-            <tbody>${situacionRows || '<tr class="empty-row"><td colspan="3">Sin datos</td></tr>'}</tbody>
-          </table>
+    </div>
+    <div class="ops-orders-drawer__toolbar">
+      <label class="ops-orders-drawer__search" for="autosKpiSearch">
+        <span class="material-symbols-outlined" aria-hidden="true">search</span>
+        <input id="autosKpiSearch" type="search" placeholder="Buscar modelo, serie, ubicación..." autocomplete="off"/>
+      </label>
+      <button type="button" class="ops-orders-drawer__filter-chip" data-autos-kpi-filter-chip hidden title="Quitar filtro"></button>
+      <span class="ops-orders-drawer__meta" data-autos-kpi-meta></span>
+    </div>
+    <div class="ops-orders-drawer__main">
+      <aside class="ops-orders-drawer__summary custom-scrollbar" data-autos-kpi-summary></aside>
+      <div class="ops-orders-drawer__body custom-scrollbar" data-autos-kpi-body></div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+
+  const statusEl = panel.querySelector('[data-autos-kpi-status]');
+  const metaEl = panel.querySelector('[data-autos-kpi-meta]');
+  const bodyEl = panel.querySelector('[data-autos-kpi-body]');
+  const summaryEl = panel.querySelector('[data-autos-kpi-summary]');
+  const searchEl = panel.querySelector('#autosKpiSearch');
+  const filterChip = panel.querySelector('[data-autos-kpi-filter-chip]');
+  const expandBtn = panel.querySelector('[data-autos-kpi-expand]');
+  const expandIcon = panel.querySelector('[data-autos-kpi-expand-icon]');
+  const downloadBtn = panel.querySelector('[data-autos-kpi-download]');
+  const titleEl = panel.querySelector('[data-autos-kpi-title]');
+  const logoEl = panel.querySelector('[data-autos-kpi-logo]');
+
+  let expanded = false;
+  let activeFilter = null;
+  let sourceRows = [];
+  let lastExportRows = [];
+  let currentMeta = { kpi: '', title: 'Inventario', hint: '', icon: 'directions_car' };
+  let lastCard = null;
+
+  const FILTER_DIM_LABEL = {
+    situacion: 'Situación',
+    familia: 'Familia',
+    modelo: 'Modelo',
+    ubicacion: 'Ubicación',
+    estatus: 'Estatus',
+    usuario: 'Usuario',
+  };
+
+  function placeNearKpi(card) {
+    if (expanded) return;
+    const kpiBlock = document.getElementById('autosKpiGrid');
+    const ref = card || kpiBlock;
+    const rect = ref?.getBoundingClientRect?.();
+    let top = 96;
+    if (rect) top = Math.round(rect.bottom + 12);
+    top = Math.max(72, Math.min(top, Math.round(window.innerHeight * 0.28)));
+    const maxHeight = Math.max(360, window.innerHeight - top - 24);
+    panel.style.top = `${top}px`;
+    panel.style.right = window.innerWidth < 640 ? '12px' : '28px';
+    panel.style.left = window.innerWidth < 640 ? '12px' : 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.height = `${Math.min(680, maxHeight)}px`;
+  }
+
+  function clearPlacement() {
+    panel.style.top = '';
+    panel.style.right = '';
+    panel.style.left = '';
+    panel.style.bottom = '';
+    panel.style.height = '';
+  }
+
+  function setExpanded(next) {
+    expanded = Boolean(next);
+    panel.classList.toggle('ops-orders-drawer--expanded', expanded);
+    if (expandIcon) expandIcon.textContent = expanded ? 'close_fullscreen' : 'open_in_full';
+    if (expandBtn) expandBtn.title = expanded ? 'Contraer' : 'Expandir';
+    if (expanded) clearPlacement();
+    else if (panel.classList.contains('ops-orders-drawer--open')) placeNearKpi(lastCard);
+  }
+
+  function updateFilterChip() {
+    if (!filterChip) return;
+    if (!activeFilter) {
+      filterChip.hidden = true;
+      filterChip.textContent = '';
+      return;
+    }
+    filterChip.hidden = false;
+    filterChip.innerHTML = `
+      <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+      ${escapeHtml(FILTER_DIM_LABEL[activeFilter.dim] || activeFilter.dim)}: ${escapeHtml(activeFilter.label || activeFilter.value)}
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
+  }
+
+  function matchesActiveFilter(r) {
+    if (!activeFilter) return true;
+    if (isSofiaKpi(currentMeta.kpi)) {
+      if (activeFilter.dim === 'estatus') return String(r.SOF_Estatus || 'Sin estatus') === activeFilter.value;
+      if (activeFilter.dim === 'usuario') return String(r.SOF_CveUSu || 'Sin usuario') === activeFilter.value;
+      return true;
+    }
+    if (activeFilter.dim === 'situacion') return String(r.situacion || '') === activeFilter.value;
+    if (activeFilter.dim === 'familia') return String(r.familia || 'Sin familia') === activeFilter.value;
+    if (activeFilter.dim === 'modelo') return String(r.tipoAuto || 'Sin modelo') === activeFilter.value;
+    if (activeFilter.dim === 'ubicacion') return String(r.ubicacion || 'Sin ubicación') === activeFilter.value;
+    return true;
+  }
+
+  function setFilter(dim, value, label) {
+    if (activeFilter && activeFilter.dim === dim && activeFilter.value === value) {
+      activeFilter = null;
+      autosKpiFilter = null;
+    } else {
+      activeFilter = { dim, value, label: label || value };
+      if (!isSofiaKpi(currentMeta.kpi) && (dim === 'situacion' || dim === 'familia' || dim === 'modelo')) {
+        autosKpiFilter = { kpi: currentMeta.kpi, dim, id: value, label: label || value };
+      } else {
+        autosKpiFilter = null;
+      }
+    }
+    updateFilterChip();
+    renderList(searchEl?.value || '');
+    applyAutosKpiTableFilter();
+  }
+
+  function clearFilter() {
+    activeFilter = null;
+    autosKpiFilter = null;
+    updateFilterChip();
+    renderList(searchEl?.value || '');
+    applyAutosKpiTableFilter();
+  }
+
+  function renderSummary(rows) {
+    const isActive = (dim, value) => activeFilter && activeFilter.dim === dim && activeFilter.value === value;
+    const block = (titulo, dim, items, valueKey = 'label') => `
+      <div class="ops-orders-drawer__group">
+        <h5>${escapeHtml(titulo)}</h5>
+        ${items.length
+          ? items.map((x) => `
+            <button type="button"
+              class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive(dim, x[valueKey]) ? ' is-active' : ''}"
+              data-autos-filter-dim="${escapeHtml(dim)}"
+              data-autos-filter-value="${escapeHtml(x[valueKey])}"
+              data-autos-filter-label="${escapeHtml(x.label)}"
+              title="Filtrar por ${escapeHtml(x.label)}">
+              <span class="lbl">${escapeHtml(x.label)}</span>
+              <span class="val">${Number(x.value).toLocaleString('es-MX')}</span>
+            </button>`).join('')
+          : '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+      </div>`;
+
+    if (isSofiaKpi(currentMeta.kpi)) {
+      const porEstatus = countByField(rows, (r) => r.SOF_Estatus || 'Sin estatus').slice(0, 10);
+      const porUsuario = countByField(rows, (r) => r.SOF_CveUSu || 'Sin usuario').slice(0, 10);
+      summaryEl.innerHTML = `
+        <div class="ops-orders-drawer__group">
+          <h5>Resumen</h5>
+          <div class="ops-orders-drawer__row"><span class="lbl">Entregas</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">SOFIA mes</span><span class="val">${Number(window.__invSofiaTotalMes || 0).toLocaleString('es-MX')}</span></div>
+          <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
         </div>
-        ${activeFilter ? `<p class="section-subtitle" style="margin-top:10px">Mostrando: <strong>${activeFilter.label}</strong> · <button type="button" class="btn-link" data-autos-clear-filter>Ver todas</button></p>` : ''}
+        ${block('Por estatus', 'estatus', porEstatus)}
+        ${block('Por usuario', 'usuario', porUsuario)}
+      `;
+      return;
+    }
+
+    const porSituacion = countByField(rows, (r) => r.situacion || 'OTRO')
+      .map((x) => {
+        const sample = rows.find((r) => (r.situacion || 'OTRO') === x.label);
+        return {
+          label: sample?.situacionLabel || x.label,
+          value: x.value,
+          id: x.label,
+        };
+      })
+      .slice(0, 12);
+    const porFamilia = countByField(rows, (r) => r.familia || 'Sin familia').slice(0, 10);
+    const porModelo = countByField(rows, (r) => r.tipoAuto || 'Sin modelo').slice(0, 10);
+    const apartadas = rows.filter((r) => r.isApartada || r.situacion === 'SEP').length;
+    const libres = rows.filter((r) => r.situacion === 'FIS' || r.situacion === 'DIS').length;
+
+    const situacionBlock = `
+      <div class="ops-orders-drawer__group">
+        <h5>Por situación</h5>
+        ${porSituacion.length
+          ? porSituacion.map((x) => `
+            <button type="button"
+              class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive('situacion', x.id) ? ' is-active' : ''}"
+              data-autos-filter-dim="situacion"
+              data-autos-filter-value="${escapeHtml(x.id)}"
+              data-autos-filter-label="${escapeHtml(x.label)}"
+              title="Filtrar por ${escapeHtml(x.label)}">
+              <span class="lbl">${escapeHtml(x.label)}</span>
+              <span class="val">${Number(x.value).toLocaleString('es-MX')}</span>
+            </button>`).join('')
+          : '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+      </div>`;
+
+    summaryEl.innerHTML = `
+      <div class="ops-orders-drawer__group">
+        <h5>Resumen</h5>
+        <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+        ${currentMeta.kpi === 'available' || currentMeta.kpi === 'total' ? `
+          <div class="ops-orders-drawer__row"><span class="lbl">Libres FIS/DIS</span><span class="val">${libres.toLocaleString('es-MX')}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Apartadas</span><span class="val">${apartadas.toLocaleString('es-MX')}</span></div>
+        ` : ''}
+        <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
       </div>
-      <div style="padding:8px 16px 16px">
-        <h3 class="section-title" style="font-size:14px;margin-bottom:8px">Detalle de unidades${activeFilter ? ` · ${activeFilter.label}` : ' por situación'}</h3>
-        <div class="table-scroll" style="max-height:360px">
-          <table class="data-table">
-            <thead><tr>
-              <th>Modelo</th>
-              <th>Familia</th>
-              <th>Serie</th>
-              <th class="cell-num">Previas</th>
-              <th>Ubicación</th>
-              <th>Situación</th>
-              <th class="cell-num">Días stock</th>
-              <th class="cell-num">Días aparte</th>
-              <th>Apartó</th>
-              <th>Status</th>
-            </tr></thead>
-            <tbody>${detailHtml}</tbody>
-          </table>
+      ${situacionBlock}
+      ${block('Por familia', 'familia', porFamilia)}
+      ${block('Por modelo', 'modelo', porModelo)}
+    `;
+  }
+
+  function renderList(term = '') {
+    const q = String(term || '').trim().toLowerCase();
+    const sofia = isSofiaKpi(currentMeta.kpi);
+
+    const searched = !q
+      ? sourceRows
+      : sourceRows.filter((r) => {
+        const fields = sofia
+          ? [r.FECHA_PERIODO, r.SOF_FechAct, r.SOF_HoraAct, r.SOF_Factura, r.SOF_VIN, r.CLIENTE, r.SOF_Estatus, r.SOF_CveUSu, r.PREVIAS]
+          : [
+            r.tipoAuto, r.familia, r.anModelo, r.serie, r.motor, r.noInventario,
+            r.colorExterior, r.ubicacion, r.situacion, r.situacionLabel,
+            r.catalogo, r.status, r.apartadoPor, r.usuarioApartado, r.previas,
+          ];
+        return fields.some((v) => String(v || '').toLowerCase().includes(q));
+      });
+
+    const filtered = searched.filter(matchesActiveFilter);
+    lastExportRows = filtered;
+
+    statusEl.textContent = sofia
+      ? `${filtered.length.toLocaleString('es-MX')} entrega(s)`
+      : `${filtered.length.toLocaleString('es-MX')} unidad(es)`;
+    metaEl.textContent = activeFilter || q
+      ? `${filtered.length} de ${sourceRows.length}`
+      : `${sourceRows.length} registros`;
+
+    renderSummary(searched);
+    updateFilterChip();
+
+    if (!filtered.length) {
+      bodyEl.innerHTML = `
+        <div class="ops-orders-drawer__empty">
+          <span class="material-symbols-outlined">inbox</span>
+          <p>${activeFilter || q
+            ? 'Sin coincidencias con el filtro actual.'
+            : (sofia ? 'No hay entregas SOFIA sin previa en el mes.' : 'No hay unidades para este indicador.')}</p>
+        </div>`;
+      return;
+    }
+
+    if (sofia) {
+      bodyEl.innerHTML = `
+        <div class="ops-orders-drawer__list-head">
+          <h5>Entregas SOFIA</h5>
+          <span>${filtered.length.toLocaleString('es-MX')}</span>
         </div>
-        <p class="section-subtitle" style="margin-top:8px">${fmt.number(detailRows.length)} unidades listadas · apartadas resaltadas</p>
+        ${filtered.map((r) => `
+          <div class="ops-orders-drawer__item" style="cursor:default">
+            <div class="ops-orders-drawer__item-head">
+              <strong>${escapeHtml(dash(r.SOF_Factura))}</strong>
+              <span class="ops-orders-drawer__tag">${escapeHtml(dash(r.SOF_Estatus))}</span>
+            </div>
+            <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.CLIENTE))} · VIN ${escapeHtml(dash(r.SOF_VIN))}</p>
+            <div class="ops-orders-drawer__facts">
+              <span>${escapeHtml(dash(r.FECHA_PERIODO ?? r.SOF_FechFact))}</span>
+              <span>Previas ${Number(r.PREVIAS || 0)}</span>
+              <span>${escapeHtml(dash(r.SOF_CveUSu))}</span>
+            </div>
+          </div>`).join('')}`;
+      return;
+    }
+
+    bodyEl.innerHTML = `
+      <div class="ops-orders-drawer__list-head">
+        <h5>Detalle de unidades</h5>
+        <span>${filtered.length.toLocaleString('es-MX')}</span>
       </div>
-    </div>`;
+      ${filtered.map((r) => {
+        const apartada = r.isApartada || r.situacion === 'SEP';
+        return `
+          <div class="ops-orders-drawer__item" style="cursor:default">
+            <div class="ops-orders-drawer__item-head">
+              <strong>${escapeHtml(dash(r.tipoAuto))}</strong>
+              <span class="ops-orders-drawer__tag">${escapeHtml(dash(r.situacionLabel || r.situacion))}</span>
+            </div>
+            <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.familia))} · Serie ${escapeHtml(dash(r.serie))}</p>
+            <div class="ops-orders-drawer__facts">
+              <span>${escapeHtml(dash(r.ubicacion))}</span>
+              <span>${r.daysInStock != null ? `${r.daysInStock} días` : '—'}</span>
+              <span>Previas ${Number(r.previas || 0)}</span>
+            </div>
+            <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+              <span>${escapeHtml(dash(r.colorExterior))}</span>
+              <span>${apartada ? `${r.daysApartado ?? '—'} d. aparte` : escapeHtml(dash(r.status))}</span>
+              <span>${apartada ? escapeHtml(dash(r.apartadoPor || r.usuarioApartado)) : escapeHtml(dash(r.anModelo))}</span>
+            </div>
+          </div>`;
+      }).join('')}`;
+  }
+
+  function close() {
+    panel.classList.remove('ops-orders-drawer--open');
+    panel.setAttribute('aria-hidden', 'true');
+    backdrop.classList.remove('ops-orders-backdrop--visible');
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('ops-orders-drawer-open');
+    expanded = false;
+    panel.classList.remove('ops-orders-drawer--expanded');
+    if (expandIcon) expandIcon.textContent = 'open_in_full';
+    if (expandBtn) expandBtn.title = 'Expandir';
+    clearPlacement();
+    activeFilter = null;
+    lastCard = null;
+    activeAutosKpi = null;
+    autosKpiFilter = null;
+    syncAutosKpiCards();
+    applyAutosKpiTableFilter();
+  }
+
+  function open(kpiKey, card) {
+    const meta = autosKpiMeta(kpiKey);
+    const resolvedCard = card || meta.card?.() || null;
+
+    if (activeAutosKpi === kpiKey && panel.classList.contains('ops-orders-drawer--open')) {
+      close();
+      return;
+    }
+
+    currentMeta = {
+      kpi: kpiKey,
+      title: meta.title,
+      hint: meta.hint,
+      icon: meta.icon || 'directions_car',
+    };
+    lastCard = resolvedCard;
+    activeAutosKpi = kpiKey;
+    autosKpiFilter = null;
+    activeFilter = null;
+
+    if (titleEl) titleEl.textContent = currentMeta.title;
+    if (logoEl) logoEl.textContent = currentMeta.icon;
+    panel.setAttribute('aria-label', currentMeta.title);
+    if (searchEl) {
+      searchEl.placeholder = isSofiaKpi(kpiKey)
+        ? 'Buscar factura, VIN, cliente...'
+        : 'Buscar modelo, serie, ubicación...';
+      searchEl.value = '';
+    }
+
+    sourceRows = rowsForAutosKpi(kpiKey).slice();
+    updateFilterChip();
+    placeNearKpi(resolvedCard);
+    setExpanded(true);
+    renderList('');
+    panel.classList.add('ops-orders-drawer--open');
+    panel.setAttribute('aria-hidden', 'false');
+    backdrop.classList.add('ops-orders-backdrop--visible');
+    backdrop.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('ops-orders-drawer-open');
+    syncAutosKpiCards();
+    applyAutosKpiTableFilter();
+    window.setTimeout(() => searchEl?.focus({ preventScroll: true }), 180);
+  }
+
+  backdrop.addEventListener('click', close);
+  panel.querySelector('[data-autos-kpi-close]')?.addEventListener('click', close);
+  expandBtn?.addEventListener('click', () => setExpanded(!expanded));
+  downloadBtn?.addEventListener('click', () => {
+    if (!lastExportRows.length) {
+      window.alert('No hay registros para descargar.');
+      return;
+    }
+    downloadAutosKpiCsv(lastExportRows, currentMeta.title, currentMeta.kpi);
+  });
+  searchEl?.addEventListener('input', () => renderList(searchEl.value));
+  filterChip?.addEventListener('click', clearFilter);
+  summaryEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-autos-filter-dim]');
+    if (!btn || !summaryEl.contains(btn)) return;
+    setFilter(
+      btn.dataset.autosFilterDim,
+      btn.dataset.autosFilterValue,
+      btn.dataset.autosFilterLabel || btn.dataset.autosFilterValue
+    );
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && panel.classList.contains('ops-orders-drawer--open')) close();
+  });
+
+  autosDrawerUi = {
+    open,
+    close,
+    panel,
+    refresh() {
+      if (!panel.classList.contains('ops-orders-drawer--open') || !currentMeta.kpi) return;
+      sourceRows = rowsForAutosKpi(currentMeta.kpi).slice();
+      renderList(searchEl?.value || '');
+    },
+  };
+  return autosDrawerUi;
+}
+
+function setActiveAutosKpi(kpiId) {
+  ensureAutosKpiDrawer().open(kpiId, autosKpiMeta(kpiId).card?.() || null);
 }
 
 function applyAutosKpiTableFilter() {
   const term = getInventorySearchTerm();
   renderTable(filterRows(term), { searchTerm: term });
-}
-
-function setActiveAutosKpi(kpiId) {
-  activeAutosKpi = activeAutosKpi === kpiId ? null : kpiId;
-  if (!activeAutosKpi || autosKpiFilter?.kpi !== activeAutosKpi) {
-    autosKpiFilter = null;
-  }
-  syncAutosKpiCards();
-  renderAutosKpiDetail();
-  applyAutosKpiTableFilter();
-  if (activeAutosKpi) {
-    document.getElementById('autosKpiDetail')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
-
-function setAutosKpiFilter(dim, id, label) {
-  if (autosKpiFilter?.kpi === activeAutosKpi && autosKpiFilter?.dim === dim && autosKpiFilter?.id === id) {
-    autosKpiFilter = null;
-  } else {
-    autosKpiFilter = { kpi: activeAutosKpi, dim, id, label };
-  }
-  renderAutosKpiDetail();
-  applyAutosKpiTableFilter();
-}
-
-function clearAutosKpiFilter() {
-  autosKpiFilter = null;
-  renderAutosKpiDetail();
-  applyAutosKpiTableFilter();
 }
 
 function filterRows(term) {
@@ -452,6 +846,9 @@ function filterRows(term) {
   }
   if (activeAutosKpi === 'sinPrevias') {
     rows = rows.filter((r) => Number(r.previas || 0) === 0);
+  }
+  if (activeAutosKpi === 'ageing') {
+    rows = rows.filter((r) => r.situacion === 'FIS' && Number(r.daysInStock || 0) >= 60);
   }
 
   if (autosKpiFilter?.kpi === activeAutosKpi) {
@@ -475,6 +872,7 @@ function filterRows(term) {
 function renderTable(rows, { searchTerm = '' } = {}) {
   const { fmt, statusBadge } = Dashboard;
   const body = document.getElementById('inventoryTable');
+  if (!body) return;
   const total = inventoryRows.length;
   const q = searchTerm.trim();
   const countEl = document.getElementById('tableCount');
@@ -518,24 +916,43 @@ function renderTable(rows, { searchTerm = '' } = {}) {
   }).join('');
 }
 
+function renderAgeingSlowTable(rows) {
+  const body = document.getElementById('ageingSlowBody');
+  if (!body) return;
+
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-row">Sin datos de antigüedad en inventario.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = list.map((r) => {
+    const carline = r.carline || (r.model ? String(r.model).split(' · ')[0] : '—');
+    const version = r.version || (r.model ? String(r.model).split(' · ').slice(1).join(' · ') : '—') || '—';
+    const color = r.color || '—';
+    const avg = Number(r.avgDays || 0);
+    const rowClass = r.critical || avg >= 90
+      ? 'ageing-slow-row--critical'
+      : (r.warn || avg >= 60 ? 'ageing-slow-row--warn' : '');
+    return `<tr class="${rowClass}">
+      <td class="ageing-slow-carline"><strong>${escapeHtml(carline)}</strong></td>
+      <td class="ageing-slow-version" title="${escapeHtml(version)}"><span>${escapeHtml(version)}</span></td>
+      <td class="ageing-slow-color" title="${escapeHtml(color)}">${escapeHtml(color)}</td>
+      <td class="cell-num">${Number(r.units || 0).toLocaleString('es-MX')}</td>
+      <td class="cell-num ageing-slow-avg"><strong>${avg.toLocaleString('es-MX')}</strong></td>
+      <td class="cell-num">${Number(r.maxDays || avg || 0).toLocaleString('es-MX')}</td>
+    </tr>`;
+  }).join('');
+}
+
 function renderCharts(data) {
   const { chartOptions, chartPalette, chartColors } = Dashboard;
   const s = data.summary;
 
+  renderAgeingSlowTable(data.ageingSlowTable || data.ageingChart || []);
+
   destroyChart(ageingChart);
-  ageingChart = new Chart(document.getElementById('ageingChart'), {
-    type: 'bar',
-    data: {
-      labels: data.ageingChart.map((r) => r.model.slice(0, 18)),
-      datasets: [{
-        label: 'Días promedio',
-        data: data.ageingChart.map((r) => r.avgDays),
-        backgroundColor: data.ageingChart.map((r) => (r.critical ? chartColors.error : chartColors.primary)),
-        borderRadius: 8,
-      }],
-    },
-    options: chartOptions({ plugins: { legend: { display: false } } }),
-  });
+  ageingChart = null;
 
   destroyChart(situacionChart);
   situacionChart = new Chart(document.getElementById('situacionChart'), {
@@ -618,7 +1035,7 @@ async function loadInventory({ onlyPlanPiso = false } = {}) {
       chartsReady = true;
       if (activeAutosKpi) {
         syncAutosKpiCards();
-        renderAutosKpiDetail();
+        ensureAutosKpiDrawer().refresh();
       }
       status.textContent = `${s.totalUnits} unidades en inventario`;
     } else {
@@ -671,83 +1088,6 @@ function currentMonthRange() {
   };
 }
 
-function filterSofiaSinPreviasRows(term) {
-  const rows = window.__invSofiaSinPrevias || [];
-  const q = String(term || '').trim().toLowerCase();
-  if (!q) return rows;
-  return rows.filter((r) =>
-    [r.FECHA_PERIODO, r.SOF_FechAct, r.SOF_HoraAct, r.SOF_Factura, r.SOF_VIN, r.CLIENTE, r.SOF_Estatus, r.SOF_CveUSu]
-      .some((v) => String(v ?? '').toLowerCase().includes(q))
-  );
-}
-
-function renderInvSinPreviasTable(rows) {
-  const body = document.getElementById('tablaInvSinPreviasBody');
-  if (!body) return;
-  const term = document.getElementById('buscarInvSinPrevias')?.value?.trim();
-  if (!rows.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="9">${term ? 'Sin coincidencias.' : 'No hay entregas SOFIA sin previa en el mes.'}</td></tr>`;
-    return;
-  }
-  body.innerHTML = rows.map((r) => `
-    <tr>
-      <td>${r.FECHA_PERIODO || r.SOF_FechFact || '—'}</td>
-      <td>${r.SOF_FechAct || '—'}</td>
-      <td>${r.SOF_HoraAct || '—'}</td>
-      <td><strong>${r.SOF_Factura || '—'}</strong></td>
-      <td>${r.SOF_VIN || '—'}</td>
-      <td class="cell-num">${Number(r.PREVIAS || 0)}</td>
-      <td>${r.CLIENTE || '—'}</td>
-      <td>${r.SOF_Estatus || '—'}</td>
-      <td>${r.SOF_CveUSu || '—'}</td>
-    </tr>
-  `).join('');
-}
-
-function updateInvSinPreviasPanel(filteredCount) {
-  const resumen = document.getElementById('invSinPreviasPanelResumen');
-  const meta = document.getElementById('invSinPreviasSearchMeta');
-  const total = (window.__invSofiaSinPrevias || []).length;
-  const range = currentMonthRange();
-  if (!resumen) return;
-  if (filteredCount != null && filteredCount !== total) {
-    resumen.textContent = `${filteredCount} de ${total} · ${range.label}`;
-    if (meta) {
-      meta.textContent = `${filteredCount} resultado(s)`;
-      meta.classList.remove('hidden');
-    }
-    return;
-  }
-  meta?.classList.add('hidden');
-  resumen.textContent = total
-    ? `${total} entrega(s) SOFIA sin previa · ${range.label}`
-    : `Sin entregas SOFIA sin previa · ${range.label}`;
-}
-
-function setInvSinPreviasPanelOpen(open) {
-  const panel = document.getElementById('panelEntregasSinPreviasInv');
-  const card = document.getElementById('kpiEntregasSinPrevias');
-  if (!panel || !card) return;
-  if (!open) {
-    panel.classList.add('hidden');
-    card.classList.remove('is-selected');
-    card.setAttribute('aria-expanded', 'false');
-    return;
-  }
-  const wasOpen = !panel.classList.contains('hidden');
-  if (wasOpen) {
-    setInvSinPreviasPanelOpen(false);
-    return;
-  }
-  panel.classList.remove('hidden');
-  card.classList.add('is-selected');
-  card.setAttribute('aria-expanded', 'true');
-  const rows = filterSofiaSinPreviasRows('');
-  renderInvSinPreviasTable(rows);
-  updateInvSinPreviasPanel();
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
 async function loadEntregasSinPreviasMes() {
   const { api, setText, fmt } = Dashboard;
   const range = currentMonthRange();
@@ -760,12 +1100,14 @@ async function loadEntregasSinPreviasMes() {
     const conPrevias = entregas.length - sinPrevias.length;
     setText('sEntregasSinPrevias', fmt.number(sinPrevias.length));
     setText('sEntregasSinPreviasSub', `${fmt.number(conPrevias)} con previas · ${range.label}`);
+    if (activeAutosKpi === 'entregasSinPrevias') ensureAutosKpiDrawer().refresh();
   } catch (err) {
     console.warn('[Inventario] Entregas sin previa:', err.message);
     window.__invSofiaSinPrevias = [];
     window.__invSofiaTotalMes = 0;
     setText('sEntregasSinPrevias', '—');
     setText('sEntregasSinPreviasSub', 'No se pudo cargar SOFIA del mes');
+    if (activeAutosKpi === 'entregasSinPrevias') ensureAutosKpiDrawer().refresh();
   }
 }
 
@@ -787,6 +1129,9 @@ document.getElementById('planPisoPeriod')?.addEventListener('change', (e) => {
 
 function setInventoryScope(scope) {
   inventoryScope = scope === 'postventa' ? 'postventa' : 'autos';
+  if (inventoryScope !== 'autos' && autosDrawerUi?.panel?.classList.contains('ops-orders-drawer--open')) {
+    autosDrawerUi.close();
+  }
   document.querySelectorAll('#inventoryMainTabs .eeff-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.inventoryScope === inventoryScope);
   });
@@ -989,43 +1334,10 @@ document.getElementById('autosKpiGrid')?.addEventListener('click', (e) => {
   }
 });
 
-document.getElementById('autosKpiDetail')?.addEventListener('click', (e) => {
-  if (e.target.closest('[data-autos-kpi-close]')) {
-    activeAutosKpi = null;
-    autosKpiFilter = null;
-    syncAutosKpiCards();
-    renderAutosKpiDetail();
-    applyAutosKpiTableFilter();
-    return;
-  }
-  if (e.target.closest('[data-autos-clear-filter]')) {
-    clearAutosKpiFilter();
-    return;
-  }
-  const row = e.target.closest('[data-autos-filter-dim]');
-  if (!row) return;
-  const dim = row.dataset.autosFilterDim;
-  const id = row.dataset.autosFilterId;
-  const label = row.querySelector('td')?.textContent?.trim() || id;
-  setAutosKpiFilter(dim, id, label);
-});
-
 const params = new URLSearchParams(window.location.search);
 if (params.get('tab') === 'postventa') setInventoryScope('postventa');
 else setInventoryScope('autos');
 
 initPlanPisoKpiCard();
-
-document.getElementById('kpiEntregasSinPrevias')?.addEventListener('click', () => {
-  setInvSinPreviasPanelOpen(true);
-});
-document.getElementById('btnCerrarInvSinPreviasPanel')?.addEventListener('click', () => {
-  setInvSinPreviasPanelOpen(false);
-});
-document.getElementById('buscarInvSinPrevias')?.addEventListener('input', (e) => {
-  const filtered = filterSofiaSinPreviasRows(e.target.value);
-  renderInvSinPreviasTable(filtered);
-  updateInvSinPreviasPanel(e.target.value.trim() ? filtered.length : undefined);
-});
 
 loadInventory();

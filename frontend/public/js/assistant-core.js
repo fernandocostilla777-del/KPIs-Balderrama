@@ -751,8 +751,27 @@ window.AssistantChat = (function () {
 
       requestAnimationFrame(() => {
         initCharts();
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        scrollChatToBottom();
       });
+    }
+
+    function getChatScrollParent() {
+      return chatMessages?.closest('.ai-chat-panel__body') || chatMessages || null;
+    }
+
+    function scrollChatToBottom() {
+      const scroller = getChatScrollParent();
+      if (!scroller) return;
+
+      const apply = () => {
+        scroller.scrollTop = scroller.scrollHeight;
+      };
+
+      apply();
+      requestAnimationFrame(apply);
+      // Las gráficas/KPIs pueden crecer el alto después del primer paint
+      setTimeout(apply, 80);
+      setTimeout(apply, 280);
     }
 
     function renderSuggestedPrompts({ reshuffle = true } = {}) {
@@ -952,6 +971,7 @@ window.AssistantChat = (function () {
       focus: () => chatInput.focus(),
       refresh: renderMessages,
       refreshSuggestions: () => renderSuggestedPrompts({ reshuffle: true }),
+      scrollToBottom: () => scrollChatToBottom(),
     };
   }
 

@@ -23,27 +23,46 @@ const INCOME_CATALOG = {
   },
   seminuevos: {
     key: 'seminuevos',
-    label: 'Venta Autos Seminuevos (0446)',
+    label: 'Venta Seminuevos (0446 + 0450)',
     majorAccount: '0446-0000-0000-0000',
-    prefixes: ['0446%'],
+    prefixes: ['0446%', '0450%'],
+    channels: [
+      { key: 'autos', label: 'Autos seminuevos (0446)', prefix: '0446%' },
+      { key: 'comerciales', label: 'Comerciales seminuevos (0450)', prefix: '0450%' },
+    ],
   },
   servicio: {
     key: 'servicio',
-    label: 'Ventas Servicio de Mecánica (0460)',
+    label: 'Ventas Servicio (0460/0462/0463/0464/0466/0469)',
     majorAccount: '0460-0000-0000-0000',
-    prefixes: ['0460%'],
+    prefixes: ['0460%', '0462%', '0463%', '0464%', '0466%', '0469%'],
   },
   refacciones: {
     key: 'refacciones',
-    label: 'Ventas Refacciones (0481–0484)',
+    label: 'Ventas Refacciones (partes servicio/HYP/garantía + mostrador/mayoreo)',
     majorAccount: null,
-    prefixes: ['0481%', '0482%', '0483%', '0484%'],
+    prefixes: [
+      '0467%', '0477%', '0480%',
+      '0481%', '0482%', '0483%', '0484%',
+      '0490%', '0491%',
+    ],
     subLines: [
-      { key: 'internas', label: 'Refacciones internas (0481)', prefix: '0481%' },
+      { key: 'partesServicio', label: 'Partes en órdenes servicio (0467)', prefix: '0467%' },
+      { key: 'partesHyp', label: 'Partes en órdenes HYP (0477)', prefix: '0477%' },
+      { key: 'garantias', label: 'Garantías partes (0480)', prefix: '0480%' },
+      { key: 'internas', label: 'Internas (0481)', prefix: '0481%' },
       { key: 'mostrador', label: 'Mostrador (0482)', prefix: '0482%' },
       { key: 'mayoreo', label: 'Mayoreo (0483)', prefix: '0483%' },
       { key: 'accesorios', label: 'Accesorios (0484)', prefix: '0484%' },
+      { key: 'llantas', label: 'Llantas (0490)', prefix: '0490%' },
+      { key: 'lubricantes', label: 'Lubricantes (0491)', prefix: '0491%' },
     ],
+  },
+  hyp: {
+    key: 'hyp',
+    label: 'Ventas HYP (0470/0476/0479)',
+    majorAccount: '0470-0000-0000-0000',
+    prefixes: ['0470%', '0476%', '0479%'],
   },
   financiamiento: {
     key: 'financiamiento',
@@ -74,9 +93,25 @@ const COST_CATALOG = {
     ],
   },
   seminuevos: { key: 'seminuevos', label: 'Costo Seminuevos', prefixes: ['0646%', '0650%'] },
-  servicio: { key: 'servicio', label: 'Costo Servicio', prefixes: ['0643%', '0646%', '0650%'] },
-  refacciones: { key: 'refacciones', label: 'Costo Refacciones', prefixes: ['0662%', '0663%', '0664%', '0666%', '0667%', '0670%', '0676%', '0677%', '0679%', '0680%', '0681%', '0682%', '0683%', '0684%', '0691%'] },
-  hyp: { key: 'hyp', label: 'Costo HYP', prefixes: ['0660%'] },
+  servicio: {
+    key: 'servicio',
+    label: 'Costo Servicio (MO mecánica)',
+    prefixes: ['0660%', '0662%', '0663%', '0664%', '0666%'],
+  },
+  refacciones: {
+    key: 'refacciones',
+    label: 'Costo Refacciones',
+    prefixes: [
+      '0667%', '0677%', '0680%',
+      '0681%', '0682%', '0683%', '0684%',
+      '0690%', '0691%',
+    ],
+  },
+  hyp: {
+    key: 'hyp',
+    label: 'Costo HYP (MO + pintura)',
+    prefixes: ['0670%', '0676%', '0679%'],
+  },
 };
 
 /** Gastos operación: saldos deudores (cargos) — grupo 0700 */
@@ -109,13 +144,13 @@ const SEGMENT_BY_SUCURSAL = {
 };
 
 const AREA_INCOME_KEYS = {
-  todos: ['autosNuevos', 'seminuevos', 'servicio', 'refacciones', 'financiamiento'],
+  todos: ['autosNuevos', 'seminuevos', 'servicio', 'refacciones', 'hyp', 'financiamiento'],
   autosNuevos: ['autosNuevos'],
   seminuevos: ['seminuevos'],
   servicio: ['servicio'],
   refacciones: ['refacciones'],
-  hyp: [],
-  postventa: ['servicio', 'refacciones'],
+  hyp: ['hyp'],
+  postventa: ['servicio', 'refacciones', 'hyp'],
 };
 
 const AREA_COST_KEYS = {

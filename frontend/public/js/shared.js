@@ -5,17 +5,22 @@ const fmt = {
     return new Intl.NumberFormat('es-MX').format(Math.round(n || 0));
   },
   currency(n) {
-    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
-    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n || 0);
+    const v = Number(n) || 0;
+    const sign = v < 0 ? '-' : '';
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}k`;
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(v);
   },
   money(n) {
+    const v = Number(n);
+    const amount = Number.isFinite(v) ? v : 0;
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
       currency: 'MXN',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(n || 0);
+    }).format(amount);
   },
   pct(n) {
     const sign = n > 0 ? '+' : '';

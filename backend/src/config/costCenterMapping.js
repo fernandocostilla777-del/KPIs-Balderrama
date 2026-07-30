@@ -64,17 +64,17 @@ const ACCOUNT_MASKS = {
 const INCOME_PREFIX_TO_AREA = [
   { prefixes: ['0400'], area: 'autosNuevos', useSegment: true },
   { prefixes: ['0446', '0450'], area: 'seminuevos', useSegment: false },
-  { prefixes: ['0460', '0462', '0463', '0464', '0466', '0467', '0469'], area: 'servicio', useSegment: true },
-  { prefixes: ['0470', '0476', '0477', '0479', '0490', '0491'], area: 'refacciones', useSegment: false },
-  { prefixes: ['0480', '0481', '0482', '0483', '0484'], area: 'hyp', useSegment: false },
+  { prefixes: ['0460', '0462', '0463', '0464', '0466', '0469'], area: 'servicio', useSegment: true },
+  { prefixes: ['0467', '0477', '0480', '0481', '0482', '0483', '0484', '0490', '0491'], area: 'refacciones', useSegment: false },
+  { prefixes: ['0470', '0476', '0479'], area: 'hyp', useSegment: false },
 ];
 
 const COST_PREFIX_TO_AREA = [
   { prefixes: ['0600'], area: 'autosNuevos', useSegment: true },
   { prefixes: ['0620', '0646', '0650'], area: 'seminuevos', useSegment: false },
-  { prefixes: ['0643', '0646', '0650'], area: 'servicio', useSegment: false },
-  { prefixes: ['0662', '0663', '0664', '0666', '0667', '0670', '0676', '0677', '0679', '0680', '0681', '0682', '0683', '0684', '0691'], area: 'refacciones', useSegment: false },
-  { prefixes: ['0660'], area: 'hyp', useSegment: false },
+  { prefixes: ['0660', '0662', '0663', '0664', '0666'], area: 'servicio', useSegment: false },
+  { prefixes: ['0667', '0677', '0680', '0681', '0682', '0683', '0684', '0690', '0691'], area: 'refacciones', useSegment: false },
+  { prefixes: ['0670', '0676', '0679'], area: 'hyp', useSegment: false },
 ];
 
 const OPERATIONAL_CC_LIST = [

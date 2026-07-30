@@ -94,7 +94,10 @@ function buildEeffComparativa(eeff, fechaInicio, fechaFin) {
     estadoFinanciero: {
       summary: compareSummary(realEdo.summary, budget.estadoFinanciero.summary, [
         'ventasTotales',
+        'costoTotal',
         'utilidadBruta',
+        'gastosOperacion',
+        'gastosAdministracion',
         'sumaGastos',
         'utilidadOperacion',
       ]),

@@ -45,5 +45,12 @@
     return CANALES_ORDEN.map((canal) => ({ canal, label: getCanalLabel(canal), count: map[canal] || 0 })).filter((i) => i.count > 0);
   }
 
-  global.CanalesVenta = { enrichRegistro, countByCanal, getCanalLabel };
+  global.CanalesVenta = {
+    enrichRegistro,
+    countByCanal,
+    getCanalLabel,
+    getCanalVenta,
+    CANALES_ORDEN,
+    CANALES_LABEL,
+  };
 })(window);

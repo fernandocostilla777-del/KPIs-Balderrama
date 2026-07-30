@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=87" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=98" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -89,22 +89,22 @@ Leads
 <div id="kpiTotal" class="kpi-value">0</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="total"></span></div>
 </div>
-<div class="kpi-card kpi-card--green kpi-card--interactive" id="kpiCardRetail" role="button" tabindex="0" aria-expanded="false" aria-controls="panelVentasDetalle" title="Ver detalle ventas retail">
+<div class="kpi-card kpi-card--green kpi-card--interactive" id="kpiCardRetail" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle ventas retail">
 <div class="kpi-card-head"><span class="kpi-title">Ventas retail</span><span class="material-symbols-outlined kpi-icon">storefront</span></div>
 <div id="kpiRetail" class="kpi-value">0</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="retail"></span></div>
 </div>
-<div class="kpi-card kpi-card--slate kpi-card--interactive" id="kpiCardFlotillas" role="button" tabindex="0" aria-expanded="false" aria-controls="panelVentasDetalle" title="Ver detalle flotillas">
+<div class="kpi-card kpi-card--slate kpi-card--interactive" id="kpiCardFlotillas" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle flotillas">
 <div class="kpi-card-head"><span class="kpi-title">Flotillas</span><span class="material-symbols-outlined kpi-icon">local_shipping</span></div>
 <div id="kpiFlotillas" class="kpi-value">0</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="flotillas"></span></div>
 </div>
-<div class="kpi-card kpi-card--magenta kpi-card--interactive" id="kpiCardEntregasSofia" role="button" tabindex="0" aria-expanded="false" aria-controls="panelEntregasSofia" title="Ver detalle de entregas SOFIA">
+<div class="kpi-card kpi-card--magenta kpi-card--interactive" id="kpiCardEntregasSofia" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle de entregas SOFIA">
 <div class="kpi-card-head"><span class="kpi-title">Notif. entrega SOFIA</span><span class="material-symbols-outlined kpi-icon">notifications_active</span></div>
 <div id="kpiEntregasSofia" class="kpi-value">0</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="sofia"></span></div>
 </div>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="panelCarryOver" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
 <div class="kpi-card-head"><span class="kpi-title">Carry over para facturar</span><span class="material-symbols-outlined kpi-icon">pending_actions</span></div>
 <div id="kpiCarryOver" class="kpi-value">0</div>
 <p id="kpiCarryOverSub" class="kpi-subtitle">Apartadas SEP · clic para % y detalle</p>
@@ -310,6 +310,7 @@ Leads
 </div>
 <div class="section-panel">
 <h3 class="section-title">Mejores vendedores (retail)</h3>
+<p class="section-subtitle" style="margin-top:-4px;margin-bottom:10px">Clasificados por fuerza de ventas (Piso, Foraneos, Cholula...)</p>
 <div class="chart-card"><div class="chart-wrap"><canvas id="chartVendedor"></canvas></div></div>
 </div>
 </section>
@@ -343,7 +344,36 @@ Leads
 <div><span class="ytd-stat-label">Variación</span><strong id="ytdVariacion" class="ytd-stat-value">-</strong></div>
 </div>
 </div>
+<div class="chart-grid-2-1 ytd-carline-layout">
 <div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartYtd"></canvas></div></div>
+<div class="chart-card carline-utilidad-card">
+<div class="carline-utilidad-header">
+<h3 class="section-title" style="margin-bottom:4px">Mejor utilidad por carline</h3>
+<p id="carlineUtilidadSubtitle" class="section-subtitle" style="margin:0">Mejor versión · utilidad por unidad</p>
+</div>
+<div class="table-scroll carline-utilidad-table-wrap">
+<table class="data-table carline-utilidad-table">
+<colgroup>
+<col class="col-carline"/>
+<col class="col-version"/>
+<col class="col-util"/>
+<col class="col-mb"/>
+</colgroup>
+<thead>
+<tr>
+<th>Carline</th>
+<th>Mejor versión</th>
+<th class="cell-num">Util. / ud</th>
+<th class="cell-num">MB %</th>
+</tr>
+</thead>
+<tbody id="carlineUtilidadBody">
+<tr><td colspan="4" class="empty-row">Consulte un periodo para ver utilidad por carline.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
 </section>
 
 </div>
@@ -392,23 +422,6 @@ Leads
 </table>
 </div>
 </div>
-
-<aside class="fi-notes-panel" aria-label="Notas de financiamiento">
-<div class="fi-notes-head">
-<span class="material-symbols-outlined" aria-hidden="true">sticky_note_2</span>
-<div>
-<h3 class="section-title" style="margin:0;font-size:15px">Notas</h3>
-<p class="section-subtitle" style="margin:2px 0 0">Se guardan en el servidor y persisten entre sesiones.</p>
-</div>
-</div>
-<textarea id="fiNoteInput" class="fi-note-input filter-input" rows="4" maxlength="4000" placeholder="Escriba una nota operativa (seguimiento, acuerdos, pendientes…)"></textarea>
-<label class="fi-note-scope">
-<input type="checkbox" id="fiNoteScopeGlobal"/>
-<span>Guardar como nota general (no solo este periodo)</span>
-</label>
-<button type="button" id="btnFiSaveNote" class="btn-glass btn-primary">Guardar nota</button>
-<div id="fiNotesList" class="fi-notes-list"></div>
-</aside>
 </div>
 </section>
 
@@ -511,14 +524,14 @@ Leads
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
-<script src="/js/canales.js"></script>
+<script src="/js/canales.js?v=2"></script>
 <script src="/js/sidebar.js?v=8"></script>
 <script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=2"></script>
-<script src="/js/assistant-bubble.js?v=5"></script>
-<script src="/js/financiamiento.js?v=15"></script>
+<script src="/js/assistant-bubble.js?v=6"></script>
+<script src="/js/financiamiento.js?v=28"></script>
 <script src="/js/leads.js?v=1"></script>
-<script src="/js/sales.js?v=32"></script>
+<script src="/js/sales.js?v=42"></script>
 </body>
 </html>

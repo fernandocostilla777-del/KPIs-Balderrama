@@ -53,6 +53,14 @@ function mapContract(row) {
       monto: roundMoney(Number(row[def.col] || 0)),
     }));
 
+  const plan2 = row.plan_2 || null;
+  const especial = row.especial || null;
+  const modalidad = classifyModalidad({ plan_2: plan2, especial });
+  const onstarMonto = roundMoney(Number(row.onstar_monto));
+  const plazoOnstar = row.plazo_onstar || null;
+  const hasOnstarContrato = (Number(row.onstar_monto) || 0) > 0
+    || Boolean(String(plazoOnstar || '').trim());
+
   return {
     id: row.id ?? null,
     fecha: rowDate(row),
@@ -63,6 +71,10 @@ function mapContract(row) {
     contrato: row.no_contrato || row.contrato || null,
     factura: row.factura || null,
     plan: row.plan || row.plan_2 || null,
+    plan2,
+    especial,
+    modalidad,
+    modalidadLabel: modalidad === 'leasing' ? 'Arrendamiento / Leasing' : 'Crédito',
     tipoCompra: row.tipo_compra || null,
     plazoMeses: Number(row.plazo_meses) || null,
     enganchePct: Number.isFinite(Number(row.enganche_pct)) ? Number(row.enganche_pct) : null,
@@ -72,12 +84,253 @@ function mapContract(row) {
     mafComision: roundMoney(Number(row.maf_comision)),
     fi: row.fi || null,
     afi: row.afi || null,
+    onstarMonto,
+    plazoOnstar,
+    hasOnstarContrato,
     pvas,
     cantidadPvas: pvas.length,
     montoPvas: roundMoney(pvas.reduce((s, p) => s + Number(p.monto || 0), 0)),
     seguroGratis: row.seguro_gratis || null,
     roboParcial: row.robo_parcial || null,
   };
+}
+
+/** LEASING / arrendamiento vs crédito tradicional (plan_2 / especial en CRM). */
+function isLeasingText(...parts) {
+  const t = parts.map((p) => String(p || '').toUpperCase()).join(' ');
+  return /\bLEAS(ING)?\b/.test(t) || t.includes('ARREND');
+}
+
+function classifyModalidad(row = {}) {
+  return isLeasingText(row.plan_2, row.plan2, row.especial, row.plan) ? 'leasing' : 'credito';
+}
+
+/** Modelos con tecnología OnStar (denominador de penetración). */
+const ONSTAR_TECH_MODELS = [
+  'SUBURBAN', 'TAHOE', 'SILVERADO', 'BLAZER', 'CHEYENNE',
+  'COLORADO', 'MONTANA', 'TRACKER', 'TRAVERSE', 'TRAX', 'EQUINOX',
+];
+
+function isOnstarTechUnidad(unidad) {
+  const u = String(unidad || '').toUpperCase().replace(/\s+/g, ' ');
+  if (/\bONIX\b/.test(u)) {
+    // ONIX con tecnología OnStar: excluir paquetes A y B (tolera PAQ / PAQUETE / comillas / puntos)
+    if (/\b(?:MOD|PAQ(?:UETE)?)\b[\s."]*[AB]\b/.test(u)) return false;
+    return true;
+  }
+  return ONSTAR_TECH_MODELS.some((m) => new RegExp(`\\b${m}\\b`).test(u));
+}
+
+function currentMonthBounds(refDate = new Date()) {
+  const y = refDate.getFullYear();
+  const m = String(refDate.getMonth() + 1).padStart(2, '0');
+  const last = new Date(y, refDate.getMonth() + 1, 0).getDate();
+  return {
+    fechaInicio: `${y}-${m}-01`,
+    fechaFin: `${y}-${m}-${String(last).padStart(2, '0')}`,
+    label: `${m}/${y}`,
+  };
+}
+
+const MESES_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+/** Trimestre calendario en curso (T1–T4). */
+function currentQuarterBounds(refDate = new Date()) {
+  const y = refDate.getFullYear();
+  const qIndex = Math.floor(refDate.getMonth() / 3); // 0..3
+  const startMonth = qIndex * 3; // 0-based
+  const endMonth = startMonth + 2;
+  const lastDay = new Date(y, endMonth + 1, 0).getDate();
+  const months = [0, 1, 2].map((i) => {
+    const m = startMonth + i;
+    const last = new Date(y, m + 1, 0).getDate();
+    return {
+      index: m,
+      label: MESES_ES[m],
+      key: `${y}-${String(m + 1).padStart(2, '0')}`,
+      fechaInicio: `${y}-${String(m + 1).padStart(2, '0')}-01`,
+      fechaFin: `${y}-${String(m + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`,
+    };
+  });
+  return {
+    trimestre: qIndex + 1,
+    anio: y,
+    label: `T${qIndex + 1} ${y}`,
+    fechaInicio: months[0].fechaInicio,
+    fechaFin: `${y}-${String(endMonth + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+    months,
+  };
+}
+
+function monthKeyFromFecha(fecha) {
+  const f = String(fecha || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}/.test(f)) return null;
+  return f.slice(0, 7);
+}
+
+/**
+ * Serie mensual + acumulado (YTD del trimestre) por producto PVA.
+ */
+function buildPvaTrimestreYtd(contracts = [], refDate = new Date()) {
+  const bounds = currentQuarterBounds(refDate);
+  const monthKeys = bounds.months.map((m) => m.key);
+
+  const byMonth = Object.fromEntries(monthKeys.map((k) => [k, {
+    contratos: 0,
+    conPva: 0,
+    gap: 0,
+    garantia: 0,
+    accesorios: 0,
+    onstar: 0,
+    mantenimiento: 0,
+  }]));
+
+  for (const c of contracts || []) {
+    const mk = monthKeyFromFecha(c.fecha);
+    if (!mk || !byMonth[mk]) continue;
+    byMonth[mk].contratos += 1;
+    if (Number(c.cantidadPvas || 0) > 0) byMonth[mk].conPva += 1;
+    for (const def of PVA_DEFS) {
+      if ((c.pvas || []).some((p) => p.key === def.key)) {
+        byMonth[mk][def.key] += 1;
+      }
+    }
+  }
+
+  const seriesKeys = ['conPva', ...PVA_DEFS.map((d) => d.key)];
+  const series = {};
+  for (const key of seriesKeys) {
+    const mensual = monthKeys.map((mk) => byMonth[mk][key] || 0);
+    const acumulado = [];
+    let run = 0;
+    for (const n of mensual) {
+      run += n;
+      acumulado.push(run);
+    }
+    const contratosMes = monthKeys.map((mk) => byMonth[mk].contratos || 0);
+    series[key] = {
+      mensual,
+      acumulado,
+      penetracionMesPct: mensual.map((n, i) => pct(n, contratosMes[i])),
+    };
+  }
+
+  return {
+    ...bounds,
+    labels: bounds.months.map((m) => m.label),
+    series,
+  };
+}
+
+/**
+ * Penetración OnStar del mes en curso:
+ * numerador = entregas SOFIA elegibles con contrato OnStar en Sheets (monto W / plazo X)
+ * denominador = entregas SOFIA del mes con tecnología OnStar
+ *   (SUBURBAN|TAHOE|ONIX sin paq A/B|SILVERADO|BLAZER|CHEYENNE|COLORADO|MONTANA|TRACKER|TRAVERSE|TRAX|EQUINOX)
+ */
+function dmyToIso(value) {
+  const raw = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+
+function indexCrmByVin(contracts = []) {
+  const map = new Map();
+  for (const c of contracts || []) {
+    const vin = String(c.vin || '').toUpperCase().replace(/\s+/g, '');
+    if (!vin) continue;
+    const prev = map.get(vin);
+    if (!prev || (c.hasOnstarContrato && !prev.hasOnstarContrato)) {
+      map.set(vin, c);
+    }
+  }
+  return map;
+}
+
+function buildOnstarTechPenetracion(sofiaRows = [], crmContracts = [], refDate = new Date()) {
+  const bounds = currentMonthBounds(refDate);
+  const crmByVin = indexCrmByVin(crmContracts);
+  const elegibles = [];
+
+  for (const e of sofiaRows || []) {
+    const fechaIso = dmyToIso(e.FECHA_PERIODO || e.SOF_FechFact || e.VTE_FECHDOCTO || e.fecha);
+    if (fechaIso && !inPeriod(fechaIso, bounds.fechaInicio, bounds.fechaFin)) continue;
+
+    const vin = String(e.SOF_VIN || e.VTE_SERIE || e.vin || '').toUpperCase().replace(/\s+/g, '');
+    if (!vin) continue;
+
+    const crm = crmByVin.get(vin) || null;
+    const unidad = e.VEH_TIPOAUTO || e.unidad || crm?.unidad || null;
+    if (!isOnstarTechUnidad(unidad)) continue;
+
+    elegibles.push({
+      _kind: 'onstarTech',
+      onstarElegible: true,
+      fecha: fechaIso || crm?.fecha || null,
+      cliente: e.CLIENTE || crm?.cliente || null,
+      asesor: e.VENDEDOR || e.SOF_CveUSu || crm?.asesor || null,
+      unidad,
+      vin,
+      factura: e.SOF_Factura || e.VTE_DOCTO || crm?.factura || null,
+      contrato: crm?.contrato || null,
+      plan: crm?.plan || null,
+      tipoCompra: crm?.tipoCompra || e.TIPOVENTA || null,
+      fi: crm?.fi || null,
+      afi: crm?.afi || null,
+      gerenteFi: e.GERENTE_FI || crm?.fi || 'Sin gerente F&I',
+      hasOnstarContrato: Boolean(crm?.hasOnstarContrato),
+      plazoOnstar: crm?.plazoOnstar || null,
+      onstarMonto: crm?.onstarMonto ?? null,
+      montoFinanciar: crm?.montoFinanciar ?? null,
+      engancheMonto: crm?.engancheMonto ?? null,
+      plazoMeses: crm?.plazoMeses ?? null,
+      pvas: crm?.pvas || [],
+      cantidadPvas: crm?.cantidadPvas || 0,
+      SOF_VIN: e.SOF_VIN || vin,
+      SOF_Factura: e.SOF_Factura || null,
+      VEH_TIPOAUTO: unidad,
+      FECHA_PERIODO: e.FECHA_PERIODO || null,
+      fuente: 'sofia',
+    });
+  }
+
+  elegibles.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+  const conContrato = elegibles.filter((c) => c.hasOnstarContrato);
+  const sinContrato = elegibles.filter((c) => !c.hasOnstarContrato);
+
+  return {
+    periodo: bounds,
+    fuente: 'sofia',
+    totalSofiaMes: (sofiaRows || []).length,
+    elegibles: elegibles.length,
+    conContrato: conContrato.length,
+    sinContrato: sinContrato.length,
+    penetracionPct: pct(conContrato.length, elegibles.length),
+    muestra: elegibles,
+  };
+}
+
+async function loadOnstarTechMesActual(refDate = new Date()) {
+  const bounds = currentMonthBounds(refDate);
+  const crmAll = loadCrmContracts(null, null);
+  let sofiaRows = [];
+  try {
+    const { getNotificacionesEntrega } = require('./sofia-entregas');
+    const sofia = await getNotificacionesEntrega({
+      fechaInicio: bounds.fechaInicio,
+      fechaFin: bounds.fechaFin,
+    });
+    sofiaRows = sofia.registrosEntrega || [];
+  } catch (err) {
+    console.warn('[OnStar] No se pudieron cargar entregas SOFIA del mes:', err.message);
+    return {
+      ...buildOnstarTechPenetracion([], crmAll.contracts || [], refDate),
+      error: err.message,
+    };
+  }
+  return buildOnstarTechPenetracion(sofiaRows, crmAll.contracts || [], refDate);
 }
 
 function countMap(items, keyFn) {
@@ -178,7 +431,9 @@ function loadSolicitudes(fechaInicio, fechaFin) {
     }
 
     const rows = d.prepare(`
-      SELECT estatus, financiera, fecha_solicitud, fecha_compra, nombre_cliente, num_contrato, enganche, fi, afi, asesor, unidad_paquete
+      SELECT id_crm, no_solicitud, estatus, financiera, fecha_solicitud, fecha_compra,
+             nombre_cliente, num_contrato, enganche, fi, afi, asesor, unidad_paquete,
+             respuesta_financiera, biometrico
       FROM crm_solicitudes
     `).all().filter((r) => inPeriod(r.fecha_solicitud, fechaInicio, fechaFin));
 
@@ -187,6 +442,10 @@ function loadSolicitudes(fechaInicio, fechaFin) {
       r.fecha_compra || String(r.estatus || '').toUpperCase().includes('FACT')
     ).length;
 
+    const sorted = rows
+      .slice()
+      .sort((a, b) => String(b.fecha_solicitud || '').localeCompare(String(a.fecha_solicitud || '')));
+
     return {
       total: rows.length,
       aprobadas,
@@ -194,12 +453,16 @@ function loadSolicitudes(fechaInicio, fechaFin) {
       tasaAprobacionPct: pct(aprobadas, rows.length),
       porEstatus: countMap(rows, (r) => r.estatus || '(sin estatus)'),
       porFinanciera: countMap(rows, (r) => r.financiera || '(sin financiera)').slice(0, 10),
-      muestra: rows.slice(0, 50).map((r) => ({
+      muestra: sorted.map((r) => ({
         fecha: r.fecha_solicitud || null,
         cliente: r.nombre_cliente || null,
         vin: null,
+        idCrm: r.id_crm != null ? String(r.id_crm) : null,
+        noSolicitud: r.no_solicitud || null,
         estatus: r.estatus || null,
         financiera: r.financiera || null,
+        respuestaFinanciera: r.respuesta_financiera || null,
+        biometrico: r.biometrico != null ? String(r.biometrico).trim() : null,
         contrato: r.num_contrato || null,
         enganche: Number(r.enganche) || null,
         fi: r.fi || null,
@@ -256,6 +519,10 @@ function buildSummary(contracts, solicitudes) {
     planes: countMap(contracts, (c) => c.plan || '(sin plan)').slice(0, 10),
     tiposCompra: countMap(contracts, (c) => c.tipoCompra || '(sin tipo)'),
     asesores: countMap(contracts, (c) => c.asesor || '(sin asesor)').slice(0, 12),
+    porModalidad: {
+      credito: contracts.filter((c) => c.modalidad === 'credito').length,
+      leasing: contracts.filter((c) => c.modalidad === 'leasing').length,
+    },
     solicitudes: {
       total: solicitudes.total,
       aprobadas: solicitudes.aprobadas,
@@ -265,10 +532,156 @@ function buildSummary(contracts, solicitudes) {
   };
 }
 
+function rankingAsesores(contracts, limit = 10) {
+  return countMap(contracts, (c) => c.asesor || '(sin asesor)')
+    .slice(0, limit)
+    .map((r, i) => ({
+      rank: i + 1,
+      asesor: r.label,
+      contratos: r.count,
+      pct: r.pct,
+    }));
+}
+
+function slicePeriodContracts(allContracts, fechaInicio, fechaFin) {
+  return (allContracts || []).filter((c) => inPeriod(c.fecha, fechaInicio, fechaFin));
+}
+
+function periodPreview(allContracts, periodoKey, modalidad, limit = 3) {
+  const rango = crm.resolveCrmPeriod({ periodo: periodoKey });
+  const fi = rango.desde;
+  const ff = rango.hasta;
+  if (!fi || !ff) return null;
+  let rows = slicePeriodContracts(allContracts, fi, ff);
+  if (modalidad === 'leasing' || modalidad === 'credito') {
+    rows = rows.filter((c) => c.modalidad === modalidad);
+  }
+  const ranking = rankingAsesores(rows, limit);
+  return {
+    periodo: periodoKey,
+    label: {
+      trimestre_actual: 'Trimestre actual',
+      semestre_actual: 'Semestre actual',
+      acumulado_anio: 'Año acumulado (YTD)',
+      anio_actual: 'Año completo',
+      mes_pasado: 'Mes pasado',
+    }[periodoKey] || periodoKey,
+    fechaInicio: fi,
+    fechaFin: ff,
+    contratos: rows.length,
+    topAsesor: ranking[0] || null,
+    ranking,
+  };
+}
+
+/**
+ * Consulta F&I orientada al asistente IA.
+ * Default: mes en curso. Distingue crédito vs leasing (plan_2/especial).
+ */
+function getFinanciamientoAiAnalysis({
+  periodo = null,
+  fechaInicio = null,
+  fechaFin = null,
+  modalidad = 'todos',
+  limit = 10,
+} = {}) {
+  const hasExplicitDates = Boolean(fechaInicio || fechaFin);
+  const periodoKey = hasExplicitDates
+    ? (periodo || 'personalizado')
+    : (periodo || 'mes_actual');
+
+  let rango = crm.resolveCrmPeriod({
+    periodo: hasExplicitDates ? null : periodoKey,
+    desde: fechaInicio || null,
+    hasta: fechaFin || null,
+  });
+
+  // Para F&I ranking: nunca "todo" sin fechas → forzar mes actual
+  if (!rango.desde || !rango.hasta) {
+    rango = crm.resolveCrmPeriod({ periodo: 'mes_actual' });
+  }
+
+  const fi = rango.desde;
+  const ff = rango.hasta;
+  const loaded = loadCrmContracts(null, null);
+  if (!loaded.available) {
+    return {
+      available: false,
+      reason: loaded.reason,
+      periodo: { key: periodoKey, fechaInicio: fi, fechaFin: ff },
+    };
+  }
+
+  const all = loaded.contracts || [];
+  let filtered = slicePeriodContracts(all, fi, ff);
+  const modalidadNorm = String(modalidad || 'todos').toLowerCase();
+  if (modalidadNorm === 'leasing' || modalidadNorm === 'arrendamiento') {
+    filtered = filtered.filter((c) => c.modalidad === 'leasing');
+  } else if (modalidadNorm === 'credito' || modalidadNorm === 'crédito') {
+    filtered = filtered.filter((c) => c.modalidad === 'credito');
+  }
+
+  const ranking = rankingAsesores(filtered, Math.min(Number(limit) || 10, 25));
+  const creditoN = slicePeriodContracts(all, fi, ff).filter((c) => c.modalidad === 'credito').length;
+  const leasingN = slicePeriodContracts(all, fi, ff).filter((c) => c.modalidad === 'leasing').length;
+
+  const periodosSugeridos = ['trimestre_actual', 'semestre_actual', 'acumulado_anio']
+    .map((key) => periodPreview(all, key, modalidadNorm === 'arrendamiento' ? 'leasing' : modalidadNorm, 3))
+    .filter(Boolean);
+
+  return {
+    available: true,
+    fuente: 'crm_financiamiento (plan_2 / especial)',
+    periodo: {
+      key: rango.periodo || periodoKey,
+      fechaInicio: fi,
+      fechaFin: ff,
+      defaultAplicado: !hasExplicitDates && !periodo,
+    },
+    modalidad: {
+      solicitada: modalidadNorm,
+      aplicada: modalidadNorm === 'arrendamiento' ? 'leasing'
+        : (modalidadNorm === 'crédito' ? 'credito' : modalidadNorm),
+      definicion: {
+        leasing: 'plan_2 o especial contiene LEASING / arrendamiento (incluye FLOTILLA - LEASING)',
+        credito: 'resto de contratos F&I (TRADICIONAL, SUBSIDIADO, DIAMANTE, SEMINUEVO, etc.)',
+      },
+    },
+    resumen: {
+      contratos: filtered.length,
+      creditoEnPeriodo: creditoN,
+      leasingEnPeriodo: leasingN,
+      montoFinanciarTotal: roundMoney(
+        filtered.reduce((s, c) => s + Number(c.montoFinanciar || 0), 0),
+      ) || 0,
+    },
+    rankingAsesores: ranking,
+    lider: ranking[0] || null,
+    periodosSugeridos,
+    instruccionesRespuesta: [
+      'Responde con el periodo consultado (por defecto mes en curso).',
+      'Si la pregunta es de leasing/arrendamiento, NO mezcles contratos de crédito.',
+      'Si es de crédito, NO mezcles leasing.',
+      'El “vendedor” en F&I CRM es el campo asesor del contrato (no el oficial FI/AFI).',
+      'Cierra ofreciendo ampliar a trimestre, semestre o año acumulado (usa periodosSugeridos).',
+    ],
+    muestra: filtered.slice(0, 15).map((c) => ({
+      fecha: c.fecha,
+      asesor: c.asesor,
+      cliente: c.cliente,
+      modalidad: c.modalidad,
+      plan2: c.plan2,
+      especial: c.especial,
+      montoFinanciar: c.montoFinanciar,
+      vin: c.vin,
+    })),
+  };
+}
+
 /**
  * @param {{ fechaInicio: string, fechaFin: string, porTipoVentaRetail?: Array }} opts
  */
-function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail } = {}) {
+async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
@@ -279,6 +692,14 @@ function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail 
   const summary = buildSummary(contracts, solicitudes);
   const retailMix = buildRetailMix(porTipoVentaRetail);
 
+  // OnStar: entregas SOFIA del mes en curso ∩ tech OnStar, contrato desde Sheets
+  const onstarTech = await loadOnstarTechMesActual();
+
+  // PVA: serie YTD del trimestre en curso (independiente del periodo del dashboard)
+  const trimestre = currentQuarterBounds();
+  const crmTrimestre = loadCrmContracts(trimestre.fechaInicio, trimestre.fechaFin);
+  const pvaTrimestreYtd = buildPvaTrimestreYtd(crmTrimestre.contracts || []);
+
   return {
     periodo: { fechaInicio, fechaFin },
     fuente: {
@@ -288,6 +709,8 @@ function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail 
     },
     summary,
     retailMix,
+    onstarTech,
+    pvaTrimestreYtd,
     contratos: contracts,
     solicitudes,
   };
@@ -295,6 +718,12 @@ function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail 
 
 module.exports = {
   getFinanciamientoDashboard,
+  getFinanciamientoAiAnalysis,
   buildRetailMix,
+  buildOnstarTechPenetracion,
+  buildPvaTrimestreYtd,
+  loadOnstarTechMesActual,
+  isOnstarTechUnidad,
+  classifyModalidad,
   PVA_DEFS,
 };

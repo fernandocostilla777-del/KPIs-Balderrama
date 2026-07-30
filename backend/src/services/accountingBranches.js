@@ -23,17 +23,23 @@ const AREAS = [
 const INCOME_DEFAULT = {
   autosNuevos: { label: 'Ventas autos nuevos', prefixes: ['0400'] },
   seminuevos: { label: 'Ventas seminuevos', exact: ['0446-0001', '0450-0001'] },
-  servicio: { label: 'Ventas servicio', prefixes: ['0460', '0462', '0463', '0464', '0466', '0467', '0469'] },
-  refacciones: { label: 'Ventas refacciones', prefixes: ['0470', '0476', '0477', '0479', '0490', '0491'] },
-  hyp: { label: 'Ventas hojalatería y pintura', prefixes: ['0480', '0481', '0482', '0483', '0484'] },
+  servicio: { label: 'Ventas servicio', prefixes: ['0460', '0462', '0463', '0464', '0466', '0469'] },
+  refacciones: {
+    label: 'Ventas refacciones',
+    prefixes: ['0467', '0477', '0480', '0481', '0482', '0483', '0484', '0490', '0491'],
+  },
+  hyp: { label: 'Ventas hojalatería y pintura', prefixes: ['0470', '0476', '0479'] },
 };
 
 const COST_DEFAULT = {
   autosNuevos: { label: 'Costo autos nuevos', prefixes: ['0600'] },
   seminuevos: { label: 'Costo seminuevos', prefixes: ['0620', '0646-0001', '0650-0001'] },
-  servicio: { label: 'Costo servicio', prefixes: ['0646', '0650', '0643'] },
-  refacciones: { label: 'Costo refacciones', prefixes: ['0662', '0663', '0664', '0666', '0667', '0670', '0676', '0677', '0679', '0680', '0681', '0682', '0683', '0684', '0691'] },
-  hyp: { label: 'Costo hojalatería y pintura', prefixes: ['0660'] },
+  servicio: { label: 'Costo servicio', prefixes: ['0660', '0662', '0663', '0664', '0666'] },
+  refacciones: {
+    label: 'Costo refacciones',
+    prefixes: ['0667', '0677', '0680', '0681', '0682', '0683', '0684', '0690', '0691'],
+  },
+  hyp: { label: 'Costo hojalatería y pintura', prefixes: ['0670', '0676', '0679'] },
 };
 
 const POSTVENTA_AREAS = ['servicio', 'refacciones', 'hyp'];

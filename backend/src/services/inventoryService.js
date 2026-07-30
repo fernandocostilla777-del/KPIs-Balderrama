@@ -299,30 +299,55 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     ? Math.round(daysValues.reduce((s, d) => s + d, 0) / daysValues.length)
     : 0;
 
-  const ageingMap = new Map();
+  const ageingSlowMap = new Map();
   for (const unit of units) {
     if (unit.situacion === 'DEMO') continue;
-    const model = unit.tipoAuto || 'Sin modelo';
-    if (!ageingMap.has(model)) ageingMap.set(model, { model, days: [], units: 0 });
-    const entry = ageingMap.get(model);
+    if (unit.daysInStock === null) continue;
+    const carline = unit.familia || 'Sin familia';
+    const version = unit.tipoAuto || 'Sin versión';
+    const color = unit.colorExterior || 'Sin color';
+    const key = `${carline}||${version}||${color}`;
+    if (!ageingSlowMap.has(key)) {
+      ageingSlowMap.set(key, {
+        carline,
+        version,
+        color,
+        days: [],
+        units: 0,
+      });
+    }
+    const entry = ageingSlowMap.get(key);
     entry.units += 1;
-    if (unit.daysInStock !== null) entry.days.push(unit.daysInStock);
+    entry.days.push(unit.daysInStock);
   }
 
-  const ageingByModel = [...ageingMap.values()]
-    .map((r) => ({
-      model: r.model,
-      units: r.units,
-      avgDays: r.days.length ? Math.round(r.days.reduce((s, d) => s + d, 0) / r.days.length) : 0,
-    }))
-    .sort((a, b) => b.avgDays - a.avgDays)
-    .slice(0, 10);
+  const ageingSlowTable = [...ageingSlowMap.values()]
+    .map((r) => {
+      const avgDays = r.days.length
+        ? Math.round(r.days.reduce((s, d) => s + d, 0) / r.days.length)
+        : 0;
+      const maxDaysUnit = r.days.length ? Math.max(...r.days) : 0;
+      return {
+        carline: r.carline,
+        version: r.version,
+        color: r.color,
+        units: r.units,
+        avgDays,
+        maxDays: maxDaysUnit,
+        critical: avgDays >= 90,
+        warn: avgDays >= 60 && avgDays < 90,
+      };
+    })
+    .sort((a, b) => b.avgDays - a.avgDays || b.units - a.units)
+    .slice(0, 30);
 
-  const maxDays = Math.max(...ageingByModel.map((r) => r.avgDays), 1);
-  const ageingChart = ageingByModel.map((r) => ({
-    ...r,
-    heightPct: Math.round((r.avgDays / maxDays) * 100),
-    critical: r.avgDays > 90,
+  // Compat: chart legacy (por modelo) ya no se usa en UI; se mantiene resumen top
+  const ageingChart = ageingSlowTable.slice(0, 10).map((r) => ({
+    model: `${r.carline} · ${r.version}`,
+    units: r.units,
+    avgDays: r.avgDays,
+    heightPct: 0,
+    critical: r.critical,
   }));
 
   const bySituacionMap = new Map();
@@ -409,6 +434,7 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     },
     planPisoMonths,
     ageingChart,
+    ageingSlowTable,
     stockAlerts: ageingAlerts,
     byFamilia,
     inventoryTable,

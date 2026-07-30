@@ -12,6 +12,9 @@ const { getVentasPorModelo } = require('./aiVentasModeloService');
 const crmCiclos = require('./crmCiclosService');
 const { getVentasPorAuto } = require('./ventasPorAuto');
 const { generateExcelExport } = require('./aiExcelExport');
+const { nomenclaturaHelpText } = require('./postSalesOrderTypes');
+const { getFinanciamientoAiAnalysis } = require('./financiamientoService');
+const { getUtilidadPorCarlineAiAnalysis } = require('./utilidadCarlineService');
 
 const FORBIDDEN_SQL = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE',
@@ -183,14 +186,21 @@ const TOOL_DEFINITIONS = [
         'Post-venta / taller: órdenes de Servicio o HyP. '
         + 'OBLIGATORIO usar area="hyp" para hojalatería y pintura (folios A,F,H,J,V,Z,Ó) '
         + 'y area="servicio" para órdenes de servicio (C,D,G,I,K,N,O,Q,S,X,Y,Á,M,E,R). '
-        + 'Para abiertas usa estatus="abiertas". '
+        + 'Para abiertas usa estatus="abiertas" (snapshot actual; fechas opcionales). '
+        + 'Nomenclatura con tipo=…: internas (I,J,Ó,M,H,O), normales (N,Y,Q), reparacion (D,X,C), '
+        + 'garantias (G), aseguradoras (A,F,V), particulares (Z), empleados (E), flotilla (Á), previas (S), reclamaciones (R). '
+        + 'También acepta una letra (“N”) o lista (“N,Y,Q”). '
+        + `Catálogo: ${nomenclaturaHelpText()}. `
+        + 'Ejemplo: “órdenes normales abiertas” → estatus=abiertas, tipo=normales (sin fechas). '
+        + 'Ejemplo: “órdenes internas abiertas” → estatus=abiertas, tipo=internas. '
         + 'Ejemplo: “órdenes HyP abiertas de 2025” → area=hyp, estatus=abiertas, fechaInicio=2025-01-01, fechaFin=2025-12-31. '
-        + 'Responde con resumen.totalFiltrado o resumen.abiertasEnPeriodo; NUNCA uses un total global sin filtrar área.',
+        + 'En la respuesta menciona qué letras aplicaste (filtros.nomenclatura). '
+        + 'Responde con resumen.totalFiltrado o resumen.abiertasActualesDelArea; NUNCA uses un total global sin filtrar.',
       parameters: {
         type: 'object',
         properties: {
-          fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD' },
-          fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD' },
+          fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD (opcional si estatus=abiertas)' },
+          fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD (opcional si estatus=abiertas)' },
           area: {
             type: 'string',
             description: 'Área PostVenta: hyp | servicio | posventa (default posventa = ambas)',
@@ -201,8 +211,13 @@ const TOOL_DEFINITIONS = [
             description: 'Filtro de estatus: abiertas | facturadas | canceladas | todas',
             enum: ['abiertas', 'facturadas', 'canceladas', 'todas'],
           },
+          tipo: {
+            type: 'string',
+            description:
+              'Nomenclatura: normales | internas | reparacion | garantias | aseguradoras | particulares | '
+              + 'empleados | flotilla | previas | reclamaciones | letra (N) | lista (N,Y,Q)',
+          },
         },
-        required: ['fechaInicio', 'fechaFin'],
       },
     },
   },
@@ -474,10 +489,13 @@ const TOOL_DEFINITIONS = [
       description:
         'OBLIGATORIA cuando el usuario pida Excel, XLSX, descargar listado, exportar o “pásame un archivo”. '
         + 'Genera un .xlsx descargable en el chat. '
-        + 'fuente=postventa (con area hyp|servicio|posventa y estatus) | ventas | inventario | manual. '
-        + 'Para postventa/ventas siempre pasa fechaInicio y fechaFin. '
+        + 'fuente=postventa (con area, estatus y tipo de nomenclatura) | ventas | inventario | manual. '
+        + 'Para órdenes abiertas NO hace falta periodo: estatus=abiertas usa el snapshot actual. '
+        + 'tipo=normales (N,Y,Q) | internas (I,J,Ó,M,H,O) | reparacion (D,X,C) | garantias | aseguradoras | etc. '
+        + 'Ej.: “Excel de normales abiertas” → fuente=postventa, estatus=abiertas, tipo=normales. '
+        + 'Para facturadas/ventas del periodo sí pasa fechaInicio y fechaFin (si faltan, usa YTD). '
         + 'NO inventes filas: esta herramienta consulta la base y arma el archivo. '
-        + 'Después de usarla, dile al usuario que use el botón de descarga del chat.',
+        + 'Después de usarla, dile al usuario que use el botón de descarga del chat y menciona las letras usadas.',
       parameters: {
         type: 'object',
         properties: {
@@ -486,8 +504,8 @@ const TOOL_DEFINITIONS = [
             description: 'Origen de datos',
             enum: ['postventa', 'ventas', 'inventario', 'manual'],
           },
-          fechaInicio: { type: 'string', description: 'YYYY-MM-DD (postventa/ventas)' },
-          fechaFin: { type: 'string', description: 'YYYY-MM-DD (postventa/ventas)' },
+          fechaInicio: { type: 'string', description: 'YYYY-MM-DD (opcional si postventa abiertas)' },
+          fechaFin: { type: 'string', description: 'YYYY-MM-DD (opcional si postventa abiertas)' },
           area: {
             type: 'string',
             description: 'Solo postventa: hyp | servicio | posventa',
@@ -498,7 +516,13 @@ const TOOL_DEFINITIONS = [
             description: 'Solo postventa: abiertas | facturadas | canceladas | todas',
             enum: ['abiertas', 'facturadas', 'canceladas', 'todas'],
           },
-          filename: { type: 'string', description: 'Nombre sugerido del archivo, ej. hyp_abiertas_2025.xlsx' },
+          tipo: {
+            type: 'string',
+            description:
+              'Nomenclatura postventa: normales | internas | reparacion | garantias | aseguradoras | '
+              + 'particulares | empleados | flotilla | previas | reclamaciones | letra | lista de letras',
+          },
+          filename: { type: 'string', description: 'Nombre sugerido, ej. normales_abiertas.xlsx' },
           filas: {
             type: 'array',
             description: 'Solo fuente=manual: arreglo de objetos fila',
@@ -511,6 +535,84 @@ const TOOL_DEFINITIONS = [
           },
         },
         required: ['fuente'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_financiamiento',
+      description:
+        'Contratos F&I del CRM (crm_financiamiento). OBLIGATORIA para ranking de vendedores/asesores en '
+        + 'crédito vs leasing/arrendamiento, volumen de contratos, o “quién vendió más en leasing”. '
+        + 'Distingue modalidad: leasing = plan_2/especial con LEASING; crédito = TRADICIONAL, SUBSIDIADO, DIAMANTE, etc. '
+        + 'El vendedor es el campo asesor del contrato (no FI/AFI). '
+        + 'Si el usuario NO indica periodo, usa periodo=mes_actual (mes en curso). '
+        + 'Devuelve ranking, totales y periodosSugeridos (trimestre/semestre/año) para ofrecer ampliar la vista.',
+      parameters: {
+        type: 'object',
+        properties: {
+          modalidad: {
+            type: 'string',
+            enum: ['leasing', 'credito', 'todos'],
+            description:
+              'leasing/arrendamiento → solo LEASING; credito → sin leasing; todos → ambos. '
+              + 'Para “ventas en leasing” usa leasing; para “crédito” usa credito.',
+          },
+          periodo: {
+            type: 'string',
+            enum: [
+              'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'ultimos_90_dias',
+              'trimestre_actual', 'semestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior',
+            ],
+            description: 'Default recomendado: mes_actual si el usuario no especifica fechas.',
+          },
+          fechaInicio: { type: 'string', description: 'Inicio YYYY-MM-DD (opcional; tiene prioridad sobre periodo)' },
+          fechaFin: { type: 'string', description: 'Fin YYYY-MM-DD (opcional)' },
+          limit: { type: 'string', description: 'Máximo de asesores en el ranking (default 10)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_utilidad_carline',
+      description:
+        'OBLIGATORIA para “qué auto deja más utilidad por carline/familia”, “mejor versión por línea”, '
+        + '“margen bruto por carline” o ranking de utilidad por familia GM. '
+        + 'Carline = UNC_FAMILIA (AVEO, ONIX, CAPTIVA…). Versión = descripción completa TIPOAUTO (paquete/trim). '
+        + 'Por cada carline devuelve la versión con mejor utilidad y su margen bruto %. '
+        + 'Si el usuario NO indica periodo, usa periodo=mes_actual. '
+        + 'Incluye periodosSugeridos (trimestre/semestre/año) para ofrecer ampliar la vista.',
+      parameters: {
+        type: 'object',
+        properties: {
+          periodo: {
+            type: 'string',
+            enum: [
+              'mes_actual', 'mes_pasado', 'ultimos_30_dias', 'ultimos_90_dias',
+              'trimestre_actual', 'semestre_actual', 'acumulado_anio', 'anio_actual', 'anio_anterior',
+            ],
+            description: 'Default recomendado: mes_actual si el usuario no especifica fechas.',
+          },
+          fechaInicio: { type: 'string', description: 'Inicio YYYY-MM-DD (opcional; prioridad sobre periodo)' },
+          fechaFin: { type: 'string', description: 'Fin YYYY-MM-DD (opcional)' },
+          carline: {
+            type: 'string',
+            description: 'Filtrar una familia (ej. AVEO, CAPTIVA). Opcional; sin filtro = todas.',
+          },
+          metric: {
+            type: 'string',
+            enum: ['utilidad_promedio', 'utilidad_total', 'margen'],
+            description:
+              'Criterio de “mejor versión”: utilidad_promedio (default), utilidad_total o margen bruto %.',
+          },
+          minUnidades: {
+            type: 'string',
+            description: 'Mínimo de unidades vendidas de la versión para considerarla (default 1).',
+          },
+        },
       },
     },
   },
@@ -672,6 +774,7 @@ async function executeTool(name, args = {}) {
         fechaFin: args.fechaFin,
         area: args.area || 'posventa',
         estatus: args.estatus || 'todas',
+        tipo: args.tipo || null,
       });
       break;
     case 'consultar_contabilidad':
@@ -796,6 +899,25 @@ async function executeTool(name, args = {}) {
       };
       break;
     }
+    case 'consultar_financiamiento':
+      result = getFinanciamientoAiAnalysis({
+        periodo: args.periodo || null,
+        fechaInicio: args.fechaInicio || null,
+        fechaFin: args.fechaFin || null,
+        modalidad: args.modalidad || 'todos',
+        limit: Math.min(25, Math.max(1, Number(args.limit) || 10)),
+      });
+      break;
+    case 'consultar_utilidad_carline':
+      result = await getUtilidadPorCarlineAiAnalysis({
+        periodo: args.periodo || null,
+        fechaInicio: args.fechaInicio || null,
+        fechaFin: args.fechaFin || null,
+        carline: args.carline || null,
+        metric: args.metric || 'utilidad_promedio',
+        minUnidades: Math.min(20, Math.max(1, Number(args.minUnidades) || 1)),
+      });
+      break;
     case 'generar_excel':
       result = await generateExcelExport(args);
       break;

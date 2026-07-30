@@ -1,6 +1,9 @@
 const { query } = require('../db');
 const { getVentasAutosNuevosIncomeStatement } = require('./ventasAutosNuevosEeffService');
 const { SUCURSALES, AREAS, resolveScope } = require('./accountingBranches');
+const { computeLiquidezAnalysis } = require('./liquidezAnalysis');
+const { getBalanceGeneral } = require('./balanceGeneralService');
+const { BALANCE_GENERAL_SECTIONS } = require('../config/balanceGeneralAccounts');
 
 const ACUM_DET = 'DETA';
 const DISCOUNT_GROUPS = ['431', '432', '433', '435', '436', '437', '438'];
@@ -324,32 +327,58 @@ async function getAccountingKpis({ fechaInicio, fechaFin, sucursal = 'todos', ar
   const scope = resolveScope(sucursal, area);
   const useVentasAutosTemplate = area === 'autosNuevos' || (sucursal !== 'todos' && area === 'todos');
 
-  const [balance, income] = await Promise.all([
+  const [balance, income, balanceGeneral] = await Promise.all([
     getBalanceAtDate(fechaFin, scope),
     useVentasAutosTemplate
       ? getVentasAutosNuevosIncomeStatement(fechaInicio, fechaFin, sucursal)
       : getIncomeStatement(fechaInicio, fechaFin, scope),
+    scope.balanceConsolidated
+      ? getBalanceGeneral({ fechaFin }).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
-  const activoCirc = balance.sections.find((s) => s.key === 'activoCirculante')?.value || 0;
-  const pasivoCorto = balance.sections.find((s) => s.key === 'pasivoCortoPlazo')?.value || 0;
-  const liquidezCorriente = balance.balanceConsolidated && pasivoCorto
-    ? Number((activoCirc / pasivoCorto).toFixed(2))
+  const liquidez = balanceGeneral?.liquidez || computeLiquidezAnalysis({
+    activoCirculante: balance.sections.find((s) => s.key === 'activoCirculante')?.value || 0,
+    pasivoCirculante: balance.sections.find((s) => s.key === 'pasivoCortoPlazo')?.value || 0,
+    accounts: BALANCE_GENERAL_SECTIONS.find((s) => s.key === 'activoCirculante')?.accounts || [],
+  });
+  const liquidezCorriente = (balanceGeneral?.available || scope.balanceConsolidated) && liquidez.pasivoCirculante
+    ? liquidez.razonCirculante
     : null;
+
+  const balanceForTotals = balanceGeneral?.available
+    ? {
+      ...balance,
+      sections: balanceGeneral.sections,
+      totals: balanceGeneral.totals,
+      balanceConsolidated: true,
+    }
+    : balance;
 
   return {
     source: 'CON_CTAS',
     filtros: { sucursal: scope.sucursal, area: scope.area, scopeLabel: scope.scopeLabel },
     catalogos: { sucursales: SUCURSALES, areas: AREAS },
-    balance,
+    balance: balanceForTotals,
+    balanceGeneral,
     income,
+    liquidez,
     ratios: {
       liquidezCorriente: Number.isFinite(liquidezCorriente) ? liquidezCorriente : null,
+      capitalTrabajo: liquidez.capitalTrabajo,
+      pruebaAcida: liquidez.pruebaAcida,
+      activosRapidos: liquidez.activosRapidos,
+      inventariosYProceso: liquidez.inventariosYProceso,
+      pagosAnticipados: liquidez.pagosAnticipados,
+      deficitAcido: liquidez.deficitAcido,
+      margenSobreAcPct: liquidez.margenSobreAcPct,
+      interpretacion: liquidez.interpretacion,
+      lectura: liquidez.lectura,
       margenBrutoPct: income.summary.margenBrutoPct,
       margenOperacionPct: income.summary.margenOperacionPct,
       margenNetoPct: income.summary.margenNetoPct,
-      endeudamientoPct: balance.balanceConsolidated && balance.totals.activoTotal
-        ? Number(((balance.totals.pasivoTotal / balance.totals.activoTotal) * 100).toFixed(1))
+      endeudamientoPct: balanceForTotals.totals?.activoTotal
+        ? Number(((balanceForTotals.totals.pasivoTotal / balanceForTotals.totals.activoTotal) * 100).toFixed(1))
         : null,
     },
   };

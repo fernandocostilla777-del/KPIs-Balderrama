@@ -180,7 +180,7 @@
         }
       }
       best.forEach((insight) => attachInsight(insight));
-      return [...best.values()];
+      return insights;
     } catch (err) {
       console.warn('[kpi-insights]', err.message);
       return [];

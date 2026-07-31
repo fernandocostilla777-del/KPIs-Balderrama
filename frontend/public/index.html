@@ -6,8 +6,7 @@
 <title>Resumen Ejecutivo | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=92" rel="stylesheet"/>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link href="/css/dashboard.css?v=105" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="overview">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -67,25 +66,6 @@
 <p class="section-subtitle">Resumen ejecutivo para alta dirección · ventas, inventario, taller y rentabilidad</p>
 <div class="kpi-summary" id="financialSummary"></div>
 </section>
-<section class="chart-grid-2-1">
-<div class="section-panel">
-<h3 class="section-title">Tendencia de Ventas</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="trendChart"></canvas></div></div>
-</div>
-<div class="section-panel">
-<h3 class="section-title">Ventas por Estado</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="estadoChart"></canvas></div></div>
-</div>
-</section>
-<section class="section-panel table-panel">
-<h3 class="section-title">Modelos principales</h3>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr><th>Modelo</th><th>Marca</th><th>Unidades</th><th>Inventario</th><th>Estado</th></tr></thead>
-<tbody id="modelsTable"></tbody>
-</table>
-</div>
-</section>
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
@@ -95,6 +75,6 @@
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=2"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/overview.js?v=6"></script>
+<script src="/js/overview.js?v=14"></script>
 </body>
 </html>

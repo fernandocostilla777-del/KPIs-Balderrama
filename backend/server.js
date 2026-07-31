@@ -134,6 +134,12 @@ const server = app.listen(PORT, HOST, () => {
   } catch (err) {
     console.error('[cloud-sync] No se pudo iniciar el scheduler:', err.message);
   }
+  try {
+    const { startScheduler: startSofiaLive } = require('./src/services/sofiaMonthEndLive');
+    startSofiaLive();
+  } catch (err) {
+    console.error('[sofia-live] No se pudo iniciar el scheduler:', err.message);
+  }
 });
 
 server.on('error', (err) => {

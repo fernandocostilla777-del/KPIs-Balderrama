@@ -103,39 +103,67 @@ function buildYtdQuery() {
 
 function buildComparativoYtd(rows, ranges) {
   const { anioActual, anioAnterior, mesCorte, corte } = ranges;
+  const maxMonth = Math.min(12, Math.max(1, Number(mesCorte) || 12));
+  const maxQ = Math.ceil(maxMonth / 3);
+
   const actualPorMes = Object.fromEntries(
-    Array.from({ length: mesCorte }, (_, i) => [i + 1, 0])
+    Array.from({ length: 12 }, (_, i) => [i + 1, 0])
   );
   const anteriorPorMes = Object.fromEntries(
-    Array.from({ length: mesCorte }, (_, i) => [i + 1, 0])
+    Array.from({ length: 12 }, (_, i) => [i + 1, 0])
   );
 
   for (const row of rows) {
     const mes = Number(row.mes);
     const anio = Number(row.anio);
     const cnt = Number(row.cnt) || 0;
-    if (mes > mesCorte) continue;
-    if (anio === anioActual) {
-      actualPorMes[mes] = cnt;
-    }
-    if (anio === anioAnterior) {
-      anteriorPorMes[mes] = cnt;
-    }
+    if (mes < 1 || mes > 12 || mes > maxMonth) continue;
+    if (anio === anioActual) actualPorMes[mes] = cnt;
+    if (anio === anioAnterior) anteriorPorMes[mes] = cnt;
   }
 
-  const labels = Array.from({ length: mesCorte }, (_, i) => MESES[i]);
-  const actual = Array.from({ length: mesCorte }, (_, i) => actualPorMes[i + 1] || 0);
-  const anterior = Array.from({ length: mesCorte }, (_, i) => anteriorPorMes[i + 1] || 0);
+  // Serie plana (compatibilidad con clientes/IA existentes)
+  const labels = Array.from({ length: maxMonth }, (_, i) => MESES[i]);
+  const actual = Array.from({ length: maxMonth }, (_, i) => actualPorMes[i + 1] || 0);
+  const anterior = Array.from({ length: maxMonth }, (_, i) => anteriorPorMes[i + 1] || 0);
   const totalActual = actual.reduce((sum, n) => sum + n, 0);
   const totalAnterior = anterior.reduce((sum, n) => sum + n, 0);
   const variacion = totalAnterior
     ? Number((((totalActual - totalAnterior) / totalAnterior) * 100).toFixed(1))
     : null;
 
+  const monthsOfQuarter = (q) => {
+    const start = (q - 1) * 3 + 1;
+    return [start, start + 1, start + 2];
+  };
+
+  const trimestres = [1, 2, 3, 4]
+    .filter((q) => q <= maxQ)
+    .map((q) => {
+      const monthNums = monthsOfQuarter(q);
+      const meses = monthNums.map((m) => ({
+        month: m,
+        label: MESES[m - 1],
+        quarter: q,
+        withinYtd: m <= maxMonth,
+        actual: actualPorMes[m] || 0,
+        anterior: anteriorPorMes[m] || 0,
+      }));
+      const sum = (key) => meses.reduce((s, x) => s + Number(x[key] || 0), 0);
+      return {
+        quarter: q,
+        label: `T${q}`,
+        actual: sum('actual'),
+        anterior: sum('anterior'),
+        meses,
+      };
+    });
+
   return {
     anioActual,
     anioAnterior,
     corte,
+    maxMonth,
     mesEnCursoExcluido: ranges.mesEnCursoExcluido,
     totalActual,
     totalAnterior,
@@ -145,6 +173,7 @@ function buildComparativoYtd(rows, ranges) {
       actual,
       anterior,
     },
+    trimestres,
   };
 }
 

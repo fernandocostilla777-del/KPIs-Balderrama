@@ -17,6 +17,8 @@ const PAGE_AI_TOOLS = {
     'consultar_resumen_ejecutivo',
     'consultar_analytics_ventas',
     'consultar_ventas_dia',
+    'consultar_riesgos_oportunidades',
+    'consultar_objetivos_ventas',
   ],
   sales: [
     'consultar_ventas',
@@ -27,21 +29,31 @@ const PAGE_AI_TOOLS = {
     'consultar_objetivos_ventas',
     'consultar_financiamiento',
     'consultar_utilidad_carline',
+    'resumen_leads',
+    'consultar_riesgos_oportunidades',
     'generar_excel',
   ],
   forecast: [
     'consultar_pronostico',
     'consultar_objetivos_ventas',
+    'consultar_ventas',
+    'consultar_riesgos_oportunidades',
   ],
   inventory: [
     'consultar_inventario',
+    'consultar_inventario_postventa',
+    'consultar_riesgos_oportunidades',
   ],
   contabilidad: [
     'consultar_contabilidad',
+    'consultar_riesgos_oportunidades',
   ],
   'post-sales': [
     'consultar_postventa',
     'consultar_quejas_csi',
+    'consultar_inventario_postventa',
+    'consultar_refacciones',
+    'consultar_riesgos_oportunidades',
     'generar_excel',
   ],
   seguimiento: [
@@ -53,9 +65,12 @@ const PAGE_AI_TOOLS = {
     'resumen_vendedor_360',
     'consultar_quejas_csi',
     'consultar_financiamiento',
+    'consultar_riesgos_oportunidades',
     'generar_excel',
   ],
-  admin: [],
+  admin: [
+    'consultar_roles_acceso',
+  ],
 };
 
 const PAGE_LABELS = {

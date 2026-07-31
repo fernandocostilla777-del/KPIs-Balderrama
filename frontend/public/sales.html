@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=98" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=106" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -78,6 +78,10 @@ Financiamiento
 <button type="button" class="contabilidad-tab" data-sales-tab="leads" aria-controls="panelVentasLeads" aria-selected="false">
 <span class="material-symbols-outlined" aria-hidden="true">diversity_3</span>
 Leads
+</button>
+<button type="button" class="contabilidad-tab" data-sales-tab="afluencia" aria-controls="panelVentasAfluencia" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">groups</span>
+Afluencia
 </button>
 </nav>
 
@@ -333,16 +337,22 @@ Leads
 </section>
 
 <section class="section-panel dashboard-section">
-<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;margin-bottom:20px">
+<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;margin-bottom:12px">
 <div>
 <h3 class="section-title">Comparativo acumulado anual vs año anterior</h3>
-<p id="ytdSubtitle" class="section-subtitle">Ventas acumuladas al corte</p>
+<p id="ytdSubtitle" class="section-subtitle">Ventas acumuladas al corte · meses por trimestre</p>
 </div>
 <div class="ytd-stats">
 <div><span id="ytdLabelActual" class="ytd-stat-label">YTD actual</span><strong id="ytdTotalActual" class="ytd-stat-value" style="color:#2563eb">0</strong></div>
 <div><span id="ytdLabelAnterior" class="ytd-stat-label">YTD anterior</span><strong id="ytdTotalAnterior" class="ytd-stat-value">0</strong></div>
 <div><span class="ytd-stat-label">Variación</span><strong id="ytdVariacion" class="ytd-stat-value">-</strong></div>
 </div>
+</div>
+<div class="filter-chips" id="ytdQuarterChips" role="group" aria-label="Trimestres visibles" style="margin:0 0 12px">
+<button type="button" class="chip active" data-ytd-quarter="1" aria-pressed="true">T1</button>
+<button type="button" class="chip active" data-ytd-quarter="2" aria-pressed="true">T2</button>
+<button type="button" class="chip active" data-ytd-quarter="3" aria-pressed="true">T3</button>
+<button type="button" class="chip active" data-ytd-quarter="4" aria-pressed="true">T4</button>
 </div>
 <div class="chart-grid-2-1 ytd-carline-layout">
 <div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartYtd"></canvas></div></div>
@@ -457,6 +467,36 @@ Leads
 </section>
 
 <section class="section-panel table-panel dashboard-section">
+<div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Campañas para conversión</h3>
+<p id="ldCampanasConvResumen" class="section-subtitle" style="margin:4px 0 0">Campañas reactivas monitoreadas · Total, contactados y vendidos</p>
+</div>
+</div>
+<div id="ldCampanasConvNota" class="liquidity-note" style="margin:10px 0 12px" role="note">
+<strong>Vida del lead: 90 días.</strong>
+Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de estas campañas documentadas, aunque después se concrete una venta.
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Campaña</th>
+<th class="cell-num">Total</th>
+<th class="cell-num">Contactados</th>
+<th class="cell-num">Vendidos</th>
+<th class="cell-num">Conv. %</th>
+</tr>
+</thead>
+<tbody id="ldCampanasConvBody">
+<tr class="empty-row"><td colspan="5">Consulte un periodo para ver campañas de conversión.</td></tr>
+</tbody>
+<tfoot id="ldCampanasConvFoot"></tfoot>
+</table>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
 <div class="table-header-row" style="flex-wrap:wrap;gap:10px">
 <h3 class="section-title" style="margin-bottom:0">Conversión por grupo</h3>
 <nav class="eeff-tabs" id="ldGroupTabs" aria-label="Agrupar leads">
@@ -519,6 +559,174 @@ Leads
 
 </div>
 
+<div id="panelVentasAfluencia" class="sales-main-panel hidden" data-sales-panel="afluencia" hidden>
+
+<section id="secAfluencia" class="section-panel dashboard-section fi-section ld-section" aria-label="Afluencia">
+<div class="fi-section-header" style="flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between">
+<div>
+<h2 class="section-title" style="margin-bottom:6px">Afluencia</h2>
+<p id="afSubtitle" class="section-subtitle" style="margin:0">Solo NUEVOS (col R) · Fresh up + Citas (col T) · SNV · Pruebas de manejo por sucursal (Matriz, Zacatelco, Cholula).</p>
+</div>
+<nav class="eeff-tabs" id="afInnerTabs" aria-label="Secciones de afluencia">
+<button type="button" class="eeff-tab active" data-af-tab="general" aria-controls="afPanelGeneral" aria-pressed="true">Afluencia</button>
+<button type="button" class="eeff-tab" data-af-tab="mtk" aria-controls="afPanelMtk" aria-pressed="false">MTK</button>
+</nav>
+</div>
+
+<div id="afPanelGeneral" class="af-inner-panel" data-af-panel="general">
+
+<div id="afKpiOperational" class="fi-kpi-root"></div>
+
+<section class="section-panel table-panel dashboard-section" style="margin-top:12px">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Por sucursal</h3>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Sucursal</th>
+<th class="cell-num">Afluencia</th>
+<th class="cell-num">Fresh up</th>
+<th class="cell-num">Citas</th>
+<th class="cell-num">SNV</th>
+<th class="cell-num">Pruebas</th>
+<th class="cell-num">Registros</th>
+</tr>
+</thead>
+<tbody id="afSucursalesBody">
+<tr class="empty-row"><td colspan="7">Consulte un periodo para ver afluencia por sucursal.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section">
+<div class="kpi-detail-toolbar" style="flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+<div>
+<h3 id="afDetailTitle" class="section-title" style="margin:0 0 4px">Comparativo YTD por trimestre</h3>
+<div id="afDetailResumen" class="section-subtitle" style="margin:0">Año actual vs año anterior · solo NUEVOS</div>
+</div>
+<div class="filter-chips" id="afYtdMetricChips" role="group" aria-label="Métrica del comparativo">
+<button type="button" class="chip active" data-af-metric="afluenciaTotal">Afluencia</button>
+<button type="button" class="chip" data-af-metric="freshUp">Fresh up</button>
+<button type="button" class="chip" data-af-metric="citas">Citas</button>
+<button type="button" class="chip" data-af-metric="snv">SNV</button>
+<button type="button" class="chip" data-af-metric="pruebasManejo">Pruebas</button>
+</div>
+</div>
+<div class="filter-chips" id="afYtdQuarterChips" role="group" aria-label="Trimestres visibles" style="margin:10px 0 6px">
+<button type="button" class="chip active" data-af-quarter="1" aria-pressed="true">T1</button>
+<button type="button" class="chip active" data-af-quarter="2" aria-pressed="true">T2</button>
+<button type="button" class="chip active" data-af-quarter="3" aria-pressed="true">T3</button>
+<button type="button" class="chip active" data-af-quarter="4" aria-pressed="true">T4</button>
+</div>
+<div class="chart-card" style="margin-top:8px">
+<div class="chart-wrap" style="min-height:320px">
+<canvas id="afYtdChart" aria-label="Comparativo YTD de afluencia por trimestre"></canvas>
+</div>
+</div>
+<p id="afYtdEmpty" class="section-subtitle hidden" style="margin-top:10px">Sin datos suficientes para el comparativo YTD.</p>
+</section>
+
+</div>
+
+<div id="afPanelMtk" class="af-inner-panel hidden" data-af-panel="mtk" hidden>
+
+<section id="secAfluenciaMarketing" class="dashboard-section" aria-label="Marketing">
+<div class="fi-section-header" style="margin-bottom:8px">
+<div>
+<h3 class="section-title" style="margin-bottom:6px">Marketing (MTK)</h3>
+<p id="afMktSubtitle" class="section-subtitle" style="margin:0">Campañas / medios que generan tráfico piso y campañas de leads activas en el periodo.</p>
+</div>
+</div>
+
+<div id="afMktKpis" class="fi-kpi-root"></div>
+
+<section class="section-panel dashboard-section" style="margin-top:12px" aria-label="Diagnósticos marketing">
+<div class="table-header-row" style="margin-bottom:8px">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Diagnósticos y mejoras MTK</h3>
+<p class="section-subtitle" style="margin:4px 0 0">Tarjetas inteligentes con análisis y acciones · asistente IA</p>
+</div>
+</div>
+<div id="afMktInsightCards" class="mtk-insight-grid" aria-live="polite"></div>
+</section>
+
+<section class="section-panel table-panel dashboard-section" style="margin-top:12px">
+<div class="table-header-row" style="flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Origen del tráfico (piso)</h3>
+<p class="section-subtitle" style="margin:4px 0 0">Afluencia NUEVOS + compras CRM por medio/submedio · marketing vs orgánico</p>
+</div>
+<div class="filter-chips" id="afMktTraficoView" role="group" aria-label="Vista de origen">
+<button type="button" class="chip active" data-af-mkt-view="submedio">Submedio</button>
+<button type="button" class="chip" data-af-mkt-view="medio">Medio</button>
+<button type="button" class="chip" data-af-mkt-view="pair">Medio · submedio</button>
+<button type="button" class="chip" data-af-mkt-view="forma">Forma contacto</button>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th id="afMktTraficoCol">Origen</th>
+<th class="cell-num">Afluencia</th>
+<th class="cell-num">Fresh up</th>
+<th class="cell-num">Citas</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">% conv</th>
+<th class="cell-num">% mix</th>
+<th>Tipo</th>
+</tr>
+</thead>
+<tbody id="afMktTraficoBody">
+<tr class="empty-row"><td colspan="8">Consulte un periodo para ver el origen del tráfico.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section" style="margin-top:12px">
+<div class="table-header-row" style="flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Campañas de leads</h3>
+<p id="afMktLeadsResumen" class="section-subtitle" style="margin:4px 0 0">Activas en el periodo · ordenadas por desempeño</p>
+</div>
+<div class="filter-chips" id="afMktLeadsFilter" role="group" aria-label="Filtro campañas">
+<button type="button" class="chip active" data-af-mkt-leads="todas">Todas</button>
+<button type="button" class="chip" data-af-mkt-leads="funcionando">Funcionando</button>
+<button type="button" class="chip" data-af-mkt-leads="volumen">Alto volumen</button>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Campaña</th>
+<th>Canal</th>
+<th class="cell-num">Leads</th>
+<th class="cell-num">Contacto</th>
+<th class="cell-num">Citas</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">% cita</th>
+<th class="cell-num">% compra</th>
+<th>Estado</th>
+</tr>
+</thead>
+<tbody id="afMktLeadsBody">
+<tr class="empty-row"><td colspan="9">Consulte un periodo para ver campañas de leads.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+
+</div>
+</section>
+
+</div>
+
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -528,10 +736,11 @@ Leads
 <script src="/js/sidebar.js?v=8"></script>
 <script src="/js/topbar.js?v=8"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/kpi-insights.js?v=3"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/financiamiento.js?v=28"></script>
-<script src="/js/leads.js?v=1"></script>
-<script src="/js/sales.js?v=42"></script>
+<script src="/js/financiamiento.js?v=30"></script>
+<script src="/js/leads.js?v=5"></script>
+<script src="/js/afluencia.js?v=8"></script>
+<script src="/js/sales.js?v=46"></script>
 </body>
 </html>

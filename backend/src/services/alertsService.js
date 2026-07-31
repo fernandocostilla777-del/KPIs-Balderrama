@@ -170,12 +170,24 @@ function fmtMoney(n) {
 
 async function buildOperationalAlerts() {
   const now = Date.now();
-  if (cache.alerts.length && now - cache.at < CACHE_MS) {
+  let sofiaLive = null;
+  try {
+    sofiaLive = require('./sofiaMonthEndLive').getSofiaLiveUpdateContext();
+  } catch {
+    sofiaLive = { active: false };
+  }
+  // Día de cierre SOFIA: sin caché para que las notificaciones de entrega se vean al momento
+  const skipCache = Boolean(sofiaLive?.active);
+  if (!skipCache && cache.alerts.length && now - cache.at < CACHE_MS) {
     return cache.alerts;
   }
 
   const alerts = [];
-  const { fechaInicio, fechaFin } = monthToDateRange();
+  let { fechaInicio, fechaFin } = monthToDateRange();
+  if (sofiaLive?.active && sofiaLive.fechaInicio && sofiaLive.fechaFin) {
+    fechaInicio = sofiaLive.fechaInicio;
+    fechaFin = sofiaLive.fechaFin;
+  }
   const periodLabel = `${fechaInicio} — ${fechaFin}`;
 
   try {
@@ -336,4 +348,5 @@ module.exports = {
   getPrefsForRole,
   updatePrefs,
   getAlertsForRole,
+  buildOperationalAlerts,
 };

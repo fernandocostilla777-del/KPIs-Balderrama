@@ -2221,6 +2221,40 @@ const COMPRA_LEAD_SQL = `
   ) THEN 1 ELSE 0 END
 `;
 
+/** Fecha de compra asociada al lead (factura lead o ciclo CRM con VIN). */
+const FECHA_COMPRA_LEAD_SQL = `
+  COALESCE(
+    NULLIF(trim(crm_leads.fecha_factura), ''),
+    NULLIF(trim(crm_leads.fecha_entrega), ''),
+    (
+      SELECT COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo)
+      FROM crm_actividades a
+      WHERE a.id_contacto = crm_leads.id_crm
+        AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+      ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+      LIMIT 1
+    )
+  )
+`;
+
+/**
+ * Compra válida para campañas documentadas: VIN + fecha de compra
+ * dentro de LEAD_VIDA_DIAS desde fecha_entrada.
+ */
+function buildCompraLeadDentroVidaSql(dias = 90) {
+  const life = Math.max(1, Number(dias) || 90);
+  return `
+    CASE WHEN (
+      (${COMPRA_LEAD_SQL}) = 1
+      AND crm_leads.fecha_entrada IS NOT NULL
+      AND trim(crm_leads.fecha_entrada) <> ''
+      AND (${FECHA_COMPRA_LEAD_SQL}) IS NOT NULL
+      AND julianday(${FECHA_COMPRA_LEAD_SQL}) >= julianday(crm_leads.fecha_entrada)
+      AND (julianday(${FECHA_COMPRA_LEAD_SQL}) - julianday(crm_leads.fecha_entrada)) <= ${life}
+    ) THEN 1 ELSE 0 END
+  `;
+}
+
 /**
  * Dashboard de conversión oportunidades → ventas para la sección Leads en Ventas.
  * Cohorte por fecha_entrada; compra = VIN en ciclo del mismo ID CRM o vin_comprado.
@@ -2321,6 +2355,73 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   const porResultado = groupQuery('resultado', 15);
   const porSucursal = groupQuery('sucursal', 15);
 
+  const {
+    CAMPANAS_CONVERSION,
+    LEAD_VIDA_DIAS,
+    resolveCampanaConversionKey,
+  } = require('../config/campanasConversion');
+
+  const COMPRA_LEAD_90D_SQL = buildCompraLeadDentroVidaSql(LEAD_VIDA_DIAS);
+
+  const campanaAggRows = d.prepare(`
+    SELECT
+      COALESCE(NULLIF(trim(campana), ''), '(sin campaña)') AS campana,
+      COUNT(*) AS leads,
+      SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
+      SUM(${COMPRA_LEAD_SQL}) AS compras,
+      SUM(${COMPRA_LEAD_90D_SQL}) AS vendidos
+    FROM crm_leads
+    ${whereSql}
+    GROUP BY campana
+  `).all(...params);
+
+  const campanasMap = Object.fromEntries(
+    CAMPANAS_CONVERSION.map((c) => [c.key, {
+      key: c.key,
+      campana: c.label,
+      total: 0,
+      contactados: 0,
+      vendidos: 0,
+      vendidosFueraVida: 0,
+      conversionPct: 0,
+      matchedNames: [],
+    }])
+  );
+
+  for (const row of campanaAggRows) {
+    const key = resolveCampanaConversionKey(row.campana);
+    if (!key || !campanasMap[key]) continue;
+    const bucket = campanasMap[key];
+    const compras = Number(row.compras || 0);
+    const vendidos = Number(row.vendidos || 0);
+    bucket.total += Number(row.leads || 0);
+    bucket.contactados += Number(row.contactados || 0);
+    bucket.vendidos += vendidos;
+    bucket.vendidosFueraVida += Math.max(0, compras - vendidos);
+    if (row.campana && !bucket.matchedNames.includes(row.campana)) {
+      bucket.matchedNames.push(String(row.campana));
+    }
+  }
+
+  const campanasConversion = CAMPANAS_CONVERSION.map((c) => {
+    const b = campanasMap[c.key];
+    b.conversionPct = pct(b.vendidos, b.total);
+    return b;
+  });
+
+  const campanasConversionTotales = campanasConversion.reduce((acc, r) => {
+    acc.total += r.total;
+    acc.contactados += r.contactados;
+    acc.vendidos += r.vendidos;
+    acc.vendidosFueraVida += r.vendidosFueraVida;
+    return acc;
+  }, { total: 0, contactados: 0, vendidos: 0, vendidosFueraVida: 0 });
+  campanasConversionTotales.conversionPct = pct(
+    campanasConversionTotales.vendidos,
+    campanasConversionTotales.total
+  );
+  campanasConversionTotales.vidaDias = LEAD_VIDA_DIAS;
+
   const detalleRows = d.prepare(`
     SELECT
       id_crm AS idCrm,
@@ -2404,7 +2505,12 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     semantica: {
       cohorte: 'El periodo filtra fecha_entrada del lead (oportunidad)',
       compras: 'Compra vinculada por ID CRM; puede ocurrir después del periodo',
+      campanasConversion: `Vendidos de campañas documentadas solo cuentan si la compra ocurre dentro de ${LEAD_VIDA_DIAS} días desde fecha_entrada; fuera de esa vida útil no suman a conversión aunque exista venta`,
       noEsVentasTotales: 'No equivale al total de facturas DMS del periodo',
+    },
+    campanasConversionRegla: {
+      vidaDias: LEAD_VIDA_DIAS,
+      texto: `La vida del lead es de ${LEAD_VIDA_DIAS} días. Al culminar ese plazo ya no cuenta para conversión de campañas documentadas, aunque después se venda.`,
     },
     summary,
     funnel,
@@ -2412,6 +2518,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     porEjecutivo,
     porResultado,
     porSucursal,
+    campanasConversion,
+    campanasConversionTotales,
     detalle,
   };
 }

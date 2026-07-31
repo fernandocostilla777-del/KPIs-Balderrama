@@ -376,6 +376,18 @@ function buildContabilidadInsights(payload = {}) {
     });
   }
 
+  // Preferir la alerta del Detalle agencia (más rica) cuando viene en el payload
+  const peBlock = payload.puntoEquilibrio || {};
+  const peInsight = peBlock.insight;
+  if (peInsight?.title) {
+    push(list, {
+      ...peInsight,
+      id: peInsight.id || 'conta-pe-detalle-agencia',
+      kpiId: 'kpiCardPuntoEquilibrio',
+      module: 'contabilidad',
+    });
+  }
+
   pushAll(list, buildLiquidezInsights(payload));
 
   return list;
@@ -630,12 +642,12 @@ function buildOverviewInsights(payload = {}) {
     const pct = round1((sinPreviasEnt / sofia) * 100);
     push(list, {
       id: 'ov-sin-previas-entrega',
-      kpiId: 'ovEntregasSinPrevias',
+      kpiId: 'ovOrdenesTaller',
       module: 'overview',
       severity: 'warning',
-      title: 'Entregas SOFIA sin previa en el tablero',
+      title: 'Entregas SOFIA sin previa detectadas',
       summary: `${sinPreviasEnt} de ${sofia} entregas (${pct}%) sin previas.`,
-      analysis: 'Falla de proceso de entrega detectada en datos operativos: se entregan unidades sin órdenes de previa de taller.',
+      analysis: 'Falla de proceso de entrega: se entregan unidades sin órdenes de previa de taller. Revisar en Postventa / Inventario.',
       recommendations: [
         'Auditar el flujo previas → SOFIA en Ventas e Inventario.',
         'Bloquear entregas sin checklist de calidad.',
@@ -650,12 +662,12 @@ function buildOverviewInsights(payload = {}) {
   if (sinTimbrar >= 5) {
     push(list, {
       id: 'ov-sin-timbrar',
-      kpiId: 'ovEntregasSofia',
+      kpiId: 'ovFacturacionTaller',
       module: 'overview',
       severity: 'warning',
       title: 'Facturas sin timbrar acumuladas',
       summary: `${sinTimbrar} unidades facturadas sin timbrar en el periodo.`,
-      analysis: 'Falla fiscal/operativa visible en el tablero: el backlog de timbrado retrasa cobertura y entregas.',
+      analysis: 'Falla fiscal/operativa: el backlog de timbrado retrasa cobertura y entregas.',
       recommendations: ['Priorizar cola de timbrado con sistemas/contabilidad.'],
       metrics: { sinTimbrar },
       chatPrompt: chatPrompt('Tablero ejecutivo', 'Sin timbrar', [`Sin timbrar: ${sinTimbrar}`, `Periodo: ${fi} — ${ff}`]),
@@ -801,6 +813,16 @@ function buildOverviewInsights(payload = {}) {
       chatPrompt: chatPrompt('Tablero ejecutivo', 'Aging + descuento', [
         'Estancados con mayor descuento: sí', `Periodo: ${fi} — ${ff}`,
       ]),
+    });
+  }
+
+  const peInsight = payload.puntoEquilibrio?.insight;
+  if (peInsight?.title) {
+    push(list, {
+      ...peInsight,
+      id: peInsight.id || 'ov-pe-detalle-agencia',
+      kpiId: 'kpiCardPuntoEquilibrio',
+      module: 'overview',
     });
   }
 
@@ -1538,6 +1560,320 @@ function buildSeguimientoInsights(payload = {}) {
   return list;
 }
 
+/* ───────────────── Marketing / MTK (Afluencia) ───────────────── */
+
+function buildMarketingInsights(payload = {}) {
+  const insights = [];
+  const fi = payload.fechaInicio || null;
+  const ff = payload.fechaFin || null;
+  const periodo = `${fi || '—'} → ${ff || '—'}`;
+  const trafico = payload.trafico || {};
+  const leads = payload.leads || {};
+  const tSum = trafico.summary || {};
+  const lSum = leads.summary || {};
+  const porSub = Array.isArray(trafico.porSubmedio) ? trafico.porSubmedio : [];
+  const porCampana = Array.isArray(leads.porCampana) ? leads.porCampana : [];
+  const campanasDoc = Array.isArray(payload.campanasConversion) ? payload.campanasConversion : [];
+
+  const afluencia = Number(tSum.afluenciaTotal || 0);
+  const afluenciaMkt = Number(tSum.afluenciaMarketing || 0);
+  const afluenciaOrg = Number(tSum.afluenciaOrganico || 0);
+  const pctMkt = Number(tSum.pctMarketing || 0);
+  const comprasCanal = Number(tSum.compras || 0);
+  const convCanal = Number(tSum.conversionCompraPct || 0);
+  const campanasActivas = Number(lSum.campanasActivas || 0);
+  const campanasFunc = Number(lSum.campanasFuncionando || 0);
+  const leadsTot = Number(lSum.leads || 0);
+  const citasLeads = Number(lSum.citas || 0);
+  const comprasLeads = Number(lSum.compras || 0);
+
+  if (afluencia >= 80 && convCanal < 6) {
+    push(insights, {
+      id: 'mtk-conv-canal-baja',
+      kpiId: 'kpiMktComprasCanal',
+      module: 'marketing',
+      severity: convCanal < 3 ? 'critical' : 'warning',
+      badge: 'Diagnóstico MTK',
+      title: 'Conversión de canal débil vs afluencia',
+      summary: `${comprasCanal} compras atribuidas a canal con ${afluencia} de afluencia (${convCanal}% conv.).`,
+      analysis:
+        `En ${periodo}, el piso genera volumen pero pocas compras quedan atribuidas al medio/submedio. `
+        + 'Posibles fallas: mala captura de origen en CRM, fuga post-visita, o tráfico de baja calidad (paseo / no calificado).',
+      recommendations: [
+        'Auditar medio/submedio en hostess y asesores (estándar de captura).',
+        'Priorizar seguimiento 48h a Fresh up de submedios marketing (redes/internet/anuncio).',
+        'Cruzar top submedios de afluencia vs compras y atacar los de alto volumen sin venta.',
+      ],
+      metrics: { afluencia, comprasCanal, convCanal, periodo },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Conversión canal débil', [
+        `Periodo: ${periodo}`,
+        `Afluencia: ${afluencia}`,
+        `Compras por canal: ${comprasCanal}`,
+        `Conversión: ${convCanal}%`,
+        `Marketing: ${afluenciaMkt} (${pctMkt}%) · Orgánico: ${afluenciaOrg}`,
+      ]),
+    });
+  }
+
+  if (afluencia >= 100 && pctMkt < 25) {
+    push(insights, {
+      id: 'mtk-mix-bajo-marketing',
+      kpiId: 'kpiMktTraficoMarketing',
+      module: 'marketing',
+      severity: 'warning',
+      badge: 'Mejora MTK',
+      title: 'Baja participación de tráfico marketing',
+      summary: `Solo ${pctMkt}% de la afluencia viene de canales marketing (${afluenciaMkt} de ${afluencia}).`,
+      analysis:
+        'La agencia depende más de orgánico/cartera/recomendación. Si las campañas digitales están activas, '
+        + 'puede haber fuga de atribución (submedio mal etiquetado) o inversión poco efectiva en atracción a piso.',
+      recommendations: [
+        'Revisar creatividades y landing de campañas activas vs citas a piso.',
+        'Capacitar captura: redes/internet/anuncio vs “iba pasando”.',
+        'Medir costo por visita de piso en campañas FB/GM vs referidos.',
+      ],
+      metrics: { pctMkt, afluenciaMkt, afluencia, afluenciaOrg },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Mix marketing bajo', [
+        `Periodo: ${periodo}`,
+        `% marketing: ${pctMkt}`,
+        `Afluencia mkt: ${afluenciaMkt}`,
+        `Afluencia orgánica: ${afluenciaOrg}`,
+      ]),
+    });
+  }
+
+  if (afluencia >= 100 && pctMkt >= 55) {
+    push(insights, {
+      id: 'mtk-mix-alto-marketing',
+      kpiId: 'kpiMktTraficoOrganico',
+      module: 'marketing',
+      severity: 'info',
+      badge: 'Diagnóstico MTK',
+      title: 'Tráfico muy concentrado en marketing',
+      summary: `${pctMkt}% de afluencia es marketing; orgánico aportó ${afluenciaOrg}.`,
+      analysis:
+        'Buena atracción digital/publicitaria, pero conviene cuidar cartera y referidos para no depender solo de pauta. '
+        + 'Validar que la calidad (citas/compras) acompañe el volumen.',
+      recommendations: [
+        'Comparar % cita y compras de submedios marketing vs orgánicos.',
+        'Mantener activaciones de cartera propia y referidos.',
+        'Si la conversión marketing es baja, recortar pauta de bajo ROI.',
+      ],
+      metrics: { pctMkt, afluenciaMkt, afluenciaOrg },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Mix marketing alto', [
+        `Periodo: ${periodo}`,
+        `% marketing: ${pctMkt}`,
+        `Afluencia mkt: ${afluenciaMkt}`,
+        `Orgánico: ${afluenciaOrg}`,
+        `Conv. canal: ${convCanal}%`,
+      ]),
+    });
+  }
+
+  if (campanasActivas >= 5) {
+    const pctFunc = campanasActivas ? round1((campanasFunc / campanasActivas) * 100) : 0;
+    if (pctFunc < 40) {
+      push(insights, {
+        id: 'mtk-campanas-poco-funcionando',
+        kpiId: 'kpiMktCampanasFuncionando',
+        module: 'marketing',
+        severity: pctFunc < 20 ? 'critical' : 'warning',
+        badge: 'Diagnóstico MTK',
+        title: 'Pocas campañas digitales funcionando',
+        summary: `${campanasFunc} de ${campanasActivas} campañas activas cumplen criterio de funcionamiento (${pctFunc}%).`,
+        analysis:
+          `Hay ${leadsTot} leads, ${citasLeads} citas y ${comprasLeads} compras en campañas del periodo. `
+          + 'Varias campañas generan volumen sin cita/compra: posible mala calidad de lead, BDC lento o mensaje no alineado al inventario.',
+        recommendations: [
+          'Pausar o reescribir campañas en “Baja respuesta” / alto volumen sin citas.',
+          'Asegurar SLA de contacto < 30 min en leads FB/GM.',
+          'Alinear creativo al stock real (modelos disponibles).',
+        ],
+        metrics: { campanasActivas, campanasFunc, pctFunc, leadsTot, citasLeads, comprasLeads },
+        chatPrompt: chatPrompt('Marketing (MTK)', 'Campañas poco funcionando', [
+          `Periodo: ${periodo}`,
+          `Activas: ${campanasActivas}`,
+          `Funcionando: ${campanasFunc} (${pctFunc}%)`,
+          `Leads: ${leadsTot} · Citas: ${citasLeads} · Compras: ${comprasLeads}`,
+        ]),
+      });
+    }
+  }
+
+  const malasCampanas = porCampana
+    .filter((c) => Number(c.leads || 0) >= 40 && Number(c.conversionCitaPct || 0) < 2 && Number(c.compras || 0) === 0)
+    .slice(0, 3);
+  if (malasCampanas.length) {
+    const names = malasCampanas.map((c) => c.campana).join(', ');
+    push(insights, {
+      id: 'mtk-campanas-volumen-sin-cita',
+      kpiId: 'kpiMktCampanasActivas',
+      module: 'marketing',
+      severity: 'warning',
+      badge: 'Mejora MTK',
+      title: 'Campañas con volumen y casi sin citas',
+      summary: `${malasCampanas.length} campaña(s) ≥40 leads con <2% cita y 0 compras: ${names}.`,
+      analysis:
+        'El gasto/atracción no se traduce en agenda. Falla típica: lead no calificado, formulario abierto, o contacto tardío del BDC/asesor.',
+      recommendations: [
+        `Priorizar auditoría de: ${malasCampanas[0].campana}.`,
+        'Revisar tiempo a primer contacto y tasa de no contesta.',
+        'Ajustar audiencia/exclusion y CTA hacia cita o prueba de manejo.',
+      ],
+      metrics: {
+        campañas: malasCampanas.map((c) => ({
+          campana: c.campana,
+          canal: c.canal,
+          leads: c.leads,
+          citas: c.citas,
+          conversionCitaPct: c.conversionCitaPct,
+        })),
+      },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Volumen sin citas', [
+        `Periodo: ${periodo}`,
+        ...malasCampanas.map((c) => `${c.campana} (${c.canal}): ${c.leads} leads · ${c.citas} citas · ${c.compras} compras`),
+      ]),
+    });
+  }
+
+  const topSinCompra = porSub
+    .filter((r) => Number(r.afluencia || 0) >= 40 && Number(r.compras || 0) === 0 && Number(r.marketing || 0) > 0)
+    .slice(0, 3);
+  if (topSinCompra.length) {
+    push(insights, {
+      id: 'mtk-submedio-sin-compra',
+      kpiId: 'kpiMktTraficoMarketing',
+      module: 'marketing',
+      severity: 'warning',
+      badge: 'Diagnóstico MTK',
+      title: 'Submedios marketing sin compras atribuidas',
+      summary: topSinCompra.map((r) => `${r.grupo} (${r.afluencia} afl.)`).join(' · '),
+      analysis:
+        'Estos orígenes traen gente a piso pero el ciclo CRM no refleja compras con el mismo submedio. '
+        + 'Puede ser atribución rota o verdadera nula conversión.',
+      recommendations: [
+        'Verificar etiquetado de medio/submedio al facturar / ciclo.',
+        'Dar seguimiento SNV a ese submedio en los últimos 15 días.',
+        'Si tras auditoría sigue en cero, reducir inversión en ese origen.',
+      ],
+      metrics: { topSinCompra },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Submedios sin compra', [
+        `Periodo: ${periodo}`,
+        ...topSinCompra.map((r) => `${r.grupo}: afluencia ${r.afluencia} · fresh ${r.freshUp} · citas ${r.citas} · compras ${r.compras}`),
+      ]),
+    });
+  }
+
+  const buenas = porCampana.filter((c) => c.funcionando && Number(c.compras || 0) >= 2).slice(0, 3);
+  if (buenas.length) {
+    push(insights, {
+      id: 'mtk-campanas-exito',
+      kpiId: 'kpiMktCampanasFuncionando',
+      module: 'marketing',
+      severity: 'info',
+      badge: 'Oportunidad MTK',
+      title: 'Campañas que sí convierten: escalar',
+      summary: buenas.map((c) => `${c.campana} (${c.compras} ventas)`).join(' · '),
+      analysis:
+        'Estas campañas cumplen criterio de funcionamiento y ya generan compras. '
+        + 'Conviene reforzar presupuesto/creativo similar y replicar el mensaje en otros canales.',
+      recommendations: [
+        `Escalar presupuesto en: ${buenas[0].campana}.`,
+        'Documentar copy/audiencia ganadora para replicar.',
+        'Cuidar capacidad de BDC para no degradar el SLA al subir volumen.',
+      ],
+      metrics: { buenas },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Campañas a escalar', [
+        `Periodo: ${periodo}`,
+        ...buenas.map((c) => `${c.campana}: ${c.leads} leads · ${c.citas} citas · ${c.compras} compras · conv ${c.conversionCompraPct}%`),
+      ]),
+    });
+  }
+
+  // Campañas documentadas (90 días) si el frontend las envía
+  const docDebiles = campanasDoc
+    .filter((c) => Number(c.total || 0) >= 30 && Number(c.conversionPct || 0) < 1.5)
+    .slice(0, 4);
+  const fueraVida = campanasDoc.reduce((s, c) => s + Number(c.vendidosFueraVida || 0), 0);
+  if (docDebiles.length) {
+    push(insights, {
+      id: 'mtk-campanas-doc-baja-conv',
+      kpiId: 'kpiMktCampanasActivas',
+      module: 'marketing',
+      severity: 'warning',
+      badge: 'Campañas documentadas',
+      title: 'Campañas reactivas con baja conversión ≤90 días',
+      summary: docDebiles.map((c) => `${c.campana} (${c.conversionPct}%)`).join(' · '),
+      analysis:
+        'En el catálogo monitoreado, estas campañas tienen volumen pero poca venta dentro de la vida útil del lead (90 días). '
+        + (fueraVida ? `Además hay ${fueraVida} ventas fuera de 90d que no cuentan para conversión.` : ''),
+      recommendations: [
+        'Acelerar contacto y cita en la primera semana de vida del lead.',
+        'Revisar nurtures para no dejar oportunidades morir al día 60–90.',
+        'Comparar creativo vs tasa de contacto real del BDC.',
+      ],
+      metrics: { docDebiles, fueraVida },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Campañas documentadas débiles', [
+        `Periodo: ${periodo}`,
+        `Ventas fuera de 90d (no cuentan): ${fueraVida}`,
+        ...docDebiles.map((c) => `${c.campana}: total ${c.total} · contactados ${c.contactados} · vendidos≤90d ${c.vendidos} · conv ${c.conversionPct}%`),
+      ]),
+    });
+  }
+
+  if (fueraVida >= 5) {
+    push(insights, {
+      id: 'mtk-fuga-post-90d',
+      kpiId: 'kpiMktComprasCanal',
+      module: 'marketing',
+      severity: 'info',
+      badge: 'Regla 90 días',
+      title: 'Ventas fuera de la vida del lead',
+      summary: `${fueraVida} ventas de campañas documentadas ocurrieron después de 90 días y no suman a conversión.`,
+      analysis:
+        'Hay cierre comercial tardío: el lead “murió” para marketing aunque la agencia sí vendió. '
+        + 'Oportunidad de acortar ciclo o de reportar un KPI aparte de “venta recuperada post-90d”.',
+      recommendations: [
+        'Medir días promedio entrada→factura en campañas top.',
+        'Activar remarketing/CRM antes del día 60.',
+        'No pausar campañas solo por conv. baja si hay muchas ventas post-90d: mejorar velocidad de cierre.',
+      ],
+      metrics: { fueraVida },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Fuga post 90 días', [
+        `Periodo: ${periodo}`,
+        `Vendidos fuera de vida: ${fueraVida}`,
+      ]),
+    });
+  }
+
+  if (!insights.length && afluencia > 0) {
+    push(insights, {
+      id: 'mtk-ok',
+      kpiId: 'kpiMktTraficoMarketing',
+      module: 'marketing',
+      severity: 'info',
+      badge: 'MTK estable',
+      title: 'Sin alertas críticas de marketing',
+      summary: `Afluencia ${afluencia} · mkt ${pctMkt}% · conv. canal ${convCanal}% · ${campanasFunc}/${campanasActivas} campañas funcionando.`,
+      analysis: 'Los indicadores del periodo no cruzan umbrales de falla. Conviene monitorear semanalmente mix, citas y compras por campaña.',
+      recommendations: [
+        'Mantener revisión semanal de campañas “Alto volumen”.',
+        'Seguir estandarizando captura de submedio en piso.',
+      ],
+      metrics: { afluencia, pctMkt, convCanal, campanasFunc, campanasActivas },
+      chatPrompt: chatPrompt('Marketing (MTK)', 'Sin alertas críticas', [
+        `Periodo: ${periodo}`,
+        `Afluencia: ${afluencia}`,
+        `% mkt: ${pctMkt}`,
+        `Conv. canal: ${convCanal}%`,
+        `Campañas funcionando: ${campanasFunc}/${campanasActivas}`,
+      ]),
+    });
+  }
+
+  return insights;
+}
+
 /* ───────────────── Router ───────────────── */
 
 function buildInsights({ module, ...rest } = {}) {
@@ -1557,6 +1893,9 @@ function buildInsights({ module, ...rest } = {}) {
   if (mod === 'seguimiento' || mod === 'crm' || mod === 'crm360') {
     return buildSeguimientoInsights(rest);
   }
+  if (mod === 'marketing' || mod === 'mtk' || mod === 'afluencia') {
+    return buildMarketingInsights(rest);
+  }
   return [];
 }
 
@@ -1570,5 +1909,6 @@ module.exports = {
   buildForecastInsights,
   buildPostSalesInsights,
   buildSeguimientoInsights,
+  buildMarketingInsights,
   expectedPacePct,
 };

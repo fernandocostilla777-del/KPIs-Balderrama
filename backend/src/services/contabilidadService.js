@@ -5,6 +5,7 @@ const { getVentasAutosNuevosIncomeStatement } = require('./ventasAutosNuevosEeff
 const { runAccountingEtl } = require('./accountingEtlService');
 const { getCatalogKpis } = require('./accountingCatalogKpiService');
 const { getBalanceGeneral } = require('./balanceGeneralService');
+const { getPuntoEquilibrio } = require('./breakEvenService');
 
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -25,7 +26,7 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
   const includeFinanciamiento = includeFi !== 'false' && includeFi !== false;
 
   // Siempre calcular Balance General con cuentas mayor (independiente del alcance EEFF)
-  const [overview, inventory, catalogKpis, eeff, ventasAutosNuevosEeff, etlConsolidado, balanceGeneralRaw] = await Promise.all([
+  const [overview, inventory, catalogKpis, eeff, ventasAutosNuevosEeff, etlConsolidado, balanceGeneralRaw, puntoEquilibrio] = await Promise.all([
     getOverview({ fechaInicio, fechaFin }),
     getInventory({ planPisoPeriod: period }),
     getCatalogKpis({ fechaInicio, fechaFin, sucursal, area, includeFi: includeFinanciamiento }),
@@ -34,6 +35,10 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
     runAccountingEtl({ fechaInicio, fechaFin, sucursal, area }),
     getBalanceGeneral({ fechaFin }).catch((err) => {
       console.error('[contabilidad] balanceGeneral:', err.message);
+      return null;
+    }),
+    getPuntoEquilibrio({ fechaInicio, fechaFin, sucursal: sucursal || 'todos' }).catch((err) => {
+      console.error('[contabilidad] puntoEquilibrio:', err.message);
       return null;
     }),
   ]);
@@ -47,6 +52,12 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
   const { sales, service, inventory: invSnap, consolidated } = overview.financial;
   const invSummary = inventory.summary;
   const kpi = catalogKpis.summary;
+  const peSummary = puntoEquilibrio?.summary || null;
+  // Preferir PE operativo (sin F&I) para el KPI principal
+  if (peSummary?.puntoEquilibrio != null) {
+    kpi.puntoEquilibrio = peSummary.puntoEquilibrio;
+    kpi.puntoEquilibrioDetalle = peSummary;
+  }
 
   const monthlyTrend = (overview.monthlyTrend || []).map((r) => ({
     label: formatMonthLabel(r.yr, r.mo),
@@ -75,6 +86,7 @@ async function getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal
     balanceGeneral,
     ventasAutosNuevosEeff,
     etlConsolidado,
+    puntoEquilibrio,
     summary: {
       ingresoVentas: sales.revenue,
       ingresoServicio: service.importeFacturado,

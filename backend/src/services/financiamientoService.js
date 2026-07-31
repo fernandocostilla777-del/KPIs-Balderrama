@@ -134,10 +134,21 @@ function currentMonthBounds(refDate = new Date()) {
 
 const MESES_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-/** Trimestre calendario en curso (T1–T4). */
+/** Trimestre calendario (T1–T4) para una fecha de referencia. */
 function currentQuarterBounds(refDate = new Date()) {
   const y = refDate.getFullYear();
   const qIndex = Math.floor(refDate.getMonth() / 3); // 0..3
+  return quarterBounds(y, qIndex + 1);
+}
+
+/** Trimestre por año + número (1–4). */
+function quarterBounds(anio, trimestre) {
+  const y = Number(anio);
+  const q = Number(trimestre);
+  if (!Number.isFinite(y) || !Number.isFinite(q) || q < 1 || q > 4) {
+    return currentQuarterBounds();
+  }
+  const qIndex = q - 1;
   const startMonth = qIndex * 3; // 0-based
   const endMonth = startMonth + 2;
   const lastDay = new Date(y, endMonth + 1, 0).getDate();
@@ -153,13 +164,35 @@ function currentQuarterBounds(refDate = new Date()) {
     };
   });
   return {
-    trimestre: qIndex + 1,
+    trimestre: q,
     anio: y,
-    label: `T${qIndex + 1} ${y}`,
+    key: `${y}-T${q}`,
+    label: `T${q} ${y}`,
     fechaInicio: months[0].fechaInicio,
     fechaFin: `${y}-${String(endMonth + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
     months,
   };
+}
+
+/** Opciones de trimestre (más reciente primero). */
+function listPvaTrimestreOpciones(refDate = new Date(), count = 8) {
+  const opts = [];
+  let y = refDate.getFullYear();
+  let q = Math.floor(refDate.getMonth() / 3) + 1;
+  for (let i = 0; i < count; i += 1) {
+    opts.push({
+      anio: y,
+      trimestre: q,
+      key: `${y}-T${q}`,
+      label: `T${q} ${y}`,
+    });
+    q -= 1;
+    if (q < 1) {
+      q = 4;
+      y -= 1;
+    }
+  }
+  return opts;
 }
 
 function monthKeyFromFecha(fecha) {
@@ -170,9 +203,14 @@ function monthKeyFromFecha(fecha) {
 
 /**
  * Serie mensual + acumulado (YTD del trimestre) por producto PVA.
+ * @param {Array} contracts
+ * @param {Date|{anio:number,trimestre:number}} refOrQuarter
  */
-function buildPvaTrimestreYtd(contracts = [], refDate = new Date()) {
-  const bounds = currentQuarterBounds(refDate);
+function buildPvaTrimestreYtd(contracts = [], refOrQuarter = new Date()) {
+  const bounds = (refOrQuarter && typeof refOrQuarter === 'object' && !(refOrQuarter instanceof Date)
+    && refOrQuarter.anio != null && refOrQuarter.trimestre != null)
+    ? quarterBounds(refOrQuarter.anio, refOrQuarter.trimestre)
+    : currentQuarterBounds(refOrQuarter instanceof Date ? refOrQuarter : new Date());
   const monthKeys = bounds.months.map((m) => m.key);
 
   const byMonth = Object.fromEntries(monthKeys.map((k) => [k, {
@@ -679,9 +717,30 @@ function getFinanciamientoAiAnalysis({
 }
 
 /**
- * @param {{ fechaInicio: string, fechaFin: string, porTipoVentaRetail?: Array }} opts
+ * PVA YTD de un trimestre concreto (para selector del drawer).
+ * @param {{ anio?: number|string, trimestre?: number|string }} opts
  */
-async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail } = {}) {
+function getPvaTrimestreYtd({ anio, trimestre } = {}) {
+  const opts = listPvaTrimestreOpciones();
+  let y = Number(anio);
+  let q = Number(trimestre);
+  if (!Number.isFinite(y) || !Number.isFinite(q) || q < 1 || q > 4) {
+    const cur = currentQuarterBounds();
+    y = cur.anio;
+    q = cur.trimestre;
+  }
+  const bounds = quarterBounds(y, q);
+  const crmTrimestre = loadCrmContracts(bounds.fechaInicio, bounds.fechaFin);
+  return {
+    pvaTrimestreYtd: buildPvaTrimestreYtd(crmTrimestre.contracts || [], { anio: y, trimestre: q }),
+    pvaTrimestresOpciones: opts,
+  };
+}
+
+/**
+ * @param {{ fechaInicio: string, fechaFin: string, porTipoVentaRetail?: Array, pvaAnio?: number|string, pvaTrimestre?: number|string }} opts
+ */
+async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaRetail, pvaAnio, pvaTrimestre } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
@@ -695,10 +754,8 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
   // OnStar: entregas SOFIA del mes en curso ∩ tech OnStar, contrato desde Sheets
   const onstarTech = await loadOnstarTechMesActual();
 
-  // PVA: serie YTD del trimestre en curso (independiente del periodo del dashboard)
-  const trimestre = currentQuarterBounds();
-  const crmTrimestre = loadCrmContracts(trimestre.fechaInicio, trimestre.fechaFin);
-  const pvaTrimestreYtd = buildPvaTrimestreYtd(crmTrimestre.contracts || []);
+  // PVA: serie del trimestre (por defecto el en curso; independiente del periodo del dashboard)
+  const pva = getPvaTrimestreYtd({ anio: pvaAnio, trimestre: pvaTrimestre });
 
   return {
     periodo: { fechaInicio, fechaFin },
@@ -710,7 +767,8 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
     summary,
     retailMix,
     onstarTech,
-    pvaTrimestreYtd,
+    pvaTrimestreYtd: pva.pvaTrimestreYtd,
+    pvaTrimestresOpciones: pva.pvaTrimestresOpciones,
     contratos: contracts,
     solicitudes,
   };
@@ -718,10 +776,13 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
 
 module.exports = {
   getFinanciamientoDashboard,
+  getPvaTrimestreYtd,
   getFinanciamientoAiAnalysis,
   buildRetailMix,
   buildOnstarTechPenetracion,
   buildPvaTrimestreYtd,
+  listPvaTrimestreOpciones,
+  quarterBounds,
   loadOnstarTechMesActual,
   isOnstarTechUnidad,
   classifyModalidad,

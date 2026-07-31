@@ -629,7 +629,6 @@ function renderRatios(ratios, summary, fmt) {
     kpiCard('Capital de trabajo', capital != null ? fmt.money(capital) : '—', 'Activo circ. − pasivo CP', capital != null && capital < 0 ? 'rose' : 'green'),
     kpiCard('Razón circulante', formatRatio(razon), 'AC ÷ PC · margen de corto plazo', razonTone),
     kpiCard('Prueba ácida', formatRatio(acida), 'Sin inventarios ni anticipados', acidTone),
-    kpiCard('Punto equilibrio', summary.puntoEquilibrio != null ? fmt.currency(summary.puntoEquilibrio) : '—', 'Gastos 0700 ÷ margen bruto %', 'violet'),
   ].join('');
 
   renderLiquidezNote(summary?.liquidez || ratios, ratios, fmt);
@@ -749,6 +748,138 @@ function getFiltrosContabilidad() {
   };
 }
 
+function renderPeAgencyInsight(insight, hostId = 'peAgenciaInsight') {
+  const el = document.getElementById(hostId);
+  if (!el) return;
+  if (!insight?.title) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  const badgeTone = insight.severity === 'critical'
+    ? 'rose'
+    : (insight.severity === 'warning' ? 'amber' : (insight.severity === 'info' ? 'green' : 'blue'));
+  const facts = Array.isArray(insight.facts) ? insight.facts : [];
+  const recs = Array.isArray(insight.recommendations) ? insight.recommendations : [];
+
+  el.classList.remove('hidden');
+  el.classList.toggle('pe-insight-note--critical', insight.severity === 'critical');
+  el.classList.toggle('pe-insight-note--warning', insight.severity === 'warning');
+  el.innerHTML = `
+    <span class="liquidez-note__badge liquidez-note__badge--${badgeTone}">${escHtml(insight.badge || 'Alerta inteligente')}</span>
+    <p class="liquidez-note__summary"><strong>${escHtml(insight.title)}</strong></p>
+    <p class="liquidez-note__summary">${escHtml(insight.summary || '')}</p>
+    ${facts.length ? `<ul class="liquidez-note__facts">${facts.map((f) => `<li><strong>${escHtml(f.label)}:</strong> ${escHtml(f.value)}</li>`).join('')}</ul>` : ''}
+    <p class="liquidez-note__hint"><strong>Análisis.</strong> ${escHtml(insight.analysis || '')}</p>
+    ${recs.length ? `<ul class="liquidez-note__facts">${recs.map((r) => `<li>${escHtml(r)}</li>`).join('')}</ul>` : ''}
+    ${insight.chatPrompt ? `<p class="liquidez-note__theory"><button type="button" class="btn-glass btn-primary pe-insight-chat-btn" data-pe-insight-chat>Más información en el asistente</button></p>` : ''}
+  `;
+
+  el.querySelector('[data-pe-insight-chat]')?.addEventListener('click', () => {
+    if (window.AssistantBubble?.open) {
+      window.AssistantBubble.open(insight.chatPrompt);
+    }
+  });
+}
+
+function renderPuntoEquilibrio(pe, fmt) {
+  const { setText } = Dashboard;
+  const cardsEl = document.getElementById('peSegmentCards');
+  const tableEl = document.getElementById('peSegmentosTable');
+  const agenciaEl = document.getElementById('peAgenciaTable');
+  const badge = document.getElementById('peModeBadge');
+  if (!pe?.available && !pe?.agencia) {
+    if (cardsEl) cardsEl.innerHTML = '';
+    if (tableEl) tableEl.innerHTML = '<tr class="empty-row"><td colspan="6">Sin datos de punto de equilibrio</td></tr>';
+    if (agenciaEl) agenciaEl.innerHTML = '';
+    renderPeAgencyInsight(null);
+    if (badge) {
+      badge.textContent = '—';
+      badge.removeAttribute('data-mode');
+    }
+    return;
+  }
+
+  const temporal = pe.temporal || {};
+  if (badge) {
+    badge.textContent = temporal.label || temporal.mode || '—';
+    badge.dataset.mode = temporal.mode || '';
+  }
+  setText('peTemporalLabel', temporal.purpose
+    || 'PE = Gastos fijos ÷ Margen de contribución % · preliminar operativo');
+  setText('peMethodologyNote', [
+    pe.methodology?.formula,
+    pe.methodology?.exclusiones,
+    pe.methodology?.gastosFijos,
+  ].filter(Boolean).join(' · '));
+
+  const segmentos = pe.segmentos || [];
+  const tone = (row) => (row.alcanzoEquilibrio ? 'pe-card-ok kpi-card--green' : 'pe-card-gap kpi-card--rose');
+
+  if (cardsEl) {
+    cardsEl.innerHTML = segmentos.map((row) => {
+      const peVal = row.puntoEquilibrio != null ? formatFullMoney(row.puntoEquilibrio) : '—';
+      const sub = row.cumplimientoPct != null
+        ? `${row.cumplimientoPct}% de cumplimiento · MC ${row.margenContribucionPct ?? '—'}%`
+        : `MC ${row.margenContribucionPct ?? '—'}%`;
+      const mon = row.monitoreo;
+      const monLine = mon
+        ? `<p class="kpi-subtitle">Proy. ${formatFullMoney(mon.ventasProyectadas)} · avance ${mon.avanceEquilibrioPct ?? '—'}%</p>`
+        : '';
+      return `<div class="kpi-card kpi-card--eeff ${tone(row)}">
+        <div class="kpi-card-head"><span class="kpi-title">${escHtml(row.label)}</span><span class="material-symbols-outlined kpi-icon">flag</span></div>
+        <div class="kpi-value money">${peVal}</div>
+        <p class="kpi-subtitle">${escHtml(sub)}</p>
+        ${monLine}
+      </div>`;
+    }).join('');
+  }
+
+  if (tableEl) {
+    tableEl.innerHTML = segmentos.map((row) => `<tr class="${row.id === 'agencia' ? 'row-total' : ''}">
+      <td>${escHtml(row.label)}</td>
+      <td class="cell-money">${formatFullMoney(row.ventas)}</td>
+      <td class="cell-money">${row.margenContribucionPct != null ? `${row.margenContribucionPct}%` : '—'}</td>
+      <td class="cell-money">${formatFullMoney(row.gastosFijos)}</td>
+      <td class="cell-money">${row.puntoEquilibrio != null ? formatFullMoney(row.puntoEquilibrio) : '—'}</td>
+      <td class="cell-num">${row.cumplimientoPct != null ? `${row.cumplimientoPct}%` : '—'}</td>
+    </tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin segmentos</td></tr>';
+  }
+
+  const a = pe.agencia || pe.summary || {};
+  setText('peAgenciaSubtitle', a.excludeNote || a.note || 'Cálculo consolidado del periodo');
+  if (agenciaEl) {
+    const rows = [
+      ['Ventas totales', a.ventas],
+      ['Costos variables directos', a.costosVariablesDirectos],
+      ['Gastos variables adicionales', a.gastosVariablesAdicionales],
+      ['Margen de contribución', a.margenContribucion],
+      [`Margen de contribución %`, a.margenContribucionPct != null ? `${a.margenContribucionPct}%` : null, true],
+      ['Gastos fijos operativos', a.gastosFijos],
+      ['Punto de equilibrio', a.puntoEquilibrio],
+      ['Faltante / (excedente)', a.faltante],
+      ['Cumplimiento', a.cumplimientoPct != null ? `${a.cumplimientoPct}%` : null, true],
+      ['Utilidad / (pérdida) operativa', a.utilidadOperativa],
+    ];
+    if (a.monitoreo) {
+      rows.push(
+        ['Ventas proyectadas al cierre', a.monitoreo.ventasProyectadas],
+        ['Avance al equilibrio', a.monitoreo.avanceEquilibrioPct != null ? `${a.monitoreo.avanceEquilibrioPct}%` : null, true],
+      );
+    }
+    agenciaEl.innerHTML = rows.map(([label, value, plain]) => {
+      const display = value == null
+        ? '—'
+        : (plain ? escHtml(String(value)) : formatFullMoney(value));
+      const hl = label.startsWith('Punto') || label.startsWith('Margen de contribución') && !label.includes('%');
+      return `<tr class="${hl ? 'row-highlight' : ''}"><td>${escHtml(label)}</td><td class="cell-money">${display}</td></tr>`;
+    }).join('');
+  }
+
+  renderPeAgencyInsight(pe.insight);
+}
+
 async function loadContabilidad(fechaInicio, fechaFin) {
   const { fmt, api, setText } = Dashboard;
   const { sucursal, area, includeFi } = getFiltrosContabilidad();
@@ -794,17 +925,29 @@ async function loadContabilidad(fechaInicio, fechaFin) {
 
   const peEl = document.getElementById('kpiPuntoEquilibrio');
   const peCard = document.getElementById('kpiCardPuntoEquilibrio');
-  if (s.puntoEquilibrio != null && s.margenBrutoPct > 0) {
-    if (peEl) peEl.textContent = formatKpiAmount(s.puntoEquilibrio);
-    setText('kpiPuntoEquilibrioSub', `Gastos ÷ ${s.margenBrutoPct}% margen bruto`);
-    peCard?.classList.remove('kpi-card--loss');
+  const peData = data.puntoEquilibrio;
+  const peMain = peData?.summary || peData?.agencia || null;
+  const peValue = peMain?.puntoEquilibrio ?? s.puntoEquilibrio;
+  const peMargen = peMain?.margenContribucionPct ?? s.margenBrutoPct;
+  if (peValue != null && peMargen > 0) {
+    if (peEl) peEl.textContent = formatFullMoney(peValue);
+    const cumpl = peMain?.cumplimientoPct != null ? ` · ${peMain.cumplimientoPct}% avance` : '';
+    setText('kpiPuntoEquilibrioSub', `GF ÷ ${peMargen}% MC${cumpl}`);
+    peCard?.classList.toggle('kpi-card--loss', peMain?.alcanzoEquilibrio === false);
+    peCard?.classList.toggle('kpi-card--gain', peMain?.alcanzoEquilibrio === true);
   } else {
     if (peEl) peEl.textContent = '—';
-    setText('kpiPuntoEquilibrioSub', s.margenBrutoPct <= 0 ? 'Margen bruto ≤ 0 — no calculable' : 'Sin datos');
+    setText('kpiPuntoEquilibrioSub', (peMargen != null && peMargen <= 0) ? 'Margen contribución ≤ 0 — no calculable' : 'Sin datos');
     peCard?.classList.add('kpi-card--loss');
+    peCard?.classList.remove('kpi-card--gain');
   }
 
-  renderResultadoTable(catalog.resultLines, fmt);
+  renderPuntoEquilibrio(peData, fmt);
+
+  renderResultadoTable(
+    (catalog.resultLines || []).filter((r) => r.key !== 'puntoEquilibrio'),
+    fmt,
+  );
   renderDepartmentExpenseTable(catalog.departmentExpenseLines, fmt);
   renderCatalogLines('ingresosCatalogTable', catalog.incomeLines, fmt);
   renderCatalogLines('costosCatalogTable', catalog.costLines, fmt);
@@ -827,9 +970,10 @@ async function loadContabilidad(fechaInicio, fechaFin) {
         gastosOperacion: s.gastosOperacion,
         utilidadOperacion: s.utilidadOperacion,
         margenOperacionPct: s.margenOperacionPct,
-        puntoEquilibrio: s.puntoEquilibrio,
+        puntoEquilibrio: peMain?.puntoEquilibrio ?? s.puntoEquilibrio,
         gastoDepartamento: s.gastoDepartamento,
       },
+      puntoEquilibrio: peData,
       liquidez: data.balanceGeneral?.liquidez || s.liquidez || eeff.liquidez || null,
     });
   }

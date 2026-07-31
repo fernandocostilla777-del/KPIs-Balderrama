@@ -122,6 +122,7 @@ window.AssistantChat = (function () {
       'Compara ventas del mes actual vs mes anterior',
       '¿Cuántas entregas SOFIA van sin previas de taller?',
       'Lista oportunidades con cita que aún no compran',
+      '¿Cuántas unidades HIGH END (Suburban/Tahoe/Cheyenne/Traverse) se vendieron este mes?',
     ],
     'post-sales': [
       'Resumen de órdenes abiertas críticas (+60 días)',

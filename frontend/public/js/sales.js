@@ -10,6 +10,9 @@
   let activeVentasDrawerKpi = null;
   let ventasDrawerUi = null;
   let lastYtd = null;
+  let ytdQuarters = new Set([1, 2, 3, 4]);
+  let sofiaLiveTimer = null;
+  let sofiaLiveActive = false;
   const charts = {};
   let els = null;
   let chartOptions = null;
@@ -23,6 +26,7 @@
   let activeSalesTab = 'ventas';
   let pendingFinanciamiento = null;
   let pendingLeads = null;
+  let pendingAfluencia = null;
 
   const GOAL_STORAGE_KEYS = {
     retail: 'autointel_goal_retail',
@@ -678,19 +682,53 @@
     });
   }
 
-  function renderYtdChart(comparativoYtd) {
+  function syncYtdQuarterChips() {
+    const avail = new Set((lastYtd?.trimestres || []).map((t) => Number(t.quarter)).filter((q) => q >= 1 && q <= 4));
+    els.ytdQuarterChips?.querySelectorAll('[data-ytd-quarter]').forEach((btn) => {
+      const q = Number(btn.dataset.ytdQuarter);
+      const visible = !avail.size || avail.has(q);
+      btn.hidden = !visible;
+      btn.disabled = !visible;
+      const on = visible && ytdQuarters.has(q);
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function initYtdQuartersFromData(comparativoYtd) {
+    const avail = (comparativoYtd?.trimestres || []).map((t) => Number(t.quarter)).filter((q) => q >= 1 && q <= 4);
+    ytdQuarters = avail.length ? new Set(avail) : new Set([1, 2, 3, 4]);
+  }
+
+  function toggleYtdQuarter(q) {
+    const n = Number(q);
+    if (!Number.isFinite(n) || n < 1 || n > 4) return;
+    if (ytdQuarters.has(n)) {
+      if (ytdQuarters.size <= 1) return;
+      ytdQuarters.delete(n);
+    } else {
+      ytdQuarters.add(n);
+    }
+    syncYtdQuarterChips();
+    if (lastYtd) renderYtdChart(lastYtd, { keepQuarters: true });
+  }
+
+  function renderYtdChart(comparativoYtd, { keepQuarters = false } = {}) {
     if (!comparativoYtd) return;
     lastYtd = comparativoYtd;
-    const { anioActual, anioAnterior, corte, totalActual, totalAnterior, variacion, labels, series, mesEnCursoExcluido } = comparativoYtd;
+    if (!keepQuarters) initYtdQuartersFromData(comparativoYtd);
+    syncYtdQuarterChips();
+
+    const {
+      anioActual, anioAnterior, corte, totalActual, totalAnterior, variacion,
+      labels: flatLabels, series: flatSeries, mesEnCursoExcluido, trimestres,
+    } = comparativoYtd;
 
     els.ytdLabelActual.textContent = `YTD ${anioActual}`;
     els.ytdLabelAnterior.textContent = `YTD ${anioAnterior}`;
     els.ytdTotalActual.textContent = totalActual;
     els.ytdTotalAnterior.textContent = totalAnterior;
-    const corteFmt = corte.split('-').reverse().join('/');
-    els.ytdSubtitle.textContent = mesEnCursoExcluido
-      ? `Acumulado del 1 ene al ${corteFmt} · mes en curso excluido hasta cierre`
-      : `Acumulado del 1 ene al ${corteFmt} · comparación año contra año`;
+    const corteFmt = String(corte || '').split('-').reverse().join('/');
 
     if (variacion === null) {
       els.ytdVariacion.textContent = '-';
@@ -700,16 +738,81 @@
       els.ytdVariacion.className = `ytd-stat-value ${variacion >= 0 ? 'ytd-up' : 'ytd-down'}`;
     }
 
+    const selected = (trimestres || []).filter((t) => ytdQuarters.has(t.quarter));
+    const monthPoints = selected.flatMap((t) => (t.meses || []).map((m) => ({
+      ...m,
+      quarterLabel: t.label,
+    })));
+
+    let labels;
+    let actual;
+    let anterior;
+    let multiQ = false;
+
+    if (monthPoints.length) {
+      multiQ = selected.length > 1;
+      labels = monthPoints.map((m) => (multiQ ? `${m.quarterLabel} ${m.label}` : m.label));
+      actual = monthPoints.map((m) => Number(m.actual || 0));
+      anterior = monthPoints.map((m) => Number(m.anterior || 0));
+      els.ytdSubtitle.textContent = mesEnCursoExcluido
+        ? `Acumulado al ${corteFmt} · meses del trimestre · mes en curso excluido`
+        : `Acumulado al ${corteFmt} · meses del trimestre · ${anioActual} vs ${anioAnterior}`;
+    } else {
+      // Fallback si el API aún no trae trimestres
+      labels = flatLabels || [];
+      actual = flatSeries?.actual || [];
+      anterior = flatSeries?.anterior || [];
+      els.ytdSubtitle.textContent = mesEnCursoExcluido
+        ? `Acumulado del 1 ene al ${corteFmt} · mes en curso excluido hasta cierre`
+        : `Acumulado del 1 ene al ${corteFmt} · comparación año contra año`;
+    }
+
     createChart('ytd', 'chartYtd', {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: `YTD ${anioAnterior}`, data: series.anterior, backgroundColor: chartColors.slate },
-          { label: `YTD ${anioActual}`, data: series.actual, backgroundColor: chartColors.primary },
+          { label: `YTD ${anioAnterior}`, data: anterior, backgroundColor: chartColors.slate },
+          { label: `YTD ${anioActual}`, data: actual, backgroundColor: chartColors.primary },
         ],
       },
-      options: chartOptions(),
+      options: chartOptions({
+        plugins: {
+          tooltip: {
+            callbacks: {
+              title(items) {
+                if (!monthPoints.length) return undefined;
+                const i = items?.[0]?.dataIndex;
+                if (i == null) return '';
+                const m = monthPoints[i];
+                return `${m.quarterLabel} · ${m.label}`;
+              },
+              afterBody(items) {
+                if (!monthPoints.length) return undefined;
+                const i = items?.[0]?.dataIndex;
+                if (i == null) return '';
+                const a = actual[i];
+                const b = anterior[i];
+                if (!b) return a ? 'Sin base año anterior' : '';
+                const delta = a - b;
+                const p = ((delta / b) * 100).toFixed(1);
+                const sign = delta > 0 ? '+' : '';
+                return `Var: ${sign}${delta} (${sign}${p}%)`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: {
+              color: '#94a3b8',
+              font: { size: 11 },
+              maxRotation: multiQ ? 45 : 0,
+              minRotation: multiQ ? 30 : 0,
+            },
+          },
+        },
+      }),
     });
   }
 
@@ -1757,12 +1860,87 @@
           await window.LeadsVentas.load(fechaInicio, fechaFin);
         }
       }
+
+      if (window.AfluenciaVentas?.load) {
+        pendingAfluencia = { fechaInicio, fechaFin };
+        if (activeSalesTab === 'afluencia') {
+          await window.AfluenciaVentas.load(fechaInicio, fechaFin);
+        }
+      }
+
+      syncSofiaLiveMode(data.sofiaLiveUpdate);
     } catch (err) {
       console.error('[Sales]', err);
       setStatus(err.message, 'error');
     } finally {
       els.btnConsultar.disabled = false;
       Dashboard.showLoading(false);
+    }
+  }
+
+  function stopSofiaLivePolling() {
+    if (sofiaLiveTimer) {
+      clearInterval(sofiaLiveTimer);
+      sofiaLiveTimer = null;
+    }
+    sofiaLiveActive = false;
+  }
+
+  function applySofiaLivePeriod(ctx) {
+    if (!ctx?.active || !ctx.fechaInicio || !ctx.fechaFin || !els?.fechaInicio) return;
+    const changed = els.fechaInicio.value !== ctx.fechaInicio || els.fechaFin.value !== ctx.fechaFin;
+    if (!changed) return false;
+    els.fechaInicio.value = ctx.fechaInicio;
+    els.fechaFin.value = ctx.fechaFin;
+    document.querySelectorAll('[data-preset]').forEach((b) => {
+      b.classList.remove('active', 'chip--active');
+    });
+    const lbl = document.getElementById('filterPresetLabel');
+    if (lbl) {
+      lbl.textContent = ctx.deferredFromNonWorking
+        ? `Cierre ${ctx.periodKey} (hábil)`
+        : `Cierre ${ctx.periodKey}`;
+    }
+    Dashboard.updateCompactFilterLabels?.();
+    return true;
+  }
+
+  function syncSofiaLiveMode(ctx) {
+    if (!ctx?.active) {
+      stopSofiaLivePolling();
+      return;
+    }
+    applySofiaLivePeriod(ctx);
+    if (sofiaLiveActive && sofiaLiveTimer) return;
+    sofiaLiveActive = true;
+    const minutes = Math.max(1, Number(ctx.intervalMinutes) || 2);
+    const badge = els?.statusBadge;
+    if (badge && !badge.classList.contains('status-error')) {
+      const note = ctx.deferredFromNonWorking
+        ? ` · SOFIA en vivo (cierre ${ctx.periodKey}, diferido)`
+        : ` · SOFIA en vivo (cierre ${ctx.periodKey})`;
+      if (!String(badge.textContent || '').includes('SOFIA en vivo')) {
+        badge.textContent = `${badge.textContent || ''}${note}`.trim();
+      }
+    }
+    sofiaLiveTimer = setInterval(() => {
+      if (document.hidden) return;
+      consultar().catch(() => {});
+    }, minutes * 60 * 1000);
+  }
+
+  async function ensureSofiaLiveOnBoot() {
+    try {
+      const res = await fetch('/api/ventas/sofia-live-status', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const ctx = data?.context;
+      if (!ctx?.active) return;
+      if (typeof data.intervalMinutes === 'number') ctx.intervalMinutes = data.intervalMinutes;
+      applySofiaLivePeriod(ctx);
+      syncSofiaLiveMode(ctx);
+    } catch {
+      /* opcional */
     }
   }
 
@@ -1816,6 +1994,7 @@
       ytdTotalActual: document.getElementById('ytdTotalActual'),
       ytdTotalAnterior: document.getElementById('ytdTotalAnterior'),
       ytdVariacion: document.getElementById('ytdVariacion'),
+      ytdQuarterChips: document.getElementById('ytdQuarterChips'),
       carlineUtilidadBody: document.getElementById('carlineUtilidadBody'),
       carlineUtilidadSubtitle: document.getElementById('carlineUtilidadSubtitle'),
       chartsMensuales: document.getElementById('chartsMensuales'),
@@ -1848,15 +2027,24 @@
     const hash = String(location.hash || '').replace(/^#/, '').toLowerCase();
     if (hash === 'financiamiento' || hash === 'financiera' || hash === 'fi') return 'financiamiento';
     if (hash === 'leads' || hash === 'lead' || hash === 'oportunidades') return 'leads';
+    if (
+      hash === 'afluencia'
+      || hash === 'afluencia-mtk'
+      || hash === 'mtk'
+      || hash === 'marketing'
+      || hash === 'trafico'
+      || hash === 'tráfico'
+    ) return 'afluencia';
     const params = new URLSearchParams(location.search);
     const tab = String(params.get('tab') || '').toLowerCase();
     if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
     if (tab === 'leads' || tab === 'lead' || tab === 'oportunidades') return 'leads';
+    if (tab === 'afluencia' || tab === 'trafico' || tab === 'tráfico' || tab === 'mtk' || tab === 'marketing') return 'afluencia';
     return 'ventas';
   }
 
   async function switchSalesTab(tab) {
-    const next = ['financiamiento', 'leads'].includes(tab) ? tab : 'ventas';
+    const next = ['financiamiento', 'leads', 'afluencia'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
     if (next !== 'ventas') {
       ventasDrawerUi?.close?.();
@@ -1871,6 +2059,7 @@
     const panelVentas = document.getElementById('panelVentasUnidades');
     const panelFi = document.getElementById('panelVentasFinanciamiento');
     const panelLd = document.getElementById('panelVentasLeads');
+    const panelAf = document.getElementById('panelVentasAfluencia');
     if (panelVentas) {
       panelVentas.classList.toggle('hidden', next !== 'ventas');
       panelVentas.hidden = next !== 'ventas';
@@ -1883,12 +2072,18 @@
       panelLd.classList.toggle('hidden', next !== 'leads');
       panelLd.hidden = next !== 'leads';
     }
+    if (panelAf) {
+      panelAf.classList.toggle('hidden', next !== 'afluencia');
+      panelAf.hidden = next !== 'afluencia';
+    }
 
     const title = document.querySelector('.top-bar-title');
     if (title) {
       title.textContent = next === 'financiamiento'
         ? 'Financiamiento'
-        : (next === 'leads' ? 'Leads' : 'Ventas de Unidades');
+        : (next === 'leads'
+          ? 'Leads'
+          : (next === 'afluencia' ? 'Afluencia' : 'Ventas de Unidades'));
     }
 
     if (next === 'financiamiento') {
@@ -1915,9 +2110,24 @@
         pendingLeads = { fechaInicio: els.fechaInicio.value, fechaFin: els.fechaFin.value };
         await window.LeadsVentas.load(pendingLeads.fechaInicio, pendingLeads.fechaFin);
       }
+    } else if (next === 'afluencia') {
+      const hash = String(location.hash || '').toLowerCase();
+      const wantsMtk = hash === '#afluencia-mtk' || hash === '#mtk' || hash === '#marketing';
+      if (!hash.startsWith('#afluencia') && hash !== '#mtk' && hash !== '#marketing' && hash !== '#trafico' && hash !== '#tráfico') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#afluencia`);
+      }
+      if (pendingAfluencia && window.AfluenciaVentas?.load) {
+        await window.AfluenciaVentas.load(pendingAfluencia.fechaInicio, pendingAfluencia.fechaFin);
+      } else if (els.fechaInicio?.value && els.fechaFin?.value && window.AfluenciaVentas?.load) {
+        pendingAfluencia = { fechaInicio: els.fechaInicio.value, fechaFin: els.fechaFin.value };
+        await window.AfluenciaVentas.load(pendingAfluencia.fechaInicio, pendingAfluencia.fechaFin);
+      }
+      window.AfluenciaVentas?.setInnerTab?.(wantsMtk ? 'mtk' : 'general');
     } else if (
       location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
       || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
+      || location.hash === '#afluencia' || location.hash === '#afluencia-mtk' || location.hash === '#mtk'
+      || location.hash === '#marketing' || location.hash === '#trafico' || location.hash === '#tráfico'
     ) {
       history.replaceState(null, '', `${location.pathname}${location.search}`);
     }
@@ -1932,6 +2142,12 @@
       const tab = e.target.closest('[data-sales-tab]');
       if (!tab) return;
       switchSalesTab(tab.dataset.salesTab).catch((err) => console.warn('[Sales tabs]', err));
+    });
+
+    els.ytdQuarterChips?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-ytd-quarter]');
+      if (!btn) return;
+      toggleYtdQuarter(btn.dataset.ytdQuarter);
     });
 
     els.btnConsultar.addEventListener('click', consultar);
@@ -2006,9 +2222,11 @@
       bindEvents();
       window.FinanciamientoVentas?.init?.();
       window.LeadsVentas?.init?.();
+      window.AfluenciaVentas?.init?.();
       compactFilters = Dashboard.initCompactFilters();
       setDefaultDates();
       Dashboard.setActivePresetChip('mes-actual');
+      await ensureSofiaLiveOnBoot();
       await switchSalesTab(getSalesTabFromUrl());
       await consultar();
       window.__salesPageInit = true;

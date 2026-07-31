@@ -1630,13 +1630,26 @@
   const initialId = params.get('id');
   const initialQ = params.get('q');
   const initialVendedor = params.get('vendedor');
-  el('fechaInicioOrdenes').value = params.get('fechaInicio') || '';
-  el('fechaFinOrdenes').value = params.get('fechaFin') || '';
+  const hasUrlPeriod = Boolean(params.get('fechaInicio') && params.get('fechaFin'));
+
+  if (hasUrlPeriod) {
+    el('fechaInicioOrdenes').value = params.get('fechaInicio');
+    el('fechaFinOrdenes').value = params.get('fechaFin');
+    setActivePeriodChip(null);
+  } else {
+    const [start, end] = window.Dashboard.getDatePresetRange('mes-actual');
+    el('fechaInicioOrdenes').value = window.Dashboard.formatDateInput(start);
+    el('fechaFinOrdenes').value = window.Dashboard.formatDateInput(end);
+    setActivePeriodChip('mes-actual');
+  }
 
   if (initialVendedor) {
     if (el('vendedorInput')) el('vendedorInput').value = initialVendedor;
     setVista('vendedor');
-  } else if (params.get('fechaInicio') && params.get('fechaFin') && !initialId && !initialQ) {
+  } else if (hasUrlPeriod && !initialId && !initialQ) {
+    cargarCierresPeriodo();
+  } else if (!hasUrlPeriod && !initialId && !initialQ) {
+    // Por defecto: mes en curso
     cargarCierresPeriodo();
   } else if (initialId) {
     openClient(initialId);

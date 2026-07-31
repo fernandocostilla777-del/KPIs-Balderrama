@@ -68,7 +68,8 @@ function buildVentasQuery() {
       A.PER_NOMRAZON + ' ' + A.PER_PATERNO + ' ' + A.PER_MATERNO AS CLIENTE,
       A.PER_SEXO,
       ${TIPO_VENTA_CASE} AS TIPOVENTA,
-      ADE_VTAFI.VTE_FORMAPAGO AS FORMAPAGO_ORIGINAL
+      ADE_VTAFI.VTE_FORMAPAGO AS FORMAPAGO_ORIGINAL,
+      ISNULL(prev.PREVIAS, 0) AS PREVIAS
     FROM ADE_VTAFI
     INNER JOIN PER_PERSONAS AS A ON A.PER_IDPERSONA = ADE_VTAFI.VTE_IDCLIENTE
     INNER JOIN SER_VEHICULO
@@ -80,6 +81,17 @@ function buildVentasQuery() {
       AND UNI_CATACOLOR.COL_CATALOGO = SER_VEHICULO.VEH_CATALOGO
     INNER JOIN PER_PERSONAS AS B ON B.PER_IDPERSONA = SER_VEHICULO.VEH_VENDEDOR
     INNER JOIN PNC_PARAMETR AS C ON C.PAR_TIPOPARA = 'EO' AND C.PAR_IDENPARA = A.PER_ESTADO
+    LEFT JOIN (
+      SELECT
+        UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) AS SERIE,
+        COUNT(*) AS PREVIAS
+      FROM SER_ORDEN o
+      WHERE LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) = 'S'
+        AND o.ORE_STATUS <> 'C'
+        AND o.ORE_NUMSERIE IS NOT NULL
+        AND LTRIM(RTRIM(o.ORE_NUMSERIE)) <> ''
+      GROUP BY UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE)))
+    ) prev ON prev.SERIE = UPPER(LTRIM(RTRIM(ADE_VTAFI.VTE_SERIE)))
     WHERE ADE_VTAFI.VTE_TIPODOCTO = 'A'
       AND CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103)
         BETWEEN @fechaInicio AND @fechaFin
@@ -109,7 +121,8 @@ function buildVentasQuery() {
       C.PAR_DESCRIP1,
       UNI_CATACOLOR.COL_DESCRIPCION,
       SER_VEHICULO.VEH_REPUVE,
-      ADE_VTAFI.VTE_FORMAPAGO
+      ADE_VTAFI.VTE_FORMAPAGO,
+      ISNULL(prev.PREVIAS, 0)
     ORDER BY
       VENDEDOR,
       CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103),
@@ -381,6 +394,8 @@ function summarizeVentas(rows, inicio, fin, sofiaEntregas = {}) {
       ?? entregasRows.filter((r) => Number(r.PREVIAS || 0) === 0).length,
     totalEntregasConPrevias: sofiaEntregas.totalEntregasConPrevias
       ?? entregasRows.filter((r) => Number(r.PREVIAS || 0) > 0).length,
+    totalFacturadoSinPrevias: rows.filter((r) => Number(r.PREVIAS || 0) === 0).length,
+    totalFacturadoConPrevias: rows.filter((r) => Number(r.PREVIAS || 0) > 0).length,
     totalUnidadesFacturadas: cobertura.totalUnidadesFacturadas,
     totalUnidadesFacturadasNoTimbradas: cobertura.totalUnidadesFacturadasNoTimbradas,
     numeradorCobertura: cobertura.numeradorCobertura,

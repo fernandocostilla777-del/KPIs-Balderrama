@@ -15,6 +15,11 @@ const { generateExcelExport } = require('./aiExcelExport');
 const { nomenclaturaHelpText } = require('./postSalesOrderTypes');
 const { getFinanciamientoAiAnalysis } = require('./financiamientoService');
 const { getUtilidadPorCarlineAiAnalysis } = require('./utilidadCarlineService');
+const { buildInsights } = require('./intelligentInsightsService');
+const { buildOperationalAlerts, getPrefs, listAlertTypes } = require('./alertsService');
+const { getInventoryPostventa } = require('./inventoryPostventaService');
+const { getRefaccionesDashboard } = require('./refaccionesPedidosService');
+const { getRole, listRoles } = require('../auth/roles');
 
 const FORBIDDEN_SQL = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE',
@@ -84,11 +89,17 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'consultar_ventas_modelo',
-      description: 'Cuenta unidades vendidas de un modelo específico (ej. Aveo, Onix, Tahoe) en un periodo. Relaciona ADE_VTAFI + SER_VEHICULO por serie. Usar cuando pregunten cuántos/se vendieron de un modelo, marca o familia.',
+      description:
+        'Cuenta unidades vendidas de un modelo/carline (Aveo, Onix, Tahoe…) o del segmento HIGH END '
+        + '(canal de lujo: Suburban, Tahoe, Cheyenne, Traverse). Para HIGH END usa modelo="HIGH END". '
+        + 'Relaciona ADE_VTAFI + SER_VEHICULO. Usar cuando pregunten cuántos se vendieron de un modelo o del lujo.',
       parameters: {
         type: 'object',
         properties: {
-          modelo: { type: 'string', description: 'Nombre o fragmento del modelo (ej. Aveo, ONIX)' },
+          modelo: {
+            type: 'string',
+            description: 'Modelo/carline (Aveo, ONIX…) o exactamente "HIGH END" para el segmento de lujo',
+          },
           fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD' },
           fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD' },
           incluirFlotilla: { type: 'boolean', description: 'Incluir ventas flotilla (default true)' },
@@ -165,7 +176,10 @@ const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'consultar_inventario',
-      description: 'Inventario de vehículos nuevos, seminuevos y plan piso.',
+      description:
+        'Inventario de vehículos nuevos (FIS/DIS/SEP…), plan piso, aging y sin previas. '
+        + 'Para stock de refacciones/HyP usa consultar_inventario_postventa. '
+        + 'Este módulo es autos nuevos; seminuevos no están el foco principal (acláralo si preguntan).',
       parameters: {
         type: 'object',
         properties: {
@@ -173,6 +187,59 @@ const TOOL_DEFINITIONS = [
             type: 'string',
             description: 'Periodo del plan piso: all, current, previous',
             enum: ['all', 'current', 'previous'],
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_inventario_postventa',
+      description:
+        'Inventario de postventa: refacciones, HyP (grupo 32/ALM8) y piezas en proceso de servicio. '
+        + 'Úsala para stock trabado, costo inmovilizado o comparar áreas de refacciones vs HyP.',
+      parameters: {
+        type: 'object',
+        properties: {
+          area: {
+            type: 'string',
+            enum: ['refacciones', 'hyp', 'servicio', 'todas'],
+            description: 'Área a enfatizar (default todas)',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_refacciones',
+      description:
+        'Dashboard de refacciones: pedidos, partes con más días sin venta (+90), mejor utilidad y margen. '
+        + 'Úsala para “inventario de refacciones trabado”, “top partes por utilidad” o pedidos pendientes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fechaInicio: { type: 'string', description: 'Inicio YYYY-MM-DD (default mes actual)' },
+          fechaFin: { type: 'string', description: 'Fin YYYY-MM-DD (default hoy)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_roles_acceso',
+      description:
+        'Catálogo de roles del dashboard (Administración, Dirección, Gerencia Comercial, Contabilidad): '
+        + 'páginas/módulos que ve cada perfil y capacidades. Úsala para preguntas de administración de accesos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          rol: {
+            type: 'string',
+            description: 'Opcional: administracion | direccion | gerencia_comercial | contabilidad',
           },
         },
       },
@@ -394,7 +461,8 @@ const TOOL_DEFINITIONS = [
         + 'auto de interés o mes. Úsala para preguntas como "cuántos leads llegaron en enero", "leads por canal", '
         + '"conversión de leads a citas/compras" o "cuántos leads hubo el mes pasado". "Compras" representa leads '
         + 'del periodo vinculados por ID CRM a un VIN de compra; no representa las ventas totales facturadas en el DMS. '
-        + 'El periodo filtra la fecha de entrada del lead y la compra vinculada puede ser posterior. Para periodos relativos usa periodo.',
+        + 'El periodo filtra la fecha de entrada del lead y la compra vinculada puede ser posterior. Para periodos relativos usa periodo. '
+        + 'Para “oportunidades con cita que aún no compran” usa listar="citas_sin_compra".',
       parameters: {
         type: 'object',
         properties: {
@@ -410,7 +478,12 @@ const TOOL_DEFINITIONS = [
             enum: ['canal', 'sucursal', 'tipo', 'campana', 'resultado', 'fuerza_ventas', 'ejecutivo', 'estatus_compra', 'auto_interes', 'mes'],
             description: 'Dimensión de agrupación (default: canal)',
           },
-          limit: { type: 'string', description: 'Máximo de grupos (default 30)' },
+          listar: {
+            type: 'string',
+            enum: ['citas_sin_compra', 'sin_compra'],
+            description: 'Devuelve detalle de leads: citas_sin_compra = cita programada sin VIN de compra',
+          },
+          limit: { type: 'string', description: 'Máximo de grupos o filas de detalle (default 30)' },
         },
       },
     },
@@ -619,6 +692,29 @@ const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'consultar_riesgos_oportunidades',
+      description:
+        'OBLIGATORIA para riesgos, oportunidades, alertas críticas, “qué revisar hoy/esta semana”, '
+        + 'hallazgos del tablero o insights accionables. Consolida alertas operativas + insights de '
+        + 'ventas/inventario/tablero (previas, aging, plan piso, margen, taller, etc.). '
+        + 'Sin periodo → semana_actual (últimos 7 días). Responde con riesgos + oportunidades + 2–4 acciones.',
+      parameters: {
+        type: 'object',
+        properties: {
+          periodo: {
+            type: 'string',
+            description: 'semana_actual | mes_actual | mes_pasado',
+            enum: ['semana_actual', 'mes_actual', 'mes_pasado'],
+          },
+          fechaInicio: { type: 'string', description: 'Opcional YYYY-MM-DD (override)' },
+          fechaFin: { type: 'string', description: 'Opcional YYYY-MM-DD (override)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'listar_tablas_bd',
       description: 'Lista tablas y vistas de la base GMOFARRIL para explorar estructura.',
       parameters: {
@@ -746,6 +842,238 @@ function shapeForecastForAi(raw) {
   };
 }
 
+function ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function resolveRiesgosPeriodo({ periodo, fechaInicio, fechaFin } = {}) {
+  if (fechaInicio && fechaFin) {
+    return { fechaInicio, fechaFin, label: `${fechaInicio} → ${fechaFin}`, periodo: 'custom' };
+  }
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  const key = String(periodo || 'semana_actual').toLowerCase();
+
+  if (key === 'mes_pasado') {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return {
+      fechaInicio: ymd(start),
+      fechaFin: ymd(end),
+      label: 'Mes pasado',
+      periodo: 'mes_pasado',
+    };
+  }
+
+  if (key === 'mes_actual') {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    return {
+      fechaInicio: ymd(start),
+      fechaFin: ymd(today),
+      label: 'Mes en curso',
+      periodo: 'mes_actual',
+    };
+  }
+
+  // semana_actual = últimos 7 días (incluye hoy)
+  const start = new Date(today);
+  start.setDate(start.getDate() - 6);
+  return {
+    fechaInicio: ymd(start),
+    fechaFin: ymd(today),
+    label: 'Últimos 7 días',
+    periodo: 'semana_actual',
+  };
+}
+
+function shapeInsight(insight, tipo = 'riesgo') {
+  return {
+    tipo,
+    severity: insight.severity || 'info',
+    modulo: insight.module || null,
+    titulo: insight.title,
+    resumen: insight.summary,
+    analisis: insight.analysis,
+    acciones: Array.isArray(insight.recommendations) ? insight.recommendations.slice(0, 3) : [],
+  };
+}
+
+function getRolesAcceso({ rol } = {}) {
+  const PAGE_LABELS = {
+    overview: 'Resumen / Tablero',
+    sales: 'Ventas / F&I / Leads',
+    forecast: 'Pronóstico',
+    inventory: 'Inventario',
+    contabilidad: 'Contabilidad / EEFF',
+    'post-sales': 'PostVenta',
+    seguimiento: 'Seguimiento 360',
+    admin: 'Administración de usuarios',
+  };
+
+  const all = listRoles().map((r) => {
+    const full = getRole(r.id) || r;
+    return {
+      id: full.id,
+      label: full.label,
+      homePath: full.homePath,
+      canManageUsers: Boolean(full.canManageUsers),
+      paginas: (full.pages || []).map((p) => ({
+        id: p,
+        label: PAGE_LABELS[p] || p,
+      })),
+    };
+  });
+
+  const wanted = String(rol || '').trim().toLowerCase();
+  const filtered = wanted
+    ? all.filter((r) => r.id === wanted || String(r.label || '').toLowerCase().includes(wanted))
+    : all;
+
+  return {
+    roles: filtered.length ? filtered : all,
+    alertasTipos: listAlertTypes().map((t) => ({ id: t.id, label: t.label, category: t.category })),
+    preferenciasAlertasPorRol: getPrefs(),
+    nota: 'Gerencia Comercial ve Ventas, Pronóstico y Seguimiento 360. Contabilidad solo Contabilidad/EEFF. Dirección y Administración ven el tablero completo.',
+  };
+}
+
+function currentMonthRangeYmd() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  return { fechaInicio: ymd(start), fechaFin: ymd(now) };
+}
+
+async function getRiesgosOportunidades(args = {}) {
+  const range = resolveRiesgosPeriodo(args);
+  const { fechaInicio, fechaFin } = range;
+
+  const [overview, inventory, alertas] = await Promise.all([
+    getOverview({ fechaInicio, fechaFin }).catch((err) => ({ error: err.message })),
+    getInventory({ planPisoPeriod: 'all' }).catch((err) => ({ error: err.message })),
+    buildOperationalAlerts().catch(() => []),
+  ]);
+
+  const insights = [];
+  if (!overview?.error) {
+    insights.push(...buildInsights({
+      module: 'overview',
+      fechaInicio,
+      fechaFin,
+      financial: overview.financial,
+      operaciones: overview.operaciones,
+      analytics: overview.analytics || overview.salesAnalytics,
+      salesAnalytics: overview.salesAnalytics || overview.analytics,
+    }));
+  }
+  if (!inventory?.error) {
+    insights.push(...buildInsights({
+      module: 'inventory',
+      summary: inventory.summary,
+      postventa: inventory.postventa,
+    }));
+  }
+
+  const rank = { critical: 3, warning: 2, info: 1 };
+  const riesgos = insights
+    .filter((i) => i.severity === 'critical' || i.severity === 'warning')
+    .sort((a, b) => (rank[b.severity] || 0) - (rank[a.severity] || 0))
+    .slice(0, 8)
+    .map((i) => shapeInsight(i, 'riesgo'));
+
+  const oportunidades = [];
+  const seen = new Set();
+  for (const insight of insights) {
+    for (const rec of insight.recommendations || []) {
+      const key = String(rec).trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      oportunidades.push({
+        tipo: 'oportunidad',
+        severity: 'info',
+        modulo: insight.module || null,
+        titulo: `Acción: ${insight.title}`,
+        resumen: rec,
+        origen: insight.summary,
+      });
+      if (oportunidades.length >= 8) break;
+    }
+    if (oportunidades.length >= 8) break;
+  }
+
+  // Señales positivas del tablero cuando el KPI está sano
+  const f = overview?.financial || {};
+  const ops = overview?.operaciones || {};
+  const sales = f.sales || {};
+  const service = f.service || {};
+  const inv = f.inventory || inventory?.summary || {};
+  if (Number(sales.marginPct) >= 10) {
+    oportunidades.unshift({
+      tipo: 'oportunidad',
+      severity: 'info',
+      modulo: 'overview',
+      titulo: 'Margen bruto saludable',
+      resumen: `Margen ${Number(sales.marginPct).toFixed(1)}% en el periodo — sostener disciplina de precio/descuento.`,
+    });
+  }
+  if (Number(service.pctFacturado) >= 70) {
+    oportunidades.unshift({
+      tipo: 'oportunidad',
+      severity: 'info',
+      modulo: 'overview',
+      titulo: 'Buena conversión de taller a factura',
+      resumen: `${Number(service.pctFacturado).toFixed(1)}% de órdenes facturadas — replicar ritmo de cierre.`,
+    });
+  }
+  if (Number(ops.unidadesVendidas ?? sales.units) > 0 && Number(inv.sinPrevias || 0) === 0) {
+    oportunidades.unshift({
+      tipo: 'oportunidad',
+      severity: 'info',
+      modulo: 'inventory',
+      titulo: 'Stock con previas al día',
+      resumen: 'No hay disponibles sin previa — ventaja operativa para entregas limpias.',
+    });
+  }
+
+  const alertasOp = (alertas || []).slice(0, 10).map((a) => ({
+    severity: a.severity,
+    titulo: a.title,
+    mensaje: a.message,
+    tipo: a.type,
+    href: a.href,
+  }));
+
+  return {
+    periodo: range,
+    totales: {
+      riesgos: riesgos.length,
+      oportunidades: Math.min(oportunidades.length, 8),
+      alertasOperativas: alertasOp.length,
+    },
+    riesgos,
+    oportunidades: oportunidades.slice(0, 8),
+    alertasOperativas: alertasOp,
+    kpisRapidos: overview?.error ? { error: overview.error } : {
+      unidadesVendidas: Number(ops.unidadesVendidas ?? sales.units ?? 0),
+      entregasSofia: Number(ops.entregasSofia ?? 0),
+      entregasSinPrevias: Number(ops.entregasSinPrevias ?? 0),
+      sinTimbrar: Number(ops.sinTimbrar ?? 0),
+      margenPct: Number(sales.marginPct ?? 0),
+      inventarioDisponible: Number(inv.availableUnits ?? inv.available ?? 0),
+      sinPreviasStock: Number(inv.sinPrevias ?? 0),
+      envejecidas: Number(inv.ageingAlertsCount ?? 0),
+      planPiso: Number(inv.planPisoTotal ?? 0),
+      pctFacturadoTaller: Number(service.pctFacturado ?? 0),
+    },
+    instruccionRespuesta:
+      'Lista 1) Riesgos (críticos primero) con cifra + por qué importa + 1 acción. '
+      + '2) Oportunidades / acciones de mejora. 3) Cierra con las 3 prioridades de la semana. '
+      + 'No digas que no tienes acceso: estos datos ya están en la herramienta.',
+  };
+}
+
 async function executeTool(name, args = {}) {
   let result;
 
@@ -767,6 +1095,30 @@ async function executeTool(name, args = {}) {
       break;
     case 'consultar_inventario':
       result = await getInventory({ planPisoPeriod: args.planPisoPeriod || 'all' });
+      break;
+    case 'consultar_inventario_postventa': {
+      const raw = await getInventoryPostventa();
+      const area = String(args.area || 'todas').toLowerCase();
+      if (area === 'todas' || !raw.areas?.[area]) {
+        result = raw;
+      } else {
+        result = {
+          fuente: raw.fuente,
+          area: raw.areas[area],
+          overview: raw.overview,
+        };
+      }
+      break;
+    }
+    case 'consultar_refacciones': {
+      const range = (args.fechaInicio && args.fechaFin)
+        ? { fechaInicio: args.fechaInicio, fechaFin: args.fechaFin }
+        : currentMonthRangeYmd();
+      result = await getRefaccionesDashboard(range);
+      break;
+    }
+    case 'consultar_roles_acceso':
+      result = getRolesAcceso({ rol: args.rol || null });
       break;
     case 'consultar_postventa':
       result = await getPostSales({
@@ -831,9 +1183,39 @@ async function executeTool(name, args = {}) {
         fechaFin: args.fechaFin || null,
       });
       break;
-    case 'resumen_leads':
-      result = crmCiclos.getLeadsSummary(args);
+    case 'resumen_leads': {
+      if (args.listar === 'citas_sin_compra' || args.listar === 'sin_compra') {
+        const rango = crmCiclos.resolveCrmPeriod
+          ? crmCiclos.resolveCrmPeriod({
+            periodo: args.periodo || 'mes_actual',
+            desde: args.desde || null,
+            hasta: args.hasta || null,
+          })
+          : null;
+        const dash = crmCiclos.getLeadsDashboard({
+          fechaInicio: args.desde || rango?.desde || null,
+          fechaFin: args.hasta || rango?.hasta || null,
+          limit: Math.min(400, Math.max(50, Number(args.limit) || 200)),
+        });
+        const detalle = (dash.detalle || []).filter((d) => {
+          if (args.listar === 'citas_sin_compra') return d.cita && !d.conCompra;
+          return !d.conCompra;
+        }).slice(0, Math.min(50, Number(args.limit) || 30));
+        result = {
+          filtros: dash.filtros,
+          listar: args.listar,
+          summary: dash.summary,
+          totalListado: detalle.length,
+          detalle,
+          nota: args.listar === 'citas_sin_compra'
+            ? 'Oportunidades con cita programada y sin VIN de compra vinculado.'
+            : 'Leads del periodo sin compra vinculada.',
+        };
+      } else {
+        result = crmCiclos.getLeadsSummary(args);
+      }
       break;
+    }
     case 'resumen_seguimiento_360':
       result = crmCiclos.getSeguimiento360Summary(args);
       break;
@@ -916,6 +1298,13 @@ async function executeTool(name, args = {}) {
         carline: args.carline || null,
         metric: args.metric || 'utilidad_promedio',
         minUnidades: Math.min(20, Math.max(1, Number(args.minUnidades) || 1)),
+      });
+      break;
+    case 'consultar_riesgos_oportunidades':
+      result = await getRiesgosOportunidades({
+        periodo: args.periodo || 'semana_actual',
+        fechaInicio: args.fechaInicio || null,
+        fechaFin: args.fechaFin || null,
       });
       break;
     case 'generar_excel':

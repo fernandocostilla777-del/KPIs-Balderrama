@@ -22,6 +22,8 @@
     retailMix: null,
     onstarTech: null,
     pvaTrimestreYtd: null,
+    pvaTrimestresOpciones: [],
+    pvaQuarterKey: null,
     sofiaRegistros: [],
     facturasGmfRegistros: [],
     facturaNotesByDocto: {},
@@ -632,18 +634,35 @@
         <button type="button" class="ops-orders-drawer__filter-chip" data-fi-mix-filter-chip hidden title="Quitar filtro"></button>
         <span class="ops-orders-drawer__meta" data-fi-mix-meta></span>
       </div>
-      <div class="fi-pva-ytd-panel hidden" data-fi-pva-ytd-panel>
-        <div class="fi-pva-ytd-panel__head">
-          <h5 data-fi-pva-ytd-title>YTD trimestre en curso</h5>
-          <span class="fi-pva-ytd-panel__meta" data-fi-pva-ytd-meta></span>
+      <div class="ops-orders-drawer__main" data-fi-mix-main>
+        <div class="ops-orders-drawer__data" data-fi-mix-data>
+          <aside class="ops-orders-drawer__summary custom-scrollbar" data-fi-mix-summary></aside>
+          <div class="ops-orders-drawer__body custom-scrollbar" data-fi-mix-body></div>
         </div>
-        <div class="fi-pva-ytd-panel__chart">
-          <canvas data-fi-pva-ytd-chart aria-label="Gráfica YTD PVA trimestre"></canvas>
+        <div class="fi-pva-ytd-panel hidden" data-fi-pva-ytd-panel>
+          <div class="fi-pva-ytd-panel__head">
+            <div class="fi-pva-ytd-panel__head-main">
+              <h5 data-fi-pva-ytd-title>YTD trimestre</h5>
+              <label class="fi-pva-ytd-panel__quarter" for="fiPvaQuarterSelect">
+                <span class="visually-hidden">Trimestre</span>
+                <select id="fiPvaQuarterSelect" data-fi-pva-ytd-quarter aria-label="Seleccionar trimestre"></select>
+              </label>
+              <label class="fi-pva-ytd-panel__width" for="fiPvaWidthSelect">
+                <span class="visually-hidden">Ancho de gráfica</span>
+                <select id="fiPvaWidthSelect" data-fi-pva-ytd-width aria-label="Ancho de la gráfica">
+                  <option value="sm">Ancho: compacto</option>
+                  <option value="md" selected>Ancho: medio</option>
+                  <option value="lg">Ancho: amplio</option>
+                  <option value="xl">Ancho: extra</option>
+                </select>
+              </label>
+            </div>
+            <span class="fi-pva-ytd-panel__meta" data-fi-pva-ytd-meta></span>
+          </div>
+          <div class="fi-pva-ytd-panel__chart">
+            <canvas data-fi-pva-ytd-chart aria-label="Gráfica YTD PVA trimestre"></canvas>
+          </div>
         </div>
-      </div>
-      <div class="ops-orders-drawer__main">
-        <aside class="ops-orders-drawer__summary custom-scrollbar" data-fi-mix-summary></aside>
-        <div class="ops-orders-drawer__body custom-scrollbar" data-fi-mix-body></div>
       </div>
     `;
 
@@ -654,6 +673,7 @@
     const metaEl = panel.querySelector('[data-fi-mix-meta]');
     const bodyEl = panel.querySelector('[data-fi-mix-body]');
     const summaryEl = panel.querySelector('[data-fi-mix-summary]');
+    const mainEl = panel.querySelector('[data-fi-mix-main]');
     const searchEl = panel.querySelector('#fiMixSearch');
     const filterChip = panel.querySelector('[data-fi-mix-filter-chip]');
     const expandBtn = panel.querySelector('[data-fi-mix-expand]');
@@ -665,6 +685,8 @@
     const pvaYtdTitle = panel.querySelector('[data-fi-pva-ytd-title]');
     const pvaYtdMeta = panel.querySelector('[data-fi-pva-ytd-meta]');
     const pvaYtdCanvas = panel.querySelector('[data-fi-pva-ytd-chart]');
+    const pvaYtdQuarter = panel.querySelector('[data-fi-pva-ytd-quarter]');
+    const pvaYtdWidth = panel.querySelector('[data-fi-pva-ytd-width]');
 
     let expanded = false;
     let activeFilter = null;
@@ -673,6 +695,29 @@
     let currentMeta = { kpi: '', title: 'Penetración GMF', hint: '', icon: 'account_balance' };
     let lastCard = null;
     let pvaYtdChart = null;
+    const PVA_WIDTH_KEY = 'fiPvaChartWidth';
+    const PVA_WIDTHS = new Set(['sm', 'md', 'lg', 'xl']);
+
+    function applyPvaChartWidth(size) {
+      const next = PVA_WIDTHS.has(size) ? size : 'md';
+      if (pvaYtdPanel) pvaYtdPanel.dataset.chartWidth = next;
+      if (pvaYtdWidth && pvaYtdWidth.value !== next) pvaYtdWidth.value = next;
+      try { localStorage.setItem(PVA_WIDTH_KEY, next); } catch { /* ignore */ }
+      if (pvaYtdChart) {
+        window.requestAnimationFrame(() => {
+          try { pvaYtdChart.resize(); } catch { /* ignore */ }
+        });
+      }
+    }
+
+    function initPvaChartWidth() {
+      let saved = 'md';
+      try {
+        const raw = localStorage.getItem(PVA_WIDTH_KEY);
+        if (PVA_WIDTHS.has(raw)) saved = raw;
+      } catch { /* ignore */ }
+      applyPvaChartWidth(saved);
+    }
 
     const FILTER_DIM_LABEL = {
       tipo: 'Tipo',
@@ -1140,6 +1185,49 @@
         pvaYtdChart = null;
       }
       if (pvaYtdPanel) pvaYtdPanel.classList.add('hidden');
+      mainEl?.classList.remove('ops-orders-drawer__main--with-pva');
+    }
+
+    function fillPvaQuarterSelect(ytd) {
+      if (!pvaYtdQuarter) return;
+      const opts = state.pvaTrimestresOpciones || state.data?.pvaTrimestresOpciones || [];
+      const selectedKey = state.pvaQuarterKey
+        || ytd?.key
+        || (ytd?.anio && ytd?.trimestre ? `${ytd.anio}-T${ytd.trimestre}` : null)
+        || opts[0]?.key
+        || '';
+      if (!opts.length) {
+        pvaYtdQuarter.innerHTML = selectedKey
+          ? `<option value="${escapeHtml(selectedKey)}">${escapeHtml(ytd?.label || selectedKey)}</option>`
+          : '';
+        return;
+      }
+      pvaYtdQuarter.innerHTML = opts.map((o) => {
+        const sel = o.key === selectedKey ? ' selected' : '';
+        return `<option value="${escapeHtml(o.key)}"${sel}>${escapeHtml(o.label)}</option>`;
+      }).join('');
+      if (selectedKey) state.pvaQuarterKey = selectedKey;
+    }
+
+    async function loadPvaTrimestre(anio, trimestre) {
+      try {
+        const qs = new URLSearchParams({
+          anio: String(anio),
+          trimestre: String(trimestre),
+        });
+        const res = await fetch(`/api/ventas/financiamiento/pva-trimestre?${qs}`, { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Error PVA (${res.status})`);
+        state.pvaTrimestreYtd = data.pvaTrimestreYtd || null;
+        if (Array.isArray(data.pvaTrimestresOpciones) && data.pvaTrimestresOpciones.length) {
+          state.pvaTrimestresOpciones = data.pvaTrimestresOpciones;
+        }
+        if (state.pvaTrimestreYtd?.key) state.pvaQuarterKey = state.pvaTrimestreYtd.key;
+        else state.pvaQuarterKey = `${anio}-T${trimestre}`;
+      } catch (err) {
+        console.error('[Financiamiento PVA trimestre]', err);
+        if (pvaYtdMeta) pvaYtdMeta.textContent = err.message || 'No se pudo cargar el trimestre';
+      }
     }
 
     function renderPvaYtdChart(kpiKey) {
@@ -1149,22 +1237,24 @@
       const ytd = state.pvaTrimestreYtd || state.data?.pvaTrimestreYtd;
       const seriesKey = PVA_SERIES_KEY[kpiKey];
       const serie = ytd?.series?.[seriesKey];
+
+      mainEl?.classList.add('ops-orders-drawer__main--with-pva');
+      pvaYtdPanel.classList.remove('hidden');
+      fillPvaQuarterSelect(ytd);
+
       if (!ytd || !serie) {
-        pvaYtdPanel.classList.remove('hidden');
-        if (pvaYtdTitle) pvaYtdTitle.textContent = 'YTD trimestre en curso';
+        if (pvaYtdTitle) pvaYtdTitle.textContent = currentMeta.title || 'PVA por mes';
         if (pvaYtdMeta) pvaYtdMeta.textContent = 'Sin datos del trimestre';
         return;
       }
 
       if (typeof Chart === 'undefined') {
-        pvaYtdPanel.classList.remove('hidden');
         if (pvaYtdMeta) pvaYtdMeta.textContent = 'Chart.js no disponible';
         return;
       }
 
-      pvaYtdPanel.classList.remove('hidden');
       if (pvaYtdTitle) {
-        pvaYtdTitle.textContent = `${ytd.label || 'Trimestre'} · ${currentMeta.title || 'PVA'} por mes`;
+        pvaYtdTitle.textContent = `${currentMeta.title || 'PVA'} por mes`;
       }
       const mensual = serie.mensual || [];
       const totalMeses = mensual.reduce((s, n) => s + Number(n || 0), 0);
@@ -1297,6 +1387,19 @@
       if (isMixKpi(currentMeta.kpi)) downloadMixCsv(lastExportRows, currentMeta.title);
       else downloadCrmCsv(lastExportRows, currentMeta.title);
     });
+    pvaYtdQuarter?.addEventListener('change', async () => {
+      const key = String(pvaYtdQuarter.value || '');
+      const m = key.match(/^(\d{4})-T([1-4])$/);
+      if (!m || !isPvaKpi(currentMeta.kpi)) return;
+      state.pvaQuarterKey = key;
+      if (pvaYtdMeta) pvaYtdMeta.textContent = 'Cargando trimestre…';
+      await loadPvaTrimestre(Number(m[1]), Number(m[2]));
+      renderPvaYtdChart(currentMeta.kpi);
+    });
+    pvaYtdWidth?.addEventListener('change', () => {
+      applyPvaChartWidth(pvaYtdWidth.value);
+    });
+    initPvaChartWidth();
     searchEl?.addEventListener('input', () => renderList(searchEl.value));
     filterChip?.addEventListener('click', clearFilter);
     summaryEl.addEventListener('click', (e) => {
@@ -1902,6 +2005,11 @@
       state.data = data;
       state.onstarTech = data.onstarTech || null;
       state.pvaTrimestreYtd = data.pvaTrimestreYtd || null;
+      state.pvaTrimestresOpciones = data.pvaTrimestresOpciones || [];
+      state.pvaQuarterKey = data.pvaTrimestreYtd?.key
+        || (data.pvaTrimestreYtd?.anio && data.pvaTrimestreYtd?.trimestre
+          ? `${data.pvaTrimestreYtd.anio}-T${data.pvaTrimestreYtd.trimestre}`
+          : null);
     } catch (err) {
       console.error('[Financiamiento]', err);
       state.data = {
@@ -1912,6 +2020,8 @@
       };
       state.onstarTech = null;
       state.pvaTrimestreYtd = null;
+      state.pvaTrimestresOpciones = [];
+      state.pvaQuarterKey = null;
       if (els.subtitle) els.subtitle.textContent = err.message;
     }
 

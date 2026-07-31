@@ -2,13 +2,14 @@ const express = require('express');
 const { getOverview } = require('../services/overviewService');
 const { loadSalesExecutiveAnalytics } = require('../services/salesExecutiveAnalytics');
 const { getVentas } = require('../services/ventas');
-const { getInventory } = require('../services/inventoryService');
+const { getInventory, getIntercambiosHistorico } = require('../services/inventoryService');
 const { getInventoryPostventa } = require('../services/inventoryPostventaService');
 const { getPostSales, getPostSalesOrderDetail } = require('../services/postSalesService');
 const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/refaccionesPedidosService');
 const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
-const { getFinanciamientoDashboard } = require('../services/financiamientoService');
+const { getFinanciamientoDashboard, getPvaTrimestreYtd } = require('../services/financiamientoService');
+const { getAfluenciaDashboard } = require('../services/afluenciaService');
 const financiamientoNotes = require('../services/financiamientoNotesStore');
 const gerentesFi = require('../services/gerentesFinanciamientoStore');
 const { getFacturaMovimientos } = require('../services/facturaMovimientosService');
@@ -61,19 +62,72 @@ router.get('/ventas', async (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(await getVentas({ fechaInicio, fechaFin }));
+    const data = await getVentas({ fechaInicio, fechaFin });
+    let sofiaLiveUpdate = { active: false };
+    try {
+      const status = require('../services/sofiaMonthEndLive').getStatus();
+      sofiaLiveUpdate = {
+        ...(status.context || { active: false }),
+        intervalMinutes: status.intervalMinutes,
+        enabled: status.enabled,
+      };
+    } catch {
+      /* optional */
+    }
+    res.json({ ...data, sofiaLiveUpdate });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
+router.get('/ventas/sofia-live-status', (_req, res, next) => {
+  try {
+    const sofiaLive = require('../services/sofiaMonthEndLive');
+    res.json({ ok: true, ...sofiaLive.getStatus() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/ventas/sofia-live-sync', async (_req, res, next) => {
+  try {
+    const sofiaLive = require('../services/sofiaMonthEndLive');
+    const ctx = sofiaLive.getSofiaLiveUpdateContext();
+    if (!ctx.active) {
+      return res.status(409).json({
+        ok: false,
+        skipped: true,
+        reason: 'Hoy no es el día de actualización en vivo de entregas SOFIA',
+        context: ctx,
+      });
+    }
+    const result = await sofiaLive.syncSofiaVentasLive(ctx, { reason: 'api' });
+    res.status(result.ok ? 200 : 500).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/ventas/financiamiento', async (req, res, next) => {
   try {
-    const { fechaInicio, fechaFin } = req.query;
+    const { fechaInicio, fechaFin, pvaAnio, pvaTrimestre } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(await getFinanciamientoDashboard({ fechaInicio, fechaFin }));
+    res.json(await getFinanciamientoDashboard({ fechaInicio, fechaFin, pvaAnio, pvaTrimestre }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/financiamiento/pva-trimestre', (req, res, next) => {
+  try {
+    const { anio, trimestre, pvaAnio, pvaTrimestre } = req.query;
+    res.json(getPvaTrimestreYtd({
+      anio: anio || pvaAnio,
+      trimestre: trimestre || pvaTrimestre,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -88,6 +142,19 @@ router.get('/ventas/leads', (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     res.json(crm.getLeadsDashboard({ fechaInicio, fechaFin, limit }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/afluencia', (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, limit } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(getAfluenciaDashboard({ fechaInicio, fechaFin, limit }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -200,6 +267,19 @@ router.get('/inventory', async (req, res, next) => {
   try {
     res.json(await getInventory({ planPisoPeriod: req.query.planPisoPeriod || 'all' }));
   } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/inventory/intercambios', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(await getIntercambiosHistorico({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
@@ -324,6 +404,24 @@ router.get('/contabilidad', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     res.json(await getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal, area, includeFi }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/contabilidad/punto-equilibrio', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, sucursal, refined } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    const { getPuntoEquilibrio } = require('../services/breakEvenService');
+    res.json(await getPuntoEquilibrio({
+      fechaInicio,
+      fechaFin,
+      sucursal: sucursal || 'todos',
+      refined: refined === 'true' || refined === '1',
+    }));
   } catch (err) {
     next(err);
   }

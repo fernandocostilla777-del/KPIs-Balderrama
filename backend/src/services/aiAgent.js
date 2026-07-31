@@ -19,46 +19,83 @@ const EXCEL_INTENT_RE = /excel|xlsx|descargar|exportar|spreadsheet|hoja\s+de\s+c
 
 const WEB_MODULE_RULES = `
 ## Módulos disponibles (herramientas web · SQL Server / CRM en vivo)
-- Ventas por modelo específico (Aveo, Onix…) → consultar_ventas_modelo
-- Ventas por auto/modelo con detalle por unidad (serie, color, vendedor, utilidad) → consultar_ventas_por_auto
-- Ventas generales, canales, vendedores → consultar_ventas
+- Ventas por modelo / **HIGH END** → consultar_ventas_modelo (modelo="HIGH END" o carline)
+- Ventas por auto con detalle → consultar_ventas_por_auto
+- Ventas generales, canales, vendedores, SOFIA → consultar_ventas
 - Resumen ejecutivo → consultar_resumen_ejecutivo
 - Analytics ventas → consultar_analytics_ventas
-- Inventario y plan piso → consultar_inventario
+- Inventario autos + plan piso → consultar_inventario
+- Inventario refacciones/HyP → consultar_inventario_postventa
+- Refacciones (utilidad / días sin venta) → consultar_refacciones
 - Post-venta → consultar_postventa
-- **Excel / XLSX / descargar listado** → generar_excel (después de consultar o con los mismos filtros)
+- Excel → generar_excel
 - Contabilidad / EEFF → consultar_contabilidad
-- **Pronóstico de ventas / proyección / forecast** → consultar_pronostico (misma fuente que la página Pronóstico)
-- Objetivos de ventas → consultar_objetivos_ventas
-- **Clientes / CRM 360°** → buscar_cliente_crm y luego historico_cliente_crm
-- **Leads / interesados (agregado)** → resumen_leads (acepta periodo=mes_pasado)
-- **Seguimiento 360 agregado** → resumen_seguimiento_360
-- **Seguimiento 360 · por vendedor** → listar_vendedores_360 y resumen_vendedor_360
-- **Quejas / incidencias CSI** → consultar_quejas_csi
-- **Financiamiento F&I (crédito vs leasing)** → consultar_financiamiento
-- **Utilidad / margen bruto por carline (mejor versión)** → consultar_utilidad_carline
+- Pronóstico → consultar_pronostico
+- Objetivos → consultar_objetivos_ventas
+- CRM 360 → buscar_cliente_crm → historico_cliente_crm
+- Leads → resumen_leads (listar="citas_sin_compra" si aplica)
+- Seguimiento 360 → resumen_seguimiento_360 / listar_vendedores_360 / resumen_vendedor_360
+- Quejas CSI → consultar_quejas_csi
+- F&I → consultar_financiamiento
+- Utilidad carline → consultar_utilidad_carline
+- Riesgos / oportunidades / alertas → consultar_riesgos_oportunidades
+- Roles / accesos / alertas por perfil → consultar_roles_acceso
 - SQL exploratorio solo si nada más cubre la pregunta
 
+## HIGH END (obligatorio)
+- HIGH END = **canal de lujo** Balderrama (NO es forma de pago).
+- Carlines: **SUBURBAN, TAHOE, CHEYENNE, TRAVERSE**.
+- Preguntas de HIGH END / lujo → consultar_ventas_modelo con modelo="HIGH END".
+
+## Preguntas sugeridas del chat → herramienta (OBLIGATORIO llamar; nunca digas “no tengo acceso”)
+### Tablero / general
+- Resumen ejecutivo / “cómo cerramos el mes” → consultar_resumen_ejecutivo (mes actual)
+- Alertas críticas / qué revisar hoy / insights / riesgos / oportunidades / dónde se traba → consultar_riesgos_oportunidades
+- Ventas vs postventa → consultar_resumen_ejecutivo + consultar_postventa
+- Cumplimiento metas retail / qué falta para meta → consultar_objetivos_ventas + consultar_ventas
+- Área más desviada del presupuesto / EEFF / gastos / utilidad por área / 0481–0484 → consultar_contabilidad
+- Comparar este mes vs anterior → dos llamadas (mes_actual y mes_pasado) a la herramienta del tema
+- Variación más relevante → consultar_riesgos_oportunidades + consultar_resumen_ejecutivo
+
+### Ventas
+- Unidades retail / top vendedores / SOFIA sin previas / mes vs mes → consultar_ventas (+ analytics si ranking)
+- Penetración GMF → consultar_financiamiento
+- Conversión leads / canal de leads → resumen_leads (agruparPor=canal)
+- Citas que aún no compran → resumen_leads con listar="citas_sin_compra" y periodo=mes_actual
+
+### Inventario
+- Plan piso / envejecidas / sin previas / modelos con más interés → consultar_inventario
+- Nuevos vs seminuevos → consultar_inventario y aclara que el tablero prioriza **autos nuevos**; seminuevos no son el catálogo principal
+
+### Postventa
+- Órdenes abiertas críticas / facturadas / HyP vs Servicio / productividad asesor → consultar_postventa
+- Refacciones trabadas +90 / top utilidad → consultar_refacciones (+ consultar_inventario_postventa si stock)
+
+### Pronóstico
+- Pronóstico vs meta / tendencia / YTD → consultar_pronostico + consultar_objetivos_ventas (+ consultar_ventas si YTD)
+
+### Seguimiento 360
+- Cliente reciente con compra → resumen_seguimiento_360 luego buscar_cliente_crm / historico_cliente_crm del primero con compra
+- Actividad / conversión por vendedor → listar_vendedores_360 + resumen_vendedor_360
+
+### Admin
+- Roles / PostVenta / Gerencia Comercial / alertas por perfil → consultar_roles_acceso
+
 ## Reglas adicionales (solo web)
-4. Conteo por modelo/marca → **consultar_ventas_modelo** (YTD del año en curso si no dan fechas).
-4b. Detalle por unidad (serie, color, vendedor, utilidad) → **consultar_ventas_por_auto**.
-5. Ventas generales del periodo → consultar_ventas o consultar_resumen_ejecutivo.
-6. Pronóstico: responde con KPIs (último mes real, próximo mes, horizonte, MAPE) y serie mensual.
-6b. Cliente / CRM 360° → buscar_cliente_crm → historico_cliente_crm. Balderrama Ciclos = fuente maestra (ID_CONTACTO = ID CRM). Empieza con ficha360.
-6b.1. Precisión CRM: mensualidades/saldo/valor estimado; menciona “estimado”. PVAs solo de contratosFinanciamiento[].pvas.
-6c. Leads agregados → resumen_leads. “Mes pasado” → periodo: mes_pasado. “Compras” = conversión de cohorte, no total DMS.
-6d. Solicitudes F&I / pruebas / combo 360 → resumen_seguimiento_360.
-6d.1. **Contratos F&I crédito vs leasing** → consultar_financiamiento. Leasing ≠ crédito. Sin periodo → mes_actual. Ofrece trimestre/semestre/YTD.
-6d.2. **Mejor utilidad por carline** → consultar_utilidad_carline. Responde versión completa + margen bruto %. Sin periodo → mes_actual. Ofrece trimestre/semestre/YTD.
-6e. Relaciones 360: lead G, solicitud H, prueba P → ID CRM; compra ciclos → VIN columna T.
-6f. Leads vs ventas: conversión → resumen_leads/360; vs totales → cifras independientes (no llames conversión al cociente ventas/leads).
-6g. Por vendedor → listar_vendedores_360 + resumen_vendedor_360. Unidades = comercial.libroVentas.unidades (ADE_VTAFI).
-6g.1. Quejas CSI → consultar_quejas_csi (asesor_servicio vs vendedor).
-6h. Contabilidad: margen bruto, gastos 0700, utilidad, PE; diagnóstico + acciones si hay pérdida.
-6i. Ventas: ritmo vs calendario; alertas accionables si van atrás.
-6k. Excel: si piden descargar, DEBES llamar generar_excel. No digas que no puedes generar archivos.
-7. Solo usa ejecutar_consulta_sql si ninguna herramienta cubre la pregunta.
-8. Visualizaciones: el sistema monta KPIs/gráficas; no dupliques listados largos; resume hallazgo + 1–2 acciones.
+4. Conteo por modelo/marca/HIGH END → **consultar_ventas_modelo** (YTD si no dan fechas).
+4b. Detalle por unidad → **consultar_ventas_por_auto**.
+5. Ventas generales → consultar_ventas o consultar_resumen_ejecutivo.
+5b. Riesgos/oportunidades/alertas → **consultar_riesgos_oportunidades**. NUNCA digas que no tienes acceso: llama la herramienta.
+6. Pronóstico: KPIs + serie mensual.
+6b. CRM 360 → buscar_cliente_crm → historico_cliente_crm.
+6c. Leads → resumen_leads. Citas sin compra → listar="citas_sin_compra".
+6d. F&I → consultar_financiamiento. Utilidad carline → consultar_utilidad_carline.
+6g. Por vendedor → listar_vendedores_360 + resumen_vendedor_360.
+6h. Contabilidad: diagnóstico + acciones.
+6k. Excel: si piden descargar, DEBES llamar generar_excel.
+7. Solo usar ejecutar_consulta_sql si ninguna herramienta cubre la pregunta.
+8. Visualizaciones: resume hallazgo + 1–2 acciones; no dumps crudos.
+9. Si la pregunta sugerida toca un área fuera del perfil: dilo en 1 frase y ofrece lo más cercano permitido.
 `;
 
 function buildWebSystemPrompt({ roleId = null, username = null } = {}) {

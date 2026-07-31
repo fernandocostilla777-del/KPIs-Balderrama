@@ -1,5 +1,12 @@
 const { query } = require('../db');
 const { getCanalVenta, getCanalLabel } = require('./canales-venta');
+const {
+  isHighEndQuery,
+  isHighEndVehicle,
+  highEndSqlLikeClauses,
+  HIGH_END_CARLINES,
+  normalizeModelText,
+} = require('../config/highEndSegment');
 
 function parseDateInput(value) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -11,22 +18,37 @@ function parseDateInput(value) {
 }
 
 function normalizeModeloTerm(value) {
-  return String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  return normalizeModelText(value);
 }
 
 async function getVentasPorModelo({ modelo, fechaInicio, fechaFin, incluirFlotilla = true }) {
   const term = normalizeModeloTerm(modelo);
   if (!term || term.length < 2) {
-    throw new Error('Indica el modelo a buscar (ej. Aveo, Onix).');
+    throw new Error('Indica el modelo a buscar (ej. Aveo, Onix) o “HIGH END”.');
   }
 
   parseDateInput(fechaInicio);
   parseDateInput(fechaFin);
 
-  const likeTerm = `%${term}%`;
+  const highEnd = isHighEndQuery(term);
   const flotillaFilter = incluirFlotilla
     ? ''
     : `AND ADE_VTAFI.VTE_FORMAPAGO NOT IN ('FLOT', 'FLOTGMF')`;
+
+  const modelFilter = highEnd
+    ? `(
+        ${highEndSqlLikeClauses('SER_VEHICULO.VEH_TIPOAUTO')}
+        OR ${highEndSqlLikeClauses('UNI_CATALOGO.UNC_FAMILIA')}
+      )`
+    : `(
+        UPPER(LTRIM(RTRIM(SER_VEHICULO.VEH_TIPOAUTO))) LIKE @likeTerm
+        OR UPPER(LTRIM(RTRIM(SER_VEHICULO.VEH_ANMODELO))) LIKE @likeTerm
+        OR UPPER(LTRIM(RTRIM(UNI_CATALOGO.UNC_FAMILIA))) LIKE @likeTerm
+      )`;
+
+  const params = highEnd
+    ? { fechaInicio, fechaFin }
+    : { fechaInicio, fechaFin, likeTerm: `%${term}%` };
 
   const rows = await query(`
     SELECT
@@ -58,13 +80,9 @@ async function getVentasPorModelo({ modelo, fechaInicio, fechaFin, incluirFlotil
       AND CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103)
         BETWEEN @fechaInicio AND @fechaFin
       ${flotillaFilter}
-      AND (
-        UPPER(LTRIM(RTRIM(SER_VEHICULO.VEH_TIPOAUTO))) LIKE @likeTerm
-        OR UPPER(LTRIM(RTRIM(SER_VEHICULO.VEH_ANMODELO))) LIKE @likeTerm
-        OR UPPER(LTRIM(RTRIM(UNI_CATALOGO.UNC_FAMILIA))) LIKE @likeTerm
-      )
+      AND ${modelFilter}
     ORDER BY CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103) DESC
-  `, { fechaInicio, fechaFin, likeTerm });
+  `, params);
 
   const porVariante = {};
   const porMes = {};
@@ -140,15 +158,23 @@ async function getVentasPorModelo({ modelo, fechaInicio, fechaFin, incluirFlotil
     consulta: {
       modeloBuscado: modelo,
       terminoSql: term,
+      segmento: highEnd ? 'HIGH_END' : null,
+      highEndCarlines: highEnd ? HIGH_END_CARLINES : undefined,
       fechaInicio,
       fechaFin,
       incluirFlotilla,
     },
-    razonamiento: [
-      'ADE_VTAFI registra la factura de venta (tipo A, status I).',
-      'SER_VEHICULO aporta VEH_TIPOAUTO (nombre comercial, ej. AVEO) vía VTE_SERIE.',
-      'UNI_CATALOGO.UNC_FAMILIA cubre variantes de catálogo cuando el nombre difiere.',
-    ],
+    razonamiento: highEnd
+      ? [
+        'HIGH END = canal de lujo Balderrama (no es forma de pago).',
+        `Carlines: ${HIGH_END_CARLINES.join(', ')}.`,
+        'Filtro por VEH_TIPOAUTO / UNC_FAMILIA que contengan esos nombres.',
+      ]
+      : [
+        'ADE_VTAFI registra la factura de venta (tipo A, status I).',
+        'SER_VEHICULO aporta VEH_TIPOAUTO (nombre comercial, ej. AVEO) vía VTE_SERIE.',
+        'UNI_CATALOGO.UNC_FAMILIA cubre variantes de catálogo cuando el nombre difiere.',
+      ],
     resumen: {
       unidadesVendidas: rows.length,
       retail,
@@ -168,6 +194,7 @@ async function getVentasPorModelo({ modelo, fechaInicio, fechaFin, incluirFlotil
       modelo: r.VEH_TIPOAUTO,
       catalogo: r.VEH_ANMODELO,
       segmento: r.SEGMENTO,
+      highEnd: isHighEndVehicle({ tipoAuto: r.VEH_TIPOAUTO, familia: r.UNC_FAMILIA }),
       vendedor: r.VENDEDOR,
     })),
   };

@@ -6,7 +6,7 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=92" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=105" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -143,11 +143,6 @@
 <div id="kpiUtilidadOperacion" class="kpi-value money">—</div>
 <p id="kpiUtilidadOperacionSub" class="kpi-subtitle">Utilidad bruta − gastos operación</p>
 </div>
-<div class="kpi-card kpi-card--eeff kpi-card--blue" id="kpiCardPuntoEquilibrio">
-<div class="kpi-card-head"><span class="kpi-title">Punto de equilibrio</span><span class="material-symbols-outlined kpi-icon">flag</span></div>
-<div id="kpiPuntoEquilibrio" class="kpi-value money">—</div>
-<p id="kpiPuntoEquilibrioSub" class="kpi-subtitle">Gastos ÷ margen bruto %</p>
-</div>
 </section>
 
 <section class="section-panel table-panel dashboard-section">
@@ -281,6 +276,61 @@
 <section id="panelEdoFin" class="eeff-panel" data-panel="estadoFinanciero">
 <section class="kpi-grid kpi-grid--eeff" id="kpiEdoFin"></section>
 <div id="eeffKpiDetailEdoFin" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+
+<section class="section-panel dashboard-section" id="panelPuntoEquilibrio">
+<div class="section-head-row">
+<div>
+<h3 class="section-title">Punto de equilibrio operativo</h3>
+<p class="section-subtitle" id="peTemporalLabel">PE = Gastos fijos ÷ Margen de contribución % · preliminar (costos variables = TOTAL COSTOS · fijos = gastos depto)</p>
+</div>
+<span id="peModeBadge" class="pe-mode-badge">—</span>
+</div>
+
+<div class="kpi-grid kpi-grid--eeff pe-segment-grid" id="peSegmentCards" aria-label="Punto de equilibrio por departamento"></div>
+
+<div class="kpi-grid kpi-grid--eeff" style="margin-top:12px">
+<div class="kpi-card kpi-card--eeff kpi-card--blue" id="kpiCardPuntoEquilibrio">
+<div class="kpi-card-head"><span class="kpi-title">Punto de equilibrio agencia</span><span class="material-symbols-outlined kpi-icon">flag</span></div>
+<div id="kpiPuntoEquilibrio" class="kpi-value money">—</div>
+<p id="kpiPuntoEquilibrioSub" class="kpi-subtitle">Gastos fijos ÷ margen de contribución %</p>
+</div>
+</div>
+
+<div class="chart-grid pe-detail-grid">
+<div class="section-panel table-panel">
+<h3 class="section-title">Detalle agencia</h3>
+<p class="section-subtitle" id="peAgenciaSubtitle">Cálculo consolidado del periodo</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
+<tbody id="peAgenciaTable"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Por departamento</h3>
+<p class="section-subtitle">Nuevos · Seminuevos · Postventa · Agencia</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Departamento</th>
+<th class="cell-money">Ventas</th>
+<th class="cell-money">MC %</th>
+<th class="cell-money">Gastos fijos</th>
+<th class="cell-money">Punto equilibrio</th>
+<th class="cell-num">Cumpl.</th>
+</tr>
+</thead>
+<tbody id="peSegmentosTable"></tbody>
+</table>
+</div>
+<div id="peAgenciaInsight" class="liquidez-note pe-insight-note hidden" aria-live="polite"></div>
+</div>
+</div>
+<p class="section-subtitle pe-methodology-note" id="peMethodologyNote"></p>
+</section>
+
 <div class="section-panel table-panel">
 <h3 class="section-title">Estado de resultados acumulado</h3>
 <p class="section-subtitle">Saldos al cierre · estructura de estado de resultados</p>
@@ -482,7 +532,7 @@ Exportar CSV
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=3"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/eeff.js?v=25"></script>
-<script src="/js/contabilidad.js?v=36"></script>
+<script src="/js/eeff.js?v=26"></script>
+<script src="/js/contabilidad.js?v=42"></script>
 </body>
 </html>

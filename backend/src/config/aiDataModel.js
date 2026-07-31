@@ -61,6 +61,12 @@ Para "¿cuántos Aveo se vendieron?":
 - **Vendedor F&I** en rankings = campo **asesor** (no FI/AFI).
 - Herramienta: **consultar_financiamiento** (default periodo = mes en curso).
 
+### Segmento HIGH END (canal de lujo)
+- **HIGH END** NO es un código de forma de pago: es el **canal/segmento de lujo** de la agencia.
+- Incluye carlines: **SUBURBAN, TAHOE, CHEYENNE, TRAVERSE** (también variantes CHEYEN/CHEYENE en DMS).
+- Para contar o detallar HIGH END → **consultar_ventas_modelo** con modelo="HIGH END" (o el carline puntual).
+- En inventario, mismas familias/modelos en VEH_TIPOAUTO / UNC_FAMILIA.
+
 ### Utilidad por carline
 - Agrupa ventas por **UNC_FAMILIA** (carline) y elige la **versión** (TIPOAUTO) con mejor utilidad.
 - Reporta utilidad (promedio/total) y **margen bruto %** = utilidad / subtotal.

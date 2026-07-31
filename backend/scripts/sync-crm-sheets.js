@@ -89,6 +89,7 @@ async function syncCrmSheets({ quiet = false } = {}) {
     'etl-crm-leads.js',
     'etl-crm-solicitudes.js',
     'etl-crm-pruebas-manejo.js',
+    'etl-crm-trafico-piso.js',
     'etl-crm-financiamiento.js',
     'etl-crm-csi.js',
   ];

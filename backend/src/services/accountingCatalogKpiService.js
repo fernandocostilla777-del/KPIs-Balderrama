@@ -116,10 +116,11 @@ function pct(num, den) {
   return Number(((num / den) * 100).toFixed(1));
 }
 
-function breakEven(gastosOperacion, utilidadBruta, ventasTotales) {
-  const margenPct = ventasTotales ? utilidadBruta / ventasTotales : 0;
+/** PE operativo preliminar: GF ÷ (MC / Ventas). Por defecto GF = gastos depto. */
+function breakEven(gastosFijos, margenContribucion, ventasTotales) {
+  const margenPct = ventasTotales ? margenContribucion / ventasTotales : 0;
   if (margenPct <= 0) return null;
-  return Number((gastosOperacion / margenPct).toFixed(2));
+  return Number((gastosFijos / margenPct).toFixed(2));
 }
 
 async function buildIncomeLines(segments, scope) {
@@ -390,16 +391,17 @@ async function getCatalogKpis({ fechaInicio, fechaFin, sucursal = 'todos', area 
   const utilidadOperacion = utilidadBruta - gastosOperacion;
   const margenBrutoPct = pct(utilidadBruta, ventasTotales);
   const margenOperacionPct = pct(utilidadOperacion, ventasTotales);
-  const puntoEquilibrio = breakEven(gastosOperacion, utilidadBruta, ventasTotales);
+  // Preliminar: TOTAL COSTOS = variable · gastos depto = fijos (no usar 0700 total)
+  const puntoEquilibrio = breakEven(gastoDepartamento, utilidadBruta, ventasTotales);
 
   const resultLines = [
     { key: 'ventasTotales', label: 'Ventas totales (0400 + complementos)', value: ventasTotales, group: 'ingreso' },
     { key: 'costoVentas', label: 'Costo de ventas (0600)', value: costoVentas, group: 'costo' },
-    { key: 'utilidadBruta', label: 'Utilidad bruta', value: utilidadBruta, group: 'resultado', highlight: true },
-    { key: 'gastoDepartamento', label: 'Gasto departamento (catálogo Excel)', value: gastoDepartamento, group: 'gasto' },
+    { key: 'utilidadBruta', label: 'Utilidad bruta / MC preliminar', value: utilidadBruta, group: 'resultado', highlight: true },
+    { key: 'gastoDepartamento', label: 'Gastos fijos provisionales (depto)', value: gastoDepartamento, group: 'gasto' },
     { key: 'gastosOperacion', label: 'Gastos de operación total (0700)', value: gastosOperacion, group: 'gasto' },
     { key: 'utilidadOperacion', label: 'Utilidad de operación', value: utilidadOperacion, group: 'resultado', highlight: true },
-    { key: 'margenBrutoPct', label: 'Margen bruto %', value: margenBrutoPct, group: 'ratio', suffix: '%' },
+    { key: 'margenBrutoPct', label: 'Margen contribución %', value: margenBrutoPct, group: 'ratio', suffix: '%' },
     { key: 'puntoEquilibrio', label: 'Punto de equilibrio ($)', value: puntoEquilibrio, group: 'ratio', highlight: true },
   ];
 
@@ -412,7 +414,7 @@ async function getCatalogKpis({ fechaInicio, fechaFin, sucursal = 'todos', area 
       gastos: 'Gasto departamento: CTA_GPOCONT por área (Excel) · Gastos operación: total 0700',
       utilidadBruta: 'Ventas − Costo de ventas',
       utilidadOperacion: 'Utilidad bruta − Gastos de operación',
-      puntoEquilibrio: 'Gastos operación ÷ (Utilidad bruta ÷ Ventas)',
+      puntoEquilibrio: 'Gastos fijos (depto) ÷ (Margen contribución ÷ Ventas) — preliminar operativo',
     },
     filtros: {
       sucursal: scope.sucursal,

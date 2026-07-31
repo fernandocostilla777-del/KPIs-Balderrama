@@ -1,6 +1,11 @@
 let ageingChart;
 let situacionChart;
 let familiaChart;
+let intHistChart;
+let intHistRows = [];
+let intHistSearch = '';
+let intHistFilter = 'all';
+let intHistData = null;
 let inventoryRows = [];
 let planPisoRows = [];
 let planPisoPeriodLabel = 'Todo (acumulado a hoy)';
@@ -252,6 +257,14 @@ function isSofiaKpi(kpiId) {
   return kpiId === 'entregasSinPrevias';
 }
 
+function isFacturadoRow(r) {
+  return Boolean(r && r._kind === 'facturado');
+}
+
+function facturadoSinPreviasRows() {
+  return (window.__invFacturadoSinPrevias || []).slice();
+}
+
 function rowsForAutosKpi(kpiId) {
   if (kpiId === 'available') {
     return inventoryRows.filter((r) => r.situacion === 'DIS' || r.situacion === 'FIS' || r.situacion === 'SEP');
@@ -331,7 +344,19 @@ function downloadAutosKpiCsv(rows, title, kpi) {
   const stamp = new Date().toISOString().slice(0, 10);
   let headers;
   let lines;
-  if (isSofiaKpi(kpi)) {
+  const facturado = rows.length > 0 && rows.every(isFacturadoRow);
+  if (facturado) {
+    headers = ['Fecha', 'Factura', 'VIN', 'Modelo', 'Previas', 'Cliente', 'Vendedor'];
+    lines = rows.map((r) => [
+      r.VTE_FECHDOCTO || '',
+      r.VTE_DOCTO || '',
+      r.VTE_SERIE || '',
+      r.VEH_TIPOAUTO || '',
+      Number(r.PREVIAS || 0),
+      r.CLIENTE || '',
+      r.VENDEDOR || '',
+    ]);
+  } else if (isSofiaKpi(kpi)) {
     headers = ['Fecha', 'Registro', 'Hora', 'Factura', 'VIN', 'Previas', 'Cliente', 'Estatus', 'Usuario'];
     lines = rows.map((r) => [
       r.FECHA_PERIODO || r.SOF_FechFact || '',
@@ -453,6 +478,7 @@ function ensureAutosKpiDrawer() {
 
   let expanded = false;
   let activeFilter = null;
+  let alcanceMode = 'default'; // 'default' | 'FACTURADO'
   let sourceRows = [];
   let lastExportRows = [];
   let currentMeta = { kpi: '', title: 'Inventario', hint: '', icon: 'directions_car' };
@@ -465,6 +491,7 @@ function ensureAutosKpiDrawer() {
     ubicacion: 'Ubicación',
     estatus: 'Estatus',
     usuario: 'Usuario',
+    alcance: 'Alcance',
   };
 
   function placeNearKpi(card) {
@@ -502,6 +529,14 @@ function ensureAutosKpiDrawer() {
 
   function updateFilterChip() {
     if (!filterChip) return;
+    if (showingFacturado() && !activeFilter) {
+      filterChip.hidden = false;
+      filterChip.innerHTML = `
+        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+        Alcance: Facturado sin previa
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
+      return;
+    }
     if (!activeFilter) {
       filterChip.hidden = true;
       filterChip.textContent = '';
@@ -514,8 +549,22 @@ function ensureAutosKpiDrawer() {
       <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
   }
 
+  function showingFacturado() {
+    return alcanceMode === 'FACTURADO'
+      && (currentMeta.kpi === 'sinPrevias' || currentMeta.kpi === 'entregasSinPrevias');
+  }
+
   function matchesActiveFilter(r) {
     if (!activeFilter) return true;
+    if (showingFacturado() || isFacturadoRow(r)) {
+      if (activeFilter.dim === 'modelo') {
+        return String(r.VEH_TIPOAUTO || r.tipoAuto || 'Sin modelo') === activeFilter.value;
+      }
+      if (activeFilter.dim === 'vendedor') {
+        return String(r.VENDEDOR || 'Sin vendedor') === activeFilter.value;
+      }
+      return true;
+    }
     if (isSofiaKpi(currentMeta.kpi)) {
       if (activeFilter.dim === 'estatus') return String(r.SOF_Estatus || 'Sin estatus') === activeFilter.value;
       if (activeFilter.dim === 'usuario') return String(r.SOF_CveUSu || 'Sin usuario') === activeFilter.value;
@@ -529,12 +578,31 @@ function ensureAutosKpiDrawer() {
   }
 
   function setFilter(dim, value, label) {
+    if (dim === 'alcance') {
+      const next = value === 'FACTURADO' ? 'FACTURADO' : 'default';
+      if (alcanceMode === next && (!activeFilter || activeFilter.dim === 'alcance')) {
+        alcanceMode = 'default';
+      } else {
+        alcanceMode = next;
+      }
+      activeFilter = null;
+      autosKpiFilter = null;
+      updateFilterChip();
+      renderList(searchEl?.value || '');
+      applyAutosKpiTableFilter();
+      return;
+    }
+
     if (activeFilter && activeFilter.dim === dim && activeFilter.value === value) {
       activeFilter = null;
       autosKpiFilter = null;
     } else {
       activeFilter = { dim, value, label: label || value };
-      if (!isSofiaKpi(currentMeta.kpi) && (dim === 'situacion' || dim === 'familia' || dim === 'modelo')) {
+      if (
+        !showingFacturado()
+        && !isSofiaKpi(currentMeta.kpi)
+        && (dim === 'situacion' || dim === 'familia' || dim === 'modelo')
+      ) {
         autosKpiFilter = { kpi: currentMeta.kpi, dim, id: value, label: label || value };
       } else {
         autosKpiFilter = null;
@@ -547,6 +615,7 @@ function ensureAutosKpiDrawer() {
 
   function clearFilter() {
     activeFilter = null;
+    alcanceMode = 'default';
     autosKpiFilter = null;
     updateFilterChip();
     renderList(searchEl?.value || '');
@@ -572,6 +641,59 @@ function ensureAutosKpiDrawer() {
           : '<p class="ops-orders-drawer__hint">Sin datos</p>'}
       </div>`;
 
+    const showingFact = showingFacturado();
+    const factCount = facturadoSinPreviasRows().length;
+    const alcanceItems = currentMeta.kpi === 'sinPrevias'
+      ? [
+        { label: 'En stock', value: rowsForAutosKpi('sinPrevias').length, id: 'STOCK' },
+        { label: 'Facturado sin previa', value: factCount, id: 'FACTURADO' },
+      ]
+      : currentMeta.kpi === 'entregasSinPrevias'
+        ? [
+          { label: 'Entregas SOFIA', value: (window.__invSofiaSinPrevias || []).length, id: 'ENTREGA' },
+          { label: 'Facturado sin previa', value: factCount, id: 'FACTURADO' },
+        ]
+        : null;
+
+    const isAlcanceActive = (id) => (
+      id === 'FACTURADO'
+        ? alcanceMode === 'FACTURADO'
+        : alcanceMode === 'default'
+    );
+
+    const alcanceBlock = alcanceItems
+      ? `
+      <div class="ops-orders-drawer__group">
+        <h5>Alcance</h5>
+        ${alcanceItems.map((x) => `
+          <button type="button"
+            class="ops-orders-drawer__row ops-orders-drawer__row--filter${isAlcanceActive(x.id) ? ' is-active' : ''}"
+            data-autos-filter-dim="alcance"
+            data-autos-filter-value="${escapeHtml(x.id)}"
+            data-autos-filter-label="${escapeHtml(x.label)}"
+            title="Filtrar por ${escapeHtml(x.label)}">
+            <span class="lbl">${escapeHtml(x.label)}</span>
+            <span class="val">${Number(x.value).toLocaleString('es-MX')}</span>
+          </button>`).join('')}
+      </div>`
+      : '';
+
+    if (showingFact) {
+      const porModelo = countByField(rows, (r) => r.VEH_TIPOAUTO || r.tipoAuto || 'Sin modelo').slice(0, 10);
+      const porVendedor = countByField(rows, (r) => r.VENDEDOR || 'Sin vendedor').slice(0, 10);
+      summaryEl.innerHTML = `
+        <div class="ops-orders-drawer__group">
+          <h5>Resumen</h5>
+          <div class="ops-orders-drawer__row"><span class="lbl">Facturas</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+          <p class="ops-orders-drawer__hint">Ventas facturadas del mes (VEN) sin órdenes de previa</p>
+        </div>
+        ${alcanceBlock}
+        ${block('Por modelo', 'modelo', porModelo)}
+        ${block('Por vendedor', 'vendedor', porVendedor)}
+      `;
+      return;
+    }
+
     if (isSofiaKpi(currentMeta.kpi)) {
       const porEstatus = countByField(rows, (r) => r.SOF_Estatus || 'Sin estatus').slice(0, 10);
       const porUsuario = countByField(rows, (r) => r.SOF_CveUSu || 'Sin usuario').slice(0, 10);
@@ -582,6 +704,7 @@ function ensureAutosKpiDrawer() {
           <div class="ops-orders-drawer__row"><span class="lbl">SOFIA mes</span><span class="val">${Number(window.__invSofiaTotalMes || 0).toLocaleString('es-MX')}</span></div>
           <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
         </div>
+        ${alcanceBlock}
         ${block('Por estatus', 'estatus', porEstatus)}
         ${block('Por usuario', 'usuario', porUsuario)}
       `;
@@ -630,6 +753,7 @@ function ensureAutosKpiDrawer() {
         ` : ''}
         <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
       </div>
+      ${alcanceBlock}
       ${situacionBlock}
       ${block('Por familia', 'familia', porFamilia)}
       ${block('Por modelo', 'modelo', porModelo)}
@@ -638,11 +762,17 @@ function ensureAutosKpiDrawer() {
 
   function renderList(term = '') {
     const q = String(term || '').trim().toLowerCase();
-    const sofia = isSofiaKpi(currentMeta.kpi);
+    const showingFact = showingFacturado();
+    const sofia = isSofiaKpi(currentMeta.kpi) && !showingFact;
+    const viewRows = showingFact ? facturadoSinPreviasRows() : sourceRows;
 
     const searched = !q
-      ? sourceRows
-      : sourceRows.filter((r) => {
+      ? viewRows
+      : viewRows.filter((r) => {
+        if (showingFact || isFacturadoRow(r)) {
+          return [r.VTE_FECHDOCTO, r.VTE_DOCTO, r.VTE_SERIE, r.VEH_TIPOAUTO, r.CLIENTE, r.VENDEDOR, r.PREVIAS]
+            .some((v) => String(v || '').toLowerCase().includes(q));
+        }
         const fields = sofia
           ? [r.FECHA_PERIODO, r.SOF_FechAct, r.SOF_HoraAct, r.SOF_Factura, r.SOF_VIN, r.CLIENTE, r.SOF_Estatus, r.SOF_CveUSu, r.PREVIAS]
           : [
@@ -656,12 +786,14 @@ function ensureAutosKpiDrawer() {
     const filtered = searched.filter(matchesActiveFilter);
     lastExportRows = filtered;
 
-    statusEl.textContent = sofia
-      ? `${filtered.length.toLocaleString('es-MX')} entrega(s)`
-      : `${filtered.length.toLocaleString('es-MX')} unidad(es)`;
-    metaEl.textContent = activeFilter || q
-      ? `${filtered.length} de ${sourceRows.length}`
-      : `${sourceRows.length} registros`;
+    statusEl.textContent = showingFact
+      ? `${filtered.length.toLocaleString('es-MX')} factura(s)`
+      : sofia
+        ? `${filtered.length.toLocaleString('es-MX')} entrega(s)`
+        : `${filtered.length.toLocaleString('es-MX')} unidad(es)`;
+    metaEl.textContent = activeFilter || showingFact || q
+      ? `${filtered.length} de ${viewRows.length}`
+      : `${viewRows.length} registros`;
 
     renderSummary(searched);
     updateFilterChip();
@@ -672,8 +804,35 @@ function ensureAutosKpiDrawer() {
           <span class="material-symbols-outlined">inbox</span>
           <p>${activeFilter || q
             ? 'Sin coincidencias con el filtro actual.'
-            : (sofia ? 'No hay entregas SOFIA sin previa en el mes.' : 'No hay unidades para este indicador.')}</p>
+            : (showingFact
+              ? 'No hay facturas del mes sin previa.'
+              : (sofia ? 'No hay entregas SOFIA sin previa en el mes.' : 'No hay unidades para este indicador.'))}</p>
         </div>`;
+      return;
+    }
+
+    if (showingFact) {
+      bodyEl.innerHTML = `
+        <div class="ops-orders-drawer__list-head">
+          <h5>Facturado sin previa</h5>
+          <span>${filtered.length.toLocaleString('es-MX')}</span>
+        </div>
+        ${filtered.map((r) => `
+          <div class="ops-orders-drawer__item" style="cursor:default">
+            <div class="ops-orders-drawer__item-head">
+              <strong>${escapeHtml(dash(r.VTE_DOCTO))}</strong>
+              <span class="ops-orders-drawer__tag">Facturado</span>
+            </div>
+            <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.CLIENTE))} · VIN ${escapeHtml(dash(r.VTE_SERIE))}</p>
+            <div class="ops-orders-drawer__facts">
+              <span>${escapeHtml(dash(r.VTE_FECHDOCTO))}</span>
+              <span>${escapeHtml(dash(r.VEH_TIPOAUTO))}</span>
+              <span>Previas ${Number(r.PREVIAS || 0)}</span>
+            </div>
+            <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+              <span>${escapeHtml(dash(r.VENDEDOR))}</span>
+            </div>
+          </div>`).join('')}`;
       return;
     }
 
@@ -742,6 +901,7 @@ function ensureAutosKpiDrawer() {
     lastCard = null;
     activeAutosKpi = null;
     autosKpiFilter = null;
+    alcanceMode = 'default';
     syncAutosKpiCards();
     applyAutosKpiTableFilter();
   }
@@ -765,6 +925,7 @@ function ensureAutosKpiDrawer() {
     activeAutosKpi = kpiKey;
     autosKpiFilter = null;
     activeFilter = null;
+    alcanceMode = 'default';
 
     if (titleEl) titleEl.textContent = currentMeta.title;
     if (logoEl) logoEl.textContent = currentMeta.icon;
@@ -772,7 +933,9 @@ function ensureAutosKpiDrawer() {
     if (searchEl) {
       searchEl.placeholder = isSofiaKpi(kpiKey)
         ? 'Buscar factura, VIN, cliente...'
-        : 'Buscar modelo, serie, ubicación...';
+        : kpiKey === 'sinPrevias'
+          ? 'Buscar modelo, serie, factura...'
+          : 'Buscar modelo, serie, ubicación...';
       searchEl.value = '';
     }
 
@@ -1097,17 +1260,29 @@ async function loadEntregasSinPreviasMes() {
     const sinPrevias = entregas.filter((r) => Number(r.PREVIAS || 0) === 0);
     window.__invSofiaSinPrevias = sinPrevias;
     window.__invSofiaTotalMes = entregas.length;
+    const facturado = (data.registros || [])
+      .filter((r) => Number(r.PREVIAS || 0) === 0)
+      .map((r) => ({ ...r, _kind: 'facturado' }));
+    window.__invFacturadoSinPrevias = facturado;
     const conPrevias = entregas.length - sinPrevias.length;
     setText('sEntregasSinPrevias', fmt.number(sinPrevias.length));
-    setText('sEntregasSinPreviasSub', `${fmt.number(conPrevias)} con previas · ${range.label}`);
-    if (activeAutosKpi === 'entregasSinPrevias') ensureAutosKpiDrawer().refresh();
+    setText(
+      'sEntregasSinPreviasSub',
+      `${fmt.number(conPrevias)} con previas · ${fmt.number(facturado.length)} fact. sin previa · ${range.label}`
+    );
+    if (activeAutosKpi === 'entregasSinPrevias' || activeAutosKpi === 'sinPrevias') {
+      ensureAutosKpiDrawer().refresh();
+    }
   } catch (err) {
     console.warn('[Inventario] Entregas sin previa:', err.message);
     window.__invSofiaSinPrevias = [];
     window.__invSofiaTotalMes = 0;
+    window.__invFacturadoSinPrevias = [];
     setText('sEntregasSinPrevias', '—');
     setText('sEntregasSinPreviasSub', 'No se pudo cargar SOFIA del mes');
-    if (activeAutosKpi === 'entregasSinPrevias') ensureAutosKpiDrawer().refresh();
+    if (activeAutosKpi === 'entregasSinPrevias' || activeAutosKpi === 'sinPrevias') {
+      ensureAutosKpiDrawer().refresh();
+    }
   }
 }
 
@@ -1334,10 +1509,254 @@ document.getElementById('autosKpiGrid')?.addEventListener('click', (e) => {
   }
 });
 
+function isoDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function initIntercambiosHistoricoDates() {
+  const inicioEl = document.getElementById('intHistFechaInicio');
+  const finEl = document.getElementById('intHistFechaFin');
+  if (!inicioEl || !finEl) return;
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  if (!inicioEl.value) inicioEl.value = isoDate(start);
+  if (!finEl.value) finEl.value = isoDate(now);
+}
+
+function formatIntHistDate(v) {
+  if (!v) return '—';
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y, m, d] = s.slice(0, 10).split('-');
+    return `${d}/${m}/${y}`;
+  }
+  return s.slice(0, 10);
+}
+
+function intSeverityBadge(severity) {
+  const map = {
+    ok: { cls: 'int-sev--ok', label: 'OK' },
+    warning: { cls: 'int-sev--warning', label: 'Adv.' },
+    critical: { cls: 'int-sev--critical', label: 'Crítica' },
+  };
+  const m = map[severity] || map.warning;
+  return `<span class="int-sev ${m.cls}">${m.label}</span>`;
+}
+
+function filteredIntHistRows() {
+  let rows = intHistRows;
+  if (intHistFilter && intHistFilter !== 'all') {
+    rows = rows.filter((r) => r.severity === intHistFilter);
+  }
+  const q = String(intHistSearch || '').trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) => {
+    const hay = [
+      r.serie, r.canjePor, r.vinEntrante, r.modelo, r.modeloEntrante,
+      r.title, r.detail, r.action, r.ruleId, r.concCanje, r.cliente, r.vendedor,
+    ].map((x) => String(x || '').toLowerCase()).join(' ');
+    return hay.includes(q);
+  });
+}
+
+function renderIntercambiosAlerts(alertas = []) {
+  const box = document.getElementById('intHistAlerts');
+  if (!box) return;
+  if (!alertas.length) {
+    box.innerHTML = `<div class="int-acq-alert int-acq-alert--ok">
+      <span class="material-symbols-outlined int-acq-alert__icon">verified</span>
+      <div>
+        <p class="int-acq-alert__title">Sin alertas abiertas</p>
+        <p class="int-acq-alert__meta">Las adquisiciones del periodo están correctas o en proceso sano.</p>
+      </div>
+    </div>`;
+    return;
+  }
+  box.innerHTML = alertas.slice(0, 12).map((a) => `
+    <article class="int-acq-alert int-acq-alert--${a.severity === 'critical' ? 'critical' : 'warning'}">
+      <span class="material-symbols-outlined int-acq-alert__icon">${a.severity === 'critical' ? 'error' : 'warning'}</span>
+      <div>
+        <p class="int-acq-alert__title">${a.title || 'Alerta'}</p>
+        <p class="int-acq-alert__meta">${formatIntHistDate(a.fecha)} · ${a.vinSaliente || '—'} → ${a.vinEntrante || 'sin VIN'} · ${a.diasDesdeVenta != null ? `${a.diasDesdeVenta}d` : '—'}</p>
+        <p class="int-acq-alert__action">${a.action || a.detail || ''}</p>
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderIntercambiosBanner(summary = {}) {
+  const el = document.getElementById('intHistAlertBanner');
+  if (!el) return;
+  const critical = Number(summary.critical || 0);
+  const warning = Number(summary.warning || 0);
+  const total = Number(summary.total || 0);
+  el.hidden = false;
+  if (!total) {
+    el.className = 'int-acq-banner int-acq-banner--ok';
+    el.textContent = 'Sin canjes/intercambios en el periodo seleccionado.';
+    return;
+  }
+  if (critical > 0) {
+    el.className = 'int-acq-banner int-acq-banner--critical';
+    el.textContent = `${critical} adquisición(es) crítica(s): falta VIN entrante o el alta no cuadra. Revisar captura CANJEPOR.`;
+    return;
+  }
+  if (warning > 0) {
+    el.className = 'int-acq-banner int-acq-banner--warning';
+    el.textContent = `${warning} advertencia(s): adquisiciones incompletas o en proceso atrasado.`;
+    return;
+  }
+  el.className = 'int-acq-banner int-acq-banner--ok';
+  el.textContent = `Adquisiciones correctas: ${summary.calidadPct || 0}% de calidad en el periodo.`;
+}
+
+function renderIntercambiosHistoricoTable() {
+  const body = document.getElementById('intHistTableBody');
+  const meta = document.getElementById('intHistSearchMeta');
+  if (!body) return;
+  const rows = filteredIntHistRows();
+  if (meta) {
+    if (intHistSearch.trim() || intHistFilter !== 'all') {
+      meta.classList.remove('hidden');
+      meta.textContent = `${rows.length} de ${intHistRows.length}`;
+    } else {
+      meta.classList.add('hidden');
+    }
+  }
+  if (!rows.length) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="9">${intHistRows.length ? 'Sin coincidencias para el filtro.' : 'Sin canjes en el periodo.'}</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((r) => `
+    <tr>
+      <td>${intSeverityBadge(r.severity)}</td>
+      <td>${formatIntHistDate(r.fecha)}</td>
+      <td><strong>${r.serie || '—'}</strong></td>
+      <td>${r.canjePor || r.vinEntrante || '—'}</td>
+      <td>${r.sitEntranteLabel || r.sitEntrante || '—'}</td>
+      <td>${r.modelo || '—'}</td>
+      <td class="cell-num">${r.diasDesdeVenta != null ? r.diasDesdeVenta : '—'}</td>
+      <td title="${(r.detail || '').replace(/"/g, '&quot;')}">${r.title || '—'}</td>
+      <td>${r.action || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+function renderIntercambiosHistorico(data) {
+  const { fmt, chartOptions, chartColors, setText } = Dashboard;
+  intHistData = data || null;
+  const s = data?.summary || {};
+  setText('intHistCritical', fmt.number(s.critical || 0));
+  setText('intHistWarning', fmt.number(s.warning || 0));
+  setText('intHistOk', fmt.number(s.ok || 0));
+  setText('intHistCalidad', s.calidadPct != null ? `${s.calidadPct}%` : '—');
+  setText('intHistCobertura', `Cobertura VIN entrante ${s.coberturaPct != null ? `${s.coberturaPct}%` : '—'} · ${fmt.number(s.total || 0)} canjes`);
+  setText('intHistCount', `${fmt.number(s.alertasAbiertas || 0)} alerta(s) · ${fmt.number(s.total || 0)} canje(s)`);
+  const sub = document.getElementById('intHistSubtitle');
+  if (sub && data?.periodo) {
+    sub.textContent = `Periodo ${data.periodo.fechaInicio} → ${data.periodo.fechaFin} · Valida CANJEPOR y alta de la unidad entrante`;
+  }
+
+  intHistRows = data?.rows || [];
+  renderIntercambiosBanner(s);
+  renderIntercambiosAlerts(data?.alertas || []);
+  renderIntercambiosHistoricoTable();
+
+  destroyChart(intHistChart);
+  const canvas = document.getElementById('intHistChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const porMes = data?.porMes || [];
+  intHistChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: porMes.map((m) => m.label),
+      datasets: [{
+        label: 'Canjes',
+        data: porMes.map((m) => m.count),
+        backgroundColor: chartColors?.secondary || 'rgba(37, 99, 235, 0.55)',
+        borderRadius: 8,
+      }],
+    },
+    options: chartOptions({
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+      },
+    }),
+  });
+}
+
+async function loadIntercambiosHistorico() {
+  const { api } = Dashboard;
+  const inicioEl = document.getElementById('intHistFechaInicio');
+  const finEl = document.getElementById('intHistFechaFin');
+  const status = document.getElementById('statusBadge');
+  if (!inicioEl || !finEl) return;
+  initIntercambiosHistoricoDates();
+  const fechaInicio = inicioEl.value;
+  const fechaFin = finEl.value;
+  if (!fechaInicio || !fechaFin) return;
+
+  try {
+    if (status) {
+      status.textContent = 'Validando adquisiciones por canje...';
+      status.className = 'sidebar-status-line status-loading';
+    }
+    const data = await api(
+      `/inventory/intercambios?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`
+    );
+    renderIntercambiosHistorico(data);
+    if (status) {
+      const abiertas = data.summary?.alertasAbiertas || 0;
+      status.textContent = abiertas
+        ? `${abiertas} alertas de adquisición por canje`
+        : `${data.summary?.total || 0} canjes · adquisición OK`;
+      status.className = 'sidebar-status-line';
+    }
+  } catch (err) {
+    console.error('[Intercambios adquisición]', err);
+    intHistRows = [];
+    intHistData = null;
+    renderIntercambiosHistoricoTable();
+    const sub = document.getElementById('intHistSubtitle');
+    if (sub) sub.textContent = err.message || 'No se pudo validar adquisiciones';
+    if (status) {
+      status.textContent = err.message;
+      status.className = 'sidebar-status-line status-error';
+    }
+  }
+}
+
+document.getElementById('btnIntHistConsultar')?.addEventListener('click', () => {
+  loadIntercambiosHistorico();
+});
+document.getElementById('buscarIntHist')?.addEventListener('input', (e) => {
+  intHistSearch = e.target.value || '';
+  renderIntercambiosHistoricoTable();
+});
+document.getElementById('intHistFilterTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-int-filter]');
+  if (!btn) return;
+  intHistFilter = btn.dataset.intFilter || 'all';
+  document.querySelectorAll('#intHistFilterTabs [data-int-filter]').forEach((el) => {
+    const on = el.dataset.intFilter === intHistFilter;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  renderIntercambiosHistoricoTable();
+});
+
 const params = new URLSearchParams(window.location.search);
 if (params.get('tab') === 'postventa') setInventoryScope('postventa');
 else setInventoryScope('autos');
 
 initPlanPisoKpiCard();
+initIntercambiosHistoricoDates();
 
-loadInventory();
+loadInventory().finally(() => {
+  loadIntercambiosHistorico();
+});

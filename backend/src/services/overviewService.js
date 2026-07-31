@@ -3,6 +3,7 @@ const { loadVentasNuevosFinancial } = require('./ventasNuevosFinanciero');
 const { loadSalesExecutiveAnalytics } = require('./salesExecutiveAnalytics');
 const { getVentas } = require('./ventas');
 const { getInventory } = require('./inventoryService');
+const { getPuntoEquilibrio } = require('./breakEvenService');
 
 function buildSerDateClause(fechaInicio, fechaFin) {
   if (!fechaInicio || !fechaFin) return { clause: '', params: {} };
@@ -80,6 +81,7 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     salesAnalytics,
     ventasOps,
     inventoryOps,
+    puntoEquilibrio,
   ] = await Promise.all([
     loadVentasNuevosFinancial({ fechaInicio, fechaFin }),
     query(`
@@ -103,6 +105,10 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     }),
     getInventory({ planPisoPeriod: 'all' }).catch((err) => {
       console.warn('[overview] inventory ops:', err.message);
+      return null;
+    }),
+    getPuntoEquilibrio({ fechaInicio, fechaFin }).catch((err) => {
+      console.warn('[overview] puntoEquilibrio:', err.message);
       return null;
     }),
   ]);
@@ -179,6 +185,7 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     financial: { sales, inventory, service, consolidated },
     operaciones,
     salesAnalytics,
+    puntoEquilibrio,
     kpis: {
       totalUnits: sales.units,
       totalRevenue: sales.revenue,

@@ -67,6 +67,14 @@ npm run start:frontend  # solo UI
 
 Abra **http://localhost:5173** (o la IP LAN que muestre la consola del frontend).
 
+## Documentación
+
+| Documento | Contenido |
+|-----------|-----------|
+| [`DOCUMENTACION.md`](./DOCUMENTACION.md) | Arquitectura y módulos del dashboard |
+| [`DOCUMENTACION-MIGRACION.md`](./DOCUMENTACION-MIGRACION.md) | Guía para migrar a otra base de datos |
+| [`cloud-api/DEPLOY_RAILWAY.md`](./cloud-api/DEPLOY_RAILWAY.md) | Despliegue cloud-api en Railway |
+
 ## Módulos
 
 | Ruta | Descripción |

@@ -40,6 +40,25 @@
           <span class="material-symbols-outlined">smart_toy</span>
           Más información en el asistente
         </button>
+        <button type="button" class="btn-glass" data-insight-assign>
+          <span class="material-symbols-outlined">assignment_ind</span>
+          Asignar seguimiento
+        </button>
+      </div>
+      <div class="kpi-insight-assign hidden" data-insight-assign-panel>
+        <label class="kpi-insight-assign__label">Responsable
+          <select data-insight-to>
+            <option value="">Cargando usuarios…</option>
+          </select>
+        </label>
+        <label class="kpi-insight-assign__label">Nota de seguimiento
+          <textarea data-insight-note rows="3" maxlength="2000" placeholder="Qué debe revisar o resolver el responsable…"></textarea>
+        </label>
+        <div class="kpi-insight-assign__actions">
+          <button type="button" class="btn-glass" data-insight-assign-cancel>Cancelar</button>
+          <button type="button" class="btn-glass btn-primary" data-insight-assign-send>Enviar</button>
+        </div>
+        <p class="kpi-insight-assign__status" data-insight-assign-status hidden></p>
       </div>
     `;
     document.body.appendChild(el);
@@ -55,6 +74,9 @@
         window.alert('El asistente IA no está disponible en esta página.');
       }
     });
+    el.querySelector('[data-insight-assign]')?.addEventListener('click', () => toggleAssignPanel(true));
+    el.querySelector('[data-insight-assign-cancel]')?.addEventListener('click', () => toggleAssignPanel(false));
+    el.querySelector('[data-insight-assign-send]')?.addEventListener('click', sendAssignFollowup);
 
     document.addEventListener('click', (e) => {
       if (!STATE.popover || STATE.popover.classList.contains('hidden')) return;
@@ -70,9 +92,115 @@
     return el;
   }
 
+  function moduleFromPath() {
+    const p = window.location.pathname || '';
+    if (p.includes('sales')) return 'ventas';
+    if (p.includes('inventory')) return 'inventario';
+    if (p.includes('forecast')) return 'forecast';
+    if (p.includes('post-sales')) return 'postventa';
+    if (p.includes('seguimiento')) return 'seguimiento';
+    if (p.includes('contabilidad')) return 'contabilidad';
+    return 'overview';
+  }
+
+  async function loadDirectoryOptions(select) {
+    if (!select) return;
+    try {
+      const res = await fetch('/api/auth/directory', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      const users = data.users || [];
+      select.innerHTML = users.length
+        ? `<option value="">Seleccione responsable…</option>${users.map((u) =>
+          `<option value="${esc(u.username)}">${esc(u.username)} · ${esc(u.roleLabel || u.role)}</option>`
+        ).join('')}`
+        : '<option value="">No hay otros usuarios</option>';
+    } catch (err) {
+      select.innerHTML = `<option value="">${esc(err.message || 'Error al cargar')}</option>`;
+    }
+  }
+
+  function toggleAssignPanel(show) {
+    const pop = ensurePopover();
+    const panel = pop.querySelector('[data-insight-assign-panel]');
+    const status = pop.querySelector('[data-insight-assign-status]');
+    if (!panel) return;
+    panel.classList.toggle('hidden', !show);
+    if (status) {
+      status.hidden = true;
+      status.textContent = '';
+    }
+    if (show) {
+      const select = pop.querySelector('[data-insight-to]');
+      const note = pop.querySelector('[data-insight-note]');
+      const insight = STATE.byKpi.get(STATE.activeId);
+      if (note && insight) {
+        note.value = `Seguimiento: ${insight.title || ''}\n${insight.summary || ''}`.trim();
+      }
+      loadDirectoryOptions(select);
+    }
+  }
+
+  async function sendAssignFollowup() {
+    const pop = ensurePopover();
+    const insight = STATE.byKpi.get(STATE.activeId);
+    const toUsername = pop.querySelector('[data-insight-to]')?.value;
+    const body = pop.querySelector('[data-insight-note]')?.value || '';
+    const status = pop.querySelector('[data-insight-assign-status]');
+    if (!insight) return;
+    if (!toUsername) {
+      if (status) {
+        status.hidden = false;
+        status.textContent = 'Seleccione un responsable.';
+      }
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/messages', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toUsername,
+          type: 'followup',
+          subject: `Seguimiento: ${insight.title || 'Alerta inteligente'}`,
+          body: String(body || insight.summary || insight.title || 'Revisar alerta inteligente').trim(),
+          source: {
+            kind: 'kpi_insight',
+            module: moduleFromPath(),
+            kpiId: insight.kpiId,
+            severity: insight.severity,
+            insightTitle: insight.title,
+            insightSummary: insight.summary,
+            href: `${window.location.pathname}${window.location.search || ''}`,
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      if (status) {
+        status.hidden = false;
+        status.textContent = `Enviado a ${toUsername}.`;
+      }
+      window.setTimeout(() => {
+        toggleAssignPanel(false);
+        closePopover();
+        if (window.MessagesCenter?.openInbox) {
+          /* opcional: no abrir automáticamente */
+        }
+      }, 900);
+    } catch (err) {
+      if (status) {
+        status.hidden = false;
+        status.textContent = err.message || 'No se pudo asignar.';
+      }
+    }
+  }
+
   function closePopover() {
     const el = STATE.popover;
     if (!el) return;
+    el.querySelector('[data-insight-assign-panel]')?.classList.add('hidden');
     el.classList.add('hidden');
     STATE.activeId = null;
   }
@@ -125,11 +253,20 @@
     let host = document.getElementById(insight.kpiId);
     if (!host) return;
 
-    // If host is not a card, wrap visual on closest card or mark the element itself
-    const card = host.classList.contains('kpi-card') ? host : (host.closest('.kpi-card') || host);
+    // Si el host es un ancla dedicada (p. ej. tomasInsightAnchor), el botón vive ahí.
+    // Si es un kpi-card / sección, se ancla al card contenedor.
+    const isAnchor = host.classList.contains('tomas-insight-anchor')
+      || host.classList.contains('kpi-insight-anchor');
+    const card = isAnchor
+      ? host
+      : (host.classList.contains('kpi-card') ? host : (host.closest('.kpi-card') || host));
     STATE.byKpi.set(insight.kpiId, insight);
-    card.classList.add('kpi-card--has-insight');
-    if (insight.severity === 'critical') card.classList.add('kpi-card--insight-critical');
+    if (!isAnchor) {
+      card.classList.add('kpi-card--has-insight');
+      if (insight.severity === 'critical') card.classList.add('kpi-card--insight-critical');
+    } else if (insight.severity === 'critical') {
+      host.classList.add('is-critical');
+    }
 
     if (card.querySelector(`.kpi-insight-btn[data-kpi="${insight.kpiId}"]`)) return;
 
@@ -152,7 +289,7 @@
       openPopover(current, btn);
     });
 
-    if (getComputedStyle(card).position === 'static') {
+    if (!isAnchor && getComputedStyle(card).position === 'static') {
       card.style.position = 'relative';
     }
     card.appendChild(btn);

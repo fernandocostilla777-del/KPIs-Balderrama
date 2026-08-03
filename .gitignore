@@ -16,6 +16,7 @@ backend/data/users.json
 backend/data/sales-goals.json
 backend/data/financiamiento-notes.json
 backend/data/rolePermissions.json
+backend/data/messages.json
 backend/data/crm-ciclos.db
 backend/data/crm-ciclos.db-*
 backend/data/leads-source.xlsx

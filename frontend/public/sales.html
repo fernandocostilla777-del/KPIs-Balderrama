@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=106" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=52" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -103,10 +103,16 @@ Afluencia
 <div id="kpiFlotillas" class="kpi-value">0</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="flotillas"></span></div>
 </div>
+<div class="kpi-card-anchor" id="kpiEntregasSofiaWrap">
 <div class="kpi-card kpi-card--magenta kpi-card--interactive" id="kpiCardEntregasSofia" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle de entregas SOFIA">
-<div class="kpi-card-head"><span class="kpi-title">Notif. entrega SOFIA</span><span class="material-symbols-outlined kpi-icon">notifications_active</span></div>
+<div class="kpi-card-head"><span class="kpi-title">Notif. entrega SOFIA</span></div>
 <div id="kpiEntregasSofia" class="kpi-value">0</div>
+<p id="kpiEntregasSofiaSub" class="kpi-subtitle">Sin flotilla · sí Flotilla GMF</p>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="sofia"></span></div>
+</div>
+<button type="button" id="btnRefreshEntregasSofia" class="kpi-card-refresh-btn" title="Actualizar notificaciones SOFIA (manual)" aria-label="Actualizar notificaciones de entrega SOFIA">
+<span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+</button>
 </div>
 <button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
 <div class="kpi-card-head"><span class="kpi-title">Carry over para facturar</span><span class="material-symbols-outlined kpi-icon">pending_actions</span></div>
@@ -115,7 +121,7 @@ Afluencia
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="carryOver"></span></div>
 </button>
-<div class="kpi-card kpi-card--violet" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Sin timbrar = facturadas − reportadas.">
+<div class="kpi-card kpi-card--violet" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye flotilla FLOT; sí cuenta Flotilla GMF (FLOTGMF).">
 <div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
 <div id="kpiCobertura" class="kpi-value">—</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="cobertura"></span></div>
@@ -336,6 +342,73 @@ Afluencia
 </div>
 </section>
 
+<section id="sectionTomasACuenta" class="section-panel dashboard-section tomas-section" aria-label="Tomas a cuenta">
+<div class="tomas-section__header-row">
+<div class="tomas-section__head-left">
+<div class="tomas-section__title-line">
+<h3 class="section-title" style="margin-bottom:0">Tomas a cuenta</h3>
+<span id="tomasInsightAnchor" class="tomas-insight-anchor" aria-label="Alerta de tomas"></span>
+</div>
+<p id="tomasSectionSubtitle" class="section-subtitle">Usados tomados vs vendidos el mismo mes · acumulado del año</p>
+</div>
+<div class="tomas-section__stats ytd-stats" aria-label="Resumen de tomas del periodo">
+<div>
+<span class="ytd-stat-label">Tomados (periodo)</span>
+<strong id="tomasStatTomados" class="ytd-stat-value" style="color:#b45309">0</strong>
+</div>
+<div>
+<span class="ytd-stat-label">Vendidos mismo mes</span>
+<strong id="tomasStatVendidos" class="ytd-stat-value" style="color:#059669">0</strong>
+</div>
+<div>
+<span class="ytd-stat-label">% revendidos</span>
+<strong id="tomasStatPct" class="ytd-stat-value">—</strong>
+</div>
+</div>
+</div>
+<div class="filter-chips" id="tomasQuarterChips" role="group" aria-label="Trimestres visibles" style="margin:0 0 12px">
+<button type="button" class="chip active" data-tomas-quarter="1" aria-pressed="true">T1</button>
+<button type="button" class="chip active" data-tomas-quarter="2" aria-pressed="true">T2</button>
+<button type="button" class="chip active" data-tomas-quarter="3" aria-pressed="true">T3</button>
+<button type="button" class="chip active" data-tomas-quarter="4" aria-pressed="true">T4</button>
+</div>
+<div class="chart-grid-2-1 ytd-carline-layout tomas-section__layout">
+<div class="chart-card">
+<p id="tomasChartSubtitle" class="section-subtitle" style="margin:0 0 8px">Tomados vs vendidos el mismo mes · meses del trimestre</p>
+<div class="chart-wrap chart-wrap-lg">
+<canvas id="chartTomasMensual" aria-label="Tomas y ventas de tomas por mes"></canvas>
+</div>
+</div>
+<div class="chart-card carline-utilidad-card tomas-info-card">
+<div class="carline-utilidad-header tomas-info-card__header">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Resumen del periodo</h3>
+<p id="tomasInfoSubtitle" class="section-subtitle" style="margin:0">Estatus de reventa · más detalle en el botón</p>
+</div>
+<button type="button" id="btnTomasDetalle" class="btn-glass btn-glass--sm" title="Abrir detalle completo de tomas">
+<span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+Detalle
+</button>
+</div>
+<div class="table-scroll carline-utilidad-table-wrap tomas-section__table-wrap">
+<table class="data-table carline-utilidad-table tomas-section__table">
+<thead>
+<tr>
+<th>VIN</th>
+<th>Modelo</th>
+<th>Estatus</th>
+</tr>
+</thead>
+<tbody id="tomasSectionBody">
+<tr><td colspan="3" class="empty-row">Consulte un periodo para ver el resumen.</td></tr>
+</tbody>
+</table>
+</div>
+<p class="tomas-info-card__hint">Para montos, fechas y vendedor usa <strong>Detalle</strong>.</p>
+</div>
+</div>
+</section>
+
 <section class="section-panel dashboard-section">
 <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;margin-bottom:12px">
 <div>
@@ -358,7 +431,10 @@ Afluencia
 <div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartYtd"></canvas></div></div>
 <div class="chart-card carline-utilidad-card">
 <div class="carline-utilidad-header">
-<h3 class="section-title" style="margin-bottom:4px">Mejor utilidad por carline</h3>
+<div class="tomas-section__title-line" style="margin-bottom:4px">
+<h3 class="section-title" style="margin-bottom:0">Mejor utilidad por carline</h3>
+<span id="carlineInsightAnchor" class="tomas-insight-anchor kpi-insight-anchor" aria-label="Alerta de utilidad por carline"></span>
+</div>
 <p id="carlineUtilidadSubtitle" class="section-subtitle" style="margin:0">Mejor versión · utilidad por unidad</p>
 </div>
 <div class="table-scroll carline-utilidad-table-wrap">
@@ -734,13 +810,13 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/canales.js?v=2"></script>
 <script src="/js/sidebar.js?v=8"></script>
-<script src="/js/topbar.js?v=8"></script>
+<script src="/js/topbar.js?v=16"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=3"></script>
+<script src="/js/kpi-insights.js?v=6"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/financiamiento.js?v=30"></script>
 <script src="/js/leads.js?v=5"></script>
-<script src="/js/afluencia.js?v=8"></script>
-<script src="/js/sales.js?v=46"></script>
+<script src="/js/afluencia.js?v=9"></script>
+<script src="/js/sales.js?v=65"></script>
 </body>
 </html>

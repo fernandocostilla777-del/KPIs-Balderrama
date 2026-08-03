@@ -2,10 +2,17 @@ let ageingChart;
 let situacionChart;
 let familiaChart;
 let intHistChart;
+let intHistMesChart;
+let intHistConcChart;
 let intHistRows = [];
 let intHistSearch = '';
 let intHistFilter = 'all';
 let intHistData = null;
+let intHistLoading = false;
+let entregasSinPreviasLoading = false;
+let inventoryQuietRefreshing = false;
+let inventoryAutoRefreshTimer = null;
+const INVENTORY_AUTO_REFRESH_MS = 60 * 60 * 1000;
 let inventoryRows = [];
 let planPisoRows = [];
 let planPisoPeriodLabel = 'Todo (acumulado a hoy)';
@@ -269,6 +276,12 @@ function rowsForAutosKpi(kpiId) {
   if (kpiId === 'available') {
     return inventoryRows.filter((r) => r.situacion === 'DIS' || r.situacion === 'FIS' || r.situacion === 'SEP');
   }
+  if (kpiId === 'demos') {
+    return inventoryRows
+      .filter((r) => r.situacion === 'DEMO')
+      .slice()
+      .sort((a, b) => (Number(b.daysAsDemo ?? b.daysInStock) || 0) - (Number(a.daysAsDemo ?? a.daysInStock) || 0));
+  }
   if (kpiId === 'sinPrevias') {
     return inventoryRows.filter((r) => Number(r.previas || 0) === 0);
   }
@@ -289,6 +302,15 @@ function autosKpiMeta(kpiId) {
       scopeLabel: 'disponibles',
       icon: 'check_circle',
       card: () => document.getElementById('kpiAvailableUnits'),
+    };
+  }
+  if (kpiId === 'demos') {
+    return {
+      title: 'Demos',
+      hint: 'Unidades en DEMO · días desde remisión · pruebas de manejo (Sheets col. M = últimos 8 del VIN)',
+      scopeLabel: 'demos',
+      icon: 'directions_car',
+      card: () => document.getElementById('kpiDemos'),
     };
   }
   if (kpiId === 'sinPrevias') {
@@ -368,6 +390,23 @@ function downloadAutosKpiCsv(rows, title, kpi) {
       r.CLIENTE || '',
       r.SOF_Estatus || '',
       r.SOF_CveUSu || '',
+    ]);
+  } else if (kpi === 'demos') {
+    headers = [
+      'Modelo', 'Familia', 'Serie', 'VIN8', 'Días como demo', 'Pruebas manejo',
+      'Ubicación', 'Color', 'Año', 'Previas',
+    ];
+    lines = rows.map((r) => [
+      r.tipoAuto || '',
+      r.familia || '',
+      r.serie || '',
+      r.vin8 || '',
+      r.daysAsDemo ?? r.daysInStock ?? '',
+      Number(r.pruebasManejo || 0),
+      r.ubicacion || '',
+      r.colorExterior || '',
+      r.anModelo || '',
+      Number(r.previas || 0),
     ]);
   } else {
     headers = [
@@ -725,6 +764,18 @@ function ensureAutosKpiDrawer() {
     const porModelo = countByField(rows, (r) => r.tipoAuto || 'Sin modelo').slice(0, 10);
     const apartadas = rows.filter((r) => r.isApartada || r.situacion === 'SEP').length;
     const libres = rows.filter((r) => r.situacion === 'FIS' || r.situacion === 'DIS').length;
+    const isDemos = currentMeta.kpi === 'demos';
+    const demosConPruebas = isDemos
+      ? rows.filter((r) => Number(r.pruebasManejo || 0) > 0).length
+      : 0;
+    const demosPruebasTotal = isDemos
+      ? rows.reduce((s, r) => s + (Number(r.pruebasManejo) || 0), 0)
+      : 0;
+    const avgDaysDemo = isDemos && rows.length
+      ? Math.round(
+        rows.reduce((s, r) => s + (Number(r.daysAsDemo ?? r.daysInStock) || 0), 0) / rows.length,
+      )
+      : 0;
 
     const situacionBlock = `
       <div class="ops-orders-drawer__group">
@@ -747,6 +798,11 @@ function ensureAutosKpiDrawer() {
       <div class="ops-orders-drawer__group">
         <h5>Resumen</h5>
         <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+        ${isDemos ? `
+          <div class="ops-orders-drawer__row"><span class="lbl">Prom. días demo</span><span class="val">${avgDaysDemo.toLocaleString('es-MX')}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Con pruebas</span><span class="val">${demosConPruebas.toLocaleString('es-MX')}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Pruebas totales</span><span class="val">${demosPruebasTotal.toLocaleString('es-MX')}</span></div>
+        ` : ''}
         ${currentMeta.kpi === 'available' || currentMeta.kpi === 'total' ? `
           <div class="ops-orders-drawer__row"><span class="lbl">Libres FIS/DIS</span><span class="val">${libres.toLocaleString('es-MX')}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Apartadas</span><span class="val">${apartadas.toLocaleString('es-MX')}</span></div>
@@ -754,7 +810,7 @@ function ensureAutosKpiDrawer() {
         <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
       </div>
       ${alcanceBlock}
-      ${situacionBlock}
+      ${isDemos ? '' : situacionBlock}
       ${block('Por familia', 'familia', porFamilia)}
       ${block('Por modelo', 'modelo', porModelo)}
     `;
@@ -776,9 +832,10 @@ function ensureAutosKpiDrawer() {
         const fields = sofia
           ? [r.FECHA_PERIODO, r.SOF_FechAct, r.SOF_HoraAct, r.SOF_Factura, r.SOF_VIN, r.CLIENTE, r.SOF_Estatus, r.SOF_CveUSu, r.PREVIAS]
           : [
-            r.tipoAuto, r.familia, r.anModelo, r.serie, r.motor, r.noInventario,
+            r.tipoAuto, r.familia, r.anModelo, r.serie, r.vin8, r.motor, r.noInventario,
             r.colorExterior, r.ubicacion, r.situacion, r.situacionLabel,
             r.catalogo, r.status, r.apartadoPor, r.usuarioApartado, r.previas,
+            r.pruebasManejo, r.daysAsDemo, r.daysInStock,
           ];
         return fields.some((v) => String(v || '').toLowerCase().includes(q));
       });
@@ -860,22 +917,27 @@ function ensureAutosKpiDrawer() {
 
     bodyEl.innerHTML = `
       <div class="ops-orders-drawer__list-head">
-        <h5>Detalle de unidades</h5>
+        <h5>${currentMeta.kpi === 'demos' ? 'Demos · días y pruebas' : 'Detalle de unidades'}</h5>
         <span>${filtered.length.toLocaleString('es-MX')}</span>
       </div>
       ${filtered.map((r) => {
         const apartada = r.isApartada || r.situacion === 'SEP';
+        const isDemo = currentMeta.kpi === 'demos' || r.situacion === 'DEMO';
+        const diasDemo = r.daysAsDemo ?? r.daysInStock;
+        const pruebas = Number(r.pruebasManejo || 0);
         return `
           <div class="ops-orders-drawer__item" style="cursor:default">
             <div class="ops-orders-drawer__item-head">
               <strong>${escapeHtml(dash(r.tipoAuto))}</strong>
               <span class="ops-orders-drawer__tag">${escapeHtml(dash(r.situacionLabel || r.situacion))}</span>
             </div>
-            <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.familia))} · Serie ${escapeHtml(dash(r.serie))}</p>
+            <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.familia))} · Serie ${escapeHtml(dash(r.serie))}${r.vin8 ? ` · VIN8 ${escapeHtml(r.vin8)}` : ''}</p>
             <div class="ops-orders-drawer__facts">
               <span>${escapeHtml(dash(r.ubicacion))}</span>
-              <span>${r.daysInStock != null ? `${r.daysInStock} días` : '—'}</span>
-              <span>Previas ${Number(r.previas || 0)}</span>
+              <span>${isDemo
+                ? (diasDemo != null ? `${diasDemo} d. como demo` : '—')
+                : (r.daysInStock != null ? `${r.daysInStock} días` : '—')}</span>
+              <span>${isDemo ? `${pruebas} prueba${pruebas === 1 ? '' : 's'}` : `Previas ${Number(r.previas || 0)}`}</span>
             </div>
             <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
               <span>${escapeHtml(dash(r.colorExterior))}</span>
@@ -933,9 +995,11 @@ function ensureAutosKpiDrawer() {
     if (searchEl) {
       searchEl.placeholder = isSofiaKpi(kpiKey)
         ? 'Buscar factura, VIN, cliente...'
-        : kpiKey === 'sinPrevias'
-          ? 'Buscar modelo, serie, factura...'
-          : 'Buscar modelo, serie, ubicación...';
+        : kpiKey === 'demos'
+          ? 'Buscar modelo, serie, VIN8...'
+          : kpiKey === 'sinPrevias'
+            ? 'Buscar modelo, serie, factura...'
+            : 'Buscar modelo, serie, ubicación...';
       searchEl.value = '';
     }
 
@@ -1147,13 +1211,17 @@ function renderCharts(data) {
   });
 }
 
-async function loadInventory({ onlyPlanPiso = false } = {}) {
+async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
   const { fmt, api, showLoading, setText } = Dashboard;
   const status = document.getElementById('statusBadge');
   const period = getPlanPisoPeriod();
-  status.textContent = 'Consultando...';
-  status.className = 'sidebar-status-line status-loading';
-  showLoading(true);
+  if (!quiet) {
+    if (status) {
+      status.textContent = 'Consultando...';
+      status.className = 'sidebar-status-line status-loading';
+    }
+    showLoading(true);
+  }
 
   try {
     const data = await api(`/inventory?planPisoPeriod=${encodeURIComponent(period)}`);
@@ -1182,6 +1250,14 @@ async function loadInventory({ onlyPlanPiso = false } = {}) {
         'sAvailSub',
         `${fmt.number(s.availableLibres ?? 0)} libres · ${fmt.number(s.availableApartadas ?? 0)} apartadas`
       );
+      const demosCount = s.demos ?? inventoryRows.filter((r) => r.situacion === 'DEMO').length;
+      setText('sDemos', fmt.number(demosCount));
+      setText(
+        'sDemosSub',
+        demosCount
+          ? `Prom. ${fmt.number(s.avgDaysDemo ?? 0)} d · ${fmt.number(s.demosPruebasTotal ?? 0)} pruebas`
+          : 'Sin unidades DEMO'
+      );
       setText('sSinPrevias', fmt.number(s.sinPrevias ?? inventoryRows.filter((r) => Number(r.previas || 0) === 0).length));
       setText(
         'sSinPreviasSub',
@@ -1200,15 +1276,23 @@ async function loadInventory({ onlyPlanPiso = false } = {}) {
         syncAutosKpiCards();
         ensureAutosKpiDrawer().refresh();
       }
-      status.textContent = `${s.totalUnits} unidades en inventario`;
+      if (!quiet && status) {
+        status.textContent = `${s.totalUnits} unidades en inventario`;
+        status.className = 'sidebar-status-line';
+      }
     } else {
       setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
-      status.textContent = `Plan Piso · ${s.planPisoPeriodLabel}`;
+      if (!quiet && status) {
+        status.textContent = `Plan Piso · ${s.planPisoPeriodLabel}`;
+        status.className = 'sidebar-status-line';
+      }
     }
 
-    status.className = 'sidebar-status-line';
+    if (quiet) {
+      setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
+    }
 
-    await loadEntregasSinPreviasMes();
+    await loadEntregasSinPreviasMes({ quiet });
 
     if (window.KpiInsights?.apply) {
       window.KpiInsights.apply('inventory', {
@@ -1232,10 +1316,13 @@ async function loadInventory({ onlyPlanPiso = false } = {}) {
       });
     }
   } catch (err) {
-    status.textContent = err.message;
-    status.className = 'sidebar-status-line status-error';
+    if (!quiet && status) {
+      status.textContent = err.message;
+      status.className = 'sidebar-status-line status-error';
+    }
+    console.error('[Inventario]', err);
   } finally {
-    showLoading(false);
+    if (!quiet) showLoading(false);
   }
 }
 
@@ -1251,9 +1338,15 @@ function currentMonthRange() {
   };
 }
 
-async function loadEntregasSinPreviasMes() {
+async function loadEntregasSinPreviasMes({ quiet = false } = {}) {
   const { api, setText, fmt } = Dashboard;
+  if (entregasSinPreviasLoading) return;
+  entregasSinPreviasLoading = true;
   const range = currentMonthRange();
+  if (!quiet) {
+    setText('sEntregasSinPreviasSub', 'Actualizando SOFIA…');
+  }
+
   try {
     const data = await api(`/ventas?fechaInicio=${range.fechaInicio}&fechaFin=${range.fechaFin}`);
     const entregas = data.entregasSofia || [];
@@ -1265,10 +1358,11 @@ async function loadEntregasSinPreviasMes() {
       .map((r) => ({ ...r, _kind: 'facturado' }));
     window.__invFacturadoSinPrevias = facturado;
     const conPrevias = entregas.length - sinPrevias.length;
+    const stamp = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
     setText('sEntregasSinPrevias', fmt.number(sinPrevias.length));
     setText(
       'sEntregasSinPreviasSub',
-      `${fmt.number(conPrevias)} con previas · ${fmt.number(facturado.length)} fact. sin previa · ${range.label}`
+      `${fmt.number(conPrevias)} con previas · ${fmt.number(facturado.length)} fact. sin previa · ${range.label} · ${stamp}`
     );
     if (activeAutosKpi === 'entregasSinPrevias' || activeAutosKpi === 'sinPrevias') {
       ensureAutosKpiDrawer().refresh();
@@ -1283,6 +1377,8 @@ async function loadEntregasSinPreviasMes() {
     if (activeAutosKpi === 'entregasSinPrevias' || activeAutosKpi === 'sinPrevias') {
       ensureAutosKpiDrawer().refresh();
     }
+  } finally {
+    entregasSinPreviasLoading = false;
   }
 }
 
@@ -1521,7 +1617,8 @@ function initIntercambiosHistoricoDates() {
   const finEl = document.getElementById('intHistFechaFin');
   if (!inicioEl || !finEl) return;
   const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 1);
+  // Incluye año anterior: los intercambios de planta suelen verse mejor en ventana amplia.
+  const start = new Date(now.getFullYear() - 1, 0, 1);
   if (!inicioEl.value) inicioEl.value = isoDate(start);
   if (!finEl.value) finEl.value = isoDate(now);
 }
@@ -1536,52 +1633,42 @@ function formatIntHistDate(v) {
   return s.slice(0, 10);
 }
 
-function intSeverityBadge(severity) {
-  const map = {
-    ok: { cls: 'int-sev--ok', label: 'OK' },
-    warning: { cls: 'int-sev--warning', label: 'Adv.' },
-    critical: { cls: 'int-sev--critical', label: 'Crítica' },
-  };
-  const m = map[severity] || map.warning;
-  return `<span class="int-sev ${m.cls}">${m.label}</span>`;
-}
-
 function filteredIntHistRows() {
   let rows = intHistRows;
   if (intHistFilter && intHistFilter !== 'all') {
-    rows = rows.filter((r) => r.severity === intHistFilter);
+    rows = rows.filter((r) => String(r.carline || '') === intHistFilter);
   }
   const q = String(intHistSearch || '').trim().toLowerCase();
   if (!q) return rows;
   return rows.filter((r) => {
     const hay = [
-      r.serie, r.canjePor, r.vinEntrante, r.modelo, r.modeloEntrante,
-      r.title, r.detail, r.action, r.ruleId, r.concCanje, r.cliente, r.vendedor,
+      r.serie, r.carline, r.modelo, r.concesionario, r.tipoVenta,
+      r.factura, r.cliente, r.vendedor, r.anModelo, r.pedido,
     ].map((x) => String(x || '').toLowerCase()).join(' ');
     return hay.includes(q);
   });
 }
 
-function renderIntercambiosAlerts(alertas = []) {
+function renderIntercambiosInsights(insights = []) {
   const box = document.getElementById('intHistAlerts');
   if (!box) return;
-  if (!alertas.length) {
+  if (!insights.length) {
     box.innerHTML = `<div class="int-acq-alert int-acq-alert--ok">
-      <span class="material-symbols-outlined int-acq-alert__icon">verified</span>
+      <span class="material-symbols-outlined int-acq-alert__icon">info</span>
       <div>
-        <p class="int-acq-alert__title">Sin alertas abiertas</p>
-        <p class="int-acq-alert__meta">Las adquisiciones del periodo están correctas o en proceso sano.</p>
+        <p class="int-acq-alert__title">Sin insights</p>
+        <p class="int-acq-alert__meta">No hay unidades de planta de otros concesionarios en el periodo.</p>
       </div>
     </div>`;
     return;
   }
-  box.innerHTML = alertas.slice(0, 12).map((a) => `
-    <article class="int-acq-alert int-acq-alert--${a.severity === 'critical' ? 'critical' : 'warning'}">
-      <span class="material-symbols-outlined int-acq-alert__icon">${a.severity === 'critical' ? 'error' : 'warning'}</span>
+  box.innerHTML = insights.slice(0, 8).map((a) => `
+    <article class="int-acq-alert int-acq-alert--${a.severity === 'ok' ? 'ok' : 'warning'}">
+      <span class="material-symbols-outlined int-acq-alert__icon">${a.severity === 'ok' ? 'verified' : 'analytics'}</span>
       <div>
-        <p class="int-acq-alert__title">${a.title || 'Alerta'}</p>
-        <p class="int-acq-alert__meta">${formatIntHistDate(a.fecha)} · ${a.vinSaliente || '—'} → ${a.vinEntrante || 'sin VIN'} · ${a.diasDesdeVenta != null ? `${a.diasDesdeVenta}d` : '—'}</p>
-        <p class="int-acq-alert__action">${a.action || a.detail || ''}</p>
+        <p class="int-acq-alert__title">${a.title || 'Insight'}</p>
+        <p class="int-acq-alert__meta">${a.detail || ''}</p>
+        <p class="int-acq-alert__action">${a.action || ''}</p>
       </div>
     </article>
   `).join('');
@@ -1590,27 +1677,31 @@ function renderIntercambiosAlerts(alertas = []) {
 function renderIntercambiosBanner(summary = {}) {
   const el = document.getElementById('intHistAlertBanner');
   if (!el) return;
-  const critical = Number(summary.critical || 0);
-  const warning = Number(summary.warning || 0);
   const total = Number(summary.total || 0);
   el.hidden = false;
   if (!total) {
     el.className = 'int-acq-banner int-acq-banner--ok';
-    el.textContent = 'Sin canjes/intercambios en el periodo seleccionado.';
+    el.textContent = 'Sin intercambios de planta en el periodo. Amplíe las fechas (p. ej. desde 2025) y pulse Consultar.';
     return;
   }
-  if (critical > 0) {
-    el.className = 'int-acq-banner int-acq-banner--critical';
-    el.textContent = `${critical} adquisición(es) crítica(s): falta VIN entrante o el alta no cuadra. Revisar captura CANJEPOR.`;
-    return;
-  }
-  if (warning > 0) {
-    el.className = 'int-acq-banner int-acq-banner--warning';
-    el.textContent = `${warning} advertencia(s): adquisiciones incompletas o en proceso atrasado.`;
-    return;
-  }
-  el.className = 'int-acq-banner int-acq-banner--ok';
-  el.textContent = `Adquisiciones correctas: ${summary.calidadPct || 0}% de calidad en el periodo.`;
+  el.className = 'int-acq-banner int-acq-banner--warning';
+  const top = summary.topModelo
+    ? ` Más solicitado: ${summary.topModelo} (${summary.topModeloUnidades || 0} · ${summary.topModeloSharePct || 0}%).`
+    : '';
+  el.textContent = `${total} unidad(es) traídas de inventario de planta de otros concesionarios.${top}`;
+}
+
+function renderIntHistFilterTabs(porModelo = []) {
+  const nav = document.getElementById('intHistFilterTabs');
+  if (!nav) return;
+  const tops = (porModelo || []).slice(0, 6);
+  nav.innerHTML = [
+    `<button type="button" class="eeff-tab${intHistFilter === 'all' ? ' active' : ''}" data-int-filter="all" aria-pressed="${intHistFilter === 'all'}">Todos</button>`,
+    ...tops.map((m) => {
+      const on = intHistFilter === m.label;
+      return `<button type="button" class="eeff-tab${on ? ' active' : ''}" data-int-filter="${String(m.label).replace(/"/g, '&quot;')}" aria-pressed="${on}">${m.label} (${m.count})</button>`;
+    }),
+  ].join('');
 }
 
 function renderIntercambiosHistoricoTable() {
@@ -1627,20 +1718,19 @@ function renderIntercambiosHistoricoTable() {
     }
   }
   if (!rows.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="9">${intHistRows.length ? 'Sin coincidencias para el filtro.' : 'Sin canjes en el periodo.'}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="8">${intHistRows.length ? 'Sin coincidencias para el filtro.' : 'Sin intercambios de planta en el periodo.'}</td></tr>`;
     return;
   }
   body.innerHTML = rows.map((r) => `
     <tr>
-      <td>${intSeverityBadge(r.severity)}</td>
       <td>${formatIntHistDate(r.fecha)}</td>
       <td><strong>${r.serie || '—'}</strong></td>
-      <td>${r.canjePor || r.vinEntrante || '—'}</td>
-      <td>${r.sitEntranteLabel || r.sitEntrante || '—'}</td>
-      <td>${r.modelo || '—'}</td>
-      <td class="cell-num">${r.diasDesdeVenta != null ? r.diasDesdeVenta : '—'}</td>
-      <td title="${(r.detail || '').replace(/"/g, '&quot;')}">${r.title || '—'}</td>
-      <td>${r.action || '—'}</td>
+      <td>${r.carline || '—'}</td>
+      <td>${r.anModelo || '—'}</td>
+      <td title="${(r.concesionario || '').replace(/"/g, '&quot;')}">${r.concesionario || '—'}</td>
+      <td>${r.tipoVenta || '—'}</td>
+      <td>${r.factura || '—'}</td>
+      <td>${r.cliente || '—'}</td>
     </tr>
   `).join('');
 }
@@ -1649,90 +1739,211 @@ function renderIntercambiosHistorico(data) {
   const { fmt, chartOptions, chartColors, setText } = Dashboard;
   intHistData = data || null;
   const s = data?.summary || {};
-  setText('intHistCritical', fmt.number(s.critical || 0));
-  setText('intHistWarning', fmt.number(s.warning || 0));
-  setText('intHistOk', fmt.number(s.ok || 0));
-  setText('intHistCalidad', s.calidadPct != null ? `${s.calidadPct}%` : '—');
-  setText('intHistCobertura', `Cobertura VIN entrante ${s.coberturaPct != null ? `${s.coberturaPct}%` : '—'} · ${fmt.number(s.total || 0)} canjes`);
-  setText('intHistCount', `${fmt.number(s.alertasAbiertas || 0)} alerta(s) · ${fmt.number(s.total || 0)} canje(s)`);
+  setText('intHistTotal', fmt.number(s.total || 0));
+  setText('intHistTopModelo', s.topModelo || '—');
+  setText(
+    'intHistTopModeloSub',
+    s.topModelo
+      ? `${fmt.number(s.topModeloUnidades || 0)} und · ${s.topModeloSharePct || 0}% del periodo`
+      : 'Auto que más pedimos a facturar'
+  );
+  setText('intHistModelos', fmt.number(s.modelosDistintos || 0));
+  setText('intHistConcesionarios', fmt.number(s.concesionariosOrigen || 0));
+  setText(
+    'intHistTopConcesionario',
+    s.topConcesionario
+      ? `Top: ${s.topConcesionario} (${fmt.number(s.topConcesionarioUnidades || 0)})`
+      : 'Dealers de planta'
+  );
+  setText('intHistCount', `${fmt.number(s.total || 0)} unidad(es) · ${fmt.number(s.modelosDistintos || 0)} modelo(s)`);
   const sub = document.getElementById('intHistSubtitle');
   if (sub && data?.periodo) {
-    sub.textContent = `Periodo ${data.periodo.fechaInicio} → ${data.periodo.fechaFin} · Valida CANJEPOR y alta de la unidad entrante`;
+    sub.textContent = `Periodo ${data.periodo.fechaInicio} → ${data.periodo.fechaFin} · CONCESIONARIO ≠ GENERAL MOTORS DE MEXICO`;
   }
 
   intHistRows = data?.rows || [];
+  if (intHistFilter !== 'all' && !(data?.porModelo || []).some((m) => m.label === intHistFilter)) {
+    intHistFilter = 'all';
+  }
   renderIntercambiosBanner(s);
-  renderIntercambiosAlerts(data?.alertas || []);
+  renderIntercambiosInsights(data?.insights || []);
+  renderIntHistFilterTabs(data?.porModelo || []);
   renderIntercambiosHistoricoTable();
 
   destroyChart(intHistChart);
-  const canvas = document.getElementById('intHistChart');
-  if (!canvas || typeof Chart === 'undefined') return;
-  const porMes = data?.porMes || [];
-  intHistChart = new Chart(canvas, {
-    type: 'bar',
-    data: {
-      labels: porMes.map((m) => m.label),
-      datasets: [{
-        label: 'Canjes',
-        data: porMes.map((m) => m.count),
-        backgroundColor: chartColors?.secondary || 'rgba(37, 99, 235, 0.55)',
-        borderRadius: 8,
-      }],
-    },
-    options: chartOptions({
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false } },
-        y: { beginAtZero: true, ticks: { precision: 0 } },
-      },
-    }),
-  });
+  destroyChart(intHistMesChart);
+  destroyChart(intHistConcChart);
+  intHistChart = null;
+  intHistMesChart = null;
+  intHistConcChart = null;
+
+  try {
+    const porModelo = (data?.porModelo || []).slice(0, 10);
+    const canvas = document.getElementById('intHistChart');
+    if (canvas && typeof Chart !== 'undefined') {
+      intHistChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: porModelo.map((m) => m.label),
+          datasets: [{
+            label: 'Unidades',
+            data: porModelo.map((m) => m.count),
+            backgroundColor: chartColors?.secondary || 'rgba(37, 99, 235, 0.55)',
+            borderRadius: 8,
+          }],
+        },
+        options: chartOptions({
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true, ticks: { precision: 0 } },
+            y: { grid: { display: false } },
+          },
+        }),
+      });
+    }
+
+    const porMes = data?.porMes || [];
+    const mesCanvas = document.getElementById('intHistMesChart');
+    if (mesCanvas && typeof Chart !== 'undefined') {
+      intHistMesChart = new Chart(mesCanvas, {
+        type: 'bar',
+        data: {
+          labels: porMes.map((m) => m.label),
+          datasets: [{
+            label: 'Unidades',
+            data: porMes.map((m) => m.count),
+            backgroundColor: chartColors?.primary || 'rgba(14, 165, 233, 0.55)',
+            borderRadius: 8,
+          }],
+        },
+        options: chartOptions({
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false } },
+            y: { beginAtZero: true, ticks: { precision: 0 } },
+          },
+        }),
+      });
+    }
+
+    const porConc = (data?.porConcesionario || []).slice(0, 8);
+    const concCanvas = document.getElementById('intHistConcChart');
+    if (concCanvas && typeof Chart !== 'undefined') {
+      intHistConcChart = new Chart(concCanvas, {
+        type: 'bar',
+        data: {
+          labels: porConc.map((m) => (m.label.length > 22 ? `${m.label.slice(0, 20)}…` : m.label)),
+          datasets: [{
+            label: 'Unidades',
+            data: porConc.map((m) => m.count),
+            backgroundColor: chartColors?.accent || 'rgba(16, 185, 129, 0.55)',
+            borderRadius: 8,
+          }],
+        },
+        options: chartOptions({
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true, ticks: { precision: 0 } },
+            y: { grid: { display: false } },
+          },
+        }),
+      });
+    }
+  } catch (chartErr) {
+    console.warn('[Intercambios planta] charts:', chartErr);
+  }
 }
 
-async function loadIntercambiosHistorico() {
+function setIntHistLocalStatus(text, type = '') {
+  const el = document.getElementById('intHistLocalStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'top-bar-meta';
+  if (type === 'loading') el.classList.add('status-loading');
+  else if (type === 'error') el.classList.add('status-error');
+}
+
+function setIntHistRefreshing(active) {
+  const btn = document.getElementById('btnIntHistRefresh');
+  const consultar = document.getElementById('btnIntHistConsultar');
+  if (btn) {
+    btn.disabled = active;
+    btn.classList.toggle('is-refreshing', active);
+  }
+  if (consultar) consultar.disabled = active;
+}
+
+async function loadIntercambiosHistorico({ quiet = false } = {}) {
   const { api } = Dashboard;
   const inicioEl = document.getElementById('intHistFechaInicio');
   const finEl = document.getElementById('intHistFechaFin');
-  const status = document.getElementById('statusBadge');
   if (!inicioEl || !finEl) return;
+  if (intHistLoading) return;
   initIntercambiosHistoricoDates();
   const fechaInicio = inicioEl.value;
   const fechaFin = finEl.value;
   if (!fechaInicio || !fechaFin) return;
 
+  intHistLoading = true;
+  setIntHistRefreshing(true);
+  setIntHistLocalStatus(quiet ? 'Actualizando en segundo plano…' : 'Consultando…', 'loading');
+
   try {
-    if (status) {
-      status.textContent = 'Validando adquisiciones por canje...';
-      status.className = 'sidebar-status-line status-loading';
-    }
     const data = await api(
       `/inventory/intercambios?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`
     );
     renderIntercambiosHistorico(data);
-    if (status) {
-      const abiertas = data.summary?.alertasAbiertas || 0;
-      status.textContent = abiertas
-        ? `${abiertas} alertas de adquisición por canje`
-        : `${data.summary?.total || 0} canjes · adquisición OK`;
-      status.className = 'sidebar-status-line';
-    }
+    const top = data.summary?.topModelo;
+    const stamp = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    setIntHistLocalStatus(
+      top
+        ? `Actualizado ${stamp} · Top: ${top}`
+        : `Actualizado ${stamp}`
+    );
   } catch (err) {
-    console.error('[Intercambios adquisición]', err);
-    intHistRows = [];
-    intHistData = null;
-    renderIntercambiosHistoricoTable();
-    const sub = document.getElementById('intHistSubtitle');
-    if (sub) sub.textContent = err.message || 'No se pudo validar adquisiciones';
-    if (status) {
-      status.textContent = err.message;
-      status.className = 'sidebar-status-line status-error';
+    console.error('[Intercambios planta]', err);
+    if (!quiet) {
+      intHistRows = [];
+      intHistData = null;
+      renderIntercambiosHistoricoTable();
+      const sub = document.getElementById('intHistSubtitle');
+      if (sub) sub.textContent = err.message || 'No se pudo analizar intercambios de planta';
     }
+    setIntHistLocalStatus(err.message || 'Error al actualizar', 'error');
+  } finally {
+    intHistLoading = false;
+    setIntHistRefreshing(false);
   }
 }
 
+async function refreshInventoryPageQuiet() {
+  if (inventoryQuietRefreshing) return;
+  inventoryQuietRefreshing = true;
+  try {
+    await Promise.all([
+      loadInventory({ quiet: true }),
+      loadIntercambiosHistorico({ quiet: true }),
+    ]);
+  } finally {
+    inventoryQuietRefreshing = false;
+  }
+}
+
+function startInventoryAutoRefresh() {
+  if (inventoryAutoRefreshTimer) clearInterval(inventoryAutoRefreshTimer);
+  inventoryAutoRefreshTimer = setInterval(() => {
+    if (document.hidden) return;
+    refreshInventoryPageQuiet();
+  }, INVENTORY_AUTO_REFRESH_MS);
+}
+
 document.getElementById('btnIntHistConsultar')?.addEventListener('click', () => {
-  loadIntercambiosHistorico();
+  loadIntercambiosHistorico({ quiet: false });
+});
+document.getElementById('btnIntHistRefresh')?.addEventListener('click', () => {
+  loadIntercambiosHistorico({ quiet: true });
 });
 document.getElementById('buscarIntHist')?.addEventListener('input', (e) => {
   intHistSearch = e.target.value || '';
@@ -1757,6 +1968,7 @@ else setInventoryScope('autos');
 initPlanPisoKpiCard();
 initIntercambiosHistoricoDates();
 
-loadInventory().finally(() => {
-  loadIntercambiosHistorico();
-});
+// Carga inicial en paralelo: inventario puede mostrar overlay; intercambios no bloquea el resto.
+loadInventory({ quiet: false });
+loadIntercambiosHistorico({ quiet: false });
+startInventoryAutoRefresh();

@@ -762,6 +762,7 @@ function renderPeAgencyInsight(insight, hostId = 'peAgenciaInsight') {
     : (insight.severity === 'warning' ? 'amber' : (insight.severity === 'info' ? 'green' : 'blue'));
   const facts = Array.isArray(insight.facts) ? insight.facts : [];
   const recs = Array.isArray(insight.recommendations) ? insight.recommendations : [];
+  const criterio = Array.isArray(insight.criterio) ? insight.criterio : [];
 
   el.classList.remove('hidden');
   el.classList.toggle('pe-insight-note--critical', insight.severity === 'critical');
@@ -771,8 +772,9 @@ function renderPeAgencyInsight(insight, hostId = 'peAgenciaInsight') {
     <p class="liquidez-note__summary"><strong>${escHtml(insight.title)}</strong></p>
     <p class="liquidez-note__summary">${escHtml(insight.summary || '')}</p>
     ${facts.length ? `<ul class="liquidez-note__facts">${facts.map((f) => `<li><strong>${escHtml(f.label)}:</strong> ${escHtml(f.value)}</li>`).join('')}</ul>` : ''}
-    <p class="liquidez-note__hint"><strong>Análisis.</strong> ${escHtml(insight.analysis || '')}</p>
-    ${recs.length ? `<ul class="liquidez-note__facts">${recs.map((r) => `<li>${escHtml(r)}</li>`).join('')}</ul>` : ''}
+    <p class="liquidez-note__hint"><strong>Interpretación.</strong> ${escHtml(insight.analysis || '')}</p>
+    ${criterio.length ? `<p class="liquidez-note__hint"><strong>Criterio de lectura</strong></p><ul class="liquidez-note__facts">${criterio.map((c) => `<li>${escHtml(c)}</li>`).join('')}</ul>` : ''}
+    ${recs.length ? `<p class="liquidez-note__hint"><strong>Acciones sugeridas</strong></p><ul class="liquidez-note__facts">${recs.map((r) => `<li>${escHtml(r)}</li>`).join('')}</ul>` : ''}
     ${insight.chatPrompt ? `<p class="liquidez-note__theory"><button type="button" class="btn-glass btn-primary pe-insight-chat-btn" data-pe-insight-chat>Más información en el asistente</button></p>` : ''}
   `;
 
@@ -820,8 +822,9 @@ function renderPuntoEquilibrio(pe, fmt) {
   if (cardsEl) {
     cardsEl.innerHTML = segmentos.map((row) => {
       const peVal = row.puntoEquilibrio != null ? formatFullMoney(row.puntoEquilibrio) : '—';
-      const sub = row.cumplimientoPct != null
-        ? `${row.cumplimientoPct}% de cumplimiento · MC ${row.margenContribucionPct ?? '—'}%`
+      const cob = row.coberturaPct ?? row.cumplimientoPct;
+      const sub = cob != null
+        ? `Cobertura ${cob}%${row.coberturaRatio != null ? ` (${row.coberturaRatio}×)` : ''} · MC ${row.margenContribucionPct ?? '—'}%`
         : `MC ${row.margenContribucionPct ?? '—'}%`;
       const mon = row.monitoreo;
       const monLine = mon
@@ -843,7 +846,7 @@ function renderPuntoEquilibrio(pe, fmt) {
       <td class="cell-money">${row.margenContribucionPct != null ? `${row.margenContribucionPct}%` : '—'}</td>
       <td class="cell-money">${formatFullMoney(row.gastosFijos)}</td>
       <td class="cell-money">${row.puntoEquilibrio != null ? formatFullMoney(row.puntoEquilibrio) : '—'}</td>
-      <td class="cell-num">${row.cumplimientoPct != null ? `${row.cumplimientoPct}%` : '—'}</td>
+      <td class="cell-num">${(row.coberturaPct ?? row.cumplimientoPct) != null ? `${row.coberturaPct ?? row.cumplimientoPct}%` : '—'}</td>
     </tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin segmentos</td></tr>';
   }
 
@@ -851,15 +854,18 @@ function renderPuntoEquilibrio(pe, fmt) {
   setText('peAgenciaSubtitle', a.excludeNote || a.note || 'Cálculo consolidado del periodo');
   if (agenciaEl) {
     const rows = [
-      ['Ventas totales', a.ventas],
+      ['Ventas del periodo', a.ventas],
       ['Costos variables directos', a.costosVariablesDirectos],
       ['Gastos variables adicionales', a.gastosVariablesAdicionales],
       ['Margen de contribución', a.margenContribucion],
       [`Margen de contribución %`, a.margenContribucionPct != null ? `${a.margenContribucionPct}%` : null, true],
       ['Gastos fijos operativos', a.gastosFijos],
       ['Punto de equilibrio', a.puntoEquilibrio],
+      ['Ratio de cobertura', a.coberturaRatio != null ? `${a.coberturaRatio} veces` : null, true],
+      ['Cobertura porcentual', (a.coberturaPct ?? a.cumplimientoPct) != null ? `${a.coberturaPct ?? a.cumplimientoPct}%` : null, true],
+      ['Brecha para alcanzar el equilibrio', a.brechaEquilibrioPct != null ? `${a.brechaEquilibrioPct}%` : null, true],
+      ['Ventas adicionales requeridas', a.ventasAdicionalesRequeridas],
       ['Faltante / (excedente)', a.faltante],
-      ['Cumplimiento', a.cumplimientoPct != null ? `${a.cumplimientoPct}%` : null, true],
       ['Utilidad / (pérdida) operativa', a.utilidadOperativa],
     ];
     if (a.monitoreo) {
@@ -931,8 +937,11 @@ async function loadContabilidad(fechaInicio, fechaFin) {
   const peMargen = peMain?.margenContribucionPct ?? s.margenBrutoPct;
   if (peValue != null && peMargen > 0) {
     if (peEl) peEl.textContent = formatFullMoney(peValue);
-    const cumpl = peMain?.cumplimientoPct != null ? ` · ${peMain.cumplimientoPct}% avance` : '';
-    setText('kpiPuntoEquilibrioSub', `GF ÷ ${peMargen}% MC${cumpl}`);
+    const cob = peMain?.coberturaPct ?? peMain?.cumplimientoPct;
+    const cobTxt = cob != null
+      ? ` · cobertura ${cob}%${peMain?.coberturaRatio != null ? ` (${peMain.coberturaRatio}×)` : ''}`
+      : '';
+    setText('kpiPuntoEquilibrioSub', `GF ÷ ${peMargen}% MC${cobTxt}`);
     peCard?.classList.toggle('kpi-card--loss', peMain?.alcanzoEquilibrio === false);
     peCard?.classList.toggle('kpi-card--gain', peMain?.alcanzoEquilibrio === true);
   } else {

@@ -29,6 +29,7 @@ const {
   updatePrefs,
   getAlertsForRole,
 } = require('../services/alertsService');
+const messagesService = require('../services/messagesService');
 
 const router = express.Router();
 
@@ -145,15 +146,87 @@ router.get('/users/:username/password', requireUserManager, (req, res) => {
 router.get('/alerts', requireSession, async (req, res) => {
   try {
     const role = req.session.role;
+    const username = req.session.username;
     const alerts = await getAlertsForRole(role);
+    const messages = messagesService.listMessagesForUser(username, { box: 'inbox', includeDone: true });
+    const unreadMessages = messagesService.countUnread(username);
+    const messageAlerts = messagesService.messagesAsAlertItems(username);
     res.json({
       role,
       roleLabel: getRole(role)?.label || role,
       count: alerts.length,
       alerts,
+      messages,
+      unreadMessages,
+      messageAlerts,
+      totalUnreadHint: unreadMessages,
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'No se pudieron cargar las alertas.' });
+  }
+});
+
+router.get('/directory', requireSession, (req, res) => {
+  res.json({ users: messagesService.listDirectory(req.session.username) });
+});
+
+router.get('/messages', requireSession, (req, res) => {
+  const box = String(req.query.box || 'inbox');
+  const includeDone = String(req.query.includeDone || 'true') !== 'false';
+  const messages = messagesService.listMessagesForUser(req.session.username, { box, includeDone });
+  res.json({
+    box,
+    count: messages.length,
+    unread: messagesService.countUnread(req.session.username),
+    messages,
+  });
+});
+
+router.post('/messages', requireSession, (req, res) => {
+  try {
+    const { toUsername, subject, body, type, source } = req.body || {};
+    const message = messagesService.createMessage({
+      fromUsername: req.session.username,
+      toUsername,
+      subject,
+      body,
+      type,
+      source,
+    });
+    res.status(201).json({ ok: true, message });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+router.post('/messages/:id/read', requireSession, (req, res) => {
+  try {
+    const message = messagesService.markRead(req.params.id, req.session.username);
+    res.json({ ok: true, message });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+router.post('/messages/:id/reply', requireSession, (req, res) => {
+  try {
+    const message = messagesService.replyMessage(req.params.id, req.session.username, req.body?.body);
+    res.json({ ok: true, message });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+router.post('/messages/:id/done', requireSession, (req, res) => {
+  try {
+    const message = messagesService.closeMessage(
+      req.params.id,
+      req.session.username,
+      req.body || {}
+    );
+    res.json({ ok: true, message });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 

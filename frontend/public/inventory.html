@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=103" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=45" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -39,6 +39,13 @@
 <div class="kpi-card-head"><span class="kpi-title">Disponibles</span><span class="material-symbols-outlined kpi-icon">check_circle</span></div>
 <div id="sAvail" class="kpi-value">—</div>
 <p id="sAvailSub" class="kpi-subtitle">FIS / DIS / Apartadas (SEP)</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<button type="button" class="kpi-card kpi-card--amber kpi-card--interactive" id="kpiDemos" data-autos-kpi="demos" aria-expanded="false" title="Clic para ver demos, días y pruebas de manejo">
+<div class="kpi-card-head"><span class="kpi-title">Demos</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
+<div id="sDemos" class="kpi-value">—</div>
+<p id="sDemosSub" class="kpi-subtitle">Días como demo · pruebas de manejo</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
 </button>
@@ -161,22 +168,11 @@
 </div>
 </section>
 
-<section class="chart-grid">
-<div class="section-panel">
-<h3 class="section-title">Por situación</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="situacionChart"></canvas></div></div>
-</div>
-<div class="section-panel">
-<h3 class="section-title">Por familia</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="familiaChart"></canvas></div></div>
-</div>
-</section>
-
-<section class="section-panel dashboard-section" id="secIntercambiosHistorico" aria-label="Alerta de adquisición por intercambio">
+<section class="section-panel dashboard-section" id="secIntercambiosHistorico" aria-label="Intercambios de planta">
 <div class="table-header-row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
 <div>
-<h3 class="section-title" style="margin-bottom:4px">Adquisición por intercambio</h3>
-<p id="intHistSubtitle" class="section-subtitle" style="margin:0">Alerta dinámica: valida si cada canje tiene la unidad entrante correctamente adquirida.</p>
+<h3 class="section-title" style="margin-bottom:4px">Intercambios de planta</h3>
+<p id="intHistSubtitle" class="section-subtitle" style="margin:0">Autos traídos de inventario de planta: CONCESIONARIO distinto de GENERAL MOTORS DE MEXICO.</p>
 </div>
 <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
 <label class="filter-field" style="margin:0">
@@ -188,56 +184,69 @@
 <input id="intHistFechaFin" type="date" class="filter-input" style="min-width:150px"/>
 </label>
 <button type="button" id="btnIntHistConsultar" class="btn-glass" style="height:38px">Consultar</button>
+<button type="button" id="btnIntHistRefresh" class="btn-glass" style="height:38px" title="Actualizar este apartado sin bloquear la página">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px" aria-hidden="true">refresh</span>
+ Actualizar
+</button>
 <span id="intHistCount" class="top-bar-meta"></span>
+<span id="intHistLocalStatus" class="top-bar-meta" aria-live="polite"></span>
 </div>
 </div>
 
 <div id="intHistAlertBanner" class="int-acq-banner" hidden></div>
 
 <div class="kpi-grid kpi-grid--eeff" style="margin-top:14px">
-<div class="kpi-card kpi-card--eeff kpi-card--rose">
-<div class="kpi-card-head"><span class="kpi-title">Críticas</span><span class="material-symbols-outlined kpi-icon">error</span></div>
-<div id="intHistCritical" class="kpi-value">—</div>
-<p class="kpi-subtitle">Adquisición rota o sin alta</p>
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Unidades traídas</span><span class="material-symbols-outlined kpi-icon">swap_horiz</span></div>
+<div id="intHistTotal" class="kpi-value">—</div>
+<p class="kpi-subtitle">CONCESIONARIO ≠ GM México</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Más solicitado</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
+<div id="intHistTopModelo" class="kpi-value" style="font-size:1.25rem">—</div>
+<p id="intHistTopModeloSub" class="kpi-subtitle">Auto que más pedimos a facturar</p>
 </div>
 <div class="kpi-card kpi-card--eeff kpi-card--amber">
-<div class="kpi-card-head"><span class="kpi-title">Advertencias</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
-<div id="intHistWarning" class="kpi-value">—</div>
-<p class="kpi-subtitle">Captura incompleta / en proceso</p>
+<div class="kpi-card-head"><span class="kpi-title">Modelos distintos</span><span class="material-symbols-outlined kpi-icon">view_list</span></div>
+<div id="intHistModelos" class="kpi-value">—</div>
+<p class="kpi-subtitle">Carlines en el periodo</p>
 </div>
 <div class="kpi-card kpi-card--eeff kpi-card--green">
-<div class="kpi-card-head"><span class="kpi-title">Correctas</span><span class="material-symbols-outlined kpi-icon">check_circle</span></div>
-<div id="intHistOk" class="kpi-value">—</div>
-<p class="kpi-subtitle">Entrante registrada OK</p>
-</div>
-<div class="kpi-card kpi-card--eeff kpi-card--blue">
-<div class="kpi-card-head"><span class="kpi-title">Calidad adquisición</span><span class="material-symbols-outlined kpi-icon">verified</span></div>
-<div id="intHistCalidad" class="kpi-value">—</div>
-<p id="intHistCobertura" class="kpi-subtitle">% con VIN entrante capturado</p>
+<div class="kpi-card-head"><span class="kpi-title">Concesionarios origen</span><span class="material-symbols-outlined kpi-icon">storefront</span></div>
+<div id="intHistConcesionarios" class="kpi-value">—</div>
+<p id="intHistTopConcesionario" class="kpi-subtitle">Dealers de planta</p>
 </div>
 </div>
 
 <div class="chart-grid" style="margin-top:14px">
 <div class="section-panel" style="margin:0">
-<h4 class="section-title" style="font-size:0.95rem;margin-bottom:8px">Alertas abiertas</h4>
+<h4 class="section-title" style="font-size:0.95rem;margin-bottom:8px">Insights</h4>
 <div id="intHistAlerts" class="int-acq-alerts custom-scrollbar"></div>
 </div>
 <div class="section-panel" style="margin:0">
-<h4 class="section-title" style="font-size:0.95rem;margin-bottom:8px">Canjes por mes</h4>
+<h4 class="section-title" style="font-size:0.95rem;margin-bottom:8px">Top autos solicitados a facturar</h4>
 <div class="chart-card"><div class="chart-wrap" style="height:220px"><canvas id="intHistChart"></canvas></div></div>
 </div>
 </div>
 
+<div class="chart-grid" style="margin-top:14px">
+<div class="section-panel" style="margin:0">
+<h4 class="section-title" style="font-size:0.95rem;margin-bottom:8px">Por mes</h4>
+<div class="chart-card"><div class="chart-wrap" style="height:200px"><canvas id="intHistMesChart"></canvas></div></div>
+</div>
+<div class="section-panel" style="margin:0">
+<h4 class="section-title" style="font-size:0.95rem;margin-bottom:8px">Top concesionarios origen</h4>
+<div class="chart-card"><div class="chart-wrap" style="height:200px"><canvas id="intHistConcChart"></canvas></div></div>
+</div>
+</div>
+
 <div class="kpi-detail-toolbar" style="margin-top:14px;flex-wrap:wrap;gap:10px;align-items:center">
-<nav class="eeff-tabs" id="intHistFilterTabs" aria-label="Filtrar por severidad">
-<button type="button" class="eeff-tab active" data-int-filter="all" aria-pressed="true">Todas</button>
-<button type="button" class="eeff-tab" data-int-filter="critical" aria-pressed="false">Críticas</button>
-<button type="button" class="eeff-tab" data-int-filter="warning" aria-pressed="false">Advertencias</button>
-<button type="button" class="eeff-tab" data-int-filter="ok" aria-pressed="false">OK</button>
+<nav class="eeff-tabs" id="intHistFilterTabs" aria-label="Filtrar por carline top">
+<button type="button" class="eeff-tab active" data-int-filter="all" aria-pressed="true">Todos</button>
 </nav>
 <label class="kpi-detail-search" for="buscarIntHist">
 <span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
-<input id="buscarIntHist" type="search" placeholder="Buscar VIN, entrante, modelo, alerta…" class="filter-input kpi-detail-search-input" autocomplete="off"/>
+<input id="buscarIntHist" type="search" placeholder="Buscar VIN, carline, concesionario…" class="filter-input kpi-detail-search-input" autocomplete="off"/>
 </label>
 <span id="intHistSearchMeta" class="kpi-detail-search-meta hidden"></span>
 </div>
@@ -245,21 +254,31 @@
 <table class="data-table">
 <thead>
 <tr>
-<th>Estado</th>
 <th>Fecha</th>
-<th>VIN salida</th>
-<th>VIN entrante</th>
-<th>Sit. entrante</th>
-<th>Modelo</th>
-<th>Días</th>
-<th>Alerta</th>
-<th>Acción</th>
+<th>VIN</th>
+<th>Carline</th>
+<th>Año</th>
+<th>Concesionario origen</th>
+<th>Tipo venta</th>
+<th>Factura</th>
+<th>Cliente</th>
 </tr>
 </thead>
 <tbody id="intHistTableBody">
-<tr class="empty-row"><td colspan="9">Consulte un periodo para ver alertas de adquisición.</td></tr>
+<tr class="empty-row"><td colspan="8">Consulte un periodo para ver intercambios de planta.</td></tr>
 </tbody>
 </table>
+</div>
+</section>
+
+<section class="chart-grid">
+<div class="section-panel">
+<h3 class="section-title">Por situación</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="situacionChart"></canvas></div></div>
+</div>
+<div class="section-panel">
+<h3 class="section-title">Por familia</h3>
+<div class="chart-card"><div class="chart-wrap"><canvas id="familiaChart"></canvas></div></div>
 </div>
 </section>
 
@@ -368,10 +387,10 @@
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/sidebar.js?v=8"></script>
-<script src="/js/topbar.js?v=8"></script>
+<script src="/js/topbar.js?v=16"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=2"></script>
+<script src="/js/kpi-insights.js?v=4"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/inventory.js?v=23"></script>
+<script src="/js/inventory.js?v=27"></script>
 </body>
 </html>

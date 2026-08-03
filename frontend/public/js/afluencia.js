@@ -561,7 +561,14 @@
     }
 
     const hash = next === 'mtk' ? '#afluencia-mtk' : '#afluencia';
-    if (location.hash !== hash && (location.hash.startsWith('#afluencia') || !location.hash || location.hash === '#trafico' || location.hash === '#tráfico' || location.hash === '#mtk')) {
+    // Solo sincroniza hash si ya estamos en Afluencia; no forzar #afluencia al boot (Ventas es la pestaña principal).
+    const current = String(location.hash || '').toLowerCase();
+    const onAfluenciaRoute = current.startsWith('#afluencia')
+      || current === '#trafico'
+      || current === '#tráfico'
+      || current === '#mtk'
+      || current === '#marketing';
+    if (onAfluenciaRoute && current !== hash) {
       history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
     }
   }

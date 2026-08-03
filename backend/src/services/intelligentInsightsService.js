@@ -237,6 +237,195 @@ function buildVentasInsights(payload = {}) {
     });
   }
 
+  const tomas = payload.tomas || {};
+  const tomasTotal = Number(tomas.total ?? r.totalTomasACuenta ?? 0);
+  const tomasVendidos = Number(tomas.vendidosMismoMes ?? r.totalTomasVendidasMismoMes ?? 0);
+  const tomasPct = Number(
+    tomas.pctVendidos
+    ?? r.pctTomasVendidasMismoMes
+    ?? (tomasTotal > 0 ? round1((tomasVendidos / tomasTotal) * 100) : 0)
+  );
+  const pendientes = Number(tomas.pendientes ?? Math.max(0, tomasTotal - tomasVendidos));
+  const modelosDificiles = Array.isArray(tomas.modelosDificiles) ? tomas.modelosDificiles : [];
+  const unidadesDificiles = Array.isArray(tomas.unidadesDificiles) ? tomas.unidadesDificiles : [];
+
+  if (tomasTotal >= 3 && (pendientes >= 3 || tomasPct < 50)) {
+    const topModelos = modelosDificiles
+      .slice(0, 5)
+      .map((m) => {
+        const nombre = String(m.modelo || m.label || 'Sin modelo').trim();
+        const t = Number(m.tomas || 0);
+        const v = Number(m.vendidos || 0);
+        const p = Number(m.pendientes ?? Math.max(0, t - v));
+        const pctM = t > 0 ? round1((v / t) * 100) : 0;
+        return `${nombre}: ${p} pendientes de ${t} tomas (${pctM}% revendidas)`;
+      });
+    const topUnidades = unidadesDificiles
+      .slice(0, 5)
+      .map((u) => {
+        const vin = String(u.vin || u.vinToma || '—').trim();
+        const modelo = String(u.modelo || u.modeloToma || '').trim();
+        const fecha = String(u.fechaToma || '').trim();
+        return [vin, modelo, fecha ? `toma ${fecha}` : null].filter(Boolean).join(' · ');
+      });
+
+    const severity = (pendientes >= 10 || (tomasTotal >= 8 && tomasPct < 30))
+      ? 'critical'
+      : 'warning';
+
+    push(insights, {
+      id: 'ventas-tomas-dificiles',
+      kpiId: 'tomasInsightAnchor',
+      module: 'ventas',
+      severity,
+      title: 'Tomas difíciles de revender',
+      summary: `${pendientes} de ${tomasTotal} tomas del periodo siguen sin venta el mismo mes (${tomasPct}% revendidas).`,
+      analysis:
+        'Las unidades tomadas que no se revenden en el mismo mes elevan inventario usado, capital inmovilizado y riesgo de envejecimiento. '
+        + (topModelos.length
+          ? `Modelos con más fricción: ${topModelos.join('; ')}.`
+          : 'Prioriza valuación, precio de lista y rotación de seminuevos.')
+        + (topUnidades.length ? ` Unidades a vigilar: ${topUnidades.join(' | ')}.` : ''),
+      recommendations: [
+        'Revisar precio/valuación de las tomas pendientes y alinear con mercado.',
+        'Priorizar exposición comercial (piso, digital, paquetes) en modelos con peor % de reventa.',
+        'Asignar seguimiento a seminuevos con más días desde la toma.',
+        'Usar el botón Detalle de Tomas a cuenta para bajar a VIN y responsable.',
+      ],
+      metrics: {
+        tomasTotal,
+        tomasVendidos,
+        pendientes,
+        tomasPct,
+        modelosDificiles: modelosDificiles.slice(0, 5),
+        unidadesDificiles: unidadesDificiles.slice(0, 5),
+      },
+      chatPrompt: chatPrompt('Ventas', 'Tomas difíciles de revender', [
+        `Tomas periodo: ${tomasTotal}`,
+        `Vendidas mismo mes: ${tomasVendidos}`,
+        `Pendientes: ${pendientes}`,
+        `% revendidas: ${tomasPct}%`,
+        ...topModelos.map((l) => `Modelo difícil: ${l}`),
+        ...topUnidades.map((l) => `Unidad: ${l}`),
+        `Periodo: ${fi || '—'} — ${ff || '—'}`,
+      ], 'Propón un plan de rotación para las tomas más difíciles (precio, canal, responsable) sin inventar VINs ni montos fuera de la lista.'),
+    });
+  }
+
+  const carlinePayload = payload.utilidadCarline || {};
+  const carlineRows = Array.isArray(carlinePayload.porCarline) ? carlinePayload.porCarline : [];
+  if (carlinePayload.available !== false && carlineRows.length >= 2) {
+    const parsed = carlineRows.map((c) => {
+      const m = c.mejorVersion || {};
+      const util = m.utilidadPromedio != null
+        ? Number(m.utilidadPromedio)
+        : (m.unidades > 0 && m.utilidadTotal != null
+          ? Number(m.utilidadTotal) / Number(m.unidades)
+          : null);
+      return {
+        carline: String(c.carline || '—').trim(),
+        version: String(m.version || '—').trim(),
+        util: Number.isFinite(util) ? util : null,
+        mb: m.margenBrutoPct != null ? Number(m.margenBrutoPct) : null,
+        unidades: Number(m.unidades ?? c.unidadesCarline ?? 0),
+      };
+    }).filter((c) => c.util != null);
+
+    if (parsed.length >= 2) {
+      const sorted = parsed.slice().sort((a, b) => b.util - a.util);
+      const best = sorted[0];
+      const worst = sorted[sorted.length - 1];
+      const gap = round1(best.util - worst.util);
+      const lowMb = parsed
+        .filter((c) => c.mb != null && c.mb < 8)
+        .sort((a, b) => a.mb - b.mb)
+        .slice(0, 4);
+      const negative = parsed.filter((c) => c.util < 0).slice(0, 4);
+
+      let severity = 'info';
+      let title = 'Oportunidad de utilidad por carline';
+      let summary = `${best.carline} (${best.version}) lidera con ${round1(best.util)} util./ud.`;
+      let analysis =
+        `La mejor versión por utilidad unitaria es ${best.carline} · ${best.version} `
+        + `(${round1(best.util)} por unidad`
+        + (best.mb != null ? `, MB ${round1(best.mb)}%` : '')
+        + `, ${best.unidades} uds). `;
+      const recommendations = [
+        `Priorizar stock y cierres en ${best.carline} (${best.version}).`,
+        'Comparar descuentos/bonificaciones de carlines rezagados vs el líder.',
+      ];
+
+      if (negative.length) {
+        severity = 'critical';
+        title = 'Carlines con utilidad unitaria negativa';
+        summary = `${negative.length} carline(s) con utilidad/ud negativa; el peor es ${worst.carline}.`;
+        analysis +=
+          `Hay versiones con utilidad por unidad en rojo: `
+          + `${negative.map((c) => `${c.carline} ${round1(c.util)}`).join(', ')}. `
+          + 'Señal de precio, mix o costo fuera de control en esas líneas.';
+        recommendations.unshift(
+          'Congelar descuentos agresivos en carlines con utilidad negativa.',
+          'Revisar costo/bonificación de las versiones en rojo antes de seguir empujando volumen.',
+        );
+      } else if (lowMb.length >= 2 || (worst.mb != null && worst.mb < 8)) {
+        severity = 'warning';
+        title = 'Margen débil en carlines rezagados';
+        summary = `${lowMb.length || 1} carline(s) con MB bajo 8%; gap líder vs peor: ${gap} util./ud.`;
+        analysis +=
+          `Carlines con margen bruto débil: `
+          + `${(lowMb.length ? lowMb : [worst]).map((c) => `${c.carline} MB ${round1(c.mb)}%`).join(', ')}. `
+          + `El spread vs el líder es ${gap} de utilidad por unidad.`;
+        recommendations.push(
+          'Empujar mix hacia versiones de mayor utilidad unitaria del líder.',
+          'Auditar negociaciones en carlines con MB < 8%.',
+        );
+      } else if (gap >= 30000) {
+        severity = 'warning';
+        title = 'Gran brecha de utilidad entre carlines';
+        summary = `Líder ${best.carline} vs peor ${worst.carline}: gap ${gap} util./ud.`;
+        analysis +=
+          `Hay una brecha amplia (${gap}) entre la mejor y la peor utilidad unitaria `
+          + `(${worst.carline} · ${worst.version}: ${round1(worst.util)}). `
+          + 'Conviene rebalancear inventario y foco comercial hacia el líder.';
+        recommendations.push(
+          `Reducir énfasis comercial en ${worst.carline} si el margen no mejora.`,
+        );
+      } else {
+        analysis +=
+          `El resto del catálogo está relativamente alineado (gap ${gap} util./ud). `
+          + 'Usa el líder como referencia de precio y mix.';
+        recommendations.push('Mantener seguimiento semanal del ranking de utilidad/ud.');
+      }
+
+      push(insights, {
+        id: 'ventas-carline-utilidad',
+        kpiId: 'carlineInsightAnchor',
+        module: 'ventas',
+        severity,
+        title,
+        summary,
+        analysis,
+        recommendations,
+        metrics: {
+          lider: best,
+          peor: worst,
+          gap,
+          lowMb,
+          negative,
+          carlines: parsed.length,
+        },
+        chatPrompt: chatPrompt('Ventas', title, [
+          `Líder: ${best.carline} · ${best.version} · util/ud ${round1(best.util)} · MB ${best.mb != null ? round1(best.mb) : '—'}% · ${best.unidades} uds`,
+          `Peor: ${worst.carline} · ${worst.version} · util/ud ${round1(worst.util)} · MB ${worst.mb != null ? round1(worst.mb) : '—'}%`,
+          `Gap util/ud: ${gap}`,
+          ...lowMb.map((c) => `MB bajo: ${c.carline} ${round1(c.mb)}%`),
+          ...negative.map((c) => `Util negativa: ${c.carline} ${round1(c.util)}`),
+          `Periodo: ${fi || '—'} — ${ff || '—'}`,
+        ], 'Propón acciones de mix, precio e inventario por carline usando solo estos datos.'),
+      });
+    }
+  }
+
   return insights;
 }
 

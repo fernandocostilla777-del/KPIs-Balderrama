@@ -1,9 +1,13 @@
+const fs = require('fs');
+const path = require('path');
 const { query } = require('../db');
 
 const INVENTORY_SITUATIONS = `('FIS', 'DIS', 'PED', 'PEN', 'SEP', 'DEMO', 'TRAN')`;
 const PLAN_PISO_FACTOR = 0.00020778;
 const PLAN_PISO_DIAS_GRACIA = 30;
 const MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const FORECAST_SHEET_PATH = path.join(__dirname, '../../data/forecast-source.csv');
+const GM_MEXICO_RE = /GENERAL\s+MOTORS\s+DE\s+MEXICO/i;
 
 const SITUACION_LABELS = {
   FIS: 'Físico',
@@ -218,6 +222,63 @@ function mapRow(row) {
   };
 }
 
+function vinSuffix8(value) {
+  const s = String(value || '').replace(/\s+/g, '').toUpperCase();
+  if (!s) return '';
+  return s.length <= 8 ? s : s.slice(-8);
+}
+
+/**
+ * Cuenta pruebas de manejo por últimos 8 dígitos de VIN (columna M del sheet).
+ */
+function loadPruebasManejoCountByVin8() {
+  const map = new Map();
+  try {
+    const Database = require('better-sqlite3');
+    const dbPath = path.join(__dirname, '../../data/crm-ciclos.db');
+    if (!fs.existsSync(dbPath)) return map;
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const hasTable = db.prepare(`
+        SELECT 1 AS ok FROM sqlite_master
+        WHERE type = 'table' AND name = 'crm_pruebas_manejo'
+      `).get();
+      if (!hasTable) return map;
+      const rows = db.prepare(`
+        SELECT vin, COUNT(*) AS n
+        FROM crm_pruebas_manejo
+        WHERE vin IS NOT NULL AND TRIM(vin) <> ''
+        GROUP BY vin
+      `).all();
+      for (const row of rows) {
+        const key = vinSuffix8(row.vin);
+        if (!key) continue;
+        map.set(key, (map.get(key) || 0) + (Number(row.n) || 0));
+      }
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    console.warn('[inventory] pruebas de manejo:', err.message);
+  }
+  return map;
+}
+
+function enrichUnitsWithPruebasManejo(units) {
+  const counts = loadPruebasManejoCountByVin8();
+  return units.map((unit) => {
+    const vin8 = vinSuffix8(unit.serie);
+    const pruebasManejo = vin8 ? (counts.get(vin8) || 0) : 0;
+    const isDemo = unit.situacion === 'DEMO';
+    return {
+      ...unit,
+      vin8: vin8 || null,
+      pruebasManejo,
+      daysAsDemo: isDemo ? unit.daysInStock : null,
+    };
+  });
+}
+
 async function getInventory({ planPisoPeriod = 'all' } = {}) {
   const rows = await query(`
     SELECT
@@ -290,9 +351,10 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     ORDER BY SER_VEHICULO.VEH_TIPOAUTO
   `);
 
-  const units = rows.map(mapRow);
+  const units = enrichUnitsWithPruebasManejo(rows.map(mapRow));
   const availableSituations = new Set(['DIS', 'FIS', 'SEP']);
   const available = units.filter((u) => availableSituations.has(u.situacion));
+  const demos = units.filter((u) => u.situacion === 'DEMO');
   const apartadas = units.filter((u) => u.isApartada);
   const daysValues = units.map((u) => u.daysInStock).filter((d) => d !== null);
   const avgDays = daysValues.length
@@ -411,6 +473,12 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
   const periodLabel = formatPlanPisoPeriodLabel(period, planPisoMonths);
   const sinPrevias = units.filter((u) => Number(u.previas || 0) === 0).length;
   const conPrevias = units.length - sinPrevias;
+  const demoDays = demos.map((u) => u.daysAsDemo).filter((d) => d != null);
+  const avgDaysDemo = demoDays.length
+    ? Math.round(demoDays.reduce((s, d) => s + d, 0) / demoDays.length)
+    : 0;
+  const demosConPruebas = demos.filter((u) => Number(u.pruebasManejo || 0) > 0).length;
+  const demosPruebasTotal = demos.reduce((s, u) => s + (Number(u.pruebasManejo) || 0), 0);
 
   return {
     summary: {
@@ -418,6 +486,10 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       available: available.length,
       availableLibres: available.filter((u) => !u.isApartada).length,
       availableApartadas: apartadas.length,
+      demos: demos.length,
+      avgDaysDemo,
+      demosConPruebas,
+      demosPruebasTotal,
       avgDaysAvailable: avgDays,
       urgentAlerts: ageingAlerts.filter((a) => a.critical).length,
       ageingAlertsCount: ageingAlerts.length,
@@ -474,98 +546,126 @@ function parseFechaDoc(value) {
   return null;
 }
 
-const SITUACION_ENTRANTE_OK = new Set(['FIS', 'DIS', 'SEP', 'PED', 'PEN', 'TRAN', 'DEMO', 'VEN']);
-const SITUACION_ENTRANTE_EN_PROCESO = new Set(['PED', 'PEN', 'TRAN']);
-const SITUACION_ENTRANTE_STOCK = new Set(['FIS', 'DIS', 'SEP', 'DEMO']);
-
-function daysBetweenIso(fromIso, toDate = new Date()) {
-  if (!fromIso || !/^\d{4}-\d{2}-\d{2}/.test(fromIso)) return null;
-  const a = new Date(`${fromIso.slice(0, 10)}T12:00:00`);
-  const b = startOfDay(toDate);
-  if (Number.isNaN(a.getTime())) return null;
-  return Math.max(0, Math.round((b - startOfDay(a)) / 86400000));
+function parseCsvLine(line) {
+  const vals = [];
+  let cur = '';
+  let inq = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      inq = !inq;
+      continue;
+    }
+    if (ch === ',' && !inq) {
+      vals.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  vals.push(cur);
+  return vals;
 }
 
-function evaluateAdquisicionCanje(row) {
-  const dias = row.diasDesdeVenta;
-  const hasCanjePor = Boolean(row.canjePor);
-  const hasEntrante = Boolean(row.vinEntrante);
-  const sit = String(row.sitEntrante || '').toUpperCase();
+function normalizeHeader(name) {
+  return String(name || '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .toUpperCase();
+}
 
-  if (!hasCanjePor) {
-    const critical = dias != null && dias >= 3;
-    return {
-      severity: critical ? 'critical' : 'warning',
-      ruleId: critical ? 'canje-sin-adquisicion' : 'canje-sin-vin',
-      title: critical ? 'Adquisición no registrada' : 'Sin VIN de unidad entrante',
-      detail: 'El canje tiene CONCCANJE pero VEH_CANJEPOR está vacío. Capture el VIN de la unidad adquirida.',
-      action: 'Capturar VIN en CANJEPOR y dar de alta la unidad entrante',
-      adquisicionOk: false,
-    };
+function isGmMexicoConcesionario(value) {
+  return GM_MEXICO_RE.test(String(value || '').trim());
+}
+
+function looksLikeVin(value) {
+  return /^[A-HJ-NPR-Z0-9]{17}$/i.test(String(value || '').trim());
+}
+
+function isPlantaIntercambioConcesionario(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (looksLikeVin(text)) return false;
+  if (text.length < 4) return false;
+  return !isGmMexicoConcesionario(text);
+}
+
+function loadForecastSheetRows() {
+  if (!fs.existsSync(FORECAST_SHEET_PATH)) {
+    throw Object.assign(
+      new Error('No se encontró forecast-source.csv (fuente de CONCESIONARIO).'),
+      { status: 503 }
+    );
   }
+  const text = fs.readFileSync(FORECAST_SHEET_PATH, 'utf8').replace(/^\uFEFF/, '');
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return { rows: [] };
 
-  if (!hasEntrante) {
-    const critical = dias != null && dias >= 7;
-    return {
-      severity: critical ? 'critical' : 'warning',
-      ruleId: critical ? 'entrante-fantasma' : 'entrante-sin-match',
-      title: critical ? 'VIN entrante inexistente' : 'VIN entrante sin alta',
-      detail: `CANJEPOR=${row.canjePor} no aparece en inventario DMS.`,
-      action: 'Verificar VIN capturado o completar alta de la unidad entrante',
-      adquisicionOk: false,
-    };
-  }
-
-  if (!SITUACION_ENTRANTE_OK.has(sit) || Number(row.noInvEntrante || 0) <= 0) {
-    return {
-      severity: 'critical',
-      ruleId: 'entrante-bloqueado',
-      title: 'Alta entrante inválida',
-      detail: `Unidad ${row.vinEntrante} en situación ${sit || '—'} / inventario ${row.noInvEntrante ?? '—'}`,
-      action: 'Revisar estatus de la unidad entrante en DMS',
-      adquisicionOk: false,
-    };
-  }
-
-  if (SITUACION_ENTRANTE_EN_PROCESO.has(sit)) {
-    const atrasado = dias != null && dias >= 14;
-    return {
-      severity: atrasado ? 'warning' : 'ok',
-      ruleId: atrasado ? 'entrante-pedido-atrasado' : 'entrante-en-proceso',
-      title: atrasado ? 'Adquisición en pedido atrasada' : 'Adquisición en proceso',
-      detail: `Entrante ${row.vinEntrante} en ${SITUACION_LABELS[sit] || sit}`,
-      action: atrasado ? 'Cerrar pedido/tránsito y remisionar' : 'Seguimiento de llegada',
-      adquisicionOk: !atrasado,
-    };
-  }
-
-  if (SITUACION_ENTRANTE_STOCK.has(sit) && !row.fechaRemisionEntrante) {
-    return {
-      severity: 'warning',
-      ruleId: 'entrante-sin-remision',
-      title: 'Entrante en stock sin remisión',
-      detail: `Unidad ${row.vinEntrante} (${SITUACION_LABELS[sit] || sit}) sin fecha de remisión`,
-      action: 'Completar remisión de la unidad adquirida',
-      adquisicionOk: false,
-    };
-  }
-
-  return {
-    severity: 'ok',
-    ruleId: 'adquisicion-ok',
-    title: 'Adquisición correcta',
-    detail: `Entrante ${row.vinEntrante} en ${SITUACION_LABELS[sit] || sit}`,
-    action: null,
-    adquisicionOk: true,
+  const headers = parseCsvLine(lines[0]).map(normalizeHeader);
+  const idx = (name) => headers.indexOf(normalizeHeader(name));
+  const col = {
+    fechaVenta: idx('FECHA DE VENTA'),
+    carline: idx('CARLINE'),
+    tipoVenta: idx('TIPO DE VENTA'),
+    pedido: idx('NUMERO DE PEDIDO'),
+    catalogo: idx('CATALOGO'),
+    anio: idx('MODELO'),
+    color: idx('COLOR EXTERIOR'),
+    serie: idx('NUMERO DE SERIE'),
+    factura: idx('NUMERO DE FACTURA'),
+    statusFactura: idx('STATUS DE FACTURA'),
+    cliente: idx('NOMBRE DEL CLIENTE'),
+    vendedor: idx('NOMBRE DEL VENDEDOR'),
+    descripcion: idx('DESCRIPCION UNIDAD'),
+    fechaEntrada: idx('FECHA ENTRADA'),
+    fechaRemision: idx('FECHA REMISION'),
+    fechaPlanta: idx('FECHA REPORTE EN PLANTA'),
+    concesionario: idx('CONCESIONARIO'),
   };
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const vals = parseCsvLine(lines[i]);
+    const get = (key) => {
+      const iCol = col[key];
+      if (iCol < 0) return '';
+      return String(vals[iCol] || '').trim();
+    };
+    rows.push({
+      fechaVenta: get('fechaVenta'),
+      carline: get('carline'),
+      tipoVenta: get('tipoVenta'),
+      pedido: get('pedido'),
+      catalogo: get('catalogo'),
+      anio: get('anio'),
+      color: get('color'),
+      serie: get('serie'),
+      factura: get('factura'),
+      statusFactura: get('statusFactura'),
+      cliente: get('cliente'),
+      vendedor: get('vendedor'),
+      descripcion: get('descripcion'),
+      fechaEntrada: get('fechaEntrada'),
+      fechaRemision: get('fechaRemision'),
+      fechaPlanta: get('fechaPlanta'),
+      concesionario: get('concesionario'),
+    });
+  }
+  return { rows };
+}
+
+function rankingFromMap(map, limit = 15) {
+  return [...map.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, limit);
 }
 
 /**
- * Monitor de adquisición por intercambio/canje.
- * Valida que cada venta con canje tenga la unidad entrante correctamente registrada.
+ * Intercambios de planta: CONCESIONARIO ≠ GENERAL MOTORS DE MEXICO.
+ * Unidades traídas de inventario de planta de otro concesionario (solicitud a facturar).
  */
 async function getIntercambiosHistorico({ fechaInicio, fechaFin } = {}) {
-  const { getPool, sql } = require('../db');
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
@@ -575,129 +675,60 @@ async function getIntercambiosHistorico({ fechaInicio, fechaFin } = {}) {
     throw Object.assign(new Error('La fecha inicial no puede ser mayor que la fecha final.'), { status: 400 });
   }
 
-  const pool = await getPool();
-  const request = pool.request();
-  request.input('fechaInicio', sql.Date, inicio);
-  request.input('fechaFin', sql.Date, fin);
-
-  const result = await request.query(`
-    SELECT
-      ADE_VTAFI.VTE_FECHDOCTO,
-      ADE_VTAFI.VTE_DOCTO,
-      ADE_VTAFI.VTE_SERIE,
-      ADE_VTAFI.VTE_FORMAPAGO,
-      S.VEH_TIPOAUTO,
-      S.VEH_ANMODELO,
-      S.VEH_CATALOGO,
-      S.VEH_FECHSALIDA,
-      S.VEH_CONCCANJE,
-      S.VEH_CANJEPOR,
-      UNI_CATACOLOR.COL_DESCRIPCION AS COLOR,
-      B.PER_PATERNO + ' ' + B.PER_MATERNO + ' ' + B.PER_NOMRAZON AS VENDEDOR,
-      A.PER_NOMRAZON + ' ' + A.PER_PATERNO + ' ' + A.PER_MATERNO AS CLIENTE,
-      E.VEH_NUMSERIE AS VIN_ENTRANTE,
-      E.VEH_SITUACION AS SIT_ENTRANTE,
-      E.VEH_TIPOAUTO AS MODELO_ENTRANTE,
-      E.VEH_ANMODELO AS ANIO_ENTRANTE,
-      E.VEH_FECREMISION AS REM_ENTRANTE,
-      E.VEH_NOINVENTA AS NOINV_ENTRANTE
-    FROM ADE_VTAFI
-    INNER JOIN PER_PERSONAS AS A ON A.PER_IDPERSONA = ADE_VTAFI.VTE_IDCLIENTE
-    INNER JOIN SER_VEHICULO AS S
-      ON S.VEH_NUMSERIE = ADE_VTAFI.VTE_SERIE
-      AND S.VEH_NOINVENTA > 0
-    LEFT JOIN SER_VEHICULO AS E
-      ON NULLIF(LTRIM(RTRIM(S.VEH_CANJEPOR)), '') IS NOT NULL
-      AND (
-        LTRIM(RTRIM(E.VEH_NUMSERIE)) = LTRIM(RTRIM(S.VEH_CANJEPOR))
-        OR RIGHT(LTRIM(RTRIM(E.VEH_NUMSERIE)), 17) = RIGHT(LTRIM(RTRIM(S.VEH_CANJEPOR)), 17)
-      )
-      AND E.VEH_NOINVENTA > 0
-    LEFT JOIN UNI_CATACOLOR
-      ON UNI_CATACOLOR.COL_CLAVE = S.VEH_COLOEXTE
-      AND UNI_CATACOLOR.COL_MODELO = S.VEH_ANMODELO
-      AND UNI_CATACOLOR.COL_CATALOGO = S.VEH_CATALOGO
-    LEFT JOIN PER_PERSONAS AS B ON B.PER_IDPERSONA = S.VEH_VENDEDOR
-    WHERE ADE_VTAFI.VTE_TIPODOCTO = 'A'
-      AND ADE_VTAFI.VTE_STATUS = 'I'
-      AND S.VEH_SITUACION = 'VEN'
-      AND (
-        NULLIF(LTRIM(RTRIM(S.VEH_CONCCANJE)), '') IS NOT NULL
-        OR UPPER(LTRIM(RTRIM(ADE_VTAFI.VTE_FORMAPAGO))) = 'INT'
-      )
-      AND CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103)
-        BETWEEN @fechaInicio AND @fechaFin
-    ORDER BY CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103) DESC, ADE_VTAFI.VTE_SERIE
-  `);
-
+  const sheet = loadForecastSheetRows();
   const byMesMap = new Map();
-  const canjePorCount = new Map();
-  const rows = (result.recordset || []).map((r) => {
-    const fecha = parseFechaDoc(r.VTE_FECHDOCTO);
-    const salida = parseFechaDoc(r.VEH_FECHSALIDA);
-    const remEntrante = parseFechaDoc(r.REM_ENTRANTE);
-    const modelo = String(r.VEH_TIPOAUTO || '').trim() || '(Sin modelo)';
-    const concCanje = String(r.VEH_CONCCANJE || '').trim() || null;
-    const formaPago = String(r.VTE_FORMAPAGO || '').trim() || null;
-    const canjePor = String(r.VEH_CANJEPOR || '').trim() || null;
-    const esIntLegacy = String(formaPago || '').toUpperCase() === 'INT';
-    const diasDesdeVenta = daysBetweenIso(fecha?.iso);
+  const byModeloMap = new Map();
+  const byModeloAnioMap = new Map();
+  const byConcesionarioMap = new Map();
+  const rows = [];
 
-    if (canjePor) {
-      canjePorCount.set(canjePor, (canjePorCount.get(canjePor) || 0) + 1);
-    }
-    if (fecha?.monthKey) {
+  for (const raw of sheet.rows) {
+    if (!isPlantaIntercambioConcesionario(raw.concesionario)) continue;
+
+    const fecha =
+      parseFechaDoc(raw.fechaVenta)
+      || parseFechaDoc(raw.fechaEntrada)
+      || parseFechaDoc(raw.fechaRemision)
+      || parseFechaDoc(raw.fechaPlanta);
+    if (!fecha?.iso) continue;
+    if (fecha.iso < fechaInicio || fecha.iso > fechaFin) continue;
+
+    const carline = raw.carline || '(Sin carline)';
+    const anio = raw.anio || null;
+    const modeloKey = anio ? `${carline} ${anio}` : carline;
+    const concesionario = raw.concesionario;
+
+    if (fecha.monthKey) {
       byMesMap.set(fecha.monthKey, (byMesMap.get(fecha.monthKey) || 0) + 1);
     }
+    byModeloMap.set(carline, (byModeloMap.get(carline) || 0) + 1);
+    byModeloAnioMap.set(modeloKey, (byModeloAnioMap.get(modeloKey) || 0) + 1);
+    byConcesionarioMap.set(concesionario, (byConcesionarioMap.get(concesionario) || 0) + 1);
 
-    const base = {
-      fecha: fecha?.iso || null,
-      fechaSalida: salida?.iso || null,
-      docto: r.VTE_DOCTO || null,
-      serie: r.VTE_SERIE || null,
-      modelo,
-      anModelo: r.VEH_ANMODELO || null,
-      catalogo: r.VEH_CATALOGO || null,
-      color: r.COLOR || null,
-      vendedor: String(r.VENDEDOR || '').replace(/\s+/g, ' ').trim() || null,
-      cliente: String(r.CLIENTE || '').replace(/\s+/g, ' ').trim() || null,
-      formaPago,
-      concCanje,
-      canjePor,
-      origen: esIntLegacy ? 'INT' : 'CONCCANJE',
-      vinEntrante: String(r.VIN_ENTRANTE || '').trim() || null,
-      sitEntrante: String(r.SIT_ENTRANTE || '').trim().toUpperCase() || null,
-      sitEntranteLabel: SITUACION_LABELS[String(r.SIT_ENTRANTE || '').trim().toUpperCase()] || (r.SIT_ENTRANTE || null),
-      modeloEntrante: String(r.MODELO_ENTRANTE || '').trim() || null,
-      anEntrante: r.ANIO_ENTRANTE || null,
-      fechaRemisionEntrante: remEntrante?.iso || null,
-      noInvEntrante: r.NOINV_ENTRANTE != null ? Number(r.NOINV_ENTRANTE) : null,
-      diasDesdeVenta,
-    };
-
-    const evalResult = evaluateAdquisicionCanje(base);
-    return { ...base, ...evalResult };
-  });
-
-  // Doble canje: mismo VIN entrante referenciado por varias salidas
-  for (const row of rows) {
-    if (row.canjePor && (canjePorCount.get(row.canjePor) || 0) > 1) {
-      row.severity = 'critical';
-      row.ruleId = 'doble-canje';
-      row.title = 'VIN entrante duplicado';
-      row.detail = `CANJEPOR ${row.canjePor} aparece en ${canjePorCount.get(row.canjePor)} canjes`;
-      row.action = 'Revisar capturas duplicadas del VIN entrante';
-      row.adquisicionOk = false;
-    }
+    rows.push({
+      fecha: fecha.iso,
+      fechaEntrada: parseFechaDoc(raw.fechaEntrada)?.iso || null,
+      fechaRemision: parseFechaDoc(raw.fechaRemision)?.iso || null,
+      fechaPlanta: parseFechaDoc(raw.fechaPlanta)?.iso || null,
+      serie: raw.serie || null,
+      carline,
+      modelo: raw.descripcion || carline,
+      anModelo: anio,
+      catalogo: raw.catalogo || null,
+      color: raw.color || null,
+      concesionario,
+      tipoVenta: raw.tipoVenta || null,
+      pedido: raw.pedido || null,
+      factura: raw.factura || null,
+      statusFactura: raw.statusFactura || null,
+      cliente: raw.cliente || null,
+      vendedor: raw.vendedor || null,
+      origen: 'planta-otro-concesionario',
+    });
   }
 
-  const severityRank = { critical: 0, warning: 1, ok: 2 };
-  rows.sort((a, b) => {
-    const sa = severityRank[a.severity] ?? 9;
-    const sb = severityRank[b.severity] ?? 9;
-    if (sa !== sb) return sa - sb;
-    return String(b.fecha || '').localeCompare(String(a.fecha || ''));
-  });
+  rows.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))
+    || String(a.carline || '').localeCompare(String(b.carline || '')));
 
   const porMes = [...byMesMap.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
@@ -710,65 +741,83 @@ async function getIntercambiosHistorico({ fechaInicio, fechaFin } = {}) {
       };
     });
 
+  const porModelo = rankingFromMap(byModeloMap, 20);
+  const porModeloAnio = rankingFromMap(byModeloAnioMap, 20);
+  const porConcesionario = rankingFromMap(byConcesionarioMap, 20);
+  const topModelo = porModelo[0] || null;
+  const topModeloAnio = porModeloAnio[0] || null;
+  const topConcesionario = porConcesionario[0] || null;
   const total = rows.length;
-  const conCanjePor = rows.filter((r) => r.canjePor).length;
-  const ok = rows.filter((r) => r.severity === 'ok').length;
-  const warning = rows.filter((r) => r.severity === 'warning').length;
-  const critical = rows.filter((r) => r.severity === 'critical').length;
-  const adquisicionOk = rows.filter((r) => r.adquisicionOk).length;
-  const coberturaPct = total ? Number(((conCanjePor / total) * 100).toFixed(1)) : 0;
-  const calidadPct = total ? Number(((adquisicionOk / total) * 100).toFixed(1)) : 0;
+  const shareTopModelo = total && topModelo
+    ? Number(((topModelo.count / total) * 100).toFixed(1))
+    : 0;
 
-  const alertas = rows
-    .filter((r) => r.severity === 'critical' || r.severity === 'warning')
-    .slice(0, 40)
-    .map((r) => ({
-      severity: r.severity,
-      ruleId: r.ruleId,
-      title: r.title,
-      detail: r.detail,
-      action: r.action,
-      fecha: r.fecha,
-      docto: r.docto,
-      vinSaliente: r.serie,
-      vinEntrante: r.canjePor || r.vinEntrante,
-      concCanje: r.concCanje,
-      diasDesdeVenta: r.diasDesdeVenta,
-      modelo: r.modelo,
-    }));
-
-  const porRegla = {};
-  for (const r of rows) {
-    if (!porRegla[r.ruleId]) {
-      porRegla[r.ruleId] = { ruleId: r.ruleId, title: r.title, severity: r.severity, count: 0 };
-    }
-    porRegla[r.ruleId].count += 1;
+  const insights = [];
+  if (topModelo) {
+    insights.push({
+      severity: 'info',
+      title: `Auto más solicitado a facturar: ${topModelo.label}`,
+      detail: `${topModelo.count} unidad(es) · ${shareTopModelo}% del periodo (CONCESIONARIO ≠ GENERAL MOTORS DE MEXICO).`,
+      action: 'Priorizar cupo/pedido de este carline en intercambios de planta',
+    });
+  }
+  if (topModeloAnio && topModelo && topModeloAnio.label !== topModelo.label) {
+    insights.push({
+      severity: 'info',
+      title: `Combinación más pedida: ${topModeloAnio.label}`,
+      detail: `${topModeloAnio.count} unidad(es) carline+año.`,
+      action: 'Revisar disponibilidad de ese modelo-año en planta',
+    });
+  }
+  if (topConcesionario) {
+    insights.push({
+      severity: 'info',
+      title: `Concesionario origen top: ${topConcesionario.label}`,
+      detail: `${topConcesionario.count} unidad(es) traídas de su inventario de planta.`,
+      action: 'Monitorear reciprocidad / saldo de intercambios con ese dealer',
+    });
+  }
+  if (!total) {
+    insights.push({
+      severity: 'ok',
+      title: 'Sin intercambios de planta en el periodo',
+      detail: 'No hay unidades con CONCESIONARIO distinto de GENERAL MOTORS DE MEXICO.',
+      action: 'Amplíe el rango de fechas si espera movimiento',
+    });
   }
 
   return {
     periodo: { fechaInicio, fechaFin },
     fuente: {
-      criterio: 'Venta con CONCCANJE/INT + validación de adquisición (CANJEPOR → SER_VEHICULO)',
-      tablas: ['ADE_VTAFI', 'SER_VEHICULO'],
+      criterio: 'CONCESIONARIO distinto de GENERAL MOTORS DE MEXICO = unidad traída de inventario de planta (otro concesionario)',
+      archivo: 'backend/data/forecast-source.csv',
+      campo: 'CONCESIONARIO',
     },
     summary: {
       total,
-      conCanjePor,
-      sinCanjePor: total - conCanjePor,
-      ok,
-      warning,
-      critical,
-      adquisicionOk,
-      coberturaPct,
-      calidadPct,
+      modelosDistintos: byModeloMap.size,
+      concesionariosOrigen: byConcesionarioMap.size,
+      topModelo: topModelo?.label || null,
+      topModeloUnidades: topModelo?.count || 0,
+      topModeloSharePct: shareTopModelo,
+      topModeloAnio: topModeloAnio?.label || null,
+      topModeloAnioUnidades: topModeloAnio?.count || 0,
+      topConcesionario: topConcesionario?.label || null,
+      topConcesionarioUnidades: topConcesionario?.count || 0,
       mesesConMovimiento: porMes.filter((m) => m.count > 0).length,
-      alertasAbiertas: warning + critical,
     },
     porMes,
-    porRegla: Object.values(porRegla).sort((a, b) => b.count - a.count),
-    alertas,
+    porModelo,
+    porModeloAnio,
+    porConcesionario,
+    insights,
     rows,
   };
 }
 
-module.exports = { getInventory, getIntercambiosHistorico };
+module.exports = {
+  getInventory,
+  getIntercambiosHistorico,
+  vinSuffix8,
+  loadPruebasManejoCountByVin8,
+};

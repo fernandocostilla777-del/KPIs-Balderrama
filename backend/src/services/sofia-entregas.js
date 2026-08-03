@@ -2,6 +2,19 @@ const { getPool, sql } = require('../db');
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
+/** Timbrados SOFIA: excluye flotilla contado (FLOT); sí incluye Flotilla GMF (FLOTGMF). */
+function isFlotillaExcluidaSofia(row) {
+  const forma = String(row.FORMAPAGO_ORIGINAL || row.VTE_FORMAPAGO || '').trim().toUpperCase();
+  if (forma === 'FLOTGMF') return false;
+  if (forma === 'FLOT') return true;
+  // Sin forma de pago: no excluir (puede ser retail u otro canal)
+  return false;
+}
+
+function excludeFlotillaContadoSofia(rows = []) {
+  return rows.filter((row) => !isFlotillaExcluidaSofia(row));
+}
+
 function parseDateInput(value) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error('Fecha invalida. Use formato YYYY-MM-DD.');
@@ -74,12 +87,25 @@ function buildEntregasDetalleQuery() {
         ISNULL(p.PER_MATERNO, '')
       )) AS CLIENTE,
       ISNULL(prev.PREVIAS, 0) AS PREVIAS,
-      veh.VEH_TIPOAUTO
+      veh.VEH_TIPOAUTO,
+      COALESCE(v.VTE_FORMAPAGO, vByVin.VTE_FORMAPAGO) AS FORMAPAGO_ORIGINAL,
+      CASE COALESCE(v.VTE_FORMAPAGO, vByVin.VTE_FORMAPAGO)
+        WHEN 'FLOT' THEN 'FLOTILLA'
+        WHEN 'FLOTGMF' THEN 'FLOTILLA GMF'
+        ELSE NULL
+      END AS TIPOVENTA
     FROM SOF_Venta_Cancel_DEMO s
     LEFT JOIN PER_PERSONAS p ON p.PER_IDPERSONA = s.SOF_IDCliente
     LEFT JOIN ADE_VTAFI v
       ON v.VTE_DOCTO = s.SOF_Factura
       AND v.VTE_TIPODOCTO = 'A'
+    OUTER APPLY (
+      SELECT TOP 1 a.VTE_FORMAPAGO
+      FROM ADE_VTAFI a
+      WHERE UPPER(LTRIM(RTRIM(a.VTE_SERIE))) = UPPER(LTRIM(RTRIM(s.SOF_VIN)))
+        AND a.VTE_TIPODOCTO = 'A'
+      ORDER BY CONVERT(DATE, a.VTE_FECHDOCTO, 103) DESC
+    ) vByVin
     OUTER APPLY (
       SELECT TOP 1 sv.VEH_TIPOAUTO
       FROM SER_VEHICULO sv
@@ -111,6 +137,10 @@ function buildEntregasDetalleQuery() {
         NULLIF(LTRIM(RTRIM(s.SOF_FechFact)), ''),
         v.VTE_FECHDOCTO
       ), 103) BETWEEN @fechaInicio AND @fechaFin
+      AND (
+        COALESCE(v.VTE_FORMAPAGO, vByVin.VTE_FORMAPAGO) IS NULL
+        OR UPPER(LTRIM(RTRIM(COALESCE(v.VTE_FORMAPAGO, vByVin.VTE_FORMAPAGO)))) <> 'FLOT'
+      )
     ORDER BY
       CONVERT(DATE, COALESCE(
         NULLIF(LTRIM(RTRIM(s.SOF_FechFact)), ''),
@@ -121,9 +151,14 @@ function buildEntregasDetalleQuery() {
   `;
 }
 
+/**
+ * Cobertura SOFIA: sin flotilla contado (FLOT); sí cuenta Flotilla GMF (FLOTGMF).
+ */
 function computeCoberturaSofia(ventasRows = [], entregasRows = []) {
-  const totalUnidadesFacturadas = ventasRows.length;
-  const totalReportadasSofia = entregasRows.length;
+  const facturadas = excludeFlotillaContadoSofia(ventasRows);
+  const reportadas = excludeFlotillaContadoSofia(entregasRows);
+  const totalUnidadesFacturadas = facturadas.length;
+  const totalReportadasSofia = reportadas.length;
   const totalUnidadesFacturadasNoTimbradas = Math.max(0, totalUnidadesFacturadas - totalReportadasSofia);
   const numeradorCobertura = totalReportadasSofia + totalUnidadesFacturadasNoTimbradas;
 
@@ -132,6 +167,8 @@ function computeCoberturaSofia(ventasRows = [], entregasRows = []) {
     totalNotificacionesEntrega: totalReportadasSofia,
     totalUnidadesFacturadasNoTimbradas,
     numeradorCobertura,
+    excluyeFlotillaContado: true,
+    incluyeFlotillaGmf: true,
   };
 }
 
@@ -163,15 +200,26 @@ async function getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes =
     .input('fechaFin', sql.Date, fin)
     .query(buildEntregasDetalleQuery());
 
-  const registros = (result.recordset || []).map((row) => ({
+  const registrosBrutos = (result.recordset || []).map((row) => ({
     ...row,
     PREVIAS: Number(row.PREVIAS || 0) || 0,
   }));
+  const excluidasFlotilla = registrosBrutos.filter(isFlotillaExcluidaSofia).length;
+  const registros = excludeFlotillaContadoSofia(registrosBrutos);
   const totalEntregasSinPrevias = registros.filter((r) => r.PREVIAS === 0).length;
+  const totalFlotillaGmf = registros.filter(
+    (r) => String(r.FORMAPAGO_ORIGINAL || '').toUpperCase() === 'FLOTGMF'
+      || String(r.TIPOVENTA || '').toUpperCase() === 'FLOTILLA GMF',
+  ).length;
+
   const payload = {
     totalNotificacionesEntrega: registros.length,
     totalEntregasSinPrevias,
     totalEntregasConPrevias: registros.length - totalEntregasSinPrevias,
+    totalEntregasExcluidasFlotilla: excluidasFlotilla,
+    totalEntregasFlotillaGmf: totalFlotillaGmf,
+    excluyeFlotillaContado: true,
+    incluyeFlotillaGmf: true,
     registrosEntrega: registros,
   };
 
@@ -185,4 +233,6 @@ async function getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes =
 module.exports = {
   getNotificacionesEntrega,
   computeCoberturaSofia,
+  isFlotillaExcluidaSofia,
+  excludeFlotillaContadoSofia,
 };

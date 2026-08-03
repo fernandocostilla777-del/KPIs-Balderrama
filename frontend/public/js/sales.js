@@ -6,11 +6,16 @@
   let registrosActuales = [];
   let entregasActuales = [];
   let apartadasActuales = [];
+  let tomasACuentaActuales = [];
+  let tomasACuentaMeta = { porModeloToma: [], montoAdquisicion: 0, totalVendidosMismoMes: 0, pctVendidosMismoMes: 0 };
   let activeVentasKpiType = null;
   let activeVentasDrawerKpi = null;
   let ventasDrawerUi = null;
   let lastYtd = null;
   let ytdQuarters = new Set([1, 2, 3, 4]);
+  let tomasQuarters = new Set([1, 2, 3, 4]);
+  let lastTomasMensual = null;
+  let lastUtilidadCarline = null;
   let sofiaLiveTimer = null;
   let sofiaLiveActive = false;
   const charts = {};
@@ -1121,7 +1126,7 @@
       },
       sofia: {
         title: 'Notificaciones SOFIA',
-        hint: 'Entregas reportadas en SOFIA en el periodo',
+        hint: 'Timbrados SOFIA · sin flotilla (FLOT) · sí incluye Flotilla GMF',
         icon: 'notifications_active',
         card: () => els.kpiCardEntregasSofia,
       },
@@ -1130,6 +1135,12 @@
         hint: 'Apartadas SEP + simulación de cobertura',
         icon: 'pending_actions',
         card: () => els.kpiCardCarryOver,
+      },
+      tomasACuenta: {
+        title: 'Tomas a cuenta',
+        hint: 'Usados tomados y cuántos ya se vendieron el mismo mes',
+        icon: 'swap_horiz',
+        card: () => els.sectionTomasACuenta,
       },
     };
     return map[key] || { title: key, hint: '', icon: 'analytics', card: () => null };
@@ -1140,6 +1151,7 @@
     if (key === 'flotilla') return getFlotillaRows();
     if (key === 'sofia') return entregasActuales;
     if (key === 'carryOver') return apartadasActuales;
+    if (key === 'tomasACuenta') return tomasACuentaActuales;
     return [];
   }
 
@@ -1149,6 +1161,381 @@
         card?.classList.remove('is-selected', 'is-open');
         card?.setAttribute('aria-expanded', 'false');
       });
+    els.sectionTomasACuenta?.classList.remove('section-focus', 'is-selected', 'is-open');
+  }
+
+  function formatTomaFecha(value) {
+    if (value == null || value === '') return '—';
+    if (typeof value === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}/.test(value.trim())) {
+      return value.trim().slice(0, 10);
+    }
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function tomaRecordKey(r) {
+    return `${r.idPedido || ''}|${String(r.vinToma || '').toUpperCase()}|${r.facturaNuevo || ''}`;
+  }
+
+  let tomaDetailFloat = null;
+
+  function ensureTomaDetailFloat() {
+    if (tomaDetailFloat) return tomaDetailFloat;
+    const el = document.createElement('div');
+    el.id = 'tomaACuentaFloat';
+    el.className = 'toma-float hidden';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'Detalle toma a cuenta');
+    el.innerHTML = `
+      <div class="toma-float__header" data-toma-drag>
+        <div class="toma-float__title-wrap">
+          <span class="material-symbols-outlined">swap_horiz</span>
+          <div>
+            <h3 class="toma-float__title" data-toma-title>Toma a cuenta</h3>
+            <p class="toma-float__subtitle" data-toma-sub></p>
+          </div>
+        </div>
+        <button type="button" class="toma-float__icon-btn" data-toma-close title="Cerrar" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="toma-float__body custom-scrollbar" data-toma-body></div>
+      <div class="toma-float__footer" data-toma-footer></div>
+    `;
+    document.body.appendChild(el);
+    el.querySelector('[data-toma-close]')?.addEventListener('click', () => {
+      el.classList.add('hidden');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !el.classList.contains('hidden')) el.classList.add('hidden');
+    });
+
+    const dragHandle = el.querySelector('[data-toma-drag]');
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+    dragHandle?.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      dragging = true;
+      const rect = el.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      el.setPointerCapture?.(e.pointerId);
+    });
+    dragHandle?.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const left = Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, e.clientX - offsetX));
+      const top = Math.max(8, Math.min(window.innerHeight - el.offsetHeight - 8, e.clientY - offsetY));
+      el.style.left = `${left}px`;
+      el.style.top = `${top}px`;
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+    });
+    const endDrag = () => { dragging = false; };
+    dragHandle?.addEventListener('pointerup', endDrag);
+    dragHandle?.addEventListener('pointercancel', endDrag);
+
+    tomaDetailFloat = el;
+    return el;
+  }
+
+  function openTomaDetail(record) {
+    if (!record) return;
+    const el = ensureTomaDetailFloat();
+    el.querySelector('[data-toma-title]').textContent = record.vinToma || 'Toma a cuenta';
+    el.querySelector('[data-toma-sub]').textContent = [
+      record.modeloToma || 'Usado',
+      record.anModeloToma || '',
+    ].filter(Boolean).join(' · ');
+
+    const row = (label, value) => `
+      <div class="toma-float__row">
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(value == null || value === '' ? '—' : String(value))}</dd>
+      </div>`;
+
+    el.querySelector('[data-toma-body]').innerHTML = `
+      <section class="toma-float__section">
+        <h4>Vehículo tomado</h4>
+        <dl class="toma-float__grid">
+          ${row('VIN toma', record.vinToma)}
+          ${row('Modelo', record.modeloToma)}
+          ${row('Año', record.anModeloToma)}
+          ${row('Importe vehículo', moneyCell(record.importeVehiculo))}
+          ${row('Importe adquisición', moneyCell(record.importeAdquisicion))}
+          ${row('Fecha toma', formatTomaFecha(record.fechaToma))}
+          ${row('Usuario toma', record.usuarioToma)}
+        </dl>
+      </section>
+      <section class="toma-float__section">
+        <h4>Venta del usado (mismo mes)</h4>
+        <dl class="toma-float__grid">
+          ${row('Estatus', record.vendidoMismoMes ? 'Vendido' : 'Sin venta en el mes de la toma')}
+          ${row('Fecha venta', formatTomaFecha(record.fechaVentaUsado))}
+          ${row('Pedido USN', record.pedidoUsn)}
+          ${row('Monto venta', moneyCell(record.montoVentaUsado))}
+          ${row('Cliente usado', record.clienteUsado)}
+          ${row('Vendedor usado', record.vendedorUsado)}
+        </dl>
+      </section>
+      <section class="toma-float__section">
+        <h4>Venta nueva asociada</h4>
+        <dl class="toma-float__grid">
+          ${row('Serie / VIN nuevo', record.serieNuevo)}
+          ${row('Modelo nuevo', record.modeloNuevo)}
+          ${row('Año nuevo', record.anModeloNuevo)}
+          ${row('Factura', record.facturaNuevo)}
+          ${row('Fecha factura', formatTomaFecha(record.fechaFactura))}
+          ${row('Pedido', record.idPedido)}
+          ${row('Cliente', record.cliente)}
+          ${row('Vendedor', record.vendedor)}
+        </dl>
+      </section>
+    `;
+
+    const vin = encodeURIComponent(record.vinToma || '');
+    el.querySelector('[data-toma-footer]').innerHTML = vin
+      ? `<a class="btn-glass btn-primary" href="/seguimiento.html?q=${vin}" target="_blank" rel="noopener">
+           <span class="material-symbols-outlined">person_search</span>
+           Abrir en Seguimiento 360
+         </a>`
+      : '';
+
+    el.classList.remove('hidden');
+    if (!el.style.left && !el.style.top) {
+      el.style.right = '28px';
+      el.style.bottom = '28px';
+      el.style.left = 'auto';
+      el.style.top = 'auto';
+    }
+  }
+
+  function filterTomasACuentaByTerm(term, base) {
+    const q = String(term || '').trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((row) =>
+      [
+        row.vinToma, row.serieNuevo, row.facturaNuevo, row.cliente, row.vendedor,
+        row.modeloToma, row.modeloNuevo, row.anModeloToma, row.anModeloNuevo,
+        row.usuarioToma, row.idPedido, row.fechaToma, row.fechaFactura,
+        row.clienteUsado, row.vendedorUsado, row.pedidoUsn, row.fechaVentaUsado,
+        row.vendidoMismoMes ? 'vendido' : 'pendiente',
+      ].some((val) => String(val ?? '').toLowerCase().includes(q))
+    );
+  }
+
+  function toggleTomasACuentaPanel() {
+    ensureVentasKpiDrawer().open('tomasACuenta', els.sectionTomasACuenta);
+    els.sectionTomasACuenta?.classList.add('section-focus');
+  }
+
+  function renderTomasSection(resumen, tomasMensual) {
+    const rows = tomasACuentaActuales || [];
+    const tomas = Number(resumen?.totalTomasACuenta ?? rows.length ?? 0);
+    const vendidas = Number(
+      resumen?.totalTomasVendidasMismoMes
+      ?? tomasACuentaMeta.totalVendidosMismoMes
+      ?? rows.filter((r) => r.vendidoMismoMes).length
+    );
+    const pct = Number(
+      resumen?.pctTomasVendidasMismoMes
+      ?? tomasACuentaMeta.pctVendidosMismoMes
+      ?? (tomas > 0 ? Math.round((vendidas / tomas) * 1000) / 10 : 0)
+    );
+
+    if (els.tomasStatTomados) els.tomasStatTomados.textContent = String(tomas);
+    if (els.tomasStatVendidos) els.tomasStatVendidos.textContent = String(vendidas);
+    if (els.tomasStatPct) els.tomasStatPct.textContent = tomas > 0 ? `${pct}%` : '—';
+    if (els.tomasSectionSubtitle) {
+      els.tomasSectionSubtitle.textContent = tomas > 0
+        ? `${vendidas} de ${tomas} usados tomados del periodo ya se vendieron en el mismo mes · ${pct}%`
+        : 'Usados tomados del periodo · cuántos ya se vendieron el mismo mes';
+    }
+
+    const fi = els.fechaInicio?.value || '';
+    const ff = els.fechaFin?.value || '';
+    if (els.tomasInfoSubtitle) {
+      const rango = fi && ff
+        ? `${fi.split('-').reverse().join('/')} – ${ff.split('-').reverse().join('/')}`
+        : 'Periodo seleccionado';
+      els.tomasInfoSubtitle.textContent = tomas > 0
+        ? `${tomas} tomas · ${vendidas} vendidas · ${rango}`
+        : `Sin tomas · ${rango}`;
+    }
+
+    renderTomasMensualChart(tomasMensual);
+
+    if (!els.tomasSectionBody) return;
+    if (!rows.length) {
+      els.tomasSectionBody.innerHTML = '<tr><td colspan="3" class="empty-row">Sin tomas en el periodo.</td></tr>';
+      return;
+    }
+
+    // Compacto: pendientes primero, luego vendidos; máx. 10 filas (el resto en Detalle).
+    const ordenadas = rows.slice().sort((a, b) => {
+      if (Boolean(a.vendidoMismoMes) !== Boolean(b.vendidoMismoMes)) {
+        return a.vendidoMismoMes ? 1 : -1;
+      }
+      return String(b.fechaToma || '').localeCompare(String(a.fechaToma || ''));
+    });
+    const visibles = ordenadas.slice(0, 10);
+    const resto = Math.max(0, ordenadas.length - visibles.length);
+
+    els.tomasSectionBody.innerHTML = `${visibles.map((r) => `
+      <tr class="tomas-row" data-toma-key="${escapeHtml(tomaRecordKey(r))}" title="Ver ficha rápida">
+        <td><strong class="toma-vin-link">${escapeHtml(r.vinToma || '—')}</strong></td>
+        <td>
+          <span class="carline-utilidad-carline" title="${escapeHtml(r.modeloToma || '')}">${escapeHtml(r.modeloToma || '—')}</span>
+        </td>
+        <td>
+          <span class="tomas-badge ${r.vendidoMismoMes ? 'tomas-badge--vendido' : 'tomas-badge--pendiente'}">
+            ${r.vendidoMismoMes ? 'Vendido' : 'No vendido'}
+          </span>
+        </td>
+      </tr>
+    `).join('')}${resto > 0 ? `
+      <tr>
+        <td colspan="3" class="empty-row" style="font-size:11px">
+          +${resto} más · abre <strong>Detalle</strong>
+        </td>
+      </tr>
+    ` : ''}`;
+  }
+
+  function buildTomasTrimestres(tomasMensual) {
+    const meses = tomasMensual?.meses || [];
+    const byQ = { 1: [], 2: [], 3: [], 4: [] };
+    for (const m of meses) {
+      const month = Number(m.month || 0);
+      if (month < 1 || month > 12) continue;
+      const q = Math.ceil(month / 3);
+      byQ[q].push(m);
+    }
+    return [1, 2, 3, 4]
+      .filter((q) => byQ[q].length)
+      .map((q) => ({
+        quarter: q,
+        label: `T${q}`,
+        meses: byQ[q],
+      }));
+  }
+
+  function syncTomasQuarterChips() {
+    const avail = new Set(buildTomasTrimestres(lastTomasMensual).map((t) => Number(t.quarter)));
+    els.tomasQuarterChips?.querySelectorAll('[data-tomas-quarter]').forEach((btn) => {
+      const q = Number(btn.dataset.tomasQuarter);
+      const visible = !avail.size || avail.has(q);
+      btn.hidden = !visible;
+      btn.disabled = !visible;
+      const on = visible && tomasQuarters.has(q);
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function initTomasQuartersFromData(tomasMensual) {
+    const avail = buildTomasTrimestres(tomasMensual).map((t) => Number(t.quarter));
+    tomasQuarters = avail.length ? new Set(avail) : new Set([1, 2, 3, 4]);
+  }
+
+  function toggleTomasQuarter(q) {
+    const n = Number(q);
+    if (!Number.isFinite(n) || n < 1 || n > 4) return;
+    if (tomasQuarters.has(n)) {
+      if (tomasQuarters.size <= 1) return;
+      tomasQuarters.delete(n);
+    } else {
+      tomasQuarters.add(n);
+    }
+    syncTomasQuarterChips();
+    if (lastTomasMensual) renderTomasMensualChart(lastTomasMensual, { keepQuarters: true });
+  }
+
+  function renderTomasMensualChart(tomasMensual, { keepQuarters = false } = {}) {
+    if (!document.getElementById('chartTomasMensual')) return;
+    if (tomasMensual) lastTomasMensual = tomasMensual;
+    const data = lastTomasMensual || {};
+    if (!keepQuarters) initTomasQuartersFromData(data);
+    syncTomasQuarterChips();
+
+    const anio = data.anio || new Date().getFullYear();
+    const corteFmt = String(data.corte || '').split('-').reverse().join('/');
+    const trimestres = buildTomasTrimestres(data);
+    const selected = trimestres.filter((t) => tomasQuarters.has(t.quarter));
+    const monthPoints = selected.flatMap((t) => (t.meses || []).map((m) => ({
+      ...m,
+      quarterLabel: t.label,
+    })));
+    const multiQ = selected.length > 1;
+    const labels = monthPoints.map((m) => (multiQ ? `${m.quarterLabel} ${m.label}` : m.label));
+    const tomados = monthPoints.map((m) => Number(m.tomados || 0));
+    const vendidos = monthPoints.map((m) => Number(m.vendidos || 0));
+
+    if (els.tomasChartSubtitle) {
+      els.tomasChartSubtitle.textContent = data.mesEnCursoExcluido
+        ? `Acumulado ${anio} al ${corteFmt || 'corte'} · meses del trimestre · mes en curso excluido`
+        : `Acumulado ${anio}${corteFmt ? ` al ${corteFmt}` : ''} · tomados vs vendidos el mismo mes`;
+    }
+
+    createChart('tomasMensual', 'chartTomasMensual', {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Tomados',
+            data: tomados,
+            backgroundColor: chartColors?.slate || '#2C3E50',
+          },
+          {
+            label: 'Vendidos mismo mes',
+            data: vendidos,
+            backgroundColor: chartColors?.primary || '#2D5BFF',
+          },
+        ],
+      },
+      options: chartOptions({
+        plugins: {
+          tooltip: {
+            callbacks: {
+              title(items) {
+                const i = items?.[0]?.dataIndex;
+                if (i == null) return '';
+                const m = monthPoints[i];
+                return m ? `${m.quarterLabel} · ${m.label} ${m.year || anio}` : '';
+              },
+              afterBody(items) {
+                const i = items?.[0]?.dataIndex;
+                if (i == null) return '';
+                const t = Number(tomados[i] || 0);
+                const v = Number(vendidos[i] || 0);
+                if (!t) return 'Sin tomas en el mes';
+                const p = ((v / t) * 100).toFixed(1);
+                return `% revendidos: ${p}%`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: {
+              color: '#94a3b8',
+              font: { size: 11 },
+              maxRotation: multiQ ? 45 : 0,
+              minRotation: multiQ ? 30 : 0,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0,
+              color: '#94a3b8',
+            },
+          },
+        },
+      }),
+    });
   }
 
   function ensureVentasKpiDrawer() {
@@ -1230,6 +1617,10 @@
       estatus: 'Estatus',
       modelo: 'Modelo',
       quien: 'Apartó',
+      modeloToma: 'Modelo toma',
+      modeloNuevo: 'Modelo nuevo',
+      vendido: 'Estatus usado',
+      vendedorUsado: 'Vendedor usado',
     };
 
     function placeNearKpi(card) {
@@ -1296,6 +1687,16 @@
         if (dim === 'modelo') return String(r.tipoAuto || r.catalogo || r.modelo || 'Sin modelo') === value;
         if (dim === 'quien') return String(r.apartadoPor || r.usuarioApartado || 'Sin dato') === value;
       }
+      if (currentMeta.kpi === 'tomasACuenta') {
+        if (dim === 'modeloToma') return String(r.modeloToma || 'Sin modelo') === value;
+        if (dim === 'vendedor') return String(r.vendedor || 'Sin vendedor') === value;
+        if (dim === 'modeloNuevo') return String(r.modeloNuevo || 'Sin modelo') === value;
+        if (dim === 'vendedorUsado') return String(r.vendedorUsado || 'Sin vendedor') === value;
+        if (dim === 'vendido') {
+          if (value === 'Vendido mismo mes') return Boolean(r.vendidoMismoMes);
+          if (value === 'Sin venta en el mes') return !r.vendidoMismoMes;
+        }
+      }
       return true;
     }
 
@@ -1315,6 +1716,7 @@
     function filterBySearch(term, rows) {
       if (currentMeta.kpi === 'sofia') return filterEntregasRowsByTerm(term, rows);
       if (currentMeta.kpi === 'carryOver') return filterApartadasRowsByTerm(term, rows);
+      if (currentMeta.kpi === 'tomasACuenta') return filterTomasACuentaByTerm(term, rows);
       return filterVentasRowsByTerm(term, rows);
     }
 
@@ -1375,6 +1777,42 @@
           </div>
           ${block('Estatus', 'estatus', countByField(rows, (r) => r.SOF_Estatus))}
           ${block('Usuario', 'vendedor', countByField(rows, (r) => r.SOF_CveUSu))}
+        `;
+        return;
+      }
+
+      if (currentMeta.kpi === 'tomasACuenta') {
+        const monto = rows.reduce((s, r) => s + (Number(r.importeVehiculo) || 0), 0);
+        const montoAdq = rows.reduce((s, r) => s + (Number(r.importeAdquisicion) || 0), 0);
+        const vendidas = rows.filter((r) => r.vendidoMismoMes).length;
+        const pct = rows.length > 0
+          ? Math.round((vendidas / rows.length) * 1000) / 10
+          : Number(resumenActual?.pctTomasVendidasMismoMes ?? 0);
+        const montoVentaUsado = rows.reduce((s, r) => s + (Number(r.montoVentaUsado) || 0), 0);
+        const fi = els.fechaInicio?.value || '';
+        const ff = els.fechaFin?.value || '';
+        const periodoLabel = fi && ff ? `${fi} → ${ff}` : 'Periodo seleccionado';
+        summaryEl.innerHTML = `
+          <div class="ops-orders-drawer__group">
+            <h5>Resumen del periodo</h5>
+            <p class="ops-orders-drawer__hint">${escapeHtml(periodoLabel)}</p>
+            <div class="ops-orders-drawer__row"><span class="lbl">Tomas</span><span class="val">${rows.length}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Vendidas mismo mes</span><span class="val">${vendidas}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">% revendidas</span><span class="val">${pct}%</span></div>
+            <p class="ops-orders-drawer__hint">${vendidas} de ${rows.length} usados tomados ya se vendieron en el mismo mes de la toma</p>
+          </div>
+          <div class="ops-orders-drawer__group">
+            <h5>Montos</h5>
+            <div class="ops-orders-drawer__row"><span class="lbl">Monto usado (toma)</span><span class="val">${escapeHtml(moneyCell(monto))}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Monto adquisición</span><span class="val">${escapeHtml(moneyCell(montoAdq))}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Monto venta usados</span><span class="val">${escapeHtml(moneyCell(montoVentaUsado))}</span></div>
+          </div>
+          ${block('Modelo toma', 'modeloToma', countByField(rows, (r) => r.modeloToma))}
+          ${block('Estatus usado', 'vendido', [
+            { label: 'Vendido mismo mes', value: vendidas },
+            { label: 'Sin venta en el mes', value: Math.max(0, rows.length - vendidas) },
+          ])}
+          ${block('Vendedor usado', 'vendedorUsado', countByField(rows.filter((r) => r.vendidoMismoMes), (r) => r.vendedorUsado))}
         `;
         return;
       }
@@ -1455,6 +1893,52 @@
         return;
       }
 
+      if (currentMeta.kpi === 'tomasACuenta') {
+        const vendidas = filtered.filter((r) => r.vendidoMismoMes).length;
+        const monto = filtered.reduce((s, r) => s + (Number(r.importeVehiculo) || 0), 0);
+        const pct = filtered.length > 0
+          ? Math.round((vendidas / filtered.length) * 1000) / 10
+          : 0;
+        bodyEl.innerHTML = `
+          <div class="toma-period-banner" aria-label="Resumen del periodo">
+            <div class="toma-period-banner__item">
+              <span class="toma-period-banner__label">Tomados</span>
+              <strong>${filtered.length}</strong>
+              <small>${escapeHtml(moneyCell(monto))}</small>
+            </div>
+            <div class="toma-period-banner__item">
+              <span class="toma-period-banner__label">Vendidos mismo mes</span>
+              <strong>${vendidas}</strong>
+              <small>usados revendidos</small>
+            </div>
+            <div class="toma-period-banner__item">
+              <span class="toma-period-banner__label">% revendidos</span>
+              <strong>${pct}%</strong>
+              <small>de las tomas</small>
+            </div>
+          </div>
+          <div class="ops-orders-drawer__list-head">
+            <span>Tomas a cuenta</span><span>${filtered.length}</span>
+          </div>
+          ${filtered.map((r) => `
+            <button type="button" class="ops-orders-drawer__item ops-orders-drawer__item--clickable" data-toma-key="${escapeHtml(tomaRecordKey(r))}" title="Ver detalle de la toma">
+              <div class="ops-orders-drawer__item-head">
+                <strong class="toma-vin-link">${escapeHtml(r.vinToma || 'Sin VIN toma')}</strong>
+                <span class="ops-orders-drawer__tag">${r.vendidoMismoMes ? 'Vendido' : 'Pendiente'}</span>
+              </div>
+              <p class="ops-orders-drawer__msg">${escapeHtml(r.modeloToma || 'Usado')} ${escapeHtml(r.anModeloToma || '')}${r.vendidoMismoMes ? ` · venta ${escapeHtml(formatTomaFecha(r.fechaVentaUsado))}` : ''}</p>
+              <div class="ops-orders-drawer__facts">
+                <span>Toma ${escapeHtml(formatTomaFecha(r.fechaToma))}</span>
+                <span>${escapeHtml(moneyCell(r.importeVehiculo))}</span>
+                <span>${escapeHtml(r.vendedorUsado || r.vendedor || '—')}</span>
+              </div>
+              <p class="ops-orders-drawer__sub">${r.vendidoMismoMes
+                ? `${escapeHtml(r.clienteUsado || '—')} · Pedido USN ${escapeHtml(String(r.pedidoUsn ?? '—'))} · ${escapeHtml(moneyCell(r.montoVentaUsado))}`
+                : `${escapeHtml(r.cliente || '—')} · Pedido nuevo ${escapeHtml(String(r.idPedido ?? '—'))}`}</p>
+            </button>`).join('')}`;
+        return;
+      }
+
       bodyEl.innerHTML = `
         <div class="ops-orders-drawer__list-head">
           <span>${currentMeta.kpi === 'flotilla' ? 'Flotillas' : 'Retail'}</span><span>${filtered.length}</span>
@@ -1514,7 +1998,9 @@
           ? 'Buscar factura, VIN, cliente, estatus...'
           : kpiKey === 'carryOver'
             ? 'Buscar serie, modelo, color, quién apartó...'
-            : 'Buscar vendedor, cliente, serie, modelo...';
+            : kpiKey === 'tomasACuenta'
+              ? 'Buscar VIN toma, factura, cliente, modelo...'
+              : 'Buscar vendedor, cliente, serie, modelo...';
         searchEl.value = '';
       }
 
@@ -1574,6 +2060,43 @@
         a.download = `carry_over_${fi}_${ff}.csv`;
         a.click();
         URL.revokeObjectURL(a.href);
+      } else if (currentMeta.kpi === 'tomasACuenta') {
+        const lines = [[
+          'Pedido', 'VINToma', 'ModeloToma', 'AnioToma', 'ImporteVehiculo', 'ImporteAdquisicion',
+          'FechaToma', 'VendidoMismoMes', 'FechaVentaUsado', 'PedidoUsn', 'MontoVentaUsado', 'ClienteUsado', 'VendedorUsado',
+          'SerieNuevo', 'ModeloNuevo', 'AnioNuevo', 'Factura', 'FechaFactura', 'Cliente', 'Vendedor', 'UsuarioToma',
+        ].join(',')];
+        for (const r of lastExportRows) {
+          lines.push([
+            r.idPedido ?? '',
+            r.vinToma || '',
+            r.modeloToma || '',
+            r.anModeloToma || '',
+            r.importeVehiculo ?? '',
+            r.importeAdquisicion ?? '',
+            formatTomaFecha(r.fechaToma),
+            r.vendidoMismoMes ? 'SI' : 'NO',
+            formatTomaFecha(r.fechaVentaUsado),
+            r.pedidoUsn ?? '',
+            r.montoVentaUsado ?? '',
+            r.clienteUsado || '',
+            r.vendedorUsado || '',
+            r.serieNuevo || '',
+            r.modeloNuevo || '',
+            r.anModeloNuevo || '',
+            r.facturaNuevo || '',
+            formatTomaFecha(r.fechaFactura),
+            r.cliente || '',
+            r.vendedor || '',
+            r.usuarioToma || '',
+          ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+        }
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `tomas_a_cuenta_${fi}_${ff}.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
       } else {
         downloadCsv(
           ['Fecha', 'Documento', 'Vendedor', 'Cliente', 'Serie', 'Modelo', 'Anio', 'Color', 'Departamento', 'TipoVenta', 'FormaPago'],
@@ -1587,6 +2110,14 @@
       const btn = e.target.closest('[data-ventas-filter-dim]');
       if (!btn || !summaryEl.contains(btn)) return;
       setFilter(btn.dataset.ventasFilterDim, btn.dataset.ventasFilterValue, btn.dataset.ventasFilterValue);
+    });
+    bodyEl.addEventListener('click', (e) => {
+      const tomaBtn = e.target.closest('[data-toma-key]');
+      if (!tomaBtn || !bodyEl.contains(tomaBtn)) return;
+      const key = tomaBtn.getAttribute('data-toma-key');
+      const record = (tomasACuentaActuales || []).find((r) => tomaRecordKey(r) === key)
+        || (lastExportRows || []).find((r) => tomaRecordKey(r) === key);
+      if (record) openTomaDetail(record);
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && panel.classList.contains('ops-orders-drawer--open')) close();
@@ -1669,8 +2200,8 @@
 
     if (meta) meta.classList.add('hidden');
     els.sofiaPanelResumen.textContent = n
-      ? `${n} notificación${n === 1 ? '' : 'es'} en el periodo seleccionado`
-      : 'No hay notificaciones de entrega en el periodo seleccionado.';
+      ? `${n} notificación${n === 1 ? '' : 'es'} en el periodo (sin flotilla · sí Flotilla GMF)`
+      : 'No hay notificaciones de entrega en el periodo (flotilla FLOT exenta; Flotilla GMF sí cuenta).';
   }
 
   function clearSofiaPreviewSearch() {
@@ -1749,14 +2280,21 @@
     URL.revokeObjectURL(link.href);
   }
 
-  async function consultar() {
+  async function consultar({ quiet = false } = {}) {
     const fechaInicio = els.fechaInicio.value;
     const fechaFin = els.fechaFin.value;
     if (!fechaInicio || !fechaFin) { setStatus('Seleccione ambas fechas', 'error'); return; }
 
-    setStatus('Consultando...', 'loading');
-    els.btnConsultar.disabled = true;
-    Dashboard.showLoading(true);
+    const refreshBtn = document.getElementById('btnRefreshEntregasSofia');
+    if (!quiet) {
+      setStatus('Consultando...', 'loading');
+      els.btnConsultar.disabled = true;
+      Dashboard.showLoading(true);
+    } else if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('is-refreshing');
+      if (els.kpiEntregasSofiaSub) els.kpiEntregasSofiaSub.textContent = 'Actualizando SOFIA…';
+    }
 
     try {
       const response = await fetch(`/api/ventas?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`, { credentials: 'same-origin' });
@@ -1775,6 +2313,14 @@
 
       registrosActuales = data.registros.map((row) => CanalesVenta.enrichRegistro(row));
       entregasActuales = data.entregasSofia ?? [];
+      tomasACuentaActuales = data.tomasACuenta ?? [];
+      tomasACuentaMeta = data.tomasACuentaMeta || {
+        porModeloToma: [],
+        montoAdquisicion: 0,
+        totalVendidosMismoMes: 0,
+        pctVendidosMismoMes: 0,
+        montoVentasUsado: 0,
+      };
       const { resumen } = data;
 
       if (!resumen.porCanal?.length) resumen.porCanal = CanalesVenta.countByCanal(registrosActuales);
@@ -1784,6 +2330,11 @@
       els.kpiRetail.textContent = resumen.totalRetail;
       els.kpiFlotillas.textContent = resumen.totalFlotillas;
       els.kpiEntregasSofia.textContent = resumen.totalNotificacionesEntrega ?? 0;
+      renderTomasSection(resumen, data.tomasMensual);
+      if (els.kpiEntregasSofiaSub) {
+        const stamp = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+        els.kpiEntregasSofiaSub.textContent = `Sin flotilla · sí GMF · ${stamp}`;
+      }
 
       await fetchSharedGoals().catch((err) => console.warn('[Goals]', err.message));
       await ensureApartadasInResumen();
@@ -1797,6 +2348,7 @@
       renderCharts(resumen);
       renderYtdChart(data.comparativoYtd);
       renderCarlineUtilidad(data.utilidadCarline, data.comparativoYtd);
+      lastUtilidadCarline = data.utilidadCarline || null;
       if (ventasDrawerUi?.isOpen?.()) {
         ventasDrawerUi.refresh();
       }
@@ -1805,11 +2357,48 @@
       els.btnExportarEntregas.disabled = entregasActuales.length === 0;
 
       const modo = resumen.mostrarComparativoMensual ? ' · comparativo mensual' : '';
-      setStatus(`${resumen.totalVentas} ventas · ${resumen.totalNotificacionesEntrega ?? 0} entregas SOFIA${modo}`);
+      if (!quiet) {
+        setStatus(`${resumen.totalVentas} ventas · ${resumen.totalNotificacionesEntrega ?? 0} entregas SOFIA${modo}`);
+      }
       Dashboard.updateCompactFilterLabels();
-      compactFilters?.closeAll?.();
+      if (!quiet) compactFilters?.closeAll?.();
 
       if (window.KpiInsights?.apply) {
+        const tomasRows = tomasACuentaActuales || [];
+        const tomasTotal = Number(resumen.totalTomasACuenta ?? tomasRows.length ?? 0);
+        const tomasVendidos = Number(
+          resumen.totalTomasVendidasMismoMes
+          ?? tomasACuentaMeta.totalVendidosMismoMes
+          ?? tomasRows.filter((r) => r.vendidoMismoMes).length
+        );
+        const pendientesRows = tomasRows.filter((r) => !r.vendidoMismoMes);
+        const byModelo = new Map();
+        for (const r of tomasRows) {
+          const modelo = String(r.modeloToma || 'Sin modelo').trim() || 'Sin modelo';
+          const cur = byModelo.get(modelo) || { modelo, tomas: 0, vendidos: 0, pendientes: 0 };
+          cur.tomas += 1;
+          if (r.vendidoMismoMes) cur.vendidos += 1;
+          else cur.pendientes += 1;
+          byModelo.set(modelo, cur);
+        }
+        const modelosDificiles = [...byModelo.values()]
+          .map((m) => ({
+            ...m,
+            pct: m.tomas > 0 ? Math.round((m.vendidos / m.tomas) * 1000) / 10 : 0,
+          }))
+          .filter((m) => m.pendientes > 0)
+          .sort((a, b) => b.pendientes - a.pendientes || a.pct - b.pct || b.tomas - a.tomas)
+          .slice(0, 5);
+        const unidadesDificiles = pendientesRows
+          .slice()
+          .sort((a, b) => String(a.fechaToma || '').localeCompare(String(b.fechaToma || '')))
+          .slice(0, 8)
+          .map((r) => ({
+            vin: r.vinToma,
+            modelo: r.modeloToma,
+            fechaToma: r.fechaToma,
+          }));
+
         window.KpiInsights.apply('ventas', {
           fechaInicio,
           fechaFin,
@@ -1822,6 +2411,20 @@
             totalUnidadesFacturadasNoTimbradas: resumen.totalUnidadesFacturadasNoTimbradas,
             numeradorCobertura: resumen.numeradorCobertura,
             unidadesApartadas: resumen.unidadesApartadas ?? 0,
+            totalTomasACuenta: tomasTotal,
+            totalTomasVendidasMismoMes: tomasVendidos,
+            pctTomasVendidasMismoMes: Number(resumen.pctTomasVendidasMismoMes || 0),
+            montoTomasACuenta: resumen.montoTomasACuenta ?? 0,
+          },
+          tomas: {
+            total: tomasTotal,
+            vendidosMismoMes: tomasVendidos,
+            pendientes: pendientesRows.length,
+            pctVendidos: tomasTotal > 0
+              ? Math.round((tomasVendidos / tomasTotal) * 1000) / 10
+              : 0,
+            modelosDificiles,
+            unidadesDificiles,
           },
           goals: {
             retail: getGoalValue('retail'),
@@ -1832,6 +2435,25 @@
             totalActual: lastYtd.totalActual,
             totalAnterior: lastYtd.totalAnterior,
           } : null,
+          utilidadCarline: (() => {
+            const uc = data.utilidadCarline || lastUtilidadCarline;
+            if (!uc) return null;
+            return {
+              available: uc.available !== false,
+              lider: uc.lider || null,
+              porCarline: (uc.porCarline || []).slice(0, 20).map((c) => ({
+                carline: c.carline,
+                unidadesCarline: c.unidadesCarline,
+                mejorVersion: c.mejorVersion ? {
+                  version: c.mejorVersion.version,
+                  utilidadPromedio: c.mejorVersion.utilidadPromedio,
+                  utilidadTotal: c.mejorVersion.utilidadTotal,
+                  margenBrutoPct: c.mejorVersion.margenBrutoPct,
+                  unidades: c.mejorVersion.unidades,
+                } : null,
+              })),
+            };
+          })(),
         });
       }
 
@@ -1871,10 +2493,17 @@
       syncSofiaLiveMode(data.sofiaLiveUpdate);
     } catch (err) {
       console.error('[Sales]', err);
-      setStatus(err.message, 'error');
+      if (!quiet) setStatus(err.message, 'error');
+      if (els.kpiEntregasSofiaSub) els.kpiEntregasSofiaSub.textContent = 'Error al actualizar SOFIA';
     } finally {
-      els.btnConsultar.disabled = false;
-      Dashboard.showLoading(false);
+      if (!quiet) {
+        els.btnConsultar.disabled = false;
+        Dashboard.showLoading(false);
+      }
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove('is-refreshing');
+      }
     }
   }
 
@@ -1925,7 +2554,7 @@
     }
     sofiaLiveTimer = setInterval(() => {
       if (document.hidden) return;
-      consultar().catch(() => {});
+      consultar({ quiet: true }).catch(() => {});
     }, minutes * 60 * 1000);
   }
 
@@ -1959,6 +2588,17 @@
       kpiFlotillas: document.getElementById('kpiFlotillas'),
       kpiCardRetail: document.getElementById('kpiCardRetail'),
       kpiCardFlotillas: document.getElementById('kpiCardFlotillas'),
+      sectionTomasACuenta: document.getElementById('sectionTomasACuenta'),
+      tomasSectionSubtitle: document.getElementById('tomasSectionSubtitle'),
+      tomasChartSubtitle: document.getElementById('tomasChartSubtitle'),
+      tomasInfoSubtitle: document.getElementById('tomasInfoSubtitle'),
+      tomasQuarterChips: document.getElementById('tomasQuarterChips'),
+      tomasStatTomados: document.getElementById('tomasStatTomados'),
+      tomasStatVendidos: document.getElementById('tomasStatVendidos'),
+      tomasStatPct: document.getElementById('tomasStatPct'),
+      tomasSectionBody: document.getElementById('tomasSectionBody'),
+      btnTomasDetalle: document.getElementById('btnTomasDetalle'),
+      chartTomasMensual: document.getElementById('chartTomasMensual'),
       panelVentasDetalle: document.getElementById('panelVentasDetalle'),
       ventasPanelTitulo: document.getElementById('ventasPanelTitulo'),
       ventasPanelResumen: document.getElementById('ventasPanelResumen'),
@@ -1967,9 +2607,11 @@
       ventasPreviewSearchMeta: document.getElementById('ventasPreviewSearchMeta'),
       btnCerrarVentasPanel: document.getElementById('btnCerrarVentasPanel'),
       kpiEntregasSofia: document.getElementById('kpiEntregasSofia'),
+      kpiEntregasSofiaSub: document.getElementById('kpiEntregasSofiaSub'),
       kpiCardCobertura: document.getElementById('kpiCardCobertura'),
       kpiCobertura: document.getElementById('kpiCobertura'),
       kpiCardEntregasSofia: document.getElementById('kpiCardEntregasSofia'),
+      btnRefreshEntregasSofia: document.getElementById('btnRefreshEntregasSofia'),
       panelEntregasSofia: document.getElementById('panelEntregasSofia'),
       sofiaPanelResumen: document.getElementById('sofiaPanelResumen'),
       tablaEntregasPreviewBody: document.getElementById('tablaEntregasPreviewBody'),
@@ -2123,13 +2765,16 @@
         await window.AfluenciaVentas.load(pendingAfluencia.fechaInicio, pendingAfluencia.fechaFin);
       }
       window.AfluenciaVentas?.setInnerTab?.(wantsMtk ? 'mtk' : 'general');
-    } else if (
-      location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
-      || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
-      || location.hash === '#afluencia' || location.hash === '#afluencia-mtk' || location.hash === '#mtk'
-      || location.hash === '#marketing' || location.hash === '#trafico' || location.hash === '#tráfico'
-    ) {
-      history.replaceState(null, '', `${location.pathname}${location.search}`);
+    } else {
+      // Pestaña Ventas: limpia hashes de otras secciones para que el próximo ingreso abra Ventas.
+      if (
+        location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
+        || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
+        || location.hash === '#afluencia' || location.hash === '#afluencia-mtk' || location.hash === '#mtk'
+        || location.hash === '#marketing' || location.hash === '#trafico' || location.hash === '#tráfico'
+      ) {
+        history.replaceState(null, '', `${location.pathname}${location.search}`);
+      }
     }
   }
 
@@ -2150,7 +2795,18 @@
       toggleYtdQuarter(btn.dataset.ytdQuarter);
     });
 
-    els.btnConsultar.addEventListener('click', consultar);
+    els.tomasQuarterChips?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tomas-quarter]');
+      if (!btn || btn.disabled) return;
+      toggleTomasQuarter(btn.dataset.tomasQuarter);
+    });
+
+    els.btnConsultar.addEventListener('click', () => consultar({ quiet: false }));
+    document.getElementById('btnRefreshEntregasSofia')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      consultar({ quiet: true });
+    });
     els.btnExportar.addEventListener('click', () => downloadCsv(
       ['Fecha', 'Documento', 'Vendedor', 'Cliente', 'Serie', 'Modelo', 'Anio', 'Color', 'Departamento', 'TipoVenta', 'FormaPago'],
       ['VTE_FECHDOCTO', 'VTE_DOCTO', 'VENDEDOR', 'CLIENTE', 'VTE_SERIE', 'VEH_TIPOAUTO', 'VEH_ANMODELO', 'COL_DESCRIPCION', 'CANAL_LABEL', 'TIPOVENTA', 'FORMAPAGO_ORIGINAL'],
@@ -2169,6 +2825,14 @@
 
     bindKpiCard(els.kpiCardRetail, () => setVentasPanelOpen('retail', true));
     bindKpiCard(els.kpiCardFlotillas, () => setVentasPanelOpen('flotilla', true));
+    els.btnTomasDetalle?.addEventListener('click', () => toggleTomasACuentaPanel());
+    els.tomasSectionBody?.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-toma-key]');
+      if (!row) return;
+      const record = (tomasACuentaActuales || []).find((r) => tomaRecordKey(r) === row.dataset.tomaKey);
+      if (record) openTomaDetail(record);
+      else toggleTomasACuentaPanel();
+    });
     bindKpiCard(els.kpiCardEntregasSofia, toggleSofiaPanel);
     bindKpiCard(els.kpiCardCarryOver, toggleCarryOverPanel);
 

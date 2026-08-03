@@ -420,6 +420,209 @@ function summarizeVentas(rows, inicio, fin, sofiaEntregas = {}) {
   };
 }
 
+async function getTomasACuenta({ fechaInicio, fechaFin }) {
+  const inicio = parseDateInput(fechaInicio);
+  const fin = parseDateInput(fechaFin);
+  const pool = await getPool();
+  // Tomas por PET_FECHOPE. "Vendidas mismo mes" = el usado ya tiene pedido
+  // USN_PEDIDO status I en el mismo mes calendario de la toma (no ventas de nuevos).
+  const result = await pool.request()
+    .input('fechaInicio', sql.Date, inicio)
+    .input('fechaFin', sql.Date, fin)
+    .query(`
+      SELECT
+        t.PET_IDPEDI AS idPedido,
+        LTRIM(RTRIM(t.PET_VINTOMA)) AS vinToma,
+        t.PET_FECHOPE AS fechaToma,
+        LTRIM(RTRIM(ISNULL(t.PET_CVEUSU, ''))) AS usuarioToma,
+        LTRIM(RTRIM(ISNULL(p.PEN_NUMSERIE, ''))) AS serieNuevo,
+        LTRIM(RTRIM(ISNULL(p.PEN_MODELO, ''))) AS anModeloPedido,
+        LTRIM(RTRIM(ISNULL(v.VTE_DOCTO, ''))) AS facturaNuevo,
+        v.VTE_FECHDOCTO AS fechaFactura,
+        LTRIM(RTRIM(
+          ISNULL(cli.PER_NOMRAZON, '') + ' ' +
+          ISNULL(cli.PER_PATERNO, '') + ' ' +
+          ISNULL(cli.PER_MATERNO, '')
+        )) AS cliente,
+        LTRIM(RTRIM(
+          ISNULL(vend.PER_PATERNO, '') + ' ' +
+          ISNULL(vend.PER_MATERNO, '') + ' ' +
+          ISNULL(vend.PER_NOMRAZON, '')
+        )) AS vendedor,
+        LTRIM(RTRIM(ISNULL(usn.VEH_TIPOAUTO, ''))) AS modeloToma,
+        LTRIM(RTRIM(ISNULL(usn.VEH_ANMODELO, ''))) AS anModeloToma,
+        usn.VEH_TOMAIMPADQUI AS importeAdquisicion,
+        usn.VEH_TOMAIMPVEHICULO AS importeVehiculo,
+        LTRIM(RTRIM(ISNULL(nuevo.VEH_TIPOAUTO, ''))) AS modeloNuevo,
+        LTRIM(RTRIM(ISNULL(nuevo.VEH_ANMODELO, ''))) AS anModeloNuevo,
+        ventaUsado.PMS_NUMPEDIDO AS pedidoUsn,
+        ventaUsado.PMS_FECHOPE AS fechaVentaUsado,
+        ventaUsado.PMS_TOTAL AS montoVentaUsado,
+        LTRIM(RTRIM(
+          ISNULL(cliUsado.PER_NOMRAZON, '') + ' ' +
+          ISNULL(cliUsado.PER_PATERNO, '') + ' ' +
+          ISNULL(cliUsado.PER_MATERNO, '')
+        )) AS clienteUsado,
+        LTRIM(RTRIM(
+          ISNULL(vendUsado.PER_PATERNO, '') + ' ' +
+          ISNULL(vendUsado.PER_MATERNO, '') + ' ' +
+          ISNULL(vendUsado.PER_NOMRAZON, '')
+        )) AS vendedorUsado
+      FROM UNI_PEDITOMAUNI t
+      LEFT JOIN UNI_PEDIUNI p
+        ON p.PEN_IDPEDI = t.PET_IDPEDI
+      OUTER APPLY (
+        SELECT TOP 1
+          fv.VTE_DOCTO,
+          fv.VTE_FECHDOCTO,
+          fv.VTE_IDCLIENTE
+        FROM ADE_VTAFI fv
+        WHERE p.PEN_NUMSERIE IS NOT NULL
+          AND LTRIM(RTRIM(p.PEN_NUMSERIE)) <> ''
+          AND UPPER(LTRIM(RTRIM(fv.VTE_SERIE))) = UPPER(LTRIM(RTRIM(p.PEN_NUMSERIE)))
+          AND fv.VTE_TIPODOCTO = 'A'
+          AND fv.VTE_STATUS = 'I'
+        ORDER BY CONVERT(DATE, fv.VTE_FECHDOCTO, 103) DESC
+      ) v
+      LEFT JOIN PER_PERSONAS cli
+        ON cli.PER_IDPERSONA = v.VTE_IDCLIENTE
+      LEFT JOIN SER_VEHICULO nuevo
+        ON p.PEN_NUMSERIE IS NOT NULL
+        AND LTRIM(RTRIM(p.PEN_NUMSERIE)) <> ''
+        AND UPPER(LTRIM(RTRIM(nuevo.VEH_NUMSERIE))) = UPPER(LTRIM(RTRIM(p.PEN_NUMSERIE)))
+        AND nuevo.VEH_NOINVENTA > 0
+      LEFT JOIN PER_PERSONAS vend
+        ON vend.PER_IDPERSONA = nuevo.VEH_VENDEDOR
+      LEFT JOIN SER_VEHICULO usn
+        ON UPPER(LTRIM(RTRIM(usn.VEH_NUMSERIE))) = UPPER(LTRIM(RTRIM(t.PET_VINTOMA)))
+      OUTER APPLY (
+        SELECT TOP 1
+          u.PMS_NUMPEDIDO,
+          u.PMS_FECHOPE,
+          u.PMS_TOTAL,
+          u.PMS_IDPERSONA,
+          u.PMS_VENDEDOR
+        FROM USN_PEDIDO u
+        WHERE UPPER(LTRIM(RTRIM(u.PMS_NUMSERIE))) = UPPER(LTRIM(RTRIM(t.PET_VINTOMA)))
+          AND ISNULL(u.PMS_STATUS, '') = 'I'
+          AND YEAR(CONVERT(DATE, u.PMS_FECHOPE, 103)) = YEAR(CONVERT(DATE, t.PET_FECHOPE, 103))
+          AND MONTH(CONVERT(DATE, u.PMS_FECHOPE, 103)) = MONTH(CONVERT(DATE, t.PET_FECHOPE, 103))
+        ORDER BY CONVERT(DATE, u.PMS_FECHOPE, 103) ASC, u.PMS_NUMPEDIDO ASC
+      ) ventaUsado
+      LEFT JOIN PER_PERSONAS cliUsado
+        ON cliUsado.PER_IDPERSONA = ventaUsado.PMS_IDPERSONA
+      LEFT JOIN PER_PERSONAS vendUsado
+        ON LTRIM(RTRIM(CONVERT(VARCHAR(20), vendUsado.PER_IDPERSONA))) = LTRIM(RTRIM(ISNULL(ventaUsado.PMS_VENDEDOR, '')))
+      WHERE LTRIM(RTRIM(ISNULL(t.PET_VINTOMA, ''))) <> ''
+        AND CONVERT(DATE, t.PET_FECHOPE, 103) BETWEEN @fechaInicio AND @fechaFin
+    `);
+
+  const seen = new Set();
+  const registros = [];
+  for (const row of result.recordset || []) {
+    const vinKey = String(row.vinToma || '').trim().toUpperCase();
+    const key = `${row.idPedido}|${vinKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const vendidoMismoMes = row.pedidoUsn != null && row.pedidoUsn !== '';
+    registros.push({
+      idPedido: row.idPedido,
+      vinToma: String(row.vinToma || '').trim(),
+      fechaToma: row.fechaToma || null,
+      usuarioToma: String(row.usuarioToma || '').trim() || null,
+      serieNuevo: String(row.serieNuevo || '').trim(),
+      facturaNuevo: String(row.facturaNuevo || '').trim() || null,
+      fechaFactura: row.fechaFactura || null,
+      cliente: String(row.cliente || '').replace(/\s+/g, ' ').trim() || null,
+      vendedor: String(row.vendedor || '').replace(/\s+/g, ' ').trim() || null,
+      modeloToma: String(row.modeloToma || '').trim() || null,
+      anModeloToma: String(row.anModeloToma || '').trim() || null,
+      modeloNuevo: String(row.modeloNuevo || '').trim() || null,
+      anModeloNuevo: String(row.anModeloNuevo || row.anModeloPedido || '').trim() || null,
+      importeAdquisicion: row.importeAdquisicion != null ? Number(row.importeAdquisicion) : null,
+      importeVehiculo: row.importeVehiculo != null ? Number(row.importeVehiculo) : null,
+      vendidoMismoMes,
+      pedidoUsn: row.pedidoUsn != null ? Number(row.pedidoUsn) : null,
+      fechaVentaUsado: row.fechaVentaUsado || null,
+      montoVentaUsado: row.montoVentaUsado != null ? Number(row.montoVentaUsado) : null,
+      clienteUsado: String(row.clienteUsado || '').replace(/\s+/g, ' ').trim() || null,
+      vendedorUsado: String(row.vendedorUsado || '').replace(/\s+/g, ' ').trim() || null,
+    });
+  }
+
+  registros.sort((a, b) => {
+    if (Boolean(b.vendidoMismoMes) !== Boolean(a.vendidoMismoMes)) {
+      return a.vendidoMismoMes ? -1 : 1;
+    }
+    const pa = parseFechaDoc(a.fechaToma) || parseFechaDoc(a.fechaFactura);
+    const pb = parseFechaDoc(b.fechaToma) || parseFechaDoc(b.fechaFactura);
+    const da = pa ? Date.UTC(pa.year, pa.month - 1, pa.day) : 0;
+    const db = pb ? Date.UTC(pb.year, pb.month - 1, pb.day) : 0;
+    if (db !== da) return db - da;
+    return Number(b.idPedido || 0) - Number(a.idPedido || 0);
+  });
+
+  const montoTotal = registros.reduce((s, r) => s + (Number(r.importeVehiculo) || 0), 0);
+  const montoAdquisicion = registros.reduce((s, r) => s + (Number(r.importeAdquisicion) || 0), 0);
+  const montoVentasUsado = registros.reduce((s, r) => s + (Number(r.montoVentaUsado) || 0), 0);
+  const totalVendidosMismoMes = registros.filter((r) => r.vendidoMismoMes).length;
+  const porModeloToma = {};
+  for (const r of registros) {
+    const key = String(r.modeloToma || 'Sin modelo').trim() || 'Sin modelo';
+    porModeloToma[key] = (porModeloToma[key] || 0) + 1;
+  }
+
+  const porMes = buildTomasPorMes(registros, inicio, fin);
+
+  return {
+    total: registros.length,
+    totalVendidosMismoMes,
+    pctVendidosMismoMes: registros.length > 0
+      ? Math.round((totalVendidosMismoMes / registros.length) * 1000) / 10
+      : 0,
+    montoTotal: Math.round(montoTotal * 100) / 100,
+    montoAdquisicion: Math.round(montoAdquisicion * 100) / 100,
+    montoVentasUsado: Math.round(montoVentasUsado * 100) / 100,
+    porModeloToma: Object.entries(porModeloToma)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value),
+    porMes,
+    registros,
+  };
+}
+
+function buildTomasPorMes(registros, inicio, fin) {
+  const monthRange = buildMonthRange(inicio, fin);
+  const buckets = Object.fromEntries(
+    monthRange.map((m) => [m.key, { key: m.key, label: MESES[m.month - 1], month: m.month, year: m.year, tomados: 0, vendidos: 0 }])
+  );
+
+  for (const r of registros || []) {
+    const parsed = parseFechaDoc(r.fechaToma);
+    if (!parsed || !buckets[parsed.monthKey]) continue;
+    buckets[parsed.monthKey].tomados += 1;
+    if (r.vendidoMismoMes) buckets[parsed.monthKey].vendidos += 1;
+  }
+
+  const meses = monthRange.map((m) => buckets[m.key]);
+  const totalTomados = meses.reduce((s, m) => s + m.tomados, 0);
+  const totalVendidos = meses.reduce((s, m) => s + m.vendidos, 0);
+
+  return {
+    labels: meses.map((m) => m.label),
+    series: {
+      tomados: meses.map((m) => m.tomados),
+      vendidos: meses.map((m) => m.vendidos),
+    },
+    meses,
+    totalTomados,
+    totalVendidos,
+    pctVendidos: totalTomados > 0
+      ? Math.round((totalVendidos / totalTomados) * 1000) / 10
+      : 0,
+  };
+}
+
 async function getVentas({ fechaInicio, fechaFin }) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
@@ -437,7 +640,9 @@ async function getVentas({ fechaInicio, fechaFin }) {
 
   const incluirPorMes = isAcumuladoAnual(inicio, fin);
   const ytdRanges = buildYtdRanges(fechaFin);
-  const [result, sofiaEntregas, comparativoYtd, inventorySnap, utilidadCarline] = await Promise.all([
+  const sameAsYtd = fechaInicio === ytdRanges.inicioActual && fechaFin === ytdRanges.finActual;
+
+  const [result, sofiaEntregas, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
     request.query(buildVentasQuery()),
     getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes }),
     getComparativoYtd(fechaFin),
@@ -451,11 +656,39 @@ async function getVentas({ fechaInicio, fechaFin }) {
       console.warn('[ventas] utilidad carline:', err.message);
       return { available: false, reason: err.message, porCarline: [] };
     }),
+    getTomasACuenta({ fechaInicio, fechaFin }).catch((err) => {
+      console.warn('[ventas] tomas a cuenta:', err.message);
+      return { total: 0, montoTotal: 0, registros: [], porMes: null, error: err.message };
+    }),
+    sameAsYtd
+      ? Promise.resolve(null)
+      : getTomasACuenta({
+        fechaInicio: ytdRanges.inicioActual,
+        fechaFin: ytdRanges.finActual,
+      }).catch((err) => {
+        console.warn('[ventas] tomas mensual YTD:', err.message);
+        return { total: 0, registros: [], porMes: null, error: err.message };
+      }),
   ]);
 
   const rows = enrichVentasRows(result.recordset);
   const resumen = summarizeVentas(rows, inicio, fin, sofiaEntregas);
   resumen.unidadesApartadas = Number(inventorySnap?.summary?.availableApartadas ?? 0);
+  resumen.totalTomasACuenta = Number(tomasACuenta.total || 0);
+  resumen.montoTomasACuenta = Number(tomasACuenta.montoTotal || 0);
+  resumen.montoAdquisicionTomas = Number(tomasACuenta.montoAdquisicion || 0);
+  resumen.totalTomasVendidasMismoMes = Number(tomasACuenta.totalVendidosMismoMes || 0);
+  resumen.montoTomasVendidasMismoMes = Number(tomasACuenta.montoVentasUsado || 0);
+  resumen.pctTomasVendidasMismoMes = Number(tomasACuenta.pctVendidosMismoMes || 0);
+  // Compat: ya no es % de ventas nuevas con toma, sino % de tomas revendidas el mismo mes.
+  resumen.pctVentasConToma = resumen.pctTomasVendidasMismoMes;
+
+  const tomasChartSource = sameAsYtd ? tomasACuenta : (tomasYtdRaw || tomasACuenta);
+  const tomasMensual = tomasChartSource.porMes || buildTomasPorMes(
+    tomasChartSource.registros || [],
+    parseDateInput(ytdRanges.inicioActual),
+    parseDateInput(ytdRanges.finActual)
+  );
 
   return {
     filtros: { fechaInicio, fechaFin },
@@ -464,10 +697,25 @@ async function getVentas({ fechaInicio, fechaFin }) {
     utilidadCarline,
     registros: rows,
     entregasSofia: sofiaEntregas.registrosEntrega ?? [],
+    tomasACuenta: tomasACuenta.registros || [],
+    tomasMensual: {
+      anio: ytdRanges.anioActual,
+      corte: ytdRanges.corte,
+      mesEnCursoExcluido: ytdRanges.mesEnCursoExcluido,
+      ...tomasMensual,
+    },
+    tomasACuentaMeta: {
+      porModeloToma: tomasACuenta.porModeloToma || [],
+      montoAdquisicion: tomasACuenta.montoAdquisicion || 0,
+      totalVendidosMismoMes: tomasACuenta.totalVendidosMismoMes || 0,
+      pctVendidosMismoMes: tomasACuenta.pctVendidosMismoMes || 0,
+      montoVentasUsado: tomasACuenta.montoVentasUsado || 0,
+    },
   };
 }
 
 module.exports = {
   getVentas,
+  getTomasACuenta,
   parseDateInput,
 };

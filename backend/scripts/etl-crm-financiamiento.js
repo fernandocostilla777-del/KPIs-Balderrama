@@ -41,8 +41,8 @@ const COL = {
   factura: 27,
   mantenimientosIncluidos: 28,
   pagoFlexible: 29,
-  seguroGratis: 30,
-  seguroSubsecuente: 31,
+  seguroGratis: 30, // Col AE — seguro gratis (12 meses)
+  seguroSubsecuente: 31, // Col AF — seguro subsecuente
   roboParcial: 32,
   fi: 33,
   envio: 34,

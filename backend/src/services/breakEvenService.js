@@ -160,7 +160,8 @@ function formatMoneyInsight(n) {
 }
 
 /**
- * Alerta inteligente que interpreta el bloque "Detalle agencia" del PE.
+ * Alerta inteligente: ratio de cobertura del punto de equilibrio.
+ * Ratio = Ventas ÷ PE · Cobertura % = ratio × 100.
  */
 function buildAgencyDetailInsight(agencia, temporal = {}) {
   if (!agencia || agencia.puntoEquilibrio == null || !(Number(agencia.ventas) > 0)) {
@@ -169,32 +170,57 @@ function buildAgencyDetailInsight(agencia, temporal = {}) {
 
   const ventas = Number(agencia.ventas || 0);
   const pe = Number(agencia.puntoEquilibrio);
+  if (!(pe > 0)) return null;
+
   const mc = Number(agencia.margenContribucion || 0);
   const mcPct = Number(agencia.margenContribucionPct || 0);
   const gf = Number(agencia.gastosFijos || 0);
-  const faltante = Number(agencia.faltante || 0);
-  const cumpl = Number(agencia.cumplimientoPct || 0);
   const uo = Number(agencia.utilidadOperativa || 0);
   const costos = Number(agencia.costosVariables || agencia.costosVariablesDirectos || 0);
-  const alcanzo = agencia.alcanzoEquilibrio === true;
   const mode = temporal.mode || 'cerrado';
 
+  const coberturaRatio = Number(agencia.coberturaRatio != null
+    ? agencia.coberturaRatio
+    : (ventas / pe));
+  const coberturaPct = Number(agencia.coberturaPct != null
+    ? agencia.coberturaPct
+    : round2(coberturaRatio * 100));
+  const ratioRounded = Number(agencia.coberturaRatio != null
+    ? agencia.coberturaRatio
+    : round4(coberturaRatio));
+  const brechaPct = Number(agencia.brechaEquilibrioPct != null
+    ? agencia.brechaEquilibrioPct
+    : round2(Math.max(0, 100 - coberturaPct)));
+  const ventasAdicionales = Number(agencia.ventasAdicionalesRequeridas != null
+    ? agencia.ventasAdicionalesRequeridas
+    : round2(Math.max(0, pe - ventas)));
+  const excedente = round2(Math.max(0, ventas - pe));
+  const alcanzo = coberturaRatio >= 1;
+
   const facts = [
-    { label: 'Ventas totales', value: formatMoneyInsight(ventas) },
-    { label: 'Costos variables', value: formatMoneyInsight(costos) },
+    { label: 'Ventas del periodo', value: formatMoneyInsight(ventas) },
+    { label: 'Punto de equilibrio', value: formatMoneyInsight(pe) },
+    { label: 'Ratio de cobertura', value: `${ratioRounded} veces` },
+    { label: 'Cobertura porcentual', value: `${coberturaPct}%` },
+    {
+      label: alcanzo ? 'Excedente sobre el equilibrio' : 'Brecha para alcanzar el equilibrio',
+      value: alcanzo
+        ? `${formatMoneyInsight(excedente)} (${round2(Math.max(0, coberturaPct - 100))}%)`
+        : `${brechaPct}%`,
+    },
+  ];
+  if (!alcanzo) {
+    facts.push({ label: 'Ventas adicionales requeridas', value: formatMoneyInsight(ventasAdicionales) });
+  }
+  facts.push(
     { label: 'Margen de contribución', value: `${formatMoneyInsight(mc)} (${mcPct}%)` },
     { label: 'Gastos fijos', value: formatMoneyInsight(gf) },
-    { label: 'Punto de equilibrio', value: formatMoneyInsight(pe) },
-    { label: 'Cumplimiento', value: `${cumpl}%` },
-    {
-      label: alcanzo ? 'Excedente vs PE' : 'Faltante vs PE',
-      value: formatMoneyInsight(Math.abs(faltante)),
-    },
+    { label: 'Costos variables', value: formatMoneyInsight(costos) },
     {
       label: uo >= 0 ? 'Utilidad operativa' : 'Pérdida operativa',
       value: formatMoneyInsight(uo),
     },
-  ];
+  );
 
   let severity = 'info';
   let title;
@@ -202,34 +228,39 @@ function buildAgencyDetailInsight(agencia, temporal = {}) {
   let analysis;
   const recommendations = [];
 
+  const criterio = [
+    'Mayor a 1 o 100%: operación por encima del equilibrio.',
+    'Igual a 1 o 100%: equilibrio exacto.',
+    'Menor a 1 o 100%: operación por debajo del equilibrio.',
+  ];
+
   if (alcanzo) {
     severity = 'info';
-    title = 'La agencia cubrió su punto de equilibrio';
-    summary = `Con ventas de ${formatMoneyInsight(ventas)} se superó el PE de ${formatMoneyInsight(pe)} `
-      + `(cumplimiento ${cumpl}%).`;
-    analysis = `El detalle de agencia muestra un margen de contribución de ${formatMoneyInsight(mc)} `
-      + `(${mcPct}% sobre ventas): tras descontar costos variables (${formatMoneyInsight(costos)}) `
-      + `quedó margen suficiente para absorber los gastos fijos (${formatMoneyInsight(gf)}) `
-      + `y aún generar ${formatMoneyInsight(uo)} de utilidad operativa. `
-      + `Con esta mezcla, cada peso adicional de venta aporta aproximadamente ${mcPct} centavos de contribución.`;
+    title = 'Cobertura del punto de equilibrio alcanzada';
+    summary = `Ratio de cobertura = Ventas ÷ PE = ${formatMoneyInsight(ventas)} ÷ ${formatMoneyInsight(pe)} `
+      + `= ${ratioRounded} → cobertura ${coberturaPct}%.`;
+    analysis = `La agencia cubrió ${coberturaPct}% de las ventas necesarias para alcanzar su punto de equilibrio. `
+      + `Por cada $1.00 requerido, generó aproximadamente $${ratioRounded.toFixed(2)}, `
+      + `por lo que el periodo cerró por encima (o en) el equilibrio operativo. `
+      + `Margen de contribución ${mcPct}% · gastos fijos ${formatMoneyInsight(gf)}.`;
     recommendations.push(
       'Mantener el mix y el control de gastos fijos para no erosionar el colchón sobre el PE.',
       'Usar el PE por departamento para ver qué área sostiene o debilita el consolidado.',
     );
   } else {
-    severity = cumpl < 95 ? 'critical' : 'warning';
-    title = 'La operación no alcanzó el punto de equilibrio';
-    summary = `Ventas ${formatMoneyInsight(ventas)} frente a un PE de ${formatMoneyInsight(pe)}. `
-      + `Faltaron ${formatMoneyInsight(Math.abs(faltante))} (${cumpl}% de cumplimiento).`;
-    const checkLoss = Math.abs(faltante) * (mcPct / 100);
-    analysis = `Con un margen de contribución de ${mcPct}%, los gastos fijos de ${formatMoneyInsight(gf)} `
-      + `exigen vender ${formatMoneyInsight(pe)} solo para empatar. `
-      + `La ${uo < 0 ? 'pérdida' : 'utilidad'} operativa de ${formatMoneyInsight(uo)} se explica con el faltante: `
-      + `${formatMoneyInsight(Math.abs(faltante))} × ${mcPct}% ≈ ${formatMoneyInsight(checkLoss)}. `
-      + 'Cálculo preliminar: TOTAL COSTOS se trata como variable y los gastos departamentales como fijos '
-      + '(aún sin separar comisiones, bonos o publicidad).';
+    severity = coberturaPct < 95 ? 'critical' : 'warning';
+    title = 'Cobertura del punto de equilibrio incompleta';
+    summary = `Ratio de cobertura = ${formatMoneyInsight(ventas)} ÷ ${formatMoneyInsight(pe)} `
+      + `= ${ratioRounded} → cobertura ${coberturaPct}% · brecha ${brechaPct}%.`;
+    const debajo = coberturaPct >= 95 ? 'ligeramente por debajo' : 'por debajo';
+    analysis = `La agencia cubrió ${coberturaPct}% de las ventas necesarias para alcanzar su punto de equilibrio. `
+      + `Por cada $1.00 requerido, generó aproximadamente $${ratioRounded.toFixed(2)}, `
+      + `por lo que el periodo cerró ${debajo} del equilibrio operativo. `
+      + `Faltan ${formatMoneyInsight(ventasAdicionales)} de ventas adicionales `
+      + `(${brechaPct}% de brecha) para empatar el PE. `
+      + `Con MC ${mcPct}%, los gastos fijos de ${formatMoneyInsight(gf)} exigen vender ${formatMoneyInsight(pe)}.`;
     recommendations.push(
-      `Cerrar el gap de ${formatMoneyInsight(Math.abs(faltante))} en ventas sin bajar el margen, o mejorar el MC% para reducir el PE.`,
+      `Cerrar el gap de ${formatMoneyInsight(ventasAdicionales)} en ventas sin bajar el margen, o mejorar el MC% para reducir el PE.`,
       'Separar comisiones, bonos y publicidad del gasto fijo para un PE más preciso.',
       'Revisar el mix: postventa suele aportar mayor margen de contribución que nuevos.',
     );
@@ -259,15 +290,26 @@ function buildAgencyDetailInsight(agencia, temporal = {}) {
     summary,
     analysis,
     recommendations,
+    criterio,
     facts,
+    metrics: {
+      ventas,
+      puntoEquilibrio: pe,
+      coberturaRatio: ratioRounded,
+      coberturaPct,
+      brechaEquilibrioPct: brechaPct,
+      ventasAdicionalesRequeridas: ventasAdicionales,
+    },
     chatPrompt: [
-      'Eres el analista financiero de BALDERRAMA. Explica el Detalle agencia del punto de equilibrio.',
+      'Eres el analista financiero de BALDERRAMA. Explica la cobertura del punto de equilibrio.',
+      'Fórmula: Ratio de cobertura = Ventas ÷ Punto de equilibrio. Cobertura % = ratio × 100.',
       `Hallazgo: ${title}`,
-      'Datos del detalle:',
+      'Datos:',
       ...facts.map((f) => `- ${f.label}: ${f.value}`),
+      'Criterio de lectura:',
+      ...criterio.map((c) => `- ${c}`),
       `Modo temporal: ${temporal.label || mode}`,
-      'Explica en español qué significa cada renglón del detalle, por qué el PE sale así, '
-        + 'y da 3 acciones concretas. No inventes cifras fuera de las dadas.',
+      'Explica en español el ratio, la brecha y da 3 acciones concretas. No inventes cifras fuera de las dadas.',
     ].join('\n'),
   };
 }
@@ -281,6 +323,11 @@ function round2(n) {
 function round1(n) {
   if (n == null || Number.isNaN(Number(n))) return null;
   return Number(Number(n).toFixed(1));
+}
+
+function round4(n) {
+  if (n == null || Number.isNaN(Number(n))) return null;
+  return Number(Number(n).toFixed(4));
 }
 
 function calcBreakEvenRow({
@@ -298,7 +345,11 @@ function calcBreakEvenRow({
   const margenPct = ventas > 0 ? margenContribucion / ventas : 0;
   const puntoEquilibrio = margenPct > 0 ? gastosFijos / margenPct : null;
   const faltante = puntoEquilibrio != null ? puntoEquilibrio - ventas : null;
-  const cumplimientoPct = puntoEquilibrio > 0 ? (ventas / puntoEquilibrio) * 100 : null;
+  const coberturaRatio = puntoEquilibrio > 0 ? ventas / puntoEquilibrio : null;
+  const coberturaPct = coberturaRatio != null ? coberturaRatio * 100 : null;
+  const cumplimientoPct = coberturaPct;
+  const brechaEquilibrioPct = coberturaPct != null ? Math.max(0, 100 - coberturaPct) : null;
+  const ventasAdicionalesRequeridas = faltante != null ? Math.max(0, faltante) : null;
   const utilidadOperativa = margenContribucion - Number(gastosFijos || 0);
 
   return {
@@ -314,11 +365,17 @@ function calcBreakEvenRow({
     gastosFijos: round2(gastosFijos),
     puntoEquilibrio: puntoEquilibrio != null ? round2(puntoEquilibrio) : null,
     faltante: faltante != null ? round2(faltante) : null,
+    coberturaRatio: coberturaRatio != null ? round4(coberturaRatio) : null,
+    coberturaPct: coberturaPct != null ? round2(coberturaPct) : null,
+    brechaEquilibrioPct: brechaEquilibrioPct != null ? round2(brechaEquilibrioPct) : null,
+    ventasAdicionalesRequeridas: ventasAdicionalesRequeridas != null
+      ? round2(ventasAdicionalesRequeridas)
+      : null,
     cumplimientoPct: cumplimientoPct != null ? round1(cumplimientoPct) : null,
     utilidadOperativa: round2(utilidadOperativa),
     alcanzoEquilibrio: puntoEquilibrio != null ? ventas >= puntoEquilibrio : null,
     excludeNote: excludeNote || null,
-    formula: 'PE = Gastos fijos ÷ (1 − Costos variables ÷ Ventas)',
+    formula: 'Ratio cobertura = Ventas ÷ PE · PE = Gastos fijos ÷ (1 − Costos variables ÷ Ventas)',
   };
 }
 
@@ -543,7 +600,7 @@ async function getPuntoEquilibrio({
         ? 'Comisiones, entrega y publicidad (0700-0011/0013/0065) sumadas al variable.'
         : 'Preliminares en 0 — se asume que están dentro de gastos depto como fijos.',
       gastosFijos: 'Gastos departamentales del catálogo Excel/GPO (sin productos financieros). Agencia incluye administración.',
-      formula: 'PE = Gastos fijos ÷ Margen de contribución %',
+      formula: 'Ratio cobertura = Ventas ÷ PE · PE = Gastos fijos ÷ Margen de contribución %',
       exclusiones: 'Productos/gastos financieros, otros ingresos, provisiones, dividendos, F&I. Internas postventa se reportan sin restar en el preliminar.',
       preliminar: true,
     },
@@ -558,6 +615,10 @@ async function getPuntoEquilibrio({
       gastosFijos: agenciaDisplay.gastosFijos,
       puntoEquilibrio: agenciaDisplay.puntoEquilibrio,
       faltante: agenciaDisplay.faltante,
+      coberturaRatio: agenciaDisplay.coberturaRatio,
+      coberturaPct: agenciaDisplay.coberturaPct,
+      brechaEquilibrioPct: agenciaDisplay.brechaEquilibrioPct,
+      ventasAdicionalesRequeridas: agenciaDisplay.ventasAdicionalesRequeridas,
       cumplimientoPct: agenciaDisplay.cumplimientoPct,
       utilidadOperativa: agenciaDisplay.utilidadOperativa,
       alcanzoEquilibrio: agenciaDisplay.alcanzoEquilibrio,

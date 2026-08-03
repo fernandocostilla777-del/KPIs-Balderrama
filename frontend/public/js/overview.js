@@ -106,8 +106,9 @@ function renderPuntoEquilibrioOverview(pe) {
 
   const cards = segmentos.map((row) => {
     const peVal = row.puntoEquilibrio != null ? formatFullMoney(row.puntoEquilibrio) : '—';
-    const sub = row.cumplimientoPct != null
-      ? `${row.cumplimientoPct}% cumplimiento · MC ${row.margenContribucionPct ?? '—'}%`
+    const cob = row.coberturaPct ?? row.cumplimientoPct;
+    const sub = cob != null
+      ? `Cobertura ${cob}%${row.coberturaRatio != null ? ` (${row.coberturaRatio}×)` : ''} · MC ${row.margenContribucionPct ?? '—'}%`
       : `MC ${row.margenContribucionPct ?? '—'}%`;
     const idAttr = row.id === 'agencia' ? ' id="kpiCardPuntoEquilibrio"' : '';
     return `<div class="kpi-card kpi-card--eeff ${tone(row)}"${idAttr}>
@@ -123,18 +124,21 @@ function renderPuntoEquilibrioOverview(pe) {
     <td class="cell-money">${row.margenContribucionPct != null ? `${row.margenContribucionPct}%` : '—'}</td>
     <td class="cell-money">${formatFullMoney(row.gastosFijos)}</td>
     <td class="cell-money">${row.puntoEquilibrio != null ? formatFullMoney(row.puntoEquilibrio) : '—'}</td>
-    <td class="cell-num">${row.cumplimientoPct != null ? `${row.cumplimientoPct}%` : '—'}</td>
+    <td class="cell-num">${(row.coberturaPct ?? row.cumplimientoPct) != null ? `${row.coberturaPct ?? row.cumplimientoPct}%` : '—'}</td>
   </tr>`).join('');
 
   const detailRows = [
-    ['Ventas totales', a.ventas],
+    ['Ventas del periodo', a.ventas],
     ['Costos variables', a.costosVariables],
     ['Margen de contribución', a.margenContribucion],
     ['Margen de contribución %', a.margenContribucionPct != null ? `${a.margenContribucionPct}%` : null, true],
     ['Gastos fijos', a.gastosFijos],
     ['Punto de equilibrio', a.puntoEquilibrio],
+    ['Ratio de cobertura', a.coberturaRatio != null ? `${a.coberturaRatio} veces` : null, true],
+    ['Cobertura porcentual', (a.coberturaPct ?? a.cumplimientoPct) != null ? `${a.coberturaPct ?? a.cumplimientoPct}%` : null, true],
+    ['Brecha para alcanzar el equilibrio', a.brechaEquilibrioPct != null ? `${a.brechaEquilibrioPct}%` : null, true],
+    ['Ventas adicionales requeridas', a.ventasAdicionalesRequeridas],
     ['Faltante / (excedente)', a.faltante],
-    ['Cumplimiento', a.cumplimientoPct != null ? `${a.cumplimientoPct}%` : null, true],
     ['Utilidad / (pérdida) operativa', a.utilidadOperativa],
   ].map(([label, value, plain]) => {
     const display = value == null ? '—' : (plain ? escHtml(String(value)) : formatFullMoney(value));
@@ -168,7 +172,7 @@ function renderPuntoEquilibrioOverview(pe) {
       <div class="section-panel table-panel" style="margin:0;padding:0;border:none;box-shadow:none;background:transparent">
         <h4 class="kpi-group-title" style="margin-bottom:8px">Por departamento</h4>
         <div class="table-scroll"><table class="data-table">
-          <thead><tr><th>Departamento</th><th class="cell-money">Ventas</th><th class="cell-money">MC %</th><th class="cell-money">Gastos fijos</th><th class="cell-money">Punto equilibrio</th><th class="cell-num">Cumpl.</th></tr></thead>
+          <thead><tr><th>Departamento</th><th class="cell-money">Ventas</th><th class="cell-money">MC %</th><th class="cell-money">Gastos fijos</th><th class="cell-money">Punto equilibrio</th><th class="cell-num">Cobertura</th></tr></thead>
           <tbody>${tableRows || '<tr class="empty-row"><td colspan="6">Sin datos</td></tr>'}</tbody>
         </table></div>
         ${insightHtml}
@@ -184,6 +188,7 @@ function renderPeAgencyInsightHtml(insight) {
     : (insight.severity === 'warning' ? 'amber' : (insight.severity === 'info' ? 'green' : 'blue'));
   const facts = Array.isArray(insight.facts) ? insight.facts : [];
   const recs = Array.isArray(insight.recommendations) ? insight.recommendations : [];
+  const criterio = Array.isArray(insight.criterio) ? insight.criterio : [];
   const criticalCls = insight.severity === 'critical' ? ' pe-insight-note--critical' : '';
   const warnCls = insight.severity === 'warning' ? ' pe-insight-note--warning' : '';
   return `<div class="liquidez-note pe-insight-note${criticalCls}${warnCls}" id="peAgenciaInsight" aria-live="polite">
@@ -191,8 +196,9 @@ function renderPeAgencyInsightHtml(insight) {
     <p class="liquidez-note__summary"><strong>${escHtml(insight.title)}</strong></p>
     <p class="liquidez-note__summary">${escHtml(insight.summary || '')}</p>
     ${facts.length ? `<ul class="liquidez-note__facts">${facts.map((f) => `<li><strong>${escHtml(f.label)}:</strong> ${escHtml(f.value)}</li>`).join('')}</ul>` : ''}
-    <p class="liquidez-note__hint"><strong>Análisis.</strong> ${escHtml(insight.analysis || '')}</p>
-    ${recs.length ? `<ul class="liquidez-note__facts">${recs.map((r) => `<li>${escHtml(r)}</li>`).join('')}</ul>` : ''}
+    <p class="liquidez-note__hint"><strong>Interpretación.</strong> ${escHtml(insight.analysis || '')}</p>
+    ${criterio.length ? `<p class="liquidez-note__hint"><strong>Criterio de lectura</strong></p><ul class="liquidez-note__facts">${criterio.map((c) => `<li>${escHtml(c)}</li>`).join('')}</ul>` : ''}
+    ${recs.length ? `<p class="liquidez-note__hint"><strong>Acciones sugeridas</strong></p><ul class="liquidez-note__facts">${recs.map((r) => `<li>${escHtml(r)}</li>`).join('')}</ul>` : ''}
   </div>`;
 }
 

@@ -896,6 +896,9 @@ function blocksFromHistoricoCrm(data) {
         icon: 'receipt_long',
         sub: [f.tipoCompra, f.plazoContratado ? `${f.plazoContratado}m` : null].filter(Boolean).join(' · ') || undefined,
       }),
+      kpiItem('Seguro', f.seguroAuto || '—', {
+        icon: 'verified_user',
+      }),
       kpiItem('Km', f.kilometraje != null ? fmtNum(f.kilometraje) : '—', {
         icon: 'speed',
         sub: f.ultimaVisitaTaller ? `Taller ${f.ultimaVisitaTaller}` : undefined,

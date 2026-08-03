@@ -153,9 +153,11 @@
   const POLL_MS = 60_000;
   let alertsUi = null;
   let notifBtn = null;
+  let msgBtn = null;
   let pollTimer = null;
   let currentUsername = '';
   let lastAlertsFingerprint = '';
+  let panelAnchorBtn = null;
 
   function seenStorageKey() {
     return `${SEEN_KEY_PREFIX}${currentUsername || 'anon'}`;
@@ -180,7 +182,6 @@
       ids,
       at: new Date().toISOString(),
     }));
-    setNotifDot(false);
   }
 
   function actionableAlerts(alerts) {
@@ -210,9 +211,36 @@
     notifBtn.setAttribute(
       'aria-label',
       show
-        ? `Centro de notificaciones · ${unreadCount || 'nuevas'} sin leer`
-        : 'Centro de notificaciones'
+        ? `Notificaciones · ${unreadCount || 'nuevas'} sin leer`
+        : 'Notificaciones'
     );
+  }
+
+  function setMsgDot(hasUnread, unreadCount = 0) {
+    if (!msgBtn) return;
+    const show = Boolean(hasUnread);
+    const dot = msgBtn.querySelector('[data-msg-dot]');
+    if (dot) {
+      dot.classList.remove('is-visible');
+      dot.hidden = true;
+    }
+    msgBtn.classList.toggle('has-unread', show);
+    const countEl = msgBtn.querySelector('[data-msg-badge]');
+    if (countEl) {
+      countEl.hidden = !show;
+      countEl.textContent = unreadCount > 9 ? '9+' : String(unreadCount || '');
+    }
+    msgBtn.setAttribute(
+      'aria-label',
+      show
+        ? `Mensajes · ${unreadCount || 'nuevos'} sin leer`
+        : 'Mensajes'
+    );
+  }
+
+  function updateTopBadges(unreadAlerts, unreadMessages) {
+    setNotifDot(unreadAlerts > 0, unreadAlerts);
+    setMsgDot(unreadMessages > 0, unreadMessages);
   }
 
   function ensureAlertsPanel() {
@@ -224,7 +252,7 @@
     backdrop.setAttribute('aria-hidden', 'true');
 
     const panel = document.createElement('div');
-    panel.className = 'alerts-drawer';
+    panel.className = 'alerts-drawer alerts-drawer--wide';
     panel.id = 'alertsDrawer';
     panel.setAttribute('aria-hidden', 'true');
     panel.setAttribute('role', 'dialog');
@@ -232,13 +260,16 @@
     panel.innerHTML = `
       <div class="alerts-drawer__header">
         <div class="alerts-drawer__title-wrap">
-          <span class="material-symbols-outlined alerts-drawer__logo">notifications_active</span>
+          <span class="material-symbols-outlined alerts-drawer__logo" data-drawer-logo>notifications_active</span>
           <div>
-            <h2 class="alerts-drawer__title">Centro de notificaciones</h2>
+            <h2 class="alerts-drawer__title" data-drawer-title>Notificaciones</h2>
             <span class="alerts-drawer__status" data-alerts-status>Cargando…</span>
           </div>
         </div>
         <div class="alerts-drawer__actions">
+          <button type="button" class="alerts-drawer__icon-btn hidden" data-alerts-compose title="Nuevo mensaje">
+            <span class="material-symbols-outlined">edit_square</span>
+          </button>
           <button type="button" class="alerts-drawer__icon-btn" data-alerts-refresh title="Actualizar">
             <span class="material-symbols-outlined">refresh</span>
           </button>
@@ -248,7 +279,7 @@
         </div>
       </div>
       <div class="alerts-drawer__body custom-scrollbar" data-alerts-body>
-        <p class="alerts-drawer__empty">Cargando notificaciones…</p>
+        <p class="alerts-drawer__empty">Cargando…</p>
       </div>
     `;
 
@@ -257,19 +288,27 @@
 
     const statusEl = panel.querySelector('[data-alerts-status]');
     const bodyEl = panel.querySelector('[data-alerts-body]');
+    const titleEl = panel.querySelector('[data-drawer-title]');
+    const logoEl = panel.querySelector('[data-drawer-logo]');
+    const composeBtn = panel.querySelector('[data-alerts-compose]');
+    let activeMode = 'operativas';
+    let lastPayload = { alerts: [], messages: [], unreadMessages: 0 };
+    let directoryCache = null;
+    let chatFloat = null;
+    let activeChatId = null;
 
     function positionPanel() {
-      if (!notifBtn || !panel) return;
-      const rect = notifBtn.getBoundingClientRect();
+      const anchor = panelAnchorBtn || msgBtn || notifBtn;
+      if (!anchor || !panel) return;
+      const rect = anchor.getBoundingClientRect();
       const gap = 10;
-      const width = Math.min(400, window.innerWidth - 16);
+      const width = Math.min(440, window.innerWidth - 16);
       const right = Math.max(8, window.innerWidth - rect.right);
       let top = rect.bottom + gap;
       const maxHeight = Math.max(240, window.innerHeight - top - 12);
 
-      // Si casi no cabe abajo, pegar al borde superior con margen
       if (maxHeight < 220) {
-        top = Math.max(12, window.innerHeight - Math.min(520, window.innerHeight - 24));
+        top = Math.max(12, window.innerHeight - Math.min(560, window.innerHeight - 24));
       }
 
       panel.style.top = `${Math.round(top)}px`;
@@ -277,8 +316,13 @@
       panel.style.left = 'auto';
       panel.style.bottom = 'auto';
       panel.style.width = `${Math.round(width)}px`;
-      panel.style.maxHeight = `${Math.round(Math.min(560, window.innerHeight - top - 12))}px`;
+      panel.style.maxHeight = `${Math.round(Math.min(620, window.innerHeight - top - 12))}px`;
       panel.style.height = 'auto';
+    }
+
+    function syncExpandedAttrs(openState) {
+      notifBtn?.setAttribute('aria-expanded', openState && panelAnchorBtn === notifBtn ? 'true' : 'false');
+      msgBtn?.setAttribute('aria-expanded', openState && panelAnchorBtn === msgBtn ? 'true' : 'false');
     }
 
     function close() {
@@ -287,8 +331,53 @@
       backdrop.classList.remove('alerts-drawer-backdrop--visible');
       backdrop.setAttribute('aria-hidden', 'true');
       document.body.classList.remove('alerts-drawer-open');
-      notifBtn?.setAttribute('aria-expanded', 'false');
+      syncExpandedAttrs(false);
+      panelAnchorBtn = null;
       window.removeEventListener('resize', positionPanel);
+    }
+
+    function applyModeChrome(mode) {
+      activeMode = mode === 'mensajes' ? 'mensajes' : 'operativas';
+      const isMessages = activeMode === 'mensajes';
+      if (titleEl) titleEl.textContent = isMessages ? 'Mensajes' : 'Notificaciones';
+      if (logoEl) logoEl.textContent = isMessages ? 'mail' : 'notifications_active';
+      panel.setAttribute('aria-label', isMessages ? 'Mensajes' : 'Notificaciones');
+      composeBtn?.classList.toggle('hidden', !isMessages);
+    }
+
+    async function markVisibleMessagesRead() {
+      const unreadInbox = (lastPayload.messages || []).filter((m) => m.unreadForViewer);
+      if (!unreadInbox.length) return;
+      await Promise.all(unreadInbox.map((m) =>
+        fetch(`/api/auth/messages/${encodeURIComponent(m.id)}/read`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        }).catch(() => null)
+      ));
+      lastPayload.messages = lastPayload.messages.map((m) => (
+        m.unreadForViewer ? { ...m, unreadForViewer: false, readAt: m.readAt || new Date().toISOString() } : m
+      ));
+      lastPayload.unreadMessages = 0;
+      const unreadAlerts = countUnread(lastPayload.alerts || []);
+      updateTopBadges(unreadAlerts, 0);
+    }
+
+    function formatWhen(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleString('es-MX', {
+        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+      });
+    }
+
+    async function fetchDirectory() {
+      if (directoryCache) return directoryCache;
+      const res = await fetch('/api/auth/directory', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      directoryCache = data.users || [];
+      return directoryCache;
     }
 
     async function fetchAlerts() {
@@ -298,33 +387,18 @@
       return data;
     }
 
-    async function load({ markSeen = false } = {}) {
-      bodyEl.innerHTML = '<p class="alerts-drawer__empty">Cargando notificaciones…</p>';
-      statusEl.textContent = 'Actualizando…';
-      try {
-        const data = await fetchAlerts();
-        const alerts = data.alerts || [];
-        const roleLabel = data.roleLabel || data.role || 'su perfil';
-        const unread = countUnread(alerts);
-        lastAlertsFingerprint = fingerprint(alerts);
-        statusEl.textContent = `${alerts.length} notificación(es) · ${roleLabel}`;
-
-        if (!markSeen) setNotifDot(unread > 0, unread);
-
-        if (!alerts.length) {
-          bodyEl.innerHTML = `
-            <div class="alerts-drawer__empty-state">
-              <span class="material-symbols-outlined">notifications_off</span>
-              <p>Sin notificaciones para su perfil en este momento.</p>
-            </div>`;
-          if (markSeen) markAlertsSeen(alerts);
-          return alerts;
-        }
-
-        const seenIds = getSeenIds();
-        bodyEl.innerHTML = alerts.map((a) => {
-          const isNew = a.type !== 'sistema' && a.id && !seenIds.has(a.id);
-          return `
+    function renderOperativas(alerts, markSeen) {
+      if (!alerts.length) {
+        return `
+          <div class="alerts-drawer__empty-state">
+            <span class="material-symbols-outlined">notifications_off</span>
+            <p>Sin alertas operativas para su perfil en este momento.</p>
+          </div>`;
+      }
+      const seenIds = getSeenIds();
+      return alerts.map((a) => {
+        const isNew = a.type !== 'sistema' && a.id && !seenIds.has(a.id);
+        return `
           <article class="alerts-drawer__item ${severityClass(a.severity)}${isNew && !markSeen ? ' is-new' : ''}">
             <div class="alerts-drawer__item-head">
               <strong>${esc(a.title)}${isNew && !markSeen ? ' <span class="alerts-drawer__new">Nueva</span>' : ''}</strong>
@@ -338,43 +412,582 @@
                 </a>`
               : ''}
           </article>`;
-        }).join('');
+      }).join('');
+    }
 
-        if (markSeen) markAlertsSeen(alerts);
-        return alerts;
+    function renderMessages(messages) {
+      const openMsgs = messages.filter((m) => m.status !== 'done');
+      const doneMsgs = messages.filter((m) => m.status === 'done');
+      if (!messages.length) {
+        return `
+          <div class="alerts-drawer__empty-state">
+            <span class="material-symbols-outlined">mail</span>
+            <p>No hay mensajes. Use el botón de editar para escribir a un usuario.</p>
+          </div>`;
+      }
+      const me = (currentUsername || '').toLowerCase();
+      const block = (list, title) => {
+        if (!list.length) return '';
+        return `
+          <div class="alerts-drawer__group-label">${esc(title)}</div>
+          ${list.map((m) => {
+            const peer = String(m.fromUsername || '').toLowerCase() === me ? m.toUsername : m.fromUsername;
+            const replies = Array.isArray(m.thread) ? m.thread.length : 0;
+            const preview = String(m.body || '').slice(0, 110);
+            return `
+            <button type="button" class="alerts-drawer__item alerts-drawer__item--msg alerts-drawer__item--msg-btn ${m.unreadForViewer ? 'is-new' : ''} ${m.type === 'followup' ? 'is-followup' : ''}" data-open-chat="${esc(m.id)}">
+              <div class="alerts-drawer__item-head">
+                <strong>${esc(m.subject)}${m.unreadForViewer ? ' <span class="alerts-drawer__new">Nuevo</span>' : ''}</strong>
+                <span class="alerts-drawer__tag">${m.type === 'followup' ? 'Seguimiento' : 'Chat'}</span>
+              </div>
+              <p class="alerts-drawer__msg-meta">Con <strong>${esc(peer || '—')}</strong> · ${esc(formatWhen(m.updatedAt || m.createdAt))}</p>
+              <p class="alerts-drawer__msg">${esc(preview)}${preview.length >= 110 ? '…' : ''}</p>
+              <div class="alerts-drawer__msg-actions">
+                <span class="alerts-drawer__msg-hint">
+                  <span class="material-symbols-outlined">chat</span>
+                  ${replies ? `${replies} respuesta${replies === 1 ? '' : 's'}` : 'Abrir chat'}
+                </span>
+              </div>
+            </button>`;
+          }).join('')}`;
+      };
+      return `${block(openMsgs, 'Pendientes')}${block(doneMsgs, 'Cerrados')}`;
+    }
+
+    function ensureChatFloat() {
+      if (chatFloat) return chatFloat;
+
+      const el = document.createElement('div');
+      el.id = 'messagesChatFloat';
+      el.className = 'msg-chat-float hidden';
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', 'Chat de mensaje');
+      el.innerHTML = `
+        <div class="msg-chat-float__header" data-chat-drag>
+          <div class="msg-chat-float__title-wrap">
+            <span class="material-symbols-outlined">forum</span>
+            <div>
+              <h3 class="msg-chat-float__title" data-chat-title>Chat</h3>
+              <p class="msg-chat-float__subtitle" data-chat-sub></p>
+            </div>
+          </div>
+          <div class="msg-chat-float__actions">
+            <button type="button" class="msg-chat-float__icon-btn" data-chat-done title="Cerrar seguimiento">
+              <span class="material-symbols-outlined">task_alt</span>
+            </button>
+            <button type="button" class="msg-chat-float__icon-btn" data-chat-close title="Cerrar chat" aria-label="Cerrar chat">
+              <span class="material-symbols-outlined">close</span>
+            </button>
+          </div>
+        </div>
+        <div class="msg-chat-float__meta" data-chat-meta hidden></div>
+        <div class="msg-chat-float__thread custom-scrollbar" data-chat-thread></div>
+        <form class="msg-chat-float__close-form hidden" data-chat-close-form>
+          <div class="msg-chat-float__close-title">Documentar cierre del caso</div>
+          <label>Quién solicitó el seguimiento
+            <input type="text" name="requestedBy" data-close-requested readonly />
+          </label>
+          <label>Periodo
+            <input type="text" name="period" data-close-period required maxlength="120" placeholder="Ej. Julio 2026 / 2026-07-01 a 2026-07-31" />
+          </label>
+          <label>Qué se realizó
+            <textarea name="actionTaken" data-close-action rows="3" required maxlength="4000" placeholder="Describa la acción tomada para resolver el seguimiento…"></textarea>
+          </label>
+          <div class="msg-chat-float__close-actions">
+            <button type="button" class="btn-glass" data-close-cancel>Cancelar</button>
+            <button type="submit" class="btn-glass btn-primary">Confirmar cierre</button>
+          </div>
+        </form>
+        <form class="msg-chat-float__composer" data-chat-form>
+          <textarea rows="2" placeholder="Escriba un mensaje…" maxlength="4000" required data-chat-input></textarea>
+          <button type="submit" class="btn-glass btn-primary" title="Enviar">
+            <span class="material-symbols-outlined">send</span>
+          </button>
+        </form>
+      `;
+      document.body.appendChild(el);
+
+      const threadEl = el.querySelector('[data-chat-thread]');
+      const form = el.querySelector('[data-chat-form]');
+      const input = el.querySelector('[data-chat-input]');
+      const doneBtn = el.querySelector('[data-chat-done]');
+      const closeForm = el.querySelector('[data-chat-close-form]');
+
+      el.querySelector('[data-chat-close]')?.addEventListener('click', closeChatFloat);
+      el.querySelector('[data-close-cancel]')?.addEventListener('click', () => {
+        closeForm?.classList.add('hidden');
+        form?.classList.remove('hidden');
+      });
+
+      doneBtn?.addEventListener('click', () => {
+        if (!activeChatId) return;
+        const msg = findMessage(activeChatId);
+        if (!msg) return;
+        showCloseCaseForm(msg);
+      });
+
+      closeForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!activeChatId) return;
+        const actionTaken = String(closeForm.querySelector('[data-close-action]')?.value || '').trim();
+        const period = String(closeForm.querySelector('[data-close-period]')?.value || '').trim();
+        const requestedBy = String(closeForm.querySelector('[data-close-requested]')?.value || '').trim();
+        try {
+          const res = await fetch(`/api/auth/messages/${encodeURIComponent(activeChatId)}/done`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actionTaken, period, requestedBy }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || res.statusText);
+          closeForm.classList.add('hidden');
+          await refreshMessagesKeepChat();
+        } catch (err) {
+          window.alert(err.message || 'No se pudo cerrar el seguimiento.');
+        }
+      });
+
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!activeChatId) return;
+        const body = String(input?.value || '').trim();
+        if (!body) return;
+        try {
+          const res = await fetch(`/api/auth/messages/${encodeURIComponent(activeChatId)}/reply`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || res.statusText);
+          if (input) input.value = '';
+          await refreshMessagesKeepChat();
+          threadEl?.scrollTo({ top: threadEl.scrollHeight, behavior: 'smooth' });
+        } catch (err) {
+          window.alert(err.message || 'No se pudo enviar el mensaje.');
+        }
+      });
+
+      // Drag by header
+      const dragHandle = el.querySelector('[data-chat-drag]');
+      let dragging = false;
+      let offsetX = 0;
+      let offsetY = 0;
+      dragHandle?.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;
+        dragging = true;
+        const rect = el.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        el.setPointerCapture?.(e.pointerId);
+        el.classList.add('is-dragging');
+      });
+      dragHandle?.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const left = Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, e.clientX - offsetX));
+        const top = Math.max(8, Math.min(window.innerHeight - el.offsetHeight - 8, e.clientY - offsetY));
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+        el.style.right = 'auto';
+        el.style.bottom = 'auto';
+      });
+      const endDrag = () => {
+        dragging = false;
+        el.classList.remove('is-dragging');
+      };
+      dragHandle?.addEventListener('pointerup', endDrag);
+      dragHandle?.addEventListener('pointercancel', endDrag);
+
+      chatFloat = el;
+      return el;
+    }
+
+    function guessPeriodLabel() {
+      const fi = document.getElementById('fechaInicio')?.value;
+      const ff = document.getElementById('fechaFin')?.value;
+      if (fi && ff) return `${fi} a ${ff}`;
+      const now = new Date();
+      const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      return `${months[now.getMonth()]} ${now.getFullYear()}`;
+    }
+
+    function showCloseCaseForm(msg) {
+      const el = ensureChatFloat();
+      const closeForm = el.querySelector('[data-chat-close-form]');
+      const composer = el.querySelector('[data-chat-form]');
+      if (!closeForm) return;
+      composer?.classList.add('hidden');
+      closeForm.classList.remove('hidden');
+      const requested = closeForm.querySelector('[data-close-requested]');
+      const period = closeForm.querySelector('[data-close-period]');
+      const action = closeForm.querySelector('[data-close-action]');
+      if (requested) requested.value = msg.fromUsername || '';
+      if (period && !period.value) period.value = guessPeriodLabel();
+      if (action) action.focus();
+    }
+
+    function closeChatFloat() {
+      if (!chatFloat) return;
+      chatFloat.classList.add('hidden');
+      chatFloat.querySelector('[data-chat-close-form]')?.classList.add('hidden');
+      activeChatId = null;
+    }
+
+    function findMessage(id) {
+      return (lastPayload.messages || []).find((m) => m.id === id) || null;
+    }
+
+    function renderChatThread(msg) {
+      const me = (currentUsername || '').toLowerCase();
+      const bubbles = [];
+      bubbles.push({
+        fromUsername: msg.fromUsername,
+        body: msg.body,
+        createdAt: msg.createdAt,
+        isMine: String(msg.fromUsername || '').toLowerCase() === me,
+        kind: 'message',
+      });
+      for (const r of (msg.thread || [])) {
+        bubbles.push({
+          fromUsername: r.fromUsername,
+          body: r.body,
+          createdAt: r.createdAt,
+          isMine: String(r.fromUsername || '').toLowerCase() === me,
+          kind: r.kind === 'closure' ? 'closure' : 'message',
+          resolution: r.resolution || null,
+        });
+      }
+
+      let html = bubbles.map((b) => {
+        if (b.kind === 'closure' || b.resolution) {
+          const res = b.resolution || msg.resolution || {};
+          return `
+            <aside class="msg-chat-closure">
+              <div class="msg-chat-closure__head">
+                <span class="material-symbols-outlined">task_alt</span>
+                <strong>Caso cerrado</strong>
+                <span>${esc(formatWhen(b.createdAt || res.closedAt))}</span>
+              </div>
+              <dl class="msg-chat-closure__grid">
+                <div><dt>Solicitó el seguimiento</dt><dd>${esc(res.requestedBy || msg.fromUsername || '—')}</dd></div>
+                <div><dt>Periodo</dt><dd>${esc(res.period || '—')}</dd></div>
+                <div><dt>Qué se realizó</dt><dd>${esc(res.actionTaken || b.body || '—')}</dd></div>
+                <div><dt>Cerrado por</dt><dd>${esc(res.closedBy || b.fromUsername || '—')}</dd></div>
+              </dl>
+            </aside>`;
+        }
+        return `
+          <div class="msg-chat-bubble ${b.isMine ? 'is-mine' : 'is-theirs'}">
+            <div class="msg-chat-bubble__meta">
+              <strong>${esc(b.fromUsername || '—')}</strong>
+              <span>${esc(formatWhen(b.createdAt))}</span>
+            </div>
+            <p class="msg-chat-bubble__text">${esc(b.body || '')}</p>
+          </div>`;
+      }).join('');
+
+      if (msg.status === 'done' && msg.resolution && !(msg.thread || []).some((r) => r.kind === 'closure')) {
+        html += `
+          <aside class="msg-chat-closure">
+            <div class="msg-chat-closure__head">
+              <span class="material-symbols-outlined">task_alt</span>
+              <strong>Caso cerrado</strong>
+              <span>${esc(formatWhen(msg.resolution.closedAt))}</span>
+            </div>
+            <dl class="msg-chat-closure__grid">
+              <div><dt>Solicitó el seguimiento</dt><dd>${esc(msg.resolution.requestedBy || msg.fromUsername || '—')}</dd></div>
+              <div><dt>Periodo</dt><dd>${esc(msg.resolution.period || '—')}</dd></div>
+              <div><dt>Qué se realizó</dt><dd>${esc(msg.resolution.actionTaken || '—')}</dd></div>
+              <div><dt>Cerrado por</dt><dd>${esc(msg.resolution.closedBy || '—')}</dd></div>
+            </dl>
+          </aside>`;
+      }
+      return html;
+    }
+
+    function paintChatFloat(msg) {
+      const el = ensureChatFloat();
+      if (!msg) {
+        closeChatFloat();
+        return;
+      }
+      const me = (currentUsername || '').toLowerCase();
+      const peer = String(msg.fromUsername || '').toLowerCase() === me ? msg.toUsername : msg.fromUsername;
+      el.querySelector('[data-chat-title]').textContent = msg.subject || 'Chat';
+      el.querySelector('[data-chat-sub]').textContent = `Con ${peer || '—'} · ${msg.status === 'done' ? 'Cerrado' : 'Abierto'}`;
+      const meta = el.querySelector('[data-chat-meta]');
+      if (msg.source?.insightTitle) {
+        meta.hidden = false;
+        meta.innerHTML = `Alarma: <strong>${esc(msg.source.insightTitle)}</strong>${
+          msg.source.href ? ` · <a href="${esc(msg.source.href)}">Ver KPI</a>` : ''
+        }`;
+      } else {
+        meta.hidden = true;
+        meta.innerHTML = '';
+      }
+      const threadEl = el.querySelector('[data-chat-thread]');
+      threadEl.innerHTML = renderChatThread(msg);
+      const form = el.querySelector('[data-chat-form]');
+      const closeForm = el.querySelector('[data-chat-close-form]');
+      const doneBtn = el.querySelector('[data-chat-done]');
+      const closed = msg.status === 'done';
+      closeForm?.classList.add('hidden');
+      if (form) form.classList.toggle('hidden', closed);
+      if (doneBtn) doneBtn.classList.toggle('hidden', closed);
+      el.classList.remove('hidden');
+      if (!el.style.left && !el.style.top) {
+        el.style.right = '24px';
+        el.style.bottom = '24px';
+        el.style.left = 'auto';
+        el.style.top = 'auto';
+      }
+      requestAnimationFrame(() => {
+        threadEl.scrollTop = threadEl.scrollHeight;
+      });
+    }
+
+    async function openChatFloat(messageId) {
+      activeChatId = messageId;
+      let msg = findMessage(messageId);
+      if (!msg) {
+        await refreshMessagesKeepChat(false);
+        msg = findMessage(messageId);
+      }
+      if (!msg) {
+        window.alert('No se encontró el mensaje.');
+        return;
+      }
+      if (msg.unreadForViewer) {
+        fetch(`/api/auth/messages/${encodeURIComponent(msg.id)}/read`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        }).catch(() => null);
+        msg.unreadForViewer = false;
+      }
+      paintChatFloat(msg);
+    }
+
+    async function refreshMessagesKeepChat(repaint = true) {
+      try {
+        const res = await fetch('/api/auth/messages?box=all&includeDone=true', { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        lastPayload.messages = data.messages || [];
+        lastPayload.unreadMessages = Number(data.unread || 0);
+        updateTopBadges(countUnread(lastPayload.alerts || []), lastPayload.unreadMessages);
+        if (activeMode === 'mensajes' && !bodyEl.querySelector('[data-compose-form]')) {
+          renderBody(false);
+          statusEl.textContent = `${lastPayload.messages.length} mensaje(s)`;
+        }
+        if (repaint && activeChatId) {
+          paintChatFloat(findMessage(activeChatId));
+        }
       } catch (err) {
-        statusEl.textContent = 'Error al cargar';
-        bodyEl.innerHTML = `<p class="alerts-drawer__empty">${esc(err.message || 'No se pudieron cargar las notificaciones.')}</p>`;
-        return [];
+        console.warn('[messages-chat]', err.message);
       }
     }
 
-    async function open() {
+    function renderComposeForm(users, preset = {}) {
+      const opts = (users || []).map((u) =>
+        `<option value="${esc(u.username)}" ${preset.toUsername === u.username ? 'selected' : ''}>${esc(u.username)} · ${esc(u.roleLabel || u.role)}</option>`
+      ).join('');
+      return `
+        <form class="alerts-drawer__compose" data-compose-form>
+          <div class="alerts-drawer__group-label">Nuevo mensaje / seguimiento</div>
+          <label>Para
+            <select name="toUsername" required>
+              <option value="">Seleccione responsable…</option>
+              ${opts}
+            </select>
+          </label>
+          <label>Asunto
+            <input name="subject" type="text" maxlength="200" value="${esc(preset.subject || '')}" placeholder="Asunto" required />
+          </label>
+          <label>Mensaje
+            <textarea name="body" rows="4" maxlength="4000" required placeholder="Indique el seguimiento o instrucción…">${esc(preset.body || '')}</textarea>
+          </label>
+          <input type="hidden" name="type" value="${esc(preset.type || 'direct')}" />
+          <input type="hidden" name="sourceJson" value="${esc(preset.sourceJson || '')}" />
+          <div class="alerts-drawer__compose-actions">
+            <button type="button" class="btn-glass" data-compose-cancel>Cancelar</button>
+            <button type="submit" class="btn-glass btn-primary">Enviar</button>
+          </div>
+        </form>`;
+    }
+
+    function renderBody(markSeen = false) {
+      const { alerts, messages } = lastPayload;
+      if (activeMode === 'mensajes') {
+        bodyEl.innerHTML = renderMessages(messages);
+      } else {
+        bodyEl.innerHTML = renderOperativas(alerts, markSeen);
+      }
+    }
+
+    async function load({ markSeen = false } = {}) {
+      bodyEl.innerHTML = '<p class="alerts-drawer__empty">Cargando…</p>';
+      statusEl.textContent = 'Actualizando…';
+      try {
+        const data = await fetchAlerts();
+        const alerts = data.alerts || [];
+        let messages = data.messages || [];
+        let unreadMessages = Number(data.unreadMessages || 0);
+        const roleLabel = data.roleLabel || data.role || 'su perfil';
+        const unreadAlerts = countUnread(alerts);
+
+        if (activeMode === 'mensajes') {
+          try {
+            const msgRes = await fetch('/api/auth/messages?box=all&includeDone=true', { credentials: 'same-origin' });
+            const msgData = await msgRes.json().catch(() => ({}));
+            if (msgRes.ok) {
+              messages = msgData.messages || messages;
+              unreadMessages = Number(msgData.unread ?? unreadMessages);
+            }
+          } catch {
+            /* keep inbox from alerts payload */
+          }
+        }
+
+        lastAlertsFingerprint = fingerprint(alerts) + `|m:${unreadMessages}|${messages.map((m) => m.id + (m.readAt || '')).join(',')}`;
+        lastPayload = { alerts, messages, unreadMessages };
+
+        if (activeMode === 'mensajes') {
+          statusEl.textContent = `${messages.length} mensaje(s)`;
+        } else {
+          statusEl.textContent = `${alerts.length} alerta(s) · ${roleLabel}`;
+        }
+
+        if (!markSeen) updateTopBadges(unreadAlerts, unreadMessages);
+
+        renderBody(markSeen);
+        if (markSeen && activeMode === 'operativas') {
+          markAlertsSeen(alerts);
+          updateTopBadges(0, unreadMessages);
+        }
+        if (activeMode === 'mensajes') {
+          await markVisibleMessagesRead();
+        }
+        if (activeChatId) paintChatFloat(findMessage(activeChatId));
+        return data;
+      } catch (err) {
+        statusEl.textContent = 'Error al cargar';
+        bodyEl.innerHTML = `<p class="alerts-drawer__empty">${esc(err.message || 'No se pudieron cargar los datos.')}</p>`;
+        return null;
+      }
+    }
+
+    async function openCompose(preset = {}) {
+      applyModeChrome('mensajes');
+      try {
+        const users = await fetchDirectory();
+        bodyEl.innerHTML = renderComposeForm(users, preset);
+        statusEl.textContent = 'Nuevo mensaje';
+      } catch (err) {
+        bodyEl.innerHTML = `<p class="alerts-drawer__empty">${esc(err.message || 'No se pudo cargar el directorio.')}</p>`;
+      }
+    }
+
+    async function open(opts = {}) {
+      const mode = opts.tab === 'mensajes' || opts.mode === 'mensajes' ? 'mensajes' : 'operativas';
+      panelAnchorBtn = opts.anchor || (mode === 'mensajes' ? msgBtn : notifBtn) || notifBtn;
+      applyModeChrome(mode);
       positionPanel();
       panel.classList.add('alerts-drawer--open');
       panel.setAttribute('aria-hidden', 'false');
       backdrop.classList.add('alerts-drawer-backdrop--visible');
       backdrop.setAttribute('aria-hidden', 'false');
       document.body.classList.add('alerts-drawer-open');
-      notifBtn?.setAttribute('aria-expanded', 'true');
+      syncExpandedAttrs(true);
       window.addEventListener('resize', positionPanel);
-      await load({ markSeen: true });
+      await load({ markSeen: mode === 'operativas' });
       positionPanel();
     }
 
-    function toggle() {
-      if (panel.classList.contains('alerts-drawer--open')) close();
-      else open();
+    function toggle(opts = {}) {
+      const mode = opts.tab === 'mensajes' || opts.mode === 'mensajes' ? 'mensajes' : 'operativas';
+      const anchor = opts.anchor || (mode === 'mensajes' ? msgBtn : notifBtn);
+      const sameOpen = panel.classList.contains('alerts-drawer--open')
+        && panelAnchorBtn === anchor
+        && activeMode === mode;
+      if (sameOpen) close();
+      else open({ mode, anchor });
     }
 
     panel.querySelector('[data-alerts-close]')?.addEventListener('click', close);
     panel.querySelector('[data-alerts-refresh]')?.addEventListener('click', () => load({ markSeen: false }));
+    panel.querySelector('[data-alerts-compose]')?.addEventListener('click', () => openCompose());
     backdrop.addEventListener('click', close);
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && panel.classList.contains('alerts-drawer--open')) close();
+      if (e.key !== 'Escape') return;
+      if (chatFloat && !chatFloat.classList.contains('hidden')) {
+        closeChatFloat();
+        return;
+      }
+      if (panel.classList.contains('alerts-drawer--open')) close();
     });
 
-    alertsUi = { open, close, toggle, load, fetchAlerts, panel };
+    bodyEl.addEventListener('click', async (e) => {
+      const openChatBtn = e.target.closest('[data-open-chat]');
+      if (openChatBtn) {
+        e.preventDefault();
+        await openChatFloat(openChatBtn.getAttribute('data-open-chat'));
+        return;
+      }
+      if (e.target.closest('[data-compose-cancel]')) {
+        applyModeChrome('mensajes');
+        renderBody();
+        statusEl.textContent = `${(lastPayload.messages || []).length} mensaje(s)`;
+      }
+    });
+
+    bodyEl.addEventListener('submit', async (e) => {
+      const compose = e.target.closest('[data-compose-form]');
+      if (!compose) return;
+      e.preventDefault();
+      const fd = new FormData(compose);
+      let source = null;
+      const rawSource = String(fd.get('sourceJson') || '').trim();
+      if (rawSource) {
+        try { source = JSON.parse(rawSource); } catch { source = null; }
+      }
+      try {
+        const res = await fetch('/api/auth/messages', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toUsername: fd.get('toUsername'),
+            subject: fd.get('subject'),
+            body: fd.get('body'),
+            type: fd.get('type') || 'direct',
+            source,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        applyModeChrome('mensajes');
+        await load({ markSeen: false });
+        if (data.message?.id) await openChatFloat(data.message.id);
+      } catch (err) {
+        window.alert(err.message || 'No se pudo enviar el mensaje.');
+      }
+    });
+
+    alertsUi = {
+      open,
+      close,
+      toggle,
+      load,
+      fetchAlerts,
+      openCompose,
+      openChat: openChatFloat,
+      openMessages() {
+        return open({ mode: 'mensajes', anchor: msgBtn || notifBtn });
+      },
+      panel,
+    };
     return alertsUi;
   }
 
@@ -383,11 +996,11 @@
       const ui = ensureAlertsPanel();
       const data = await ui.fetchAlerts();
       const alerts = data.alerts || [];
-      const fp = fingerprint(alerts);
-      const unread = countUnread(alerts);
-      const changed = fp && fp !== lastAlertsFingerprint && lastAlertsFingerprint !== '';
+      const unreadMessages = Number(data.unreadMessages || 0);
+      const fp = fingerprint(alerts) + `|m:${unreadMessages}`;
+      const unreadAlerts = countUnread(alerts);
       lastAlertsFingerprint = fp || lastAlertsFingerprint;
-      setNotifDot(unread > 0 || changed, unread);
+      updateTopBadges(unreadAlerts, unreadMessages);
     } catch {
       /* silencioso en polling */
     }
@@ -402,31 +1015,62 @@
     });
   }
 
+  window.MessagesCenter = {
+    openCompose(preset) {
+      const ui = ensureAlertsPanel();
+      ui.open({ mode: 'mensajes', anchor: msgBtn || notifBtn }).then(() => ui.openCompose(preset || {}));
+    },
+    openInbox() {
+      ensureAlertsPanel().openMessages();
+    },
+  };
+
   function ensureNotificationsCenter(trailing) {
     if (trailing.querySelector('.top-bar-notif-wrap')) return;
 
     const wrap = document.createElement('div');
     wrap.className = 'top-bar-notif-wrap';
 
+    const mailBtn = document.createElement('button');
+    mailBtn.type = 'button';
+    mailBtn.className = 'avatar-glass top-bar-notif-btn top-bar-msg-btn';
+    mailBtn.setAttribute('aria-label', 'Mensajes');
+    mailBtn.setAttribute('aria-expanded', 'false');
+    mailBtn.setAttribute('aria-haspopup', 'dialog');
+    mailBtn.setAttribute('aria-controls', 'alertsDrawer');
+    mailBtn.title = 'Mensajes';
+    mailBtn.innerHTML = `
+      <span class="material-symbols-outlined" aria-hidden="true">mail</span>
+      <span class="top-bar-notif-dot" data-msg-dot hidden aria-hidden="true"></span>
+      <span class="top-bar-msg-badge" data-msg-badge hidden aria-hidden="true">0</span>
+    `;
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'avatar-glass top-bar-notif-btn';
-    btn.setAttribute('aria-label', 'Centro de notificaciones');
+    btn.setAttribute('aria-label', 'Notificaciones');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-haspopup', 'dialog');
     btn.setAttribute('aria-controls', 'alertsDrawer');
+    btn.title = 'Notificaciones';
     btn.innerHTML = `
       <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
       <span class="top-bar-notif-dot" data-notif-dot hidden aria-hidden="true"></span>
     `;
 
+    wrap.appendChild(mailBtn);
     wrap.appendChild(btn);
     trailing.appendChild(wrap);
+    msgBtn = mailBtn;
     notifBtn = btn;
 
+    mailBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      ensureAlertsPanel().toggle({ mode: 'mensajes', anchor: mailBtn });
+    });
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      ensureAlertsPanel().toggle();
+      ensureAlertsPanel().toggle({ mode: 'operativas', anchor: btn });
     });
 
     ensureAlertsPanel();

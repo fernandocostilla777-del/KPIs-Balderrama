@@ -890,6 +890,7 @@
     const items = [
       ['event_available', 'Última compra', dateMx(f.fechaUltimaCompra), 'purchase', 'secCompras', null],
       ['description', 'Número de contrato', dash(f.numeroContrato), 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['verified_user', 'Seguro del auto', dash(f.seguroAuto), 'finance', 'secFinanciamiento', 'financiamiento', 'seguro'],
       ['credit_card', 'Tipo de compra', dash(f.tipoCompra), 'finance', 'secFinanciamiento', 'financiamiento'],
       ['calendar_month', 'Plazo contratado', f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
       ['task_alt', 'Mensualidades estimadas', f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)}` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
@@ -904,7 +905,7 @@
       ['garage', 'Historial de compras', `${Number(f.historialCompras || 0)} vehículo(s)`, 'purchase', 'secCompras', 'compra', 'compras'],
     ];
     el('ficha360Grid').innerHTML = items.map(([icon, label, value, tone, gotoId, filter, openKpi]) => `
-      <button type="button" class="client-360-stat client-360-stat--${tone}" ${openKpi === 'quejas' ? 'id="kQuejas"' : ''} data-goto="${esc(gotoId)}" data-timeline-filter="${esc(filter || '')}" ${openKpi ? `data-open-kpi="${esc(openKpi)}"` : ''} title="Ver detalle relacionado">
+      <button type="button" class="client-360-stat client-360-stat--${tone}" ${openKpi === 'quejas' ? 'id="kQuejas"' : (openKpi === 'seguro' ? 'id="kSeguroAuto"' : '')} data-goto="${esc(gotoId)}" data-timeline-filter="${esc(filter || '')}" ${openKpi ? `data-open-kpi="${esc(openKpi)}"` : ''} title="Ver detalle relacionado">
         <span class="material-symbols-outlined client-360-stat-icon">${icon}</span>
         <div><span>${label}</span><strong>${value}</strong></div>
       </button>`).join('');
@@ -1181,6 +1182,27 @@
     const num = (v) => Number(v || 0).toLocaleString('es-MX');
 
     switch (kpi) {
+      case 'seguro': {
+        const f = h.ficha360 || {};
+        const contratos = h.contratosFinanciamiento || [];
+        return {
+          title: 'Seguro del auto',
+          value: f.seguroAuto || '—',
+          sections: [
+            { titulo: 'Seguro', rows: [
+              { label: 'Aseguradora', value: f.seguroAuto || '—' },
+              { label: 'Contrato', value: f.numeroContrato || '—' },
+              { label: 'Unidad', value: f.modeloActual || '—' },
+            ] },
+            { titulo: 'Por contrato', rows: contratos.length
+              ? contratos.map((c) => ({
+                label: [c.unidad, c.no_contrato || c.contrato].filter(Boolean).join(' · ') || c.vin || 'Contrato',
+                value: c.aseguradora || '—',
+              }))
+              : [{ label: 'Sin contratos de financiamiento', value: '—' }] },
+          ],
+        };
+      }
       case 'leads': {
         const conCita = leads.filter((l) => String(l.cita_programada || '').toUpperCase() === 'SI').length;
         return {

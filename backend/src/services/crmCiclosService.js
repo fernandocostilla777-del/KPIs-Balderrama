@@ -443,6 +443,33 @@ function getQuejasCsiForPersona(persona, opts = {}) {
   return getQuejasCsiSummary({ ...opts, persona });
 }
 
+function cleanSeguroValor(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  const upper = text.toUpperCase();
+  if (upper === 'N/A' || upper === 'NA' || upper === 'NULL' || upper === '-' || upper === '—') return null;
+  return text;
+}
+
+/**
+ * Seguro del auto (Historico de contratos):
+ * - Col AE = seguro_gratis (vigencia 12 meses)
+ * - Col AF = seguro_subsecuente
+ * Regla: sin AE → AF; con AE y compra > 1 año → AF; con AE y ≤ 1 año → AE.
+ */
+function resolveAseguradoraContrato(row, contratoMayorUnAnio) {
+  const seguroGratis = cleanSeguroValor(row.seguro_gratis);
+  const seguroSubsecuente = cleanSeguroValor(row.seguro_subsecuente);
+
+  if (contratoMayorUnAnio) {
+    return { aseguradora: seguroSubsecuente || null };
+  }
+  if (seguroGratis) {
+    return { aseguradora: seguroGratis };
+  }
+  return { aseguradora: seguroSubsecuente || null };
+}
+
 function getFinanciamientoByVins(d, vins) {
   if (!hasFinanciamientoTable(d)) return [];
   const normalized = [...new Set((vins || []).map(normalizeVin).filter(Boolean))];
@@ -479,7 +506,7 @@ function getFinanciamientoByVins(d, vins) {
       const contratoMayorUnAnio = purchaseDate && !Number.isNaN(purchaseDate.getTime())
         ? purchaseDate < oneYearAgo
         : false;
-      const aseguradora = contratoMayorUnAnio ? row.seguro_subsecuente : row.seguro_gratis;
+      const resolved = resolveAseguradoraContrato(row, contratoMayorUnAnio);
       const pvas = [
         { tipo: 'GAP', monto: Number(row.gap_monto || 0) },
         { tipo: 'Garantía extendida', monto: Number(row.garantia_extendida_monto || 0) },
@@ -490,8 +517,7 @@ function getFinanciamientoByVins(d, vins) {
       return {
         ...row,
         fecha_compra_valida: fechaCompraValida,
-        aseguradora: aseguradora || null,
-        fuenteAseguradora: contratoMayorUnAnio ? 'seguro_subsecuente' : 'seguro_gratis',
+        aseguradora: resolved.aseguradora,
         contratoMayorUnAnio,
         pvas,
       };
@@ -1364,6 +1390,7 @@ function buildCliente360({
       numeroContrato: contratoActual?.no_contrato || contratoActual?.contrato || null,
       tipoCompra: contratoActual?.tipo_compra || contratoActual?.plan_2
         || contratoActual?.plan || (contratoActual ? 'Crédito' : null),
+      seguroAuto: contratoActual?.aseguradora || null,
       plazoContratado: Number.isFinite(plazo) && plazo > 0 ? plazo : null,
       mensualidadesPagadas,
       saldoEstimado,

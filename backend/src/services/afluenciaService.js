@@ -4,6 +4,7 @@
  */
 const Database = require('better-sqlite3');
 const path = require('path');
+const { getLeadNotDuplicateSql } = require('./crmCiclosService');
 
 const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
 
@@ -461,6 +462,7 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
   };
 
   if (hasTable(d, 'crm_leads')) {
+    const noDup = getLeadNotDuplicateSql();
     const totalesLeads = d.prepare(`
       SELECT
         COUNT(*) AS leads,
@@ -473,6 +475,7 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
       WHERE fecha_entrada IS NOT NULL
         AND fecha_entrada >= ?
         AND fecha_entrada <= ?
+        AND (${noDup})
     `).get(String(fechaInicio), String(fechaFin));
 
     const rows = d.prepare(`
@@ -489,6 +492,7 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
       WHERE fecha_entrada IS NOT NULL
         AND fecha_entrada >= ?
         AND fecha_entrada <= ?
+        AND (${noDup})
       GROUP BY campana, canal
       ORDER BY compras DESC, citas DESC, leads DESC
       LIMIT 40

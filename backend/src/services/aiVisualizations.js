@@ -1369,6 +1369,42 @@ const BUILDERS = {
   historico_cliente_crm: blocksFromHistoricoCrm,
   resumen_leads: blocksFromLeads,
   resumen_seguimiento_360: blocksFromSeguimiento360,
+  consultar_recomendaciones_directivas: (data) => {
+    if (!data?.available) return [];
+    const blocks = [];
+    const ritmo = data.ritmo || {};
+    const recs = data.recomendaciones || [];
+    blocks.push(kpiRow('Recomendaciones directivas', [
+      kpiItem('Señal', String(ritmo.senalPresion || '—').replace(/_/g, ' '), { icon: 'campaign' }),
+      kpiItem('Avance retail', ritmo.retailAvancePct != null ? `${ritmo.retailAvancePct}%` : '—', {
+        icon: 'trending_up',
+        sub: ritmo.paceEsperadoPct != null ? `Ritmo ${ritmo.paceEsperadoPct}%` : undefined,
+      }),
+      kpiItem('Faltan', ritmo.faltanRetail != null ? fmtNum(ritmo.faltanRetail) : '—', {
+        icon: 'flag',
+        sub: ritmo.runRateNecesarioUdsDia != null ? `${ritmo.runRateNecesarioUdsDia}/día` : undefined,
+      }),
+      kpiItem('Cuellos', fmtNum((data.funnel?.cuellos || []).length), { icon: 'warning' }),
+    ]));
+    const funnelBars = [
+      { label: 'Leads/día', count: Number(data.funnel?.ritmos?.leadsPorDia?.actual || 0) },
+      { label: 'Citas/día', count: Number(data.funnel?.ritmos?.citasPorDia?.actual || 0) },
+      { label: 'Solic./día', count: Number(data.funnel?.ritmos?.solicitudesPorDia?.actual || 0) },
+    ].filter((x) => x.count > 0);
+    const funnelChart = barChart('Ritmo embudo / día', funnelBars, { horizontal: true, seriesLabel: 'Por día' });
+    if (funnelChart) blocks.push(funnelChart);
+    if (recs.length) {
+      blocks.push(dataTable(
+        'Prioridades gerencia',
+        ['#', 'Área', 'Acción'],
+        recs.slice(0, 5).map((r, i) => [String(i + 1), r.titulo || r.area || '—', r.accion || '—']),
+      ));
+    }
+    if (data.diagnosticoEjecutivo) {
+      blocks.push(insightCard('warning', 'Diagnóstico', data.diagnosticoEjecutivo));
+    }
+    return blocks.filter(Boolean);
+  },
   listar_vendedores_360: (data) => {
     const rows = data?.vendedores || [];
     if (!rows.length) return [];

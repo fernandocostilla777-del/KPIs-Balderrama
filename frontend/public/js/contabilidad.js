@@ -530,8 +530,10 @@ function renderBalanceGeneralPanel(bg, fmt) {
     closeBgKpiFloat();
   }
 
-  renderBgInteractiveKpis('kpiBalanceGeneral', [
+  renderBgInteractiveKpis('kpiBalanceActivo', [
     'activoCirculante', 'activoFijo', 'activoDiferido', 'activoTotal',
+  ], fmt);
+  renderBgInteractiveKpis('kpiBalancePasivo', [
     'pasivoCirculante', 'pasivoLargo', 'pasivoTotal', 'capital',
   ], fmt);
 

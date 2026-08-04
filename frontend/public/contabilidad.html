@@ -6,7 +6,7 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=45" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=46" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -241,7 +241,10 @@
 <p class="section-subtitle" id="balanceGeneralMethodology">Saldos SQL (CON_CTAS · cuentas mayor ACUM) · Activo (circulante + fijo + diferido) · Pasivo (circulante + largo plazo) · Capital</p>
 </section>
 
-<section class="kpi-grid kpi-grid--eeff" id="kpiBalanceGeneral" aria-label="KPIs Balance General"></section>
+<section id="kpiBalanceGeneral" class="bg-kpi-stack" aria-label="KPIs Balance General">
+<div class="kpi-grid kpi-grid--eeff kpi-grid--bg-activo" id="kpiBalanceActivo" aria-label="Activo"></div>
+<div class="kpi-grid kpi-grid--eeff kpi-grid--bg-pasivo" id="kpiBalancePasivo" aria-label="Pasivo y capital"></div>
+</section>
 <div id="bgKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
 <aside id="bgKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="bgKpiFloatTitle"></aside>
 
@@ -533,6 +536,6 @@ Exportar CSV
 <script src="/js/kpi-insights.js?v=4"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/eeff.js?v=26"></script>
-<script src="/js/contabilidad.js?v=43"></script>
+<script src="/js/contabilidad.js?v=44"></script>
 </body>
 </html>

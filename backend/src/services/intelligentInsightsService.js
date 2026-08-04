@@ -426,6 +426,21 @@ function buildVentasInsights(payload = {}) {
     }
   }
 
+  try {
+    const { buildDirectivoInsights } = require('./executiveRecommendationsService');
+    const directivo = buildDirectivoInsights({
+      fechaInicio: fi,
+      fechaFin: ff,
+      resumen: r,
+      goals: { retail: goalRetail, sofia: goalSofia },
+      utilidadCarline: payload.utilidadCarline || null,
+      porModelo: r.porModelo || payload.porModelo || null,
+    });
+    for (const insight of directivo) push(insights, insight);
+  } catch (err) {
+    console.warn('[insights-ventas] directivo:', err.message);
+  }
+
   return insights;
 }
 

@@ -35,6 +35,17 @@ function clean(v) {
   return s || null;
 }
 
+/** Duplicados en sheet Acumulado: columna AD (y marcas en resultado/contacto/estación). */
+function isDuplicadoLead(row) {
+  const markers = [
+    row[COL.enlaceDirecto],
+    row[COL.resultado],
+    row[COL.contacto],
+    row[COL.estacion],
+  ];
+  return markers.some((v) => String(v || '').trim().toUpperCase() === 'DUPLICADO');
+}
+
 // Índices de columna del sheet "Acumulado" (hay encabezados duplicados; se mapea por posición)
 const COL = {
   sucursal: 0,
@@ -59,6 +70,7 @@ const COL = {
   contacto: 26,
   resultado: 27,
   comentario: 28,
+  enlaceDirecto: 29, // columna AD — puede ser SI / NO / DUPLICADO / N/A
   intentosContacto: 31,
   canalContacto: 32,
   asignacion: 33,
@@ -115,6 +127,8 @@ function run() {
       contacto TEXT,
       resultado TEXT,
       comentario TEXT,
+      enlace_directo TEXT,
+      es_duplicado INTEGER NOT NULL DEFAULT 0,
       intentos_contacto TEXT,
       canal_contacto TEXT,
       asignacion TEXT,
@@ -136,15 +150,16 @@ function run() {
       id_crm, id_lead_fabricante, id_oportunidad, sucursal, tipo, canal, campana,
       nombre, telefono, telefono2, correo, auto_interes, fuerza_ventas,
       cuando_estrena, forma_compra, mes, fecha_entrada, estacion, contacto,
-      resultado, comentario, intentos_contacto, canal_contacto, asignacion,
+      resultado, comentario, enlace_directo, es_duplicado, intentos_contacto, canal_contacto, asignacion,
       ejecutivo_asignado, fecha_asignacion, cita_programada, fecha_cita,
       cita_asistida, cotizacion, vin_comprado, fecha_factura, fecha_entrega,
       estatus_compra
-    ) VALUES (${new Array(34).fill('?').join(',')})
+    ) VALUES (${new Array(36).fill('?').join(',')})
   `);
 
   let total = 0;
   let conIdCrm = 0;
+  let omitidosDuplicado = 0;
   const insertMany = db.transaction((data) => {
     for (const r of data) insert.run(r);
   });
@@ -153,6 +168,12 @@ function run() {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.every((c) => c == null || String(c).trim() === '')) continue;
+
+    // No cargar duplicados (columna AD / resultado / contacto / estación = DUPLICADO)
+    if (isDuplicadoLead(r)) {
+      omitidosDuplicado += 1;
+      continue;
+    }
 
     const idCrm = clean(r[COL.idCrm]);
     if (idCrm) conIdCrm++;
@@ -181,6 +202,8 @@ function run() {
       clean(r[COL.contacto]),
       clean(r[COL.resultado]),
       clean(r[COL.comentario]),
+      clean(r[COL.enlaceDirecto]),
+      0,
       clean(r[COL.intentosContacto]),
       clean(r[COL.canalContacto]),
       clean(r[COL.asignacion]),
@@ -217,6 +240,7 @@ function run() {
   console.log('\nCarga completa → tabla crm_leads en', DB_PATH);
   console.table([{
     leads: total,
+    omitidosDuplicado,
     conIdCrm,
     sinIdCrm: total - conIdCrm,
     idsCruzanConCiclos: cruzan,

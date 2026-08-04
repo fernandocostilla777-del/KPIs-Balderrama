@@ -1,8 +1,10 @@
 window.AssistantChat = (function () {
   const STORAGE_KEY = 'balderrama-ai-chat-v2';
-  const WELCOME_MESSAGE =
-    'Soy tu asistente de Administración IA.\n'
-    + 'Analizo tu duda para obtener respuestas claras, precisas y útiles para la toma de decisiones.';
+  const DEFAULT_WELCOME =
+    'Soy tu asistente de BALDERRAMA.\n'
+    + 'Razonaré con el lente de tu perfil y recordaré tus preferencias para enfocarme en lo que necesitas decidir.';
+  let welcomeMessage = DEFAULT_WELCOME;
+  let profileLabel = null;
   const chartInstances = new Map();
   const expandedKpis = new Set();
   const drilldownState = new Map();
@@ -12,6 +14,28 @@ window.AssistantChat = (function () {
     '#3498db', '#e74c3c', '#1abc9c', '#95a5a6', '#2C3E50',
   ];
 
+  function buildWelcome(roleLabel) {
+    if (!roleLabel) return DEFAULT_WELCOME;
+    return (
+      `Soy tu asistente para el perfil **${roleLabel}**.\n`
+      + 'Uso el conocimiento de tu rol y la memoria de tus preferencias para responder enfocado a lo que necesitas decidir.'
+    );
+  }
+
+  async function refreshProfileWelcome() {
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const me = await res.json();
+      profileLabel = me.roleLabel || me.role || null;
+      welcomeMessage = buildWelcome(profileLabel);
+      if (typeof window !== 'undefined' && window.__assistantApplyWelcome) {
+        window.__assistantApplyWelcome(welcomeMessage);
+      }
+    } catch {
+      /* opcional */
+    }
+  }
   function fmtUnits(n) {
     return new Intl.NumberFormat('es-MX').format(Math.round(n || 0));
   }
@@ -571,19 +595,34 @@ window.AssistantChat = (function () {
         messages = [];
       }
       if (!messages.length) {
-        messages = [{ role: 'assistant', content: WELCOME_MESSAGE }];
+        messages = [{ role: 'assistant', content: welcomeMessage }];
       }
     }
 
     function isOnlyWelcome() {
       return messages.length === 1
         && messages[0]?.role === 'assistant'
-        && messages[0]?.content === WELCOME_MESSAGE;
+        && (
+          messages[0]?.content === welcomeMessage
+          || messages[0]?.content === DEFAULT_WELCOME
+          || String(messages[0]?.content || '').startsWith('Soy tu asistente')
+        );
     }
 
     function resetToWelcome() {
-      messages = [{ role: 'assistant', content: WELCOME_MESSAGE }];
+      messages = [{ role: 'assistant', content: welcomeMessage }];
     }
+
+    window.__assistantApplyWelcome = (text) => {
+      welcomeMessage = text || DEFAULT_WELCOME;
+      if (isOnlyWelcome()) {
+        messages = [{ role: 'assistant', content: welcomeMessage }];
+        saveHistory();
+        renderMessages();
+      }
+    };
+
+    refreshProfileWelcome();
 
     function saveHistory() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-40)));

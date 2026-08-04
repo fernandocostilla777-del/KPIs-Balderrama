@@ -12,6 +12,9 @@
     mktView: 'submedio',
     mktLeadsFilter: 'todas',
     innerTab: 'general',
+    cacheKey: null,
+    inflightKey: null,
+    inflightPromise: null,
   };
 
   let ytdChart = null;
@@ -640,7 +643,9 @@
     });
   }
 
-  async function load(fechaInicio, fechaFin) {
+  async function load(fechaInicio, fechaFin, opts = {}) {
+    const force = Boolean(opts.force);
+    const key = `${fechaInicio}|${fechaFin}`;
     state.fechaInicio = fechaInicio;
     state.fechaFin = fechaFin;
     state.openKpi = null;
@@ -652,31 +657,63 @@
       els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin} · Solo NUEVOS (col R) · Fresh up + Citas (col T) · SNV · Pruebas de manejo`;
     }
 
-    try {
-      const qs = new URLSearchParams({ fechaInicio, fechaFin, limit: '800' });
-      const res = await fetch(`/api/ventas/afluencia?${qs}`, { credentials: 'same-origin' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Error afluencia (${res.status})`);
-      state.data = data;
-    } catch (err) {
-      console.error('[Afluencia]', err);
-      state.data = {
-        summary: {},
-        porSucursal: [],
-        comparativoYtd: null,
-        marketing: null,
-      };
-      if (els.subtitle) els.subtitle.textContent = err.message;
+    const paint = () => {
+      initQuartersFromData();
+      syncMetricChips();
+      syncQuarterChips();
+      renderKpis();
+      renderSucursales();
+      renderYtdChart();
+      renderMarketing();
+      setInnerTab(state.innerTab);
+    };
+
+    if (!force && state.cacheKey === key && state.data && !state.data.error) {
+      paint();
+      return state.data;
+    }
+    if (!force && state.inflightKey === key && state.inflightPromise) {
+      await state.inflightPromise;
+      paint();
+      return state.data;
     }
 
-    initQuartersFromData();
-    syncMetricChips();
-    syncQuarterChips();
-    renderKpis();
-    renderSucursales();
-    renderYtdChart();
-    renderMarketing();
-    setInnerTab(state.innerTab);
+    state.inflightKey = key;
+    state.inflightPromise = (async () => {
+      try {
+        const qs = new URLSearchParams({ fechaInicio, fechaFin, limit: '800' });
+        const res = await fetch(`/api/ventas/afluencia?${qs}`, { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Error afluencia (${res.status})`);
+        state.data = data;
+        state.cacheKey = key;
+      } catch (err) {
+        console.error('[Afluencia]', err);
+        state.cacheKey = null;
+        state.data = {
+          summary: {},
+          porSucursal: [],
+          comparativoYtd: null,
+          marketing: null,
+          error: err.message,
+        };
+        if (els.subtitle) els.subtitle.textContent = err.message;
+      } finally {
+        if (state.inflightKey === key) {
+          state.inflightKey = null;
+          state.inflightPromise = null;
+        }
+      }
+      return state.data;
+    })();
+
+    await state.inflightPromise;
+    paint();
+    return state.data;
+  }
+
+  function hasCache(fechaInicio, fechaFin) {
+    return state.cacheKey === `${fechaInicio}|${fechaFin}` && state.data && !state.data.error;
   }
 
   function init() {
@@ -689,5 +726,5 @@
     setInnerTab(startTab);
   }
 
-  window.AfluenciaVentas = { init, load, setInnerTab };
+  window.AfluenciaVentas = { init, load, hasCache, setInnerTab };
 })();

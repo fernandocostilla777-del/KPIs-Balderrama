@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=52" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -82,6 +82,10 @@ Leads
 <button type="button" class="contabilidad-tab" data-sales-tab="afluencia" aria-controls="panelVentasAfluencia" aria-selected="false">
 <span class="material-symbols-outlined" aria-hidden="true">groups</span>
 Afluencia
+</button>
+<button type="button" class="contabilidad-tab" data-sales-tab="comisiones" aria-controls="panelVentasComisiones" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">payments</span>
+Comisiones
 </button>
 </nav>
 
@@ -323,6 +327,45 @@ Afluencia
 <p class="section-subtitle" style="margin-top:-4px;margin-bottom:10px">Clasificados por fuerza de ventas (Piso, Foraneos, Cholula...)</p>
 <div class="chart-card"><div class="chart-wrap"><canvas id="chartVendedor"></canvas></div></div>
 </div>
+<div class="section-panel" id="secMixAutos">
+<div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between;margin-bottom:10px">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Mix de venta de autos</h3>
+<p class="section-subtitle" style="margin:4px 0 0">Participación por modelo / carline del periodo · clic en una barra para analizar</p>
+</div>
+<button type="button" id="btnMixAutosDetalle" class="btn-glass btn-glass--sm" title="Abrir análisis del mix">
+<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">analytics</span>
+Analizar mix
+</button>
+</div>
+<div class="chart-card chart-card--interactive" id="chartMixAutosCard" title="Clic en una barra para ver el detalle"><div class="chart-wrap"><canvas id="chartMixAutos"></canvas></div></div>
+<div id="mixOtrosControls" class="mix-otros-controls hidden" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<button type="button" id="btnMixOtrosToggle" class="btn-glass btn-glass--sm" aria-expanded="false" aria-controls="mixOtrosDetalle">
+<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">unfold_more</span>
+<span data-mix-otros-label>Ver detalle de Otros</span>
+</button>
+<span id="mixOtrosMeta" class="section-subtitle" style="margin:0"></span>
+</div>
+<div id="mixOtrosDetalle" class="mix-otros-detalle hidden" hidden style="margin-top:10px">
+<p class="section-subtitle" style="margin:0 0 8px">Asignación por fuerza de ventas · clic en una fila para ver modelos</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Fuerza / asignación</th>
+<th class="cell-num">Unidades</th>
+<th class="cell-num">% del mix</th>
+<th class="cell-num">% de Otros</th>
+<th class="cell-num">Modelos</th>
+</tr>
+</thead>
+<tbody id="mixOtrosBody">
+<tr class="empty-row"><td colspan="5">Sin unidades en Otros.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
 </section>
 
 <section id="chartsMensuales" class="hidden">
@@ -525,6 +568,8 @@ Detalle
 
 <div id="ldKpiOperational" class="fi-kpi-root"></div>
 
+<div id="ldPeriodoVacio" class="ld-periodo-vacio hidden" role="status" aria-live="polite"></div>
+
 <section id="ldKpiDetail" class="kpi-detail-panel kpi-detail-panel--fi hidden" aria-labelledby="ldDetailTitle">
 <div class="kpi-detail-header">
 <div>
@@ -537,12 +582,22 @@ Detalle
 </div>
 </section>
 
-<section class="section-panel dashboard-section" style="margin-top:12px">
+<div class="chart-grid ld-leads-pair-grid">
+<section class="section-panel dashboard-section" style="margin-bottom:0;margin-top:0">
 <h3 class="section-title" style="margin-bottom:8px">Embudo</h3>
 <div id="ldFunnel"></div>
+<div id="ldCampanasCaducar" class="ld-caducar-panel" aria-live="polite">
+<div class="ld-caducar-head">
+<h4 class="ld-caducar-title">Alertas de caducidad</h4>
+<p id="ldCampanasCaducarMeta" class="section-subtitle" style="margin:0">Campañas documentadas del periodo · vida del lead por vencer</p>
+</div>
+<div id="ldCampanasCaducarBody" class="ld-caducar-list">
+<p class="section-subtitle" style="margin:0">Consulte un periodo para ver perfiles por caducar.</p>
+</div>
+</div>
 </section>
 
-<section class="section-panel table-panel dashboard-section">
+<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
 <div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between">
 <div>
 <h3 class="section-title" style="margin-bottom:0">Campañas para conversión</h3>
@@ -571,8 +626,38 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 </table>
 </div>
 </section>
+</div>
 
-<section class="section-panel table-panel dashboard-section">
+<div class="chart-grid ld-leads-pair-grid">
+<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
+<div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Dispersión por fuerza de ventas</h3>
+<p id="ldFuerzaResumen" class="section-subtitle" style="margin:4px 0 0">Oportunidades / leads asignados por fuerza de ventas</p>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Fuerza de ventas</th>
+<th class="cell-num">Oportunidades</th>
+<th class="cell-num">% mix</th>
+<th class="cell-num">Contactados</th>
+<th class="cell-num">Citas</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">Conv. %</th>
+</tr>
+</thead>
+<tbody id="ldFuerzaBody">
+<tr class="empty-row"><td colspan="7">Consulte un periodo para ver la dispersión.</td></tr>
+</tbody>
+<tfoot id="ldFuerzaFoot"></tfoot>
+</table>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
 <div class="table-header-row" style="flex-wrap:wrap;gap:10px">
 <h3 class="section-title" style="margin-bottom:0">Conversión por grupo</h3>
 <nav class="eeff-tabs" id="ldGroupTabs" aria-label="Agrupar leads">
@@ -601,6 +686,7 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 </table>
 </div>
 </section>
+</div>
 
 <section class="section-panel table-panel dashboard-section">
 <div class="kpi-detail-toolbar">
@@ -803,6 +889,127 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 
 </div>
 
+<div id="panelVentasComisiones" class="sales-main-panel hidden" data-sales-panel="comisiones" hidden>
+
+<section id="secComisiones" class="section-panel dashboard-section fi-section" aria-label="Comisiones">
+<div class="fi-section-header" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between">
+<div>
+<h2 class="section-title" style="margin-bottom:6px">Comisiones</h2>
+<p id="comisionesSubtitle" class="section-subtitle" style="margin:0">Elija el tipo de comisión y consulte el periodo.</p>
+</div>
+<div class="comisiones-controls" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+<label class="filter-field" for="comisionTipo">
+<span class="filter-label">Tipo de comisión</span>
+<select id="comisionTipo" class="filter-input">
+<option value="fi">Comisiones F&amp;I</option>
+</select>
+</label>
+<button type="button" id="btnGenerarComisiones" class="btn-glass">
+<span class="material-symbols-outlined" aria-hidden="true">calculate</span>
+Generar
+</button>
+<button type="button" id="btnExportComisiones" class="btn-glass" disabled>
+<span class="material-symbols-outlined" aria-hidden="true">download</span>
+Exportar CSV
+</button>
+</div>
+</div>
+
+<div id="comisionesNotas" class="section-subtitle" style="margin:8px 0 12px"></div>
+
+<div id="comisionesKpis" class="kpi-grid" style="margin-bottom:16px">
+<div class="kpi-card kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Contratos</span></div>
+<div id="comKpiContratos" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title">Pool F&amp;I</span></div>
+<div id="comKpiPool" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Pool AFI (20%)</span></div>
+<div id="comKpiAfi" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--slate">
+<div class="kpi-card-head"><span class="kpi-title">Total a depositar</span></div>
+<div id="comKpiDepositar" class="kpi-value">—</div>
+</div>
+</div>
+
+<div class="chart-grid-2-1" style="margin-bottom:16px">
+<div class="chart-card">
+<h3 class="section-title" style="margin-bottom:8px;font-size:15px">Por concepto</h3>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Concepto</th>
+<th class="cell-num">Monto</th>
+<th class="cell-num">Com. asesor</th>
+<th class="cell-num">Base</th>
+<th class="cell-num">Com. F&amp;I</th>
+</tr>
+</thead>
+<tbody id="comConceptoBody">
+<tr><td colspan="5" class="empty-row">Genere la liquidación del periodo.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="chart-card">
+<h3 class="section-title" style="margin-bottom:8px;font-size:15px">Total a depositar</h3>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Puesto</th>
+<th>Sucursal</th>
+<th>Nombre</th>
+<th class="cell-num">Contratos</th>
+<th class="cell-num">Depositar</th>
+</tr>
+</thead>
+<tbody id="comDepositoBody">
+<tr><td colspan="5" class="empty-row">—</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div class="chart-card" style="margin-bottom:16px">
+<div class="kpi-detail-toolbar" style="margin-bottom:8px">
+<h3 class="section-title" style="margin:0;font-size:15px">Detalle por contrato</h3>
+<label class="kpi-detail-search" for="buscarComisiones">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarComisiones" type="search" placeholder="Buscar cliente, VIN, F&amp;I, AFI..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Fecha</th>
+<th>Cliente</th>
+<th>F&amp;I</th>
+<th>AFI</th>
+<th>VIN</th>
+<th class="cell-num">MAF F&amp;I</th>
+<th class="cell-num">GAP F&amp;I</th>
+<th class="cell-num">Gtía F&amp;I</th>
+<th class="cell-num">Total F&amp;I</th>
+</tr>
+</thead>
+<tbody id="comDetalleBody">
+<tr><td colspan="9" class="empty-row">Genere la liquidación del periodo.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+
+</div>
+
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -812,11 +1019,12 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 <script src="/js/sidebar.js?v=8"></script>
 <script src="/js/topbar.js?v=16"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=6"></script>
+<script src="/js/kpi-insights.js?v=7"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/financiamiento.js?v=30"></script>
-<script src="/js/leads.js?v=5"></script>
-<script src="/js/afluencia.js?v=9"></script>
-<script src="/js/sales.js?v=65"></script>
+<script src="/js/financiamiento.js?v=31"></script>
+<script src="/js/leads.js?v=13"></script>
+<script src="/js/afluencia.js?v=10"></script>
+<script src="/js/comisiones.js?v=2"></script>
+<script src="/js/sales.js?v=77"></script>
 </body>
 </html>

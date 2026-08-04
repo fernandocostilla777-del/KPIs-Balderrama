@@ -43,6 +43,7 @@ function releaseDb() {
   vinIndexCache = null;
   nameIndexCache = null;
   phoneIndexCache = null;
+  clearLeadNotDuplicateSqlCache();
 }
 
 function isAvailable() {
@@ -2179,11 +2180,11 @@ function getLeadsSummary({
   const groupExpr = LEAD_GROUP_FIELDS[agruparPor] || LEAD_GROUP_FIELDS.canal;
   const max = Math.min(100, Math.max(1, Number(limit) || 30));
 
-  const where = [];
+  const where = [getLeadNotDuplicateSql()];
   const params = [];
-  if (desde) { where.push('fecha_entrada >= ?'); params.push(String(desde)); }
-  if (hasta) { where.push('fecha_entrada <= ?'); params.push(String(hasta)); }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  if (desde) { where.push('substr(fecha_entrada, 1, 10) >= ?'); params.push(String(desde).slice(0, 10)); }
+  if (hasta) { where.push('substr(fecha_entrada, 1, 10) <= ?'); params.push(String(hasta).slice(0, 10)); }
+  const whereSql = `WHERE ${where.join(' AND ')}`;
 
   // Compra = el ID CRM del lead tiene al menos un VIN en ciclos (col T),
   // o el propio lead trae vin_comprado.
@@ -2248,6 +2249,38 @@ const COMPRA_LEAD_SQL = `
   ) THEN 1 ELSE 0 END
 `;
 
+/** Excluye leads marcados DUPLICADO (Google Sheets col. AD / resultado / contacto / estación). */
+let leadNotDuplicateSqlCache = null;
+
+function getLeadNotDuplicateSql() {
+  if (leadNotDuplicateSqlCache) return leadNotDuplicateSqlCache;
+  const parts = [
+    `upper(trim(COALESCE(resultado, ''))) <> 'DUPLICADO'`,
+    `upper(trim(COALESCE(contacto, ''))) <> 'DUPLICADO'`,
+    `upper(trim(COALESCE(estacion, ''))) <> 'DUPLICADO'`,
+  ];
+  try {
+    const d = getDb();
+    const cols = new Set(
+      d.prepare('PRAGMA table_info(crm_leads)').all().map((c) => c.name),
+    );
+    if (cols.has('enlace_directo')) {
+      parts.push(`upper(trim(COALESCE(enlace_directo, ''))) <> 'DUPLICADO'`);
+    }
+    if (cols.has('es_duplicado')) {
+      parts.push('COALESCE(es_duplicado, 0) = 0');
+    }
+  } catch {
+    /* tabla aún no disponible */
+  }
+  leadNotDuplicateSqlCache = parts.join(' AND ');
+  return leadNotDuplicateSqlCache;
+}
+
+function clearLeadNotDuplicateSqlCache() {
+  leadNotDuplicateSqlCache = null;
+}
+
 /** Fecha de compra asociada al lead (factura lead o ciclo CRM con VIN). */
 const FECHA_COMPRA_LEAD_SQL = `
   COALESCE(
@@ -2286,6 +2319,112 @@ function buildCompraLeadDentroVidaSql(dias = 90) {
  * Dashboard de conversión oportunidades → ventas para la sección Leads en Ventas.
  * Cohorte por fecha_entrada; compra = VIN en ciclo del mismo ID CRM o vin_comprado.
  */
+/**
+ * Normaliza fuerza de ventas del CRM al catálogo operativo (dispersión de leads).
+ */
+const FUERZA_VENTAS_ORDER = [
+  'MATRIZ PISO',
+  'FORANEO DIGITAL',
+  'CHOLULA',
+  'ZACATELCO PISO',
+  'SEMINUEVOS CERTIFICADOS',
+  'FLOTILLAS',
+  'ADMINISTRATIVO',
+  'SuAuto',
+];
+
+function normalizeFuerzaVentasLabel(raw) {
+  const u = String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!u || u === '(SIN DATO)' || u === 'SIN DATO') return 'Sin fuerza asignada';
+  if (u.includes('MATRIZ') && u.includes('PISO')) return 'MATRIZ PISO';
+  if (u.includes('FORANEO')) return 'FORANEO DIGITAL';
+  if (u.includes('CHOLULA')) return 'CHOLULA';
+  if (u.includes('ZACATELCO')) return 'ZACATELCO PISO';
+  if (u.includes('SEMINUEVO')) return 'SEMINUEVOS CERTIFICADOS';
+  if (u.includes('FLOTILLA')) return 'FLOTILLAS';
+  if (u.includes('ADMINISTRATIVO')) return 'ADMINISTRATIVO';
+  if (u.includes('SUAUTO') || u.includes('SU AUTO')) return 'SuAuto';
+  return String(raw || '').trim() || 'Sin fuerza asignada';
+}
+
+function aggregateFuerzaVentas(rows = []) {
+  const map = new Map();
+  for (const r of rows) {
+    const grupo = normalizeFuerzaVentasLabel(r.grupo);
+    if (!map.has(grupo)) {
+      map.set(grupo, {
+        grupo,
+        leads: 0,
+        contactados: 0,
+        citas: 0,
+        cotizados: 0,
+        compras: 0,
+      });
+    }
+    const b = map.get(grupo);
+    b.leads += Number(r.leads || 0);
+    b.contactados += Number(r.contactados || 0);
+    b.citas += Number(r.citas || 0);
+    b.cotizados += Number(r.cotizados || 0);
+    b.compras += Number(r.compras || 0);
+  }
+
+  const totalLeads = [...map.values()].reduce((s, r) => s + r.leads, 0);
+  const pct = (num, den) => (den ? Math.round((num / den) * 10000) / 100 : 0);
+
+  const known = FUERZA_VENTAS_ORDER
+    .map((name) => map.get(name) || {
+      grupo: name, leads: 0, contactados: 0, citas: 0, cotizados: 0, compras: 0,
+    })
+    .map((r) => ({
+      ...r,
+      conversionPct: pct(r.compras, r.leads),
+      participacionPct: pct(r.leads, totalLeads),
+    }));
+
+  const extras = [...map.values()]
+    .filter((r) => !FUERZA_VENTAS_ORDER.includes(r.grupo) && r.grupo !== 'Sin fuerza asignada')
+    .sort((a, b) => b.leads - a.leads)
+    .map((r) => ({
+      ...r,
+      conversionPct: pct(r.compras, r.leads),
+      participacionPct: pct(r.leads, totalLeads),
+    }));
+
+  const sinAsignar = map.get('Sin fuerza asignada');
+  const out = [...known, ...extras];
+  if (sinAsignar && sinAsignar.leads > 0) {
+    out.push({
+      ...sinAsignar,
+      conversionPct: pct(sinAsignar.compras, sinAsignar.leads),
+      participacionPct: pct(sinAsignar.leads, totalLeads),
+    });
+  }
+
+  const totales = out.reduce((acc, r) => {
+    acc.leads += r.leads;
+    acc.contactados += r.contactados;
+    acc.citas += r.citas;
+    acc.cotizados += r.cotizados;
+    acc.compras += r.compras;
+    return acc;
+  }, { leads: 0, contactados: 0, citas: 0, cotizados: 0, compras: 0 });
+
+  return {
+    filas: out,
+    totales: {
+      ...totales,
+      conversionPct: pct(totales.compras, totales.leads),
+      participacionPct: 100,
+    },
+  };
+}
+
 function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } = {}) {
   const d = getDb();
   if (!hasLeadsTable(d)) {
@@ -2300,11 +2439,34 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   const rango = resolveCrmPeriod({ desde, hasta });
   const max = Math.min(1000, Math.max(50, Number(limit) || 400));
 
-  const where = [];
+  const notDupSql = getLeadNotDuplicateSql();
+  const coberturaRow = d.prepare(`
+    SELECT
+      MIN(substr(fecha_entrada, 1, 10)) AS minFechaEntrada,
+      MAX(substr(fecha_entrada, 1, 10)) AS maxFechaEntrada,
+      COUNT(*) AS totalLeads
+    FROM crm_leads
+    WHERE fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''
+      AND (${notDupSql})
+  `).get();
+  const cobertura = {
+    minFechaEntrada: coberturaRow?.minFechaEntrada || null,
+    maxFechaEntrada: coberturaRow?.maxFechaEntrada || null,
+    totalLeads: Number(coberturaRow?.totalLeads || 0),
+    sinDatosEnPeriodo: false,
+  };
+
+  const where = [notDupSql];
   const params = [];
-  if (rango.desde) { where.push('fecha_entrada >= ?'); params.push(String(rango.desde)); }
-  if (rango.hasta) { where.push('fecha_entrada <= ?'); params.push(String(rango.hasta)); }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  if (rango.desde) {
+    where.push('substr(fecha_entrada, 1, 10) >= ?');
+    params.push(String(rango.desde).slice(0, 10));
+  }
+  if (rango.hasta) {
+    where.push('substr(fecha_entrada, 1, 10) <= ?');
+    params.push(String(rango.hasta).slice(0, 10));
+  }
+  const whereSql = `WHERE ${where.join(' AND ')}`;
 
   const totales = d.prepare(`
     SELECT
@@ -2381,6 +2543,27 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   const porEjecutivo = groupQuery('ejecutivo_asignado', 25);
   const porResultado = groupQuery('resultado', 15);
   const porSucursal = groupQuery('sucursal', 15);
+  const porFuerzaRaw = d.prepare(`
+    SELECT
+      COALESCE(NULLIF(trim(fuerza_ventas), ''), '(sin dato)') AS grupo,
+      COUNT(*) AS leads,
+      SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
+      SUM(CASE WHEN cita_programada = 'SI' THEN 1 ELSE 0 END) AS citas,
+      SUM(CASE WHEN cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0') THEN 1 ELSE 0 END) AS cotizados,
+      SUM(${COMPRA_LEAD_SQL}) AS compras
+    FROM crm_leads
+    ${whereSql}
+    GROUP BY grupo
+    ORDER BY leads DESC
+  `).all(...params).map((r) => ({
+    grupo: String(r.grupo || '(sin dato)'),
+    leads: Number(r.leads || 0),
+    contactados: Number(r.contactados || 0),
+    citas: Number(r.citas || 0),
+    cotizados: Number(r.cotizados || 0),
+    compras: Number(r.compras || 0),
+  }));
+  const porFuerzaVentas = aggregateFuerzaVentas(porFuerzaRaw);
 
   const {
     CAMPANAS_CONVERSION,
@@ -2448,6 +2631,81 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     campanasConversionTotales.total
   );
   campanasConversionTotales.vidaDias = LEAD_VIDA_DIAS;
+
+  const CADUCAR_ALERTA_DIAS = 14;
+  const hoyIso = formatIsoDate(new Date());
+  // Caducar respeta el mismo filtro de cohorte (fecha_entrada) que el resto de Leads.
+  const caducarDesde = rango.desde || formatIsoDate(new Date(Date.now() - LEAD_VIDA_DIAS * 24 * 60 * 60 * 1000));
+  const caducarHasta = rango.hasta || hoyIso;
+  const candidatosCaducar = d.prepare(`
+    SELECT
+      id_crm AS idCrm,
+      id_oportunidad AS idOportunidad,
+      nombre,
+      telefono,
+      campana,
+      ejecutivo_asignado AS ejecutivo,
+      fuerza_ventas AS fuerzaVentas,
+      fecha_entrada AS fechaEntrada,
+      CAST(julianday(?) - julianday(substr(fecha_entrada, 1, 10)) AS INTEGER) AS diasVividos
+    FROM crm_leads
+    WHERE fecha_entrada IS NOT NULL
+      AND trim(fecha_entrada) <> ''
+      AND (${notDupSql})
+      AND substr(fecha_entrada, 1, 10) >= ?
+      AND substr(fecha_entrada, 1, 10) <= ?
+      AND (${COMPRA_LEAD_SQL}) = 0
+    ORDER BY fecha_entrada ASC
+    LIMIT 3000
+  `).all(hoyIso, String(caducarDesde).slice(0, 10), String(caducarHasta).slice(0, 10));
+
+  const campanasCaducarAll = candidatosCaducar
+    .map((r) => {
+      const key = resolveCampanaConversionKey(r.campana);
+      if (!key) return null;
+      const campanaCfg = CAMPANAS_CONVERSION.find((c) => c.key === key);
+      const diasVividos = Math.max(0, Number(r.diasVividos || 0));
+      const diasRestantes = LEAD_VIDA_DIAS - diasVividos;
+      if (diasRestantes < 0 || diasRestantes > CADUCAR_ALERTA_DIAS) return null;
+      let severidad = 'info';
+      if (diasRestantes <= 3) severidad = 'critical';
+      else if (diasRestantes <= 7) severidad = 'warning';
+      return {
+        idCrm: r.idCrm || null,
+        idOportunidad: r.idOportunidad || null,
+        nombre: String(r.nombre || '').trim() || '(Sin nombre)',
+        telefono: String(r.telefono || '').trim() || null,
+        campana: campanaCfg?.label || String(r.campana || '').trim(),
+        campanaKey: key,
+        ejecutivo: String(r.ejecutivo || '').trim() || 'Sin ejecutivo',
+        fuerzaVentas: String(r.fuerzaVentas || '').trim() || null,
+        fechaEntrada: String(r.fechaEntrada || '').slice(0, 10) || null,
+        diasVividos,
+        diasRestantes,
+        severidad,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.diasRestantes - b.diasRestantes || String(a.nombre).localeCompare(String(b.nombre), 'es'));
+
+  // Prioriza recuperables (1–14 d); incluye un cupo de los que caducan hoy (0 d).
+  const porCaducar = campanasCaducarAll.filter((x) => x.diasRestantes >= 1);
+  const caducanHoy = campanasCaducarAll.filter((x) => x.diasRestantes === 0);
+  const campanasCaducarAlertas = [...porCaducar.slice(0, 30), ...caducanHoy.slice(0, 10)]
+    .sort((a, b) => a.diasRestantes - b.diasRestantes || String(a.nombre).localeCompare(String(b.nombre), 'es'));
+
+  const campanasCaducarResumen = {
+    total: campanasCaducarAll.length,
+    mostrados: campanasCaducarAlertas.length,
+    criticos: campanasCaducarAll.filter((x) => x.severidad === 'critical').length,
+    warning: campanasCaducarAll.filter((x) => x.severidad === 'warning').length,
+    vidaDias: LEAD_VIDA_DIAS,
+    umbralDias: CADUCAR_ALERTA_DIAS,
+    independienteDelPeriodo: false,
+    texto: `Cohorte del periodo · campañas documentadas sin compra, con ≤${CADUCAR_ALERTA_DIAS} días de vida restante (de ${LEAD_VIDA_DIAS}).`,
+  };
+
+  cobertura.sinDatosEnPeriodo = leads === 0 && Number(cobertura.totalLeads || 0) > 0;
 
   const detalleRows = d.prepare(`
     SELECT
@@ -2529,10 +2787,13 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     },
     fuente: 'crm_leads · crm_actividades (Balderrama Ciclos)',
     reglaCompra: 'VIN en ciclo CRM del mismo ID CRM, o vin_comprado en el lead',
+    cobertura,
     semantica: {
       cohorte: 'El periodo filtra fecha_entrada del lead (oportunidad)',
       compras: 'Compra vinculada por ID CRM; puede ocurrir después del periodo',
+      sinDuplicados: 'No se contabilizan leads marcados DUPLICADO en Google Sheets (columna AD / resultado / contacto / estación)',
       campanasConversion: `Vendidos de campañas documentadas solo cuentan si la compra ocurre dentro de ${LEAD_VIDA_DIAS} días desde fecha_entrada; fuera de esa vida útil no suman a conversión aunque exista venta`,
+      alertasCaducar: 'Las alertas de caducidad usan la misma cohorte por fecha_entrada del periodo, con vida restante ≤14 días de 90',
       noEsVentasTotales: 'No equivale al total de facturas DMS del periodo',
     },
     campanasConversionRegla: {
@@ -2545,8 +2806,11 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     porEjecutivo,
     porResultado,
     porSucursal,
+    porFuerzaVentas,
     campanasConversion,
     campanasConversionTotales,
+    campanasCaducarAlertas,
+    campanasCaducarResumen,
     detalle,
   };
 }
@@ -3775,6 +4039,7 @@ module.exports = {
   getLeadsDashboard,
   getSeguimiento360Summary,
   resolveCrmPeriod,
+  getLeadNotDuplicateSql,
   getCierresTallerPeriodo,
   exportCloudSyncRecords,
   enrichByVins,

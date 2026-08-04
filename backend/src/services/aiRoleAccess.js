@@ -4,9 +4,17 @@
  */
 const { getRole } = require('../auth/roles');
 const { isAuthEnabled } = require('../auth/session');
+const { buildPlaybookPromptBlock } = require('../config/aiProfilePlaybooks');
+const { buildUserMemoryPromptBlock } = require('./aiUserMemory');
 
 /** Herramientas exploratorias: solo perfiles con acceso amplio. */
 const SQL_TOOLS = new Set(['listar_tablas_bd', 'ejecutar_consulta_sql']);
+
+/** Memoria de perfil: disponible para cualquier sesión con asistente. */
+const PROFILE_MEMORY_TOOLS = new Set([
+  'consultar_memoria_perfil',
+  'actualizar_memoria_usuario',
+]);
 
 /**
  * Mapa página del dashboard → herramientas IA permitidas.
@@ -18,6 +26,7 @@ const PAGE_AI_TOOLS = {
     'consultar_analytics_ventas',
     'consultar_ventas_dia',
     'consultar_riesgos_oportunidades',
+    'consultar_recomendaciones_directivas',
     'consultar_objetivos_ventas',
   ],
   sales: [
@@ -31,6 +40,7 @@ const PAGE_AI_TOOLS = {
     'consultar_utilidad_carline',
     'resumen_leads',
     'consultar_riesgos_oportunidades',
+    'consultar_recomendaciones_directivas',
     'generar_excel',
   ],
   forecast: [
@@ -38,6 +48,7 @@ const PAGE_AI_TOOLS = {
     'consultar_objetivos_ventas',
     'consultar_ventas',
     'consultar_riesgos_oportunidades',
+    'consultar_recomendaciones_directivas',
   ],
   inventory: [
     'consultar_inventario',
@@ -66,6 +77,7 @@ const PAGE_AI_TOOLS = {
     'consultar_quejas_csi',
     'consultar_financiamiento',
     'consultar_riesgos_oportunidades',
+    'consultar_recomendaciones_directivas',
     'generar_excel',
   ],
   admin: [
@@ -93,7 +105,7 @@ function roleHasFullAccess(role) {
 
 /**
  * @param {string|null} roleId
- * @returns {{ allowedTools: Set<string>, pages: string[], roleLabel: string, fullAccess: boolean }}
+ * @returns {{ allowedTools: Set<string>|null, pages: string[], roleLabel: string, fullAccess: boolean }}
  */
 function resolveAiAccess(roleId) {
   if (!isAuthEnabled()) {
@@ -108,7 +120,7 @@ function resolveAiAccess(roleId) {
   const role = getRole(roleId);
   if (!role) {
     return {
-      allowedTools: new Set(),
+      allowedTools: new Set([...PROFILE_MEMORY_TOOLS]),
       pages: [],
       roleLabel: 'Sin perfil',
       fullAccess: false,
@@ -124,7 +136,7 @@ function resolveAiAccess(roleId) {
     };
   }
 
-  const allowed = new Set();
+  const allowed = new Set([...PROFILE_MEMORY_TOOLS]);
   for (const pageId of role.pages || []) {
     for (const tool of PAGE_AI_TOOLS[pageId] || []) {
       allowed.add(tool);
@@ -152,6 +164,7 @@ function isToolAllowedForRole(roleId, toolName) {
   const access = resolveAiAccess(roleId);
   if (access.allowedTools == null) return true;
   if (SQL_TOOLS.has(toolName)) return false;
+  if (PROFILE_MEMORY_TOOLS.has(toolName)) return true;
   return access.allowedTools.has(toolName);
 }
 
@@ -167,7 +180,8 @@ function buildRoleScopeNote(roleId, username = null) {
     .map((p) => PAGE_LABELS[p] || p)
     .filter(Boolean);
 
-  if (!areas.length || !access.allowedTools?.size) {
+  const dataTools = [...(access.allowedTools || [])].filter((t) => !PROFILE_MEMORY_TOOLS.has(t));
+  if (!areas.length || !dataTools.length) {
     return [
       `${who}Perfil: ${access.roleLabel}.`,
       'NO tienes módulos de datos asignados para el asistente.',
@@ -187,10 +201,29 @@ function buildRoleScopeNote(roleId, username = null) {
   ].join(' ');
 }
 
+/**
+ * Bloque de memoria + playbook para razonar enfocado al perfil.
+ */
+function buildProfileMemoryNote(roleId, username = null) {
+  return [
+    '## Memoria y conocimiento del perfil (obligatorio)',
+    'Usa este bloque para interpretar la pregunta y decidir qué consultar.',
+    'En ### Razonamiento menciona brevemente el lente del perfil (ej. “como Gerencia Comercial priorizo ritmo vs meta”).',
+    buildPlaybookPromptBlock(roleId),
+    '',
+    buildUserMemoryPromptBlock(username),
+    '',
+    'Si el usuario declara preferencias nuevas (periodo default, sucursal, fuerza, formato de respuesta, métrica favorita),',
+    'llama actualizar_memoria_usuario para recordarlas en sesiones futuras.',
+  ].join('\n');
+}
+
 module.exports = {
   PAGE_AI_TOOLS,
+  PROFILE_MEMORY_TOOLS,
   resolveAiAccess,
   filterToolDefinitions,
   isToolAllowedForRole,
   buildRoleScopeNote,
+  buildProfileMemoryNote,
 };

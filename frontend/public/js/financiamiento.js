@@ -33,6 +33,9 @@
     fechaInicio: null,
     fechaFin: null,
     search: '',
+    cacheKey: null,
+    inflightKey: null,
+    inflightPromise: null,
   };
 
   const els = {};
@@ -1978,56 +1981,89 @@
     }
   }
 
-  async function load(fechaInicio, fechaFin, _porTipoVentaRetail, registrosVentas, entregasSofia) {
+  async function load(fechaInicio, fechaFin, _porTipoVentaRetail, registrosVentas, entregasSofia, opts = {}) {
+    const force = Boolean(opts.force);
+    const key = `${fechaInicio}|${fechaFin}`;
     state.fechaInicio = fechaInicio;
     state.fechaFin = fechaFin;
-    const gerenteIndex = state.gerentesCatalog || await loadGerentesCatalog();
-    state.sofiaRegistros = enrichSofiaEntregas(entregasSofia || [], registrosVentas || [], gerenteIndex);
-    state.facturasGmfRegistros = buildFacturasGmf(registrosVentas || [], gerenteIndex, state.sofiaRegistros);
-    state.retailMix = buildSofiaGmfMix(state.sofiaRegistros, state.facturasGmfRegistros);
-    state.search = '';
-    state.mixSearch = '';
-    if (els.searchInput) els.searchInput.value = '';
-    await loadFacturaNotesIndex();
-    updateDisponiblesTimbrarMix();
 
-    if (els.subtitle) {
-      els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin} · Penetración GMF sobre entregas SOFIA`;
+    const paint = () => {
+      renderKpis();
+      closeKpiDetail();
+      renderTable(contracts());
+    };
+
+    if (!force && state.cacheKey === key && state.data && !state.data?.fuente?.reason) {
+      paint();
+      return state.data;
+    }
+    if (!force && state.inflightKey === key && state.inflightPromise) {
+      await state.inflightPromise;
+      paint();
+      return state.data;
     }
 
-    try {
-      const res = await fetch(
-        `/api/ventas/financiamiento?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
-        { credentials: 'same-origin' }
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Error financiamiento (${res.status})`);
-      state.data = data;
-      state.onstarTech = data.onstarTech || null;
-      state.pvaTrimestreYtd = data.pvaTrimestreYtd || null;
-      state.pvaTrimestresOpciones = data.pvaTrimestresOpciones || [];
-      state.pvaQuarterKey = data.pvaTrimestreYtd?.key
-        || (data.pvaTrimestreYtd?.anio && data.pvaTrimestreYtd?.trimestre
-          ? `${data.pvaTrimestreYtd.anio}-T${data.pvaTrimestreYtd.trimestre}`
-          : null);
-    } catch (err) {
-      console.error('[Financiamiento]', err);
-      state.data = {
-        fuente: { crm: false, reason: err.message },
-        summary: {},
-        contratos: [],
-        solicitudes: { total: 0, aprobadas: 0, muestra: [] },
-      };
-      state.onstarTech = null;
-      state.pvaTrimestreYtd = null;
-      state.pvaTrimestresOpciones = [];
-      state.pvaQuarterKey = null;
-      if (els.subtitle) els.subtitle.textContent = err.message;
-    }
+    state.inflightKey = key;
+    state.inflightPromise = (async () => {
+      const gerenteIndex = state.gerentesCatalog || await loadGerentesCatalog();
+      state.sofiaRegistros = enrichSofiaEntregas(entregasSofia || [], registrosVentas || [], gerenteIndex);
+      state.facturasGmfRegistros = buildFacturasGmf(registrosVentas || [], gerenteIndex, state.sofiaRegistros);
+      state.retailMix = buildSofiaGmfMix(state.sofiaRegistros, state.facturasGmfRegistros);
+      state.search = '';
+      state.mixSearch = '';
+      if (els.searchInput) els.searchInput.value = '';
+      await loadFacturaNotesIndex();
+      updateDisponiblesTimbrarMix();
+      if (els.subtitle) {
+        els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin} · Penetración GMF sobre entregas SOFIA`;
+      }
 
-    renderKpis();
-    closeKpiDetail();
-    renderTable(contracts());
+      try {
+        const res = await fetch(
+          `/api/ventas/financiamiento?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
+          { credentials: 'same-origin' }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Error financiamiento (${res.status})`);
+        state.data = data;
+        state.onstarTech = data.onstarTech || null;
+        state.pvaTrimestreYtd = data.pvaTrimestreYtd || null;
+        state.pvaTrimestresOpciones = data.pvaTrimestresOpciones || [];
+        state.pvaQuarterKey = data.pvaTrimestreYtd?.key
+          || (data.pvaTrimestreYtd?.anio && data.pvaTrimestreYtd?.trimestre
+            ? `${data.pvaTrimestreYtd.anio}-T${data.pvaTrimestreYtd.trimestre}`
+            : null);
+        state.cacheKey = key;
+      } catch (err) {
+        console.error('[Financiamiento]', err);
+        state.cacheKey = null;
+        state.data = {
+          fuente: { crm: false, reason: err.message },
+          summary: {},
+          contratos: [],
+          solicitudes: { total: 0, aprobadas: 0, muestra: [] },
+        };
+        state.onstarTech = null;
+        state.pvaTrimestreYtd = null;
+        state.pvaTrimestresOpciones = [];
+        state.pvaQuarterKey = null;
+        if (els.subtitle) els.subtitle.textContent = err.message;
+      } finally {
+        if (state.inflightKey === key) {
+          state.inflightKey = null;
+          state.inflightPromise = null;
+        }
+      }
+      return state.data;
+    })();
+
+    await state.inflightPromise;
+    paint();
+    return state.data;
+  }
+
+  function hasCache(fechaInicio, fechaFin) {
+    return state.cacheKey === `${fechaInicio}|${fechaFin}` && state.data && !state.data?.fuente?.reason;
   }
 
   function bindDom() {
@@ -2058,5 +2094,5 @@
     loadGerentesCatalog().catch(() => {});
   }
 
-  window.FinanciamientoVentas = { init, load };
+  window.FinanciamientoVentas = { init, load, hasCache };
 })();

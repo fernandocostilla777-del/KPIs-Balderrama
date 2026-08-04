@@ -11,10 +11,258 @@
     search: '',
     openKpi: null,
     groupView: 'canal',
+    cacheKey: null,
+    inflightKey: null,
+    inflightPromise: null,
   };
 
   const els = {};
   let leadsDrawerUi = null;
+  let prospectFloat = null;
+  let prospectFloatSection = 'identidad';
+  let selectedProspect = null;
+
+  const PROSPECT_MENU = [
+    { id: 'identidad', label: 'Identidad', icon: 'badge' },
+    { id: 'embudo', label: 'Embudo', icon: 'filter_alt' },
+    { id: 'campana', label: 'Campaña', icon: 'campaign' },
+    { id: 'comercial', label: 'Comercial', icon: 'handshake' },
+  ];
+
+  function findProspectById(idCrm) {
+    const id = String(idCrm || '').trim();
+    if (!id) return null;
+    const fromDetalle = detalle().find((r) => String(r.idCrm || '').trim() === id);
+    if (fromDetalle) return fromDetalle;
+    const fromCaducar = (state.data?.campanasCaducarAlertas || []).find((r) => String(r.idCrm || '').trim() === id);
+    if (!fromCaducar) return null;
+    return {
+      idCrm: fromCaducar.idCrm,
+      idOportunidad: fromCaducar.idOportunidad,
+      nombre: fromCaducar.nombre,
+      telefono: fromCaducar.telefono,
+      ejecutivo: fromCaducar.ejecutivo,
+      fuerzaVentas: fromCaducar.fuerzaVentas,
+      campana: fromCaducar.campana,
+      fechaEntrada: fromCaducar.fechaEntrada,
+      diasRestantes: fromCaducar.diasRestantes,
+      diasVividos: fromCaducar.diasVividos,
+      severidad: fromCaducar.severidad,
+      etapa: 'lead',
+      conCompra: false,
+      contactado: false,
+      cita: false,
+      cotizado: false,
+    };
+  }
+
+  function seguimiento360Url(prospect) {
+    const id = String(prospect?.idCrm || '').trim();
+    if (id) return `/seguimiento.html?id=${encodeURIComponent(id)}`;
+    const q = String(prospect?.nombre || prospect?.telefono || '').trim();
+    if (q) return `/seguimiento.html?q=${encodeURIComponent(q)}`;
+    return '/seguimiento.html';
+  }
+
+  function ensureProspectFloat() {
+    if (prospectFloat) return prospectFloat;
+    const el = document.createElement('div');
+    el.id = 'ldProspectFloat';
+    el.className = 'toma-float ld-prospect-float hidden';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'Perfil del prospecto');
+    el.innerHTML = `
+      <div class="toma-float__header" data-ld-prospect-drag>
+        <div class="toma-float__title-wrap">
+          <span class="material-symbols-outlined">person_search</span>
+          <div>
+            <h3 class="toma-float__title" data-ld-prospect-title>Prospecto</h3>
+            <p class="toma-float__subtitle" data-ld-prospect-sub></p>
+          </div>
+        </div>
+        <button type="button" class="toma-float__icon-btn" data-ld-prospect-close title="Cerrar" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <nav class="ld-prospect-menu" data-ld-prospect-menu aria-label="Menú del prospecto"></nav>
+      <div class="toma-float__body custom-scrollbar" data-ld-prospect-body></div>
+      <div class="toma-float__footer ld-prospect-footer" data-ld-prospect-footer></div>
+    `;
+    document.body.appendChild(el);
+
+    el.querySelector('[data-ld-prospect-close]')?.addEventListener('click', closeProspectFloat);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !el.classList.contains('hidden')) closeProspectFloat();
+    });
+
+    el.querySelector('[data-ld-prospect-menu]')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-ld-prospect-section]');
+      if (!btn || !selectedProspect) return;
+      prospectFloatSection = btn.getAttribute('data-ld-prospect-section') || 'identidad';
+      renderProspectFloatContent(selectedProspect);
+    });
+
+    const dragHandle = el.querySelector('[data-ld-prospect-drag]');
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+    dragHandle?.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      dragging = true;
+      const rect = el.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      el.setPointerCapture?.(e.pointerId);
+    });
+    dragHandle?.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const left = Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, e.clientX - offsetX));
+      const top = Math.max(8, Math.min(window.innerHeight - el.offsetHeight - 8, e.clientY - offsetY));
+      el.style.left = `${left}px`;
+      el.style.top = `${top}px`;
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+    });
+    const endDrag = () => { dragging = false; };
+    dragHandle?.addEventListener('pointerup', endDrag);
+    dragHandle?.addEventListener('pointercancel', endDrag);
+
+    prospectFloat = el;
+    return el;
+  }
+
+  function closeProspectFloat() {
+    selectedProspect = null;
+    if (!prospectFloat) return;
+    prospectFloat.classList.add('hidden');
+  }
+
+  function prospectRows(pairs) {
+    return pairs.map(([label, value]) => `
+      <div class="toma-float__row">
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(value == null || value === '' ? '—' : String(value))}</dd>
+      </div>`).join('');
+  }
+
+  function renderProspectFloatContent(prospect) {
+    const el = ensureProspectFloat();
+    const menu = el.querySelector('[data-ld-prospect-menu]');
+    const body = el.querySelector('[data-ld-prospect-body]');
+    const footer = el.querySelector('[data-ld-prospect-footer]');
+    if (!menu || !body || !footer) return;
+
+    menu.innerHTML = PROSPECT_MENU.map((item) => `
+      <button type="button"
+        class="ld-prospect-menu__btn${prospectFloatSection === item.id ? ' is-active' : ''}"
+        data-ld-prospect-section="${item.id}">
+        <span class="material-symbols-outlined" aria-hidden="true">${item.icon}</span>
+        ${escapeHtml(item.label)}
+      </button>`).join('');
+
+    let content = '';
+    if (prospectFloatSection === 'embudo') {
+      content = `
+        <section class="toma-float__section">
+          <h4>Estado en embudo</h4>
+          <dl class="toma-float__grid">
+            ${prospectRows([
+              ['Etapa', prospect.conCompra ? 'Compra' : (prospect.etapa === 'cita' ? 'Cita' : (prospect.etapa === 'contacto' ? 'Contacto' : 'Lead'))],
+              ['Contactado', prospect.contactado ? 'Sí' : 'No'],
+              ['Cita programada', prospect.cita ? 'Sí' : 'No'],
+              ['Fecha cita', formatDate(prospect.fechaCita)],
+              ['Cotizado', prospect.cotizado ? 'Sí' : 'No'],
+              ['Compra (VIN)', prospect.conCompra ? 'Sí' : 'No'],
+              ['VIN', prospect.vin],
+              ['Fecha factura', formatDate(prospect.fechaFactura)],
+            ])}
+          </dl>
+        </section>`;
+    } else if (prospectFloatSection === 'campana') {
+      content = `
+        <section class="toma-float__section">
+          <h4>Campaña / origen</h4>
+          <dl class="toma-float__grid">
+            ${prospectRows([
+              ['Campaña', prospect.campana],
+              ['Canal', prospect.canal],
+              ['Tipo', prospect.tipo],
+              ['Entrada', formatDate(prospect.fechaEntrada)],
+              ['Días vividos', prospect.diasVividos != null ? String(prospect.diasVividos) : null],
+              ['Días restantes (vida 90)', prospect.diasRestantes != null ? String(prospect.diasRestantes) : null],
+              ['Severidad caducidad', prospect.severidad],
+            ])}
+          </dl>
+        </section>`;
+    } else if (prospectFloatSection === 'comercial') {
+      content = `
+        <section class="toma-float__section">
+          <h4>Asignación comercial</h4>
+          <dl class="toma-float__grid">
+            ${prospectRows([
+              ['Ejecutivo', prospect.ejecutivo],
+              ['Fuerza de ventas', prospect.fuerzaVentas],
+              ['Sucursal', prospect.sucursal],
+              ['Auto de interés', prospect.autoInteres],
+              ['Resultado', prospect.resultado || prospect.estatusCiclo],
+              ['Estatus compra', prospect.estatusCompra],
+            ])}
+          </dl>
+        </section>`;
+    } else {
+      content = `
+        <section class="toma-float__section">
+          <h4>Identidad del prospecto</h4>
+          <dl class="toma-float__grid">
+            ${prospectRows([
+              ['Nombre', prospect.nombre],
+              ['Teléfono', prospect.telefono],
+              ['ID CRM', prospect.idCrm],
+              ['ID oportunidad', prospect.idOportunidad],
+              ['Entrada', formatDate(prospect.fechaEntrada)],
+              ['Etapa', prospect.conCompra ? 'Compra' : (prospect.etapa || 'lead')],
+            ])}
+          </dl>
+        </section>`;
+    }
+
+    body.innerHTML = content;
+
+    const hasCrm = Boolean(String(prospect.idCrm || '').trim());
+    footer.innerHTML = `
+      <a class="btn-glass btn-primary ld-prospect-360-btn" href="${escapeHtml(seguimiento360Url(prospect))}" target="_blank" rel="noopener">
+        <span class="material-symbols-outlined" aria-hidden="true">person_search</span>
+        ${hasCrm ? 'Abrir Seguimiento 360' : 'Buscar en Seguimiento 360'}
+      </a>
+      ${!hasCrm ? '<p class="section-subtitle" style="margin:6px 0 0">Sin ID CRM: se abrirá la búsqueda por nombre/teléfono.</p>' : ''}
+    `;
+  }
+
+  function openProspectFloat(prospect) {
+    if (!prospect) return;
+    selectedProspect = prospect;
+    prospectFloatSection = 'identidad';
+    const el = ensureProspectFloat();
+    el.querySelector('[data-ld-prospect-title]').textContent = prospect.nombre || 'Prospecto';
+    el.querySelector('[data-ld-prospect-sub]').textContent = [
+      prospect.idCrm ? `CRM ${prospect.idCrm}` : null,
+      prospect.ejecutivo || null,
+      prospect.campana || prospect.canal || null,
+    ].filter(Boolean).join(' · ');
+    renderProspectFloatContent(prospect);
+    if (!el.style.left && !el.style.top) {
+      el.style.left = 'auto';
+      el.style.right = '24px';
+      el.style.top = '88px';
+      el.style.bottom = 'auto';
+    }
+    el.classList.remove('hidden');
+  }
+
+  function openProspectById(idCrm) {
+    const prospect = findProspectById(idCrm);
+    if (prospect) openProspectFloat(prospect);
+  }
 
   function num(n) {
     if (n == null || !Number.isFinite(Number(n))) return '—';
@@ -172,6 +420,84 @@
       </button>`;
   }
 
+  function monthBoundsFromIso(iso) {
+    const d = String(iso || '').slice(0, 10);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const start = new Date(y, mo, 1);
+    const end = new Date(y, mo + 1, 0);
+    const fmt = (dt) => {
+      const yy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    };
+    return { fechaInicio: fmt(start), fechaFin: fmt(end), label: `${m[1]}-${m[2]}` };
+  }
+
+  function applyDashboardDates(fechaInicio, fechaFin) {
+    const fi = document.getElementById('fechaInicio');
+    const ff = document.getElementById('fechaFin');
+    if (!fi || !ff) return false;
+    fi.value = fechaInicio;
+    ff.value = fechaFin;
+    document.querySelectorAll('[data-preset]').forEach((b) => {
+      b.classList.remove('active', 'chip--active');
+    });
+    const lbl = document.getElementById('filterPresetLabel');
+    if (lbl) lbl.textContent = 'Personalizado';
+    window.Dashboard?.updateCompactFilterLabels?.();
+    const btn = document.getElementById('btnConsultar');
+    if (btn) {
+      btn.click();
+      return true;
+    }
+    return false;
+  }
+
+  function renderPeriodoVacio() {
+    const box = els.periodoVacio || document.getElementById('ldPeriodoVacio');
+    if (!box) return;
+
+    const s = summary();
+    const cob = state.data?.cobertura || null;
+    const empty = !state.data?.error && Number(s.leads || 0) === 0;
+    const hasDb = Number(cob?.totalLeads || 0) > 0;
+    const maxF = cob?.maxFechaEntrada || null;
+    const suggested = maxF ? monthBoundsFromIso(maxF) : null;
+
+    if (!empty || !hasDb) {
+      box.classList.add('hidden');
+      box.innerHTML = '';
+      return;
+    }
+
+    const fi = state.fechaInicio || '—';
+    const ff = state.fechaFin || '—';
+    const maxLabel = maxF || '—';
+    const suggestBtn = suggested
+      ? `<button type="button" class="btn-glass btn-primary" data-ld-suggest-period
+           data-fi="${escapeHtml(suggested.fechaInicio)}"
+           data-ff="${escapeHtml(suggested.fechaFin)}">
+           Ver ${escapeHtml(suggested.label)}
+         </button>`
+      : '';
+
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <p class="ld-periodo-vacio__title">Sin leads en el periodo seleccionado</p>
+      <p class="ld-periodo-vacio__text">
+        Cohorte ${escapeHtml(fi)} → ${escapeHtml(ff)} no tiene oportunidades con fecha de entrada.
+        La base CRM local llega hasta <strong>${escapeHtml(maxLabel)}</strong>
+        (${num(cob.totalLeads)} leads sin duplicados).
+        El filtro por defecto del mes en curso puede quedar vacío si el sheet aún no trae ese mes.
+      </p>
+      <div class="ld-periodo-vacio__actions">${suggestBtn}</div>
+    `;
+  }
+
   function renderKpis() {
     if (!els.kpiRoot) return;
     const s = summary();
@@ -200,7 +526,8 @@
   function renderFunnel() {
     if (!els.funnel) return;
     const steps = state.data?.funnel || [];
-    if (!steps.length) {
+    const leads = Number(summary().leads || 0);
+    if (!steps.length || leads === 0) {
       els.funnel.innerHTML = '<p class="section-subtitle">Sin datos de embudo en el periodo.</p>';
       return;
     }
@@ -221,6 +548,53 @@
       </div>`;
   }
 
+  function renderCampanasCaducar() {
+    const body = els.caducarBody || document.getElementById('ldCampanasCaducarBody');
+    const meta = els.caducarMeta || document.getElementById('ldCampanasCaducarMeta');
+    if (!body) return;
+
+    const rows = state.data?.campanasCaducarAlertas || [];
+    const resumen = state.data?.campanasCaducarResumen || null;
+    const vida = Number(resumen?.vidaDias || 90);
+    const umbral = Number(resumen?.umbralDias || 14);
+
+    if (meta) {
+      if (resumen) {
+        const shown = Number(resumen.mostrados || rows.length || 0);
+        const total = Number(resumen.total || shown);
+        meta.textContent = `Periodo · ${num(total)} perfiles · mostrando ${num(shown)} · ${num(resumen.criticos)} críticos · umbral ${umbral}d de ${vida}d`;
+      } else {
+        meta.textContent = 'Campañas documentadas del periodo · vida del lead por vencer';
+      }
+    }
+
+    if (!rows.length) {
+      body.innerHTML = `<p class="section-subtitle" style="margin:0">Sin perfiles de campañas documentadas por caducar (≤${umbral} días restantes).</p>`;
+      return;
+    }
+
+    body.innerHTML = rows.map((r) => {
+      const sev = r.severidad === 'critical' ? 'critical' : (r.severidad === 'warning' ? 'warning' : 'info');
+      const sevLabel = sev === 'critical' ? 'Crítico' : (sev === 'warning' ? 'Urgente' : 'Próximo');
+      const badgeCls = sev === 'info' ? 'info' : 'warn';
+      const id = String(r.idCrm || '').trim();
+      return `
+        <article class="ld-caducar-item ld-caducar-item--${sev}${id ? ' ld-caducar-item--clickable' : ''}"
+          ${id ? `data-ld-prospect-id="${escapeHtml(id)}" role="button" tabindex="0" title="Ver perfil del prospecto"` : ''}>
+          <div class="ld-caducar-item__top">
+            <strong class="ld-caducar-item__name">${escapeHtml(r.nombre)}</strong>
+            <span class="ld-caducar-item__days">${num(r.diasRestantes)}d</span>
+          </div>
+          <p class="ld-caducar-item__campana">${escapeHtml(r.campana)}</p>
+          <div class="ld-caducar-item__meta">
+            <span class="ld-badge ld-badge--${badgeCls}">${sevLabel}</span>
+            <span>${escapeHtml(formatDate(r.fechaEntrada))}</span>
+            <span>${escapeHtml(r.ejecutivo || 'Sin ejecutivo')}</span>
+          </div>
+        </article>`;
+    }).join('');
+  }
+
   function groupRows() {
     const key = state.groupView;
     if (key === 'ejecutivo') return state.data?.porEjecutivo || [];
@@ -229,9 +603,64 @@
     return state.data?.porCanal || [];
   }
 
+  function renderFuerzaVentas() {
+    if (!els.fuerzaBody) return;
+    const block = state.data?.porFuerzaVentas || null;
+    const tot = block?.totales || null;
+    const periodLeads = Number(summary().leads || 0);
+    const rows = periodLeads === 0
+      ? []
+      : (block?.filas || []).filter((r) => Number(r.leads || 0) > 0 || Number(r.compras || 0) > 0);
+
+    if (els.fuerzaResumen) {
+      if (tot && rows.length) {
+        els.fuerzaResumen.textContent =
+          `${rows.length} fuerzas · ${num(tot.leads)} oportunidades · conv. ${pct(tot.conversionPct)}`;
+      } else {
+        els.fuerzaResumen.textContent = periodLeads === 0
+          ? 'Sin oportunidades en el periodo seleccionado'
+          : 'Oportunidades / leads asignados por fuerza de ventas';
+      }
+    }
+
+    if (!rows.length) {
+      els.fuerzaBody.innerHTML = periodLeads === 0
+        ? '<tr class="empty-row"><td colspan="7">Sin leads en este periodo. Elija un rango con cobertura CRM.</td></tr>'
+        : '<tr class="empty-row"><td colspan="7">Sin datos de fuerza de ventas en el periodo.</td></tr>';
+      if (els.fuerzaFoot) els.fuerzaFoot.innerHTML = '';
+      return;
+    }
+
+    els.fuerzaBody.innerHTML = rows.map((r) => `
+      <tr>
+        <td><strong>${escapeHtml(r.grupo)}</strong></td>
+        <td class="cell-num">${num(r.leads)}</td>
+        <td class="cell-num">${pct(r.participacionPct)}</td>
+        <td class="cell-num">${num(r.contactados)}</td>
+        <td class="cell-num">${num(r.citas)}</td>
+        <td class="cell-num">${num(r.compras)}</td>
+        <td class="cell-num">${pct(r.conversionPct)}</td>
+      </tr>
+    `).join('');
+
+    if (els.fuerzaFoot && tot) {
+      els.fuerzaFoot.innerHTML = `
+        <tr>
+          <th>Total</th>
+          <th class="cell-num">${num(tot.leads)}</th>
+          <th class="cell-num">100%</th>
+          <th class="cell-num">${num(tot.contactados)}</th>
+          <th class="cell-num">${num(tot.citas)}</th>
+          <th class="cell-num">${num(tot.compras)}</th>
+          <th class="cell-num">${pct(tot.conversionPct)}</th>
+        </tr>`;
+    }
+  }
+
   function renderGroups() {
     if (!els.groupsBody) return;
-    const rows = groupRows();
+    const periodLeads = Number(summary().leads || 0);
+    const rows = periodLeads === 0 ? [] : groupRows();
     els.groupsBody.innerHTML = rows.length
       ? rows.map((r) => `
         <tr>
@@ -243,15 +672,21 @@
           <td class="cell-num">${num(r.compras)}</td>
           <td class="cell-num">${pct(r.conversionPct)}</td>
         </tr>`).join('')
-      : '<tr class="empty-row"><td colspan="7">Sin agrupaciones en el periodo.</td></tr>';
+      : `<tr class="empty-row"><td colspan="7">${
+        periodLeads === 0
+          ? 'Sin leads en este periodo. Elija un rango con cobertura CRM.'
+          : 'Sin agrupaciones en el periodo.'
+      }</td></tr>`;
   }
 
   function renderCampanasConversion() {
     if (!els.campanasConvBody) return;
-    const rows = state.data?.campanasConversion || [];
+    const allRows = state.data?.campanasConversion || [];
     const tot = state.data?.campanasConversionTotales || null;
     const regla = state.data?.campanasConversionRegla || null;
     const vida = Number(regla?.vidaDias || tot?.vidaDias || 90);
+    const periodLeads = Number(summary().leads || 0);
+    const rows = periodLeads === 0 ? [] : allRows.filter((r) => Number(r.total || 0) > 0);
 
     if (els.campanasConvNota) {
       els.campanasConvNota.innerHTML =
@@ -266,13 +701,16 @@
         els.campanasConvResumen.textContent =
           `${rows.length} campañas · Total ${num(tot.total)} · Contactados ${num(tot.contactados)} · Vendidos ≤${vida}d ${num(tot.vendidos)} · Conv. ${pct(tot.conversionPct)}${fueraTxt}`;
       } else {
-        els.campanasConvResumen.textContent =
-          `Campañas reactivas monitoreadas · vendidos solo dentro de ${vida} días de vida del lead`;
+        els.campanasConvResumen.textContent = periodLeads === 0
+          ? 'Sin campañas en el periodo seleccionado'
+          : `Campañas reactivas monitoreadas · vendidos solo dentro de ${vida} días de vida del lead`;
       }
     }
 
     if (!rows.length) {
-      els.campanasConvBody.innerHTML = '<tr class="empty-row"><td colspan="5">Sin campañas de conversión en el periodo.</td></tr>';
+      els.campanasConvBody.innerHTML = periodLeads === 0
+        ? '<tr class="empty-row"><td colspan="5">Sin leads en este periodo. Elija un rango con cobertura CRM.</td></tr>'
+        : '<tr class="empty-row"><td colspan="5">Sin campañas de conversión en el periodo.</td></tr>';
       if (els.campanasConvFoot) els.campanasConvFoot.innerHTML = '';
       return;
     }
@@ -322,10 +760,13 @@
       }
     }
     els.tableBody.innerHTML = rows.length
-      ? rows.map((r) => `
-        <tr>
+      ? rows.map((r, idx) => {
+        const id = String(r.idCrm || '').trim();
+        const key = id || `idx-${idx}`;
+        return `
+        <tr class="ld-prospect-row" data-ld-prospect-key="${escapeHtml(key)}" ${id ? `data-ld-prospect-id="${escapeHtml(id)}"` : ''} title="Ver perfil del prospecto" tabindex="0" role="button">
           <td>${escapeHtml(formatDate(r.fechaEntrada))}</td>
-          <td>${escapeHtml(dash(r.nombre))}</td>
+          <td><strong>${escapeHtml(dash(r.nombre))}</strong></td>
           <td>${escapeHtml(dash(r.ejecutivo))}</td>
           <td>${escapeHtml(dash(r.canal))}</td>
           <td>${escapeHtml(dash(r.autoInteres))}</td>
@@ -333,7 +774,8 @@
           <td class="mono">${escapeHtml(dash(r.vin))}</td>
           <td>${escapeHtml(dash(r.resultado || r.estatusCiclo))}</td>
           <td class="mono">${escapeHtml(dash(r.idCrm))}</td>
-        </tr>`).join('')
+        </tr>`;
+      }).join('')
       : `<tr class="empty-row"><td colspan="9">${state.search || state.openKpi ? 'Sin coincidencias.' : 'Consulte un periodo para ver leads.'}</td></tr>`;
   }
 
@@ -602,8 +1044,10 @@
           <h5>Detalle</h5>
           <span>${filtered.length}</span>
         </div>
-        ${filtered.map((r) => `
-          <div class="ops-orders-drawer__item" style="cursor:default">
+        ${filtered.map((r, idx) => {
+          const id = String(r.idCrm || '').trim();
+          return `
+          <button type="button" class="ops-orders-drawer__item ops-orders-drawer__item--clickable" data-ld-prospect-open="${idx}" ${id ? `data-ld-prospect-id="${escapeHtml(id)}"` : ''} title="Ver perfil del prospecto">
             <div class="ops-orders-drawer__item-head">
               <strong>${escapeHtml(dash(r.nombre))}</strong>
               ${etapaBadge(r.etapa, r.conCompra)}
@@ -619,7 +1063,17 @@
               <span>${escapeHtml(dash(r.resultado || r.estatusCiclo))}</span>
               <span>${r.cita ? 'Cita SI' : 'Sin cita'}</span>
             </div>
-          </div>`).join('')}`;
+            <p class="ops-orders-drawer__open-hint">Clic para ver perfil · Seguimiento 360</p>
+          </button>`;
+        }).join('')}`;
+
+      bodyEl.querySelectorAll('[data-ld-prospect-open]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.getAttribute('data-ld-prospect-open'));
+          const row = filtered[idx];
+          if (row) openProspectFloat(row);
+        });
+      });
     }
 
     function close() {
@@ -732,21 +1186,49 @@
     if (els.kpiDetail) els.kpiDetail.classList.add('hidden');
   }
 
+  function wireProspectSelection() {
+    const openFromEvent = (e) => {
+      const target = e.target.closest('[data-ld-prospect-id], [data-ld-prospect-key]');
+      if (!target) return;
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.type === 'keydown') e.preventDefault();
+      const id = target.getAttribute('data-ld-prospect-id');
+      if (id) {
+        openProspectById(id);
+        return;
+      }
+      const key = target.getAttribute('data-ld-prospect-key');
+      if (key?.startsWith('idx-')) {
+        const idx = Number(key.slice(4));
+        const row = filteredDetalle()[idx];
+        if (row) openProspectFloat(row);
+      }
+    };
+
+    els.tableBody?.addEventListener('click', openFromEvent);
+    els.tableBody?.addEventListener('keydown', openFromEvent);
+    els.caducarBody?.addEventListener('click', openFromEvent);
+    els.caducarBody?.addEventListener('keydown', openFromEvent);
+  }
+
   function updateSubtitle() {
     if (!els.subtitle) return;
     const fi = state.fechaInicio || '—';
     const ff = state.fechaFin || '—';
     const s = summary();
     els.subtitle.textContent = s.leads != null
-      ? `Cohorte ${fi} → ${ff} · ${num(s.leads)} leads · conversión a compra ${pct(s.conversionCompraPct)}`
-      : 'Seguimiento de conversión de oportunidades a ventas (VIN vinculado en CRM).';
+      ? `Cohorte ${fi} → ${ff} · ${num(s.leads)} leads (sin duplicados) · conversión a compra ${pct(s.conversionCompraPct)}`
+      : 'Seguimiento de conversión de oportunidades a ventas (VIN vinculado en CRM · sin duplicados de columna AD).';
   }
 
   function renderAll() {
     updateSubtitle();
+    renderPeriodoVacio();
     renderKpis();
     renderFunnel();
+    renderCampanasCaducar();
     renderCampanasConversion();
+    renderFuerzaVentas();
     renderGroups();
     renderTable();
     if (leadsDrawerUi?.panel?.classList.contains('ops-orders-drawer--open') && state.openKpi) {
@@ -761,11 +1243,17 @@
     els.detailResumen = document.getElementById('ldDetailResumen');
     els.btnCerrarDetail = document.getElementById('btnCerrarLdDetail');
     els.subtitle = document.getElementById('ldSubtitle');
+    els.periodoVacio = document.getElementById('ldPeriodoVacio');
     els.funnel = document.getElementById('ldFunnel');
+    els.caducarBody = document.getElementById('ldCampanasCaducarBody');
+    els.caducarMeta = document.getElementById('ldCampanasCaducarMeta');
     els.campanasConvBody = document.getElementById('ldCampanasConvBody');
     els.campanasConvFoot = document.getElementById('ldCampanasConvFoot');
     els.campanasConvResumen = document.getElementById('ldCampanasConvResumen');
     els.campanasConvNota = document.getElementById('ldCampanasConvNota');
+    els.fuerzaBody = document.getElementById('ldFuerzaBody');
+    els.fuerzaFoot = document.getElementById('ldFuerzaFoot');
+    els.fuerzaResumen = document.getElementById('ldFuerzaResumen');
     els.groupsBody = document.getElementById('ldGroupsBody');
     els.tableBody = document.getElementById('ldTableBody');
     els.search = document.getElementById('buscarLdPreview');
@@ -777,6 +1265,16 @@
       const btn = e.target.closest('[data-ld-kpi]');
       if (!btn) return;
       openKpiDetail(btn.getAttribute('data-ld-kpi'), btn);
+    });
+    els.periodoVacio?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-ld-suggest-period]');
+      if (!btn) return;
+      const fi = btn.getAttribute('data-fi');
+      const ff = btn.getAttribute('data-ff');
+      if (!fi || !ff) return;
+      if (!applyDashboardDates(fi, ff)) {
+        load(fi, ff);
+      }
     });
     els.search?.addEventListener('input', () => {
       state.search = els.search.value || '';
@@ -793,47 +1291,81 @@
       });
       renderGroups();
     });
+    wireProspectSelection();
   }
 
   function init() {
     bind();
   }
 
-  async function load(fechaInicio, fechaFin) {
+  async function load(fechaInicio, fechaFin, opts = {}) {
+    const force = Boolean(opts.force);
+    const key = `${fechaInicio}|${fechaFin}`;
     state.fechaInicio = fechaInicio;
     state.fechaFin = fechaFin;
     state.search = '';
     if (els.search) els.search.value = '';
+    closeProspectFloat();
     closeKpiDetail();
 
-    try {
-      const res = await fetch(
-        `/api/ventas/leads?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
-        { credentials: 'same-origin' },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || res.statusText);
-      state.data = data;
-    } catch (err) {
-      console.warn('[Leads]', err);
-      state.data = {
-        summary: {},
-        funnel: [],
-        porCanal: [],
-        porEjecutivo: [],
-        porResultado: [],
-        porSucursal: [],
-        detalle: [],
-        error: err.message,
-      };
-      if (els.subtitle) els.subtitle.textContent = err.message || 'No se pudieron cargar los leads.';
+    // Reutilizar datos del mismo periodo (cambio rápido entre secciones).
+    if (!force && state.cacheKey === key && state.data && !state.data.error) {
+      renderAll();
+      return state.data;
     }
+    if (!force && state.inflightKey === key && state.inflightPromise) {
+      await state.inflightPromise;
+      renderAll();
+      return state.data;
+    }
+
+    state.inflightKey = key;
+    state.inflightPromise = (async () => {
+      try {
+        const res = await fetch(
+          `/api/ventas/leads?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
+          { credentials: 'same-origin' },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        state.data = data;
+        state.cacheKey = key;
+      } catch (err) {
+        console.warn('[Leads]', err);
+        state.cacheKey = null;
+        state.data = {
+          summary: {},
+          funnel: [],
+          porCanal: [],
+          porEjecutivo: [],
+          porResultado: [],
+          porSucursal: [],
+          detalle: [],
+          error: err.message,
+        };
+        if (els.subtitle) els.subtitle.textContent = err.message || 'No se pudieron cargar los leads.';
+      } finally {
+        if (state.inflightKey === key) {
+          state.inflightKey = null;
+          state.inflightPromise = null;
+        }
+      }
+      return state.data;
+    })();
+
+    await state.inflightPromise;
     renderAll();
+    return state.data;
+  }
+
+  function hasCache(fechaInicio, fechaFin) {
+    return state.cacheKey === `${fechaInicio}|${fechaFin}` && state.data && !state.data.error;
   }
 
   window.LeadsVentas = {
     init,
     load,
+    hasCache,
     getCampanasConversion() {
       return state.data?.campanasConversion || null;
     },

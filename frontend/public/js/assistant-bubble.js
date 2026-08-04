@@ -93,7 +93,7 @@
     if (window.AssistantChat) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = '/js/assistant-core.js?v=8';
+      s.src = '/js/assistant-core.js?v=9';
       s.onload = resolve;
       s.onerror = reject;
       document.body.appendChild(s);

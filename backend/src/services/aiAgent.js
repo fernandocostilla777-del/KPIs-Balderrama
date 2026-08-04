@@ -9,6 +9,7 @@ const {
   filterToolDefinitions,
   isToolAllowedForRole,
   buildRoleScopeNote,
+  buildProfileMemoryNote,
   resolveAiAccess,
 } = require('./aiRoleAccess');
 
@@ -39,6 +40,7 @@ const WEB_MODULE_RULES = `
 - F&I → consultar_financiamiento
 - Utilidad carline → consultar_utilidad_carline
 - Riesgos / oportunidades / alertas → consultar_riesgos_oportunidades
+- Recomendaciones directivas (presión, mix, cuellos vs histórico) → consultar_recomendaciones_directivas
 - Roles / accesos / alertas por perfil → consultar_roles_acceso
 - SQL exploratorio solo si nada más cubre la pregunta
 
@@ -51,8 +53,9 @@ const WEB_MODULE_RULES = `
 ### Tablero / general
 - Resumen ejecutivo / “cómo cerramos el mes” → consultar_resumen_ejecutivo (mes actual)
 - Alertas críticas / qué revisar hoy / insights / riesgos / oportunidades / dónde se traba → consultar_riesgos_oportunidades
+- Recomendaciones a dirección / cuándo meter presión / ritmo de solicitudes / mix vs meta / cuellos de botella → consultar_recomendaciones_directivas
 - Ventas vs postventa → consultar_resumen_ejecutivo + consultar_postventa
-- Cumplimiento metas retail / qué falta para meta → consultar_objetivos_ventas + consultar_ventas
+- Cumplimiento metas retail / qué falta para meta → consultar_objetivos_ventas + consultar_ventas (+ consultar_recomendaciones_directivas)
 - Área más desviada del presupuesto / EEFF / gastos / utilidad por área / 0481–0484 → consultar_contabilidad
 - Comparar este mes vs anterior → dos llamadas (mes_actual y mes_pasado) a la herramienta del tema
 - Variación más relevante → consultar_riesgos_oportunidades + consultar_resumen_ejecutivo
@@ -62,6 +65,7 @@ const WEB_MODULE_RULES = `
 - Penetración GMF → consultar_financiamiento
 - Conversión leads / canal de leads → resumen_leads (agruparPor=canal)
 - Citas que aún no compran → resumen_leads con listar="citas_sin_compra" y periodo=mes_actual
+- Presión comercial / embudo vs histórico / mix HIGH END vs meta → consultar_recomendaciones_directivas
 
 ### Inventario
 - Plan piso / envejecidas / sin previas / modelos con más interés → consultar_inventario
@@ -86,6 +90,7 @@ const WEB_MODULE_RULES = `
 4b. Detalle por unidad → **consultar_ventas_por_auto**.
 5. Ventas generales → consultar_ventas o consultar_resumen_ejecutivo.
 5b. Riesgos/oportunidades/alertas → **consultar_riesgos_oportunidades**. NUNCA digas que no tienes acceso: llama la herramienta.
+5c. Recomendaciones directivas / presión / mix / cuellos → **consultar_recomendaciones_directivas**.
 6. Pronóstico: KPIs + serie mensual.
 6b. CRM 360 → buscar_cliente_crm → historico_cliente_crm.
 6c. Leads → resumen_leads. Citas sin compra → listar="citas_sin_compra".
@@ -116,6 +121,8 @@ function buildWebSystemPrompt({ roleId = null, username = null } = {}) {
       toolsList,
     }),
     '',
+    buildProfileMemoryNote(roleId, username),
+    '',
     AI_DATA_MODEL,
     WEB_MODULE_RULES,
     '',
@@ -123,6 +130,7 @@ function buildWebSystemPrompt({ roleId = null, username = null } = {}) {
     'Cumple estrictamente el alcance de perfil indicado arriba.',
     'Solo usa herramientas de la lista de esta sesión.',
     'Si la pregunta sale del perfil: niega el acceso con claridad y redirige a lo que sí puedes consultar.',
+    'Responde siempre con el lente del playbook del perfil y la memoria del usuario.',
   ].join('\n');
 }
 
@@ -316,6 +324,7 @@ function finalizeReply(messageContent, toolSnapshots, toolsUsed, usage) {
 async function runChat(messages, { roleId = null, username = null } = {}) {
   const client = getClient();
   const allowedTools = filterToolDefinitions(TOOL_DEFINITIONS, roleId);
+  const toolContext = { roleId, username };
   const conversation = [
     { role: 'system', content: buildWebSystemPrompt({ roleId, username }) },
     ...messages.filter((m) => m.role === 'user' || m.role === 'assistant'),
@@ -389,7 +398,7 @@ async function runChat(messages, { roleId = null, username = null } = {}) {
             deniedByRole: true,
           };
         } else {
-          toolResult = await executeTool(fnName, fnArgs);
+          toolResult = await executeTool(fnName, fnArgs, toolContext);
         }
         toolSnapshots.push({ name: fnName, args: fnArgs, result: toolResult });
       } catch (err) {

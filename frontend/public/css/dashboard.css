@@ -4391,6 +4391,39 @@ button.ops-orders-drawer__item:hover {
   box-shadow: 0 10px 28px rgba(29, 78, 216, 0.22);
 }
 
+.bg-kpi-stack {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.bg-kpi-stack > .kpi-grid {
+  margin-bottom: 0;
+}
+
+/* Activo: una sola línea (circulante · fijo · diferido · total) */
+#kpiBalanceActivo.kpi-grid--bg-activo {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#kpiBalancePasivo.kpi-grid--bg-pasivo {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  #kpiBalanceActivo.kpi-grid--bg-activo,
+  #kpiBalancePasivo.kpi-grid--bg-pasivo {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  #kpiBalanceActivo.kpi-grid--bg-activo,
+  #kpiBalancePasivo.kpi-grid--bg-pasivo {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 640px) {
   .bg-kpi-float {
     top: 0;
@@ -5382,6 +5415,21 @@ body[data-page="contabilidad"] #scopeLabel {
 
 .section-panel.section-focus {
   animation: sectionFocus 1.2s ease;
+}
+
+#secMixAutos.is-selected,
+#secMixAutos.is-open {
+  outline: 2px solid rgba(45, 91, 255, 0.28);
+  outline-offset: 2px;
+}
+
+.chart-card--interactive {
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+.chart-card--interactive:hover {
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
 @keyframes sectionFocus {
@@ -10570,6 +10618,262 @@ td.mono,
 .int-sev--ok { background: #d1fae5; color: #065f46; }
 .int-sev--warning { background: #fef3c7; color: #92400e; }
 .int-sev--critical { background: #ffe4e6; color: #9f1239; }
+
+/* Mix de ventas · Otros por fuerza */
+.mix-otros-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.mix-otros-row:hover,
+.mix-otros-row:focus-visible {
+  background: rgba(45, 91, 255, 0.08);
+  outline: none;
+}
+
+.mix-otros-float {
+  width: min(460px, calc(100vw - 24px));
+}
+
+.mix-otros-float .toma-float__header {
+  background: linear-gradient(180deg, rgba(45, 91, 255, 0.12), transparent);
+}
+
+.mix-otros-float .toma-float__title-wrap > .material-symbols-outlined {
+  color: #2d5bff;
+}
+
+/* Leads: pares en paralelo (embudo+campañas / fuerza+grupo) */
+.ld-leads-pair-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  margin-top: 12px;
+}
+
+.ld-leads-pair-grid > .section-panel {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .ld-leads-pair-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ld-periodo-vacio {
+  margin: 12px 0 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.95), rgba(254, 243, 199, 0.55));
+  color: #78350f;
+  display: grid;
+  gap: 10px;
+}
+
+.ld-periodo-vacio.hidden {
+  display: none;
+}
+
+.ld-periodo-vacio__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.ld-periodo-vacio__text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  opacity: 0.92;
+}
+
+.ld-periodo-vacio__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Alertas caducidad campañas (bajo embudo) */
+.ld-caducar-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.ld-caducar-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.ld-caducar-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.ld-caducar-list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.ld-caducar-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ld-caducar-item--critical {
+  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(255, 228, 230, 0.55);
+}
+
+.ld-caducar-item--warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(254, 243, 199, 0.55);
+}
+
+.ld-caducar-item--info {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(219, 234, 254, 0.4);
+}
+
+.ld-caducar-item__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.ld-caducar-item__name {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.ld-caducar-item__days {
+  font-size: 12px;
+  font-weight: 800;
+  color: #9f1239;
+  white-space: nowrap;
+}
+
+.ld-caducar-item--info .ld-caducar-item__days {
+  color: #1d4ed8;
+}
+
+.ld-caducar-item--warning .ld-caducar-item__days {
+  color: #b45309;
+}
+
+.ld-caducar-item__campana {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.ld-caducar-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ld-caducar-item--clickable {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.ld-caducar-item--clickable:hover,
+.ld-caducar-item--clickable:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  outline: none;
+}
+
+.ld-prospect-row {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.ld-prospect-row:hover,
+.ld-prospect-row:focus-visible {
+  background: rgba(45, 91, 255, 0.07);
+  outline: none;
+}
+
+.ld-prospect-float {
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(720px, calc(100vh - 40px));
+}
+
+.ld-prospect-float .toma-float__header {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.14), transparent);
+}
+
+.ld-prospect-float .toma-float__title-wrap > .material-symbols-outlined {
+  color: #0284c7;
+}
+
+.ld-prospect-menu {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.ld-prospect-menu__btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 12px;
+  padding: 8px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ld-prospect-menu__btn .material-symbols-outlined {
+  font-size: 18px;
+  color: #64748b;
+}
+
+.ld-prospect-menu__btn.is-active {
+  border-color: rgba(2, 132, 199, 0.45);
+  background: rgba(186, 230, 253, 0.55);
+  color: #0c4a6e;
+}
+
+.ld-prospect-menu__btn.is-active .material-symbols-outlined {
+  color: #0284c7;
+}
+
+.ld-prospect-footer {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.ld-prospect-360-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  width: 100%;
+}
 
 
 

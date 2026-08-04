@@ -9,6 +9,7 @@ const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/
 const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
 const { getFinanciamientoDashboard, getPvaTrimestreYtd } = require('../services/financiamientoService');
+const { getComisionesFi, listComisionTypes } = require('../services/comisionesFiService');
 const { getAfluenciaDashboard } = require('../services/afluenciaService');
 const financiamientoNotes = require('../services/financiamientoNotesStore');
 const gerentesFi = require('../services/gerentesFinanciamientoStore');
@@ -115,6 +116,27 @@ router.get('/ventas/financiamiento', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     res.json(await getFinanciamientoDashboard({ fechaInicio, fechaFin, pvaAnio, pvaTrimestre }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/comisiones/tipos', (_req, res) => {
+  res.json({ tipos: listComisionTypes() });
+});
+
+router.get('/ventas/comisiones', (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, tipo } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    const kind = String(tipo || 'fi').toLowerCase();
+    if (kind !== 'fi') {
+      return res.status(400).json({ error: `Tipo de comisión no disponible: ${kind}. Use tipo=fi.` });
+    }
+    res.json(getComisionesFi({ fechaInicio, fechaFin }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

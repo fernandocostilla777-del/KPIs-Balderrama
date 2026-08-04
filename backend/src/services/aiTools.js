@@ -16,10 +16,19 @@ const { nomenclaturaHelpText } = require('./postSalesOrderTypes');
 const { getFinanciamientoAiAnalysis } = require('./financiamientoService');
 const { getUtilidadPorCarlineAiAnalysis } = require('./utilidadCarlineService');
 const { buildInsights } = require('./intelligentInsightsService');
+const { getExecutiveRecommendations } = require('./executiveRecommendationsService');
 const { buildOperationalAlerts, getPrefs, listAlertTypes } = require('./alertsService');
 const { getInventoryPostventa } = require('./inventoryPostventaService');
 const { getRefaccionesDashboard } = require('./refaccionesPedidosService');
 const { getRole, listRoles } = require('../auth/roles');
+const { getProfilePlaybook } = require('../config/aiProfilePlaybooks');
+const {
+  getUserMemory,
+  rememberFact,
+  rememberPreference,
+  clearUserMemory,
+} = require('./aiUserMemory');
+const { resolveAiAccess } = require('./aiRoleAccess');
 
 const FORBIDDEN_SQL = [
   'INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE',
@@ -242,6 +251,52 @@ const TOOL_DEFINITIONS = [
             description: 'Opcional: administracion | direccion | gerencia_comercial | contabilidad',
           },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_memoria_perfil',
+      description:
+        'Lee el playbook del perfil activo y la memoria personal del usuario (preferencias y hechos guardados). '
+        + 'Úsala si necesitas recordar foco del rol, preferencias de periodo/sucursal o cómo suele pedir reportes.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'actualizar_memoria_usuario',
+      description:
+        'Guarda preferencias o hechos del usuario para sesiones futuras '
+        + '(periodo favorito, sucursal, fuerza, métrica preferida, formato de respuesta, etc.). '
+        + 'Úsala cuando el usuario diga “siempre muéstrame…”, “prefiero…”, “recuerda que…”.',
+      parameters: {
+        type: 'object',
+        properties: {
+          accion: {
+            type: 'string',
+            enum: ['preferencia', 'hecho', 'limpiar'],
+            description: 'preferencia | hecho | limpiar (borra toda la memoria del usuario)',
+          },
+          clave: {
+            type: 'string',
+            description: 'Clave corta (ej. periodo_default, sucursal, fuerza, formato_respuesta)',
+          },
+          valor: {
+            type: 'string',
+            description: 'Valor a recordar',
+          },
+          categoria: {
+            type: 'string',
+            description: 'Categoría del hecho: preferencia | foco | contexto | general',
+          },
+        },
+        required: ['accion'],
       },
     },
   },
@@ -692,12 +747,37 @@ const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'consultar_recomendaciones_directivas',
+      description:
+        'OBLIGATORIA para recomendaciones a nivel dirección/gerencia: cuellos de botella, '
+        + 'cuándo meter presión comercial, ritmo de leads/solicitudes vs histórico, '
+        + 'si el mix de coches (retail/flotilla/HIGH END/utilidad) alcanza la meta, '
+        + 'run-rate diario necesario y plan de acciones. Combina ventas + objetivos + embudo CRM. '
+        + 'Sin periodo → mes_actual.',
+      parameters: {
+        type: 'object',
+        properties: {
+          periodo: {
+            type: 'string',
+            description: 'mes_actual | mes_pasado | semana_actual',
+            enum: ['mes_actual', 'mes_pasado', 'semana_actual'],
+          },
+          fechaInicio: { type: 'string', description: 'Opcional YYYY-MM-DD (override)' },
+          fechaFin: { type: 'string', description: 'Opcional YYYY-MM-DD (override)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'consultar_riesgos_oportunidades',
       description:
         'OBLIGATORIA para riesgos, oportunidades, alertas críticas, “qué revisar hoy/esta semana”, '
         + 'hallazgos del tablero o insights accionables. Consolida alertas operativas + insights de '
         + 'ventas/inventario/tablero (previas, aging, plan piso, margen, taller, etc.). '
-        + 'Sin periodo → semana_actual (últimos 7 días). Responde con riesgos + oportunidades + 2–4 acciones.',
+        + 'Sin periodo → semana_actual (últimos 7 días). Responde con riesgos + oportunidades + 2–4 acciones. '
+        + 'Para presión/mix/embudo directivo usa también consultar_recomendaciones_directivas.',
       parameters: {
         type: 'object',
         properties: {
@@ -950,10 +1030,11 @@ async function getRiesgosOportunidades(args = {}) {
   const range = resolveRiesgosPeriodo(args);
   const { fechaInicio, fechaFin } = range;
 
-  const [overview, inventory, alertas] = await Promise.all([
+  const [overview, inventory, alertas, directivo] = await Promise.all([
     getOverview({ fechaInicio, fechaFin }).catch((err) => ({ error: err.message })),
     getInventory({ planPisoPeriod: 'all' }).catch((err) => ({ error: err.message })),
     buildOperationalAlerts().catch(() => []),
+    getExecutiveRecommendations({ fechaInicio, fechaFin }).catch((err) => ({ available: false, reason: err.message })),
   ]);
 
   const insights = [];
@@ -974,6 +1055,19 @@ async function getRiesgosOportunidades(args = {}) {
       summary: inventory.summary,
       postventa: inventory.postventa,
     }));
+  }
+  if (directivo?.available) {
+    for (const rec of directivo.recomendaciones || []) {
+      if (rec.prioridad > 2) continue;
+      insights.push({
+        module: 'ventas',
+        severity: rec.prioridad === 1 ? 'critical' : 'warning',
+        title: rec.titulo,
+        summary: rec.porQue,
+        analysis: directivo.diagnosticoEjecutivo,
+        recommendations: [rec.accion],
+      });
+    }
   }
 
   const rank = { critical: 3, warning: 2, info: 1 };
@@ -1074,8 +1168,10 @@ async function getRiesgosOportunidades(args = {}) {
   };
 }
 
-async function executeTool(name, args = {}) {
+async function executeTool(name, args = {}, context = {}) {
   let result;
+  const username = context.username || null;
+  const roleId = context.roleId || null;
 
   switch (name) {
     case 'consultar_ventas_modelo':
@@ -1108,6 +1204,65 @@ async function executeTool(name, args = {}) {
           overview: raw.overview,
         };
       }
+      break;
+    }
+    case 'consultar_memoria_perfil': {
+      const access = resolveAiAccess(roleId);
+      const playbook = getProfilePlaybook(roleId);
+      const memory = getUserMemory(username);
+      result = {
+        perfil: {
+          id: roleId,
+          label: access.roleLabel,
+          pages: access.pages,
+          fullAccess: access.fullAccess,
+        },
+        playbook,
+        memoriaUsuario: {
+          preferences: memory.preferences || {},
+          facts: memory.facts || [],
+          notes: memory.notes || '',
+          updatedAt: memory.updatedAt,
+        },
+        instruccion:
+          'Adapta el razonamiento y la respuesta al playbook del perfil y a la memoria del usuario. '
+          + 'Prioriza KPIs y lente de decisión del rol.',
+      };
+      break;
+    }
+    case 'actualizar_memoria_usuario': {
+      const accion = String(args.accion || '').toLowerCase();
+      if (!username) {
+        result = { error: 'No hay usuario en sesión para guardar memoria.' };
+        break;
+      }
+      if (accion === 'limpiar') {
+        result = { ok: true, ...(clearUserMemory(username)), mensaje: 'Memoria del usuario borrada.' };
+        break;
+      }
+      if (accion === 'preferencia') {
+        const mem = rememberPreference(username, args.clave, args.valor);
+        result = {
+          ok: true,
+          mensaje: `Preferencia guardada: ${args.clave} = ${args.valor}`,
+          memoria: { preferences: mem.preferences, facts: mem.facts },
+        };
+        break;
+      }
+      if (accion === 'hecho') {
+        const mem = rememberFact(username, {
+          key: args.clave,
+          value: args.valor,
+          category: args.categoria || 'general',
+        });
+        result = {
+          ok: true,
+          mensaje: `Hecho recordado: ${args.valor}`,
+          memoria: { preferences: mem.preferences, facts: mem.facts },
+        };
+        break;
+      }
+      result = { error: 'accion debe ser preferencia | hecho | limpiar' };
       break;
     }
     case 'consultar_refacciones': {
@@ -1298,6 +1453,13 @@ async function executeTool(name, args = {}) {
         carline: args.carline || null,
         metric: args.metric || 'utilidad_promedio',
         minUnidades: Math.min(20, Math.max(1, Number(args.minUnidades) || 1)),
+      });
+      break;
+    case 'consultar_recomendaciones_directivas':
+      result = await getExecutiveRecommendations({
+        periodo: args.periodo || 'mes_actual',
+        fechaInicio: args.fechaInicio || null,
+        fechaFin: args.fechaFin || null,
       });
       break;
     case 'consultar_riesgos_oportunidades':

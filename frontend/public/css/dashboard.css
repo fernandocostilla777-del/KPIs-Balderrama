@@ -5469,6 +5469,37 @@ body[data-page="contabilidad"] #scopeLabel {
   margin-bottom: 28px;
 }
 
+.hyp-cobranza-duo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 28px;
+  align-items: start;
+}
+
+.hyp-cobranza-panel {
+  min-width: 0;
+}
+
+.hyp-cobranza-panel .kpi-group {
+  margin-bottom: 12px;
+}
+
+.hyp-cobranza-panel #kpiHypCobranza .kpi-grid,
+.hyp-cobranza-panel #kpiHypGarantias .kpi-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.hyp-cobranza-table-scroll {
+  max-height: 420px;
+}
+
+@media (max-width: 1180px) {
+  .hyp-cobranza-duo {
+    grid-template-columns: 1fr;
+  }
+}
+
 .chart-grid-2-1 {
   display: grid;
   grid-template-columns: 2fr 1fr;

@@ -137,56 +137,27 @@ HyP
 
 <section id="panelPostVentaOrdenes" class="postventa-area-panel hidden" data-ps-panel="ordenes">
 
-<section id="panelHypCobranza" class="section-panel dashboard-section hidden" data-hyp-cobranza>
-<h3 class="section-title">Cobranza aseguradoras</h3>
-<p class="section-subtitle">Órdenes facturadas V* (Body 31) y A* (matriz) · pendiente vs enviado/pagado por CXC</p>
-<div id="kpiHypCobranza"></div>
-<div class="table-header-row" style="margin-top:16px">
-<h4 class="section-title" style="margin-bottom:0;font-size:0.95rem">Detalle de facturas</h4>
-<span id="hypCobranzaMeta" class="top-bar-meta">—</span>
-</div>
-<div class="filter-row filter-row--compact" style="margin:10px 0 12px;gap:12px;flex-wrap:wrap;align-items:end">
-<label class="filter-field" style="min-width:220px;flex:1">
-<span class="filter-label">Aseguradora</span>
-<select id="fHypCobAseguradora" class="filter-select">
-<option value="">Todas</option>
-</select>
-</label>
-<label class="filter-field" style="min-width:180px">
-<span class="filter-label">Estado de pago</span>
-<select id="fHypCobEstado" class="filter-select">
-<option value="">Todos</option>
-<option value="pendiente">Pendiente de pago</option>
-<option value="parcial">Pago parcial / enviado</option>
-<option value="pagado">Pagado</option>
-</select>
-</label>
-</div>
-<div class="table-scroll">
-<table class="data-table data-table--selectable">
-<thead>
-<tr>
-<th>Orden</th>
-<th>Segmento</th>
-<th>Aseguradora</th>
-<th>Factura</th>
-<th>Cierre</th>
-<th class="cell-num">Facturado</th>
-<th class="cell-num">Aplicado</th>
-<th class="cell-num">Saldo</th>
-<th>Estado pago</th>
-</tr>
-</thead>
-<tbody id="tblHypCobranza"></tbody>
-</table>
-</div>
-</section>
-
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Indicadores operativos</h3>
 <p class="section-subtitle">Volumen, importes, antigüedad y operación de taller · clic en un KPI para ver el detalle</p>
 <div id="kpiOperational"></div>
 <div id="opsKpiDetail" class="kpi-detail-panel hidden" style="margin-top:14px"></div>
+</section>
+
+<section id="panelHypCobranza" class="dashboard-section hidden" data-hyp-cobranza>
+<div class="hyp-cobranza-duo">
+<section class="section-panel hyp-cobranza-panel" data-hyp-cob-panel="aseg">
+<h3 class="section-title">Cobranza aseguradoras</h3>
+<p class="section-subtitle">Órdenes facturadas V* (Body 31) y A* (matriz) · pendiente vs enviado/pagado por CXC</p>
+<div id="kpiHypCobranza"></div>
+</section>
+
+<section class="section-panel hyp-cobranza-panel" data-hyp-cob-panel="garantias">
+<h3 class="section-title">Cobranza garantías</h3>
+<p class="section-subtitle">Órdenes internas HyP · J* / H* / Ó* · pendiente vs enviado/pagado por CXC</p>
+<div id="kpiHypGarantias"></div>
+</section>
+</div>
 </section>
 
 <section class="chart-grid">
@@ -221,7 +192,7 @@ HyP
 <p id="mesCursoNomenLegend" class="section-subtitle postventa-mes-curso-legend"></p>
 </section>
 
-<section class="section-panel dashboard-section">
+<section class="section-panel dashboard-section" data-hyp-hide>
 <h3 class="section-title">Flujo semanal</h3>
 <div class="chart-card"><div class="chart-wrap"><canvas id="cWeekly"></canvas></div></div>
 </section>
@@ -236,16 +207,16 @@ HyP
 <div class="chart-card"><div class="chart-wrap"><canvas id="cTipo"></canvas></div></div>
 </section>
 
-<section class="section-panel table-panel dashboard-section">
+<section class="section-panel table-panel dashboard-section" data-hyp-hide>
 <h3 class="section-title">Órdenes críticas</h3>
 <div class="table-scroll"><table class="data-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Asesor</th><th>Días</th><th>Importe</th><th>Promesa</th></tr></thead><tbody id="tblCriticas"></tbody></table></div>
 </section>
 
-<section class="chart-grid">
+<section class="chart-grid" data-hyp-hide>
 <div class="section-panel table-panel"><h3 class="section-title">Productividad por asesor</h3><div class="table-scroll"><table class="data-table"><thead><tr><th>Asesor</th><th>Órdenes</th><th>Facturadas</th><th>Abiertas</th><th>Importe</th></tr></thead><tbody id="tblAsesor"></tbody></table></div></div>
 </section>
 
-<section class="section-panel dashboard-section">
+<section class="section-panel dashboard-section" data-hyp-hide>
 <h3 class="section-title">Resumen directivo</h3>
 <p class="section-subtitle">Indicadores clave del periodo · vista gerencial</p>
 <div class="kpi-grid kpi-grid--eeff" id="kpiExecutive"></div>
@@ -508,6 +479,6 @@ Pendientes
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=4"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/post-sales.js?v=56"></script>
+<script src="/js/post-sales.js?v=60"></script>
 </body>
 </html>

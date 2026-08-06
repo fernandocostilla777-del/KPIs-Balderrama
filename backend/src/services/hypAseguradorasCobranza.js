@@ -1,13 +1,13 @@
 /**
- * Cobranza HyP · órdenes facturadas de aseguradoras.
- * Body 31 = folio V* · Matriz = folio A*
- * Pago = aplicaciones CXC (PagosCajaDet / PAGANT) sobre la factura de taller.
+ * Cobranza HyP · aseguradoras (V/A) e internas / garantías (J/H/Ó).
+ * Factura taller ADE_VTAFI S* · pago = CXC (PagosCajaDet / PAGANT).
  */
 const { query } = require('../db');
 const { firstLetter, TIPO_POR_LETRA } = require('./postSalesOrderTypes');
 
 const LETRAS_ASEG = new Set(['V', 'A']);
-const EPS = 0.5; // tolerancia de centavos
+const LETRAS_GARANTIAS = new Set(['J', 'H', 'Ó']);
+const EPS = 0.5;
 
 function mapTipoPorLetra(orden) {
   const letra = firstLetter(orden);
@@ -33,15 +33,33 @@ function clean(v) {
   return s || null;
 }
 
-function segmentoFromLetra(letra) {
+function sqlInLetters(letras) {
+  return [...letras].map((L) => `'${String(L).replace(/'/g, "''")}'`).join(', ');
+}
+
+function segmentoAseg(letra) {
   if (letra === 'V') return 'body31';
   if (letra === 'A') return 'matriz';
   return 'otro';
 }
 
-function segmentoLabel(seg) {
+function segmentoAsegLabel(seg) {
   if (seg === 'body31') return 'Aseguradora Body 31';
   if (seg === 'matriz') return 'Aseguradoras (matriz)';
+  return 'Otro';
+}
+
+function segmentoGarantia(letra) {
+  if (letra === 'J') return 'internaHyp';
+  if (letra === 'H') return 'seminuevosHyp';
+  if (letra === 'Ó') return 'nuevosHyp';
+  return 'otro';
+}
+
+function segmentoGarantiaLabel(seg) {
+  if (seg === 'internaHyp') return 'Interna HYP (J*)';
+  if (seg === 'seminuevosHyp') return 'Interna seminuevos HYP (H*)';
+  if (seg === 'nuevosHyp') return 'Interna nuevos HYP (Ó*)';
   return 'Otro';
 }
 
@@ -75,12 +93,14 @@ function classifyPago({ importeFacturado, totalAplicado, tieneMovimientos }) {
 }
 
 /**
- * Carga facturas de taller (ADE_VTAFI S*) de órdenes V/A facturadas (I) en el periodo (por cierre).
- * Una fila por factura CFDI; la orden va en VTE_REFERENCIA1.
+ * Facturas de taller S* de órdenes facturadas (I) en el periodo (por cierre).
+ * @param {{ fechaInicio: string, fechaFin: string, letras: Set<string>|string[], modo: 'aseguradoras'|'garantias' }} opts
  */
-async function loadFacturadasAseguradoras({ fechaInicio, fechaFin }) {
+async function loadFacturadasHyP({ fechaInicio, fechaFin, letras, modo }) {
   const fi = parseDateInput(fechaInicio);
   const ff = parseDateInput(fechaFin);
+  const letterSet = letras instanceof Set ? letras : new Set(letras || []);
+  const letterList = sqlInLetters(letterSet);
 
   const rows = await query(`
     SELECT
@@ -111,7 +131,7 @@ async function loadFacturadasAseguradoras({ fechaInicio, fechaFin }) {
     LEFT JOIN PNC_PARAMETR sg ON sg.PAR_TIPOPARA = 'SG' AND sg.PAR_IDENPARA = o.ORE_IDASEGURADORA
     LEFT JOIN PNC_PARAMETR asr ON asr.PAR_TIPOPARA = 'AS' AND asr.PAR_IDENPARA = o.ORE_IDASESOR
     WHERE o.ORE_STATUS = 'I'
-      AND LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) IN ('V', 'A')
+      AND LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) IN (${letterList})
       AND o.ORE_FECHACIE IS NOT NULL
       AND LTRIM(RTRIM(o.ORE_FECHACIE)) <> ''
       AND CONVERT(DATE, o.ORE_FECHACIE, 103) BETWEEN @fi AND @ff
@@ -121,13 +141,15 @@ async function loadFacturadasAseguradoras({ fechaInicio, fechaFin }) {
   return (rows || []).map((row) => {
     const { letra, tipo } = mapTipoPorLetra(row.orden);
     const importeFacturado = round2(Number(row.importeFac || 0));
-    const segmento = segmentoFromLetra(letra);
+    const isGarantia = modo === 'garantias';
+    const segmento = isGarantia ? segmentoGarantia(letra) : segmentoAseg(letra);
+    const segmentoLabel = isGarantia ? segmentoGarantiaLabel(segmento) : segmentoAsegLabel(segmento);
     return {
       orden: clean(row.orden),
       letraOrden: letra,
       tipoPorLetra: tipo,
       segmento,
-      segmentoLabel: segmentoLabel(segmento),
+      segmentoLabel,
       status: 'I',
       statusLabel: 'Facturada',
       factura: clean(row.factura),
@@ -142,16 +164,14 @@ async function loadFacturadasAseguradoras({ fechaInicio, fechaFin }) {
       serie: clean(row.serie),
       siniestro: clean(row.siniestro),
       poliza: clean(row.poliza),
-      aseguradora: clean(row.aseguradora) || 'Sin aseguradora',
+      aseguradora: clean(row.aseguradora) || (isGarantia ? null : 'Sin aseguradora'),
+      cliente: clean(row.nombre) || 'Sin cliente',
       asesor: clean(row.asesor) || 'Sin asesor',
       importeFacturado,
     };
-  }).filter((r) => LETRAS_ASEG.has(r.letraOrden) && r.factura);
+  }).filter((r) => letterSet.has(r.letraOrden) && r.factura);
 }
 
-/**
- * Agrega pagos CXC por lista de facturas (PagosCajaDet + PAGANT).
- */
 async function loadPagosPorFacturas(facturas = []) {
   const ids = [...new Set(
     (facturas || []).map((f) => String(f || '').trim()).filter(Boolean)
@@ -159,7 +179,6 @@ async function loadPagosPorFacturas(facturas = []) {
   const map = new Map();
   if (!ids.length) return map;
 
-  // Chunk para IN clause
   const chunkSize = 80;
   for (let i = 0; i < ids.length; i += chunkSize) {
     const chunk = ids.slice(i, i + chunkSize);
@@ -170,7 +189,6 @@ async function loadPagosPorFacturas(facturas = []) {
       return `@${key}`;
     }).join(',');
 
-    // PagosCajaDet: importe aplicado por factura
     try {
       const caja = await query(`
         SELECT
@@ -199,7 +217,6 @@ async function loadPagosPorFacturas(facturas = []) {
       console.warn('[hyp-cobranza] CXC_PagosCajaDet:', err.message);
     }
 
-    // PAGANT: respaldo si no hubo PagosCajaDet
     try {
       const pagant = await query(`
         SELECT
@@ -216,7 +233,6 @@ async function loadPagosPorFacturas(facturas = []) {
         const f = clean(row.factura);
         if (!f) continue;
         const prev = map.get(f) || { totalAplicado: 0, movimientos: 0, saldoInsoluto: null, foliosPago: [] };
-        // Solo sumar PAGANT si aún no hay pagos de caja (evitar doble conteo)
         if (prev.movimientos === 0) {
           prev.totalAplicado = round2(Number(row.totalPagado || 0));
           prev.movimientos = Number(row.movs || 0);
@@ -245,7 +261,6 @@ function enrichWithPago(order, pagoMap) {
     tieneMovimientos,
   });
 
-  // Si CXC trae saldo insoluto explícito y hay movimiento, preferirlo cuando sea coherente
   let saldo = cls.saldo;
   let pagoEstado = cls.pagoEstado;
   let pagoEstadoLabel = cls.pagoEstadoLabel;
@@ -274,9 +289,24 @@ function enrichWithPago(order, pagoMap) {
   };
 }
 
-function summarize(rows = []) {
-  const body31 = rows.filter((r) => r.segmento === 'body31');
-  const matriz = rows.filter((r) => r.segmento === 'matriz');
+function summarizeBySegment(rows, segmentKeys) {
+  const result = {};
+  for (const key of segmentKeys) {
+    const list = rows.filter((r) => r.segmento === key);
+    result[key] = {
+      ordenes: list.length,
+      importe: round2(list.reduce((s, r) => s + Number(r.importeFacturado || 0), 0)),
+      pendientes: list.filter((r) => r.pagoEstado === 'pendiente').length,
+      pagadas: list.filter((r) => r.pagoEstado === 'pagado').length,
+      saldoPendiente: round2(
+        list.filter((r) => r.pagoEstado !== 'pagado').reduce((s, r) => s + Number(r.saldo || 0), 0)
+      ),
+    };
+  }
+  return result;
+}
+
+function summarizePago(rows = []) {
   const pendientes = rows.filter((r) => r.pagoEstado === 'pendiente');
   const parciales = rows.filter((r) => r.pagoEstado === 'parcial');
   const pagados = rows.filter((r) => r.pagoEstado === 'pagado');
@@ -289,20 +319,6 @@ function summarize(rows = []) {
   return {
     totalFacturadas: rows.length,
     importeFacturado: sumImp(rows),
-    body31: {
-      ordenes: body31.length,
-      importe: sumImp(body31),
-      pendientes: body31.filter((r) => r.pagoEstado === 'pendiente').length,
-      pagadas: body31.filter((r) => r.pagoEstado === 'pagado').length,
-      saldoPendiente: sumSaldo(body31.filter((r) => r.pagoEstado !== 'pagado')),
-    },
-    matriz: {
-      ordenes: matriz.length,
-      importe: sumImp(matriz),
-      pendientes: matriz.filter((r) => r.pagoEstado === 'pendiente').length,
-      pagadas: matriz.filter((r) => r.pagoEstado === 'pagado').length,
-      saldoPendiente: sumSaldo(matriz.filter((r) => r.pagoEstado !== 'pagado')),
-    },
     pendientePago: {
       ordenes: pendientes.length,
       importe: sumImp(pendientes),
@@ -326,33 +342,91 @@ function summarize(rows = []) {
   };
 }
 
-async function getHypAseguradorasCobranza({ fechaInicio, fechaFin } = {}) {
+function summarizeAseguradoras(rows = []) {
+  const seg = summarizeBySegment(rows, ['body31', 'matriz']);
+  return {
+    ...summarizePago(rows),
+    body31: seg.body31,
+    matriz: seg.matriz,
+  };
+}
+
+function summarizeGarantias(rows = []) {
+  const seg = summarizeBySegment(rows, ['internaHyp', 'seminuevosHyp', 'nuevosHyp']);
+  return {
+    ...summarizePago(rows),
+    internaHyp: seg.internaHyp,
+    seminuevosHyp: seg.seminuevosHyp,
+    nuevosHyp: seg.nuevosHyp,
+  };
+}
+
+async function buildCobranzaPayload({ fechaInicio, fechaFin, letras, modo, criterio }) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
 
-  const orders = await loadFacturadasAseguradoras({ fechaInicio, fechaFin });
+  const orders = await loadFacturadasHyP({ fechaInicio, fechaFin, letras, modo });
   const pagoMap = await loadPagosPorFacturas(orders.map((o) => o.factura));
   const registros = orders.map((o) => enrichWithPago(o, pagoMap));
-  const summary = summarize(registros);
+  const summary = modo === 'garantias'
+    ? summarizeGarantias(registros)
+    : summarizeAseguradoras(registros);
 
   return {
     periodo: { fechaInicio, fechaFin },
-    criterio: {
-      body31: 'Folio V* · Aseguradora Body 31 (sucursal 31)',
-      matriz: 'Folio A* · Aseguradoras (sucursal matriz)',
-      facturada: 'ORE_STATUS = I + factura taller ADE_VTAFI (S*)',
-      periodoPor: 'Fecha de cierre (ORE_FECHACIE)',
-      pago: 'CXC_PagosCajaDet / CXC_PAGANT sobre VTE_DOCTO (SRV*)',
-      enlace: 'ADE_VTAFI.VTE_REFERENCIA1 = ORE_IDORDEN',
-    },
+    modo,
+    criterio,
     summary,
     registros,
   };
 }
 
+async function getHypAseguradorasCobranza({ fechaInicio, fechaFin } = {}) {
+  return buildCobranzaPayload({
+    fechaInicio,
+    fechaFin,
+    letras: LETRAS_ASEG,
+    modo: 'aseguradoras',
+    criterio: {
+      body31: 'Folio V* · Aseguradora Body 31 (sucursal 31)',
+      matriz: 'Folio A* · Aseguradoras (sucursal matriz)',
+      facturada: 'ORE_STATUS = I + factura taller ADE_VTAFI (S*)',
+      periodoPor: 'Fecha de cierre (ORE_FECHACIE)',
+      pago: 'CXC_PagosCajaDet / CXC_PAGANT sobre VTE_DOCTO',
+      enlace: 'ADE_VTAFI.VTE_REFERENCIA1 = ORE_IDORDEN',
+    },
+  });
+}
+
+async function getHypGarantiasCobranza({ fechaInicio, fechaFin } = {}) {
+  return buildCobranzaPayload({
+    fechaInicio,
+    fechaFin,
+    letras: LETRAS_GARANTIAS,
+    modo: 'garantias',
+    criterio: {
+      internaHyp: 'Folio J* · Interna HYP',
+      seminuevosHyp: 'Folio H* · Interna seminuevos HYP',
+      nuevosHyp: 'Folio Ó* · Interna nuevos HYP',
+      facturada: 'ORE_STATUS = I + factura taller ADE_VTAFI (S*)',
+      periodoPor: 'Fecha de cierre (ORE_FECHACIE)',
+      pago: 'CXC_PagosCajaDet / CXC_PAGANT sobre VTE_DOCTO',
+      enlace: 'ADE_VTAFI.VTE_REFERENCIA1 = ORE_IDORDEN',
+    },
+  });
+}
+
+/** Compat: alias antiguo */
+function segmentoFromLetra(letra) {
+  return segmentoAseg(letra);
+}
+
 module.exports = {
   getHypAseguradorasCobranza,
+  getHypGarantiasCobranza,
   classifyPago,
   segmentoFromLetra,
+  LETRAS_ASEG,
+  LETRAS_GARANTIAS,
 };

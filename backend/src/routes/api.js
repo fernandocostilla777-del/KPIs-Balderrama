@@ -6,7 +6,7 @@ const { getInventory, getIntercambiosHistorico } = require('../services/inventor
 const { getInventoryPostventa } = require('../services/inventoryPostventaService');
 const { getInventorySeminuevos } = require('../services/inventorySeminuevosService');
 const { getPostSales, getPostSalesOrderDetail } = require('../services/postSalesService');
-const { getHypAseguradorasCobranza } = require('../services/hypAseguradorasCobranza');
+const { getHypAseguradorasCobranza, getHypGarantiasCobranza } = require('../services/hypAseguradorasCobranza');
 const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/refaccionesPedidosService');
 const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
@@ -341,6 +341,16 @@ router.get('/post-sales/hyp/aseguradoras-cobranza', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
     res.json(await getHypAseguradorasCobranza({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/post-sales/hyp/garantias-cobranza', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    res.json(await getHypGarantiasCobranza({ fechaInicio, fechaFin }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

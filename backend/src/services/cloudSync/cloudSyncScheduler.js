@@ -45,7 +45,28 @@ function msUntilNextMonthlyRun(now = new Date()) {
   if (target <= now) {
     target.setMonth(target.getMonth() + 1);
   }
-  return target.getTime() - now.getTime();
+  return Math.max(0, target.getTime() - now.getTime());
+}
+
+/** setTimeout en Node/V8 solo acepta hasta ~24.8 días (int32). */
+const MAX_TIMER_MS = 12 * 60 * 60 * 1000; // reprogramar cada 12 h como máximo
+
+function scheduleMonthly() {
+  if (state.monthlyTimer) clearTimeout(state.monthlyTimer);
+  const remaining = msUntilNextMonthlyRun();
+  const delay = Math.min(remaining, MAX_TIMER_MS);
+  state.monthlyTimer = setTimeout(() => {
+    const left = msUntilNextMonthlyRun();
+    if (left <= 60_000) {
+      runSync({ type: 'monthly', reason: 'monthly' })
+        .catch(() => {})
+        .finally(() => scheduleMonthly());
+    } else {
+      scheduleMonthly();
+    }
+  }, Math.max(1_000, delay));
+  if (typeof state.monthlyTimer.unref === 'function') state.monthlyTimer.unref();
+  state.nextMonthlyAt = new Date(Date.now() + remaining).toISOString();
 }
 
 function getStatus() {
@@ -182,18 +203,6 @@ function scheduleIncremental() {
   }, intervalMs);
   if (typeof state.incrementalTimer.unref === 'function') state.incrementalTimer.unref();
   state.nextIncrementalAt = new Date(Date.now() + intervalMs).toISOString();
-}
-
-function scheduleMonthly() {
-  if (state.monthlyTimer) clearTimeout(state.monthlyTimer);
-  const delay = msUntilNextMonthlyRun();
-  state.monthlyTimer = setTimeout(() => {
-    runSync({ type: 'monthly', reason: 'monthly' })
-      .catch(() => {})
-      .finally(() => scheduleMonthly());
-  }, delay);
-  if (typeof state.monthlyTimer.unref === 'function') state.monthlyTimer.unref();
-  state.nextMonthlyAt = new Date(Date.now() + delay).toISOString();
 }
 
 function startScheduler() {

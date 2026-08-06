@@ -34,6 +34,9 @@
     fechaFin: null,
     search: '',
     cacheKey: null,
+    mixReady: false,
+    loadSeq: 0,
+    desiredKey: null,
     inflightKey: null,
     inflightPromise: null,
   };
@@ -41,6 +44,7 @@
   const els = {};
   let mixDrawerUi = null;
   let facturaDetailUi = null;
+  let contratoDetailUi = null;
 
   function money(n) {
     if (n == null || !Number.isFinite(Number(n))) return '—';
@@ -413,6 +417,12 @@
           return true;
         });
       }
+      case 'unidadesNuevos':
+        return list.filter((c) => volumeTipoOf(c) === 'nuevo');
+      case 'unidadesSeminuevos':
+        return list.filter((c) => volumeTipoOf(c) === 'seminuevo');
+      case 'unidadesFlotilla':
+        return list.filter((c) => volumeTipoOf(c) === 'flotilla');
       case 'conPva':
         return list.filter((c) => Number(c.cantidadPvas || 0) > 0);
       case 'pvaGap':
@@ -481,6 +491,18 @@
       },
       contratos: { title: 'Contratos colocados', hint: 'Contratos F&I en el periodo (CRM)' },
       unidades: { title: 'Unidades financiadas', hint: 'VIN distintos con contrato' },
+      unidadesNuevos: {
+        title: 'Nuevos',
+        hint: 'Contratos de unidades nuevas (sin flotillas)',
+      },
+      unidadesSeminuevos: {
+        title: 'Seminuevos',
+        hint: 'Contratos de unidades seminuevas',
+      },
+      unidadesFlotilla: {
+        title: 'Flotillas',
+        hint: 'Contratos de flotilla (restadas de Nuevos)',
+      },
       montoTotal: { title: 'Monto a financiar', hint: 'Suma de monto_financiar' },
       montoPromedio: { title: 'Monto promedio', hint: 'Promedio por contrato' },
       enganche: { title: 'Enganche promedio', hint: 'Promedio de enganche monetario' },
@@ -518,6 +540,9 @@
       onstarTech: 'cell_tower',
       contratos: 'description',
       unidades: 'directions_car',
+      unidadesNuevos: 'directions_car',
+      unidadesSeminuevos: 'airport_shuttle',
+      unidadesFlotilla: 'local_shipping',
       montoTotal: 'payments',
       montoPromedio: 'payments',
       enganche: 'account_balance_wallet',
@@ -569,7 +594,7 @@
     const isOnstar = String(title || '').toLowerCase().includes('onstar') || state.openKpi === 'onstarTech';
     const headers = isOnstar
       ? ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'OnStar', 'Plazo OnStar', 'Monto OnStar', 'GerenteFI']
-      : ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'Tipo', 'Plan', 'Plazo', 'Enganche', 'Monto', 'PVAs'];
+      : ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'Factura', 'Tipo', 'Especial', 'Plan', 'Plazo', 'Enganche', 'Monto', 'PVAs'];
     const lines = [headers.join(',')];
     for (const r of rows || []) {
       const vals = isOnstar
@@ -578,8 +603,8 @@
           r.hasOnstarContrato ? 'SI' : 'NO', r.plazoOnstar, r.onstarMonto, r.gerenteFi || r.fi,
         ]
         : [
-          r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato,
-          r.tipoCompra, r.plan, r.plazoMeses, r.engancheMonto, r.montoFinanciar,
+          r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura,
+          r.tipoCompra, r.especial, r.plan, r.plazoMeses, r.engancheMonto, r.montoFinanciar,
           (r.pvas || []).map((p) => p.label).join(' | '),
         ];
       lines.push(vals.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
@@ -995,7 +1020,7 @@
         ? sourceRows
         : sourceRows.filter((r) => {
           const fields = crmMode
-            ? [r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.plan, r.tipoCompra, r.plazoMeses,
+            ? [r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura, r.plan, r.tipoCompra, r.especial, r.plazoMeses,
               r.estatus, r.financiera, r.respuestaFinanciera, r.biometrico, r.idCrm, r.noSolicitud,
               r.gerenteFi, r.fi, r.afi, r.plazoOnstar, r.onstarMonto,
               r.hasOnstarContrato ? 'con onstar' : 'sin onstar',
@@ -1051,7 +1076,7 @@
             <h5>${isSolicitudes ? 'Detalle solicitudes' : (isOnstar ? 'Entregas SOFIA · tech OnStar' : 'Detalle F&amp;I')}</h5>
             <span>${filtered.length.toLocaleString('es-MX')}</span>
           </div>
-          ${filtered.map((r) => {
+          ${filtered.map((r, idx) => {
             if (r._kind === 'solicitud' || isSolicitudes) {
               const bioRaw = String(r.biometrico || '').trim().toUpperCase();
               const bioLabel = bioRaw === 'SI' || bioRaw === 'SÍ' || bioRaw === 'YES'
@@ -1097,9 +1122,11 @@
 
             const pva = (r.pvas || []).map((p) => p.label).join(', ') || 'Sin PVA';
             const isOnstar = isOnstarKpi(currentMeta.kpi) || r._kind === 'onstarTech';
+            const tipoLabel = String(r.tipoCompra || '').trim() || null;
+            const especialLabel = String(r.especial || '').trim() || null;
             const tag = isOnstar
               ? (r.hasOnstarContrato ? 'Con OnStar' : 'Sin OnStar')
-              : (r.tipoCompra || r.plan || 'Contrato');
+              : (tipoLabel || especialLabel || r.plan || 'Contrato');
             const onstarFacts = isOnstar
               ? `<div class="ops-orders-drawer__facts">
                   <span class="fi-list-chip ${r.hasOnstarContrato ? 'fi-list-chip--ok' : 'fi-list-chip--warn'}">${r.hasOnstarContrato ? 'Contrato OnStar' : 'Sin contrato'}</span>
@@ -1111,10 +1138,13 @@
                   <span>${r.plazoMeses != null ? `${num(r.plazoMeses)} mes` : '—'}</span>
                   <span>${escapeHtml(dash(r.gerenteFi || r.fi))}</span>
                 </div>`;
+            const contratoNo = dash(r.contrato || r.noContrato);
+            const facturaNo = dash(r.factura);
+            const title = r.contrato || r.noContrato || r.vin || r.cliente || 'Contrato';
             return `
-              <div class="ops-orders-drawer__item" style="cursor:default">
+              <button type="button" class="ops-orders-drawer__item" data-fi-contrato-idx="${idx}" title="Ver detalle del contrato">
                 <div class="ops-orders-drawer__item-head">
-                  <strong>${escapeHtml(dash(r.vin))}</strong>
+                  <strong>${escapeHtml(dash(title))}</strong>
                   <span class="ops-orders-drawer__tag">${escapeHtml(dash(tag))}</span>
                 </div>
                 <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.cliente))} · ${escapeHtml(dash(r.asesor))}</p>
@@ -1126,8 +1156,23 @@
                     : `<span>${r.montoFinanciar != null ? money(r.montoFinanciar) : '—'}</span>
                        <span>${r.engancheMonto != null ? `Eng. ${money(r.engancheMonto)}` : '—'}</span>`}
                 </div>
-                <p class="ops-orders-drawer__sub">${escapeHtml(isOnstar ? (r.contrato || pva) : pva)}</p>
-              </div>`;
+                ${isOnstar ? '' : `
+                <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+                  <span class="mono">VIN ${escapeHtml(dash(r.vin))}</span>
+                  <span>Contrato ${escapeHtml(contratoNo)}</span>
+                  <span>Factura ${escapeHtml(facturaNo)}</span>
+                </div>
+                <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+                  <span>${escapeHtml(tipoLabel || 'Sin tipo')}</span>
+                  <span>${escapeHtml(especialLabel || 'Sin especial')}</span>
+                  <span>${escapeHtml(dash(r.plan))}</span>
+                </div>`}
+                <p class="ops-orders-drawer__sub">${escapeHtml(isOnstar ? (r.contrato || pva) : pva)} · Clic para ver detalle</p>
+                <span class="ops-orders-drawer__open-hint">
+                  <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+                  Abrir detalle
+                </span>
+              </button>`;
           }).join('')}`;
         return;
       }
@@ -1415,13 +1460,25 @@
       );
     });
     bodyEl.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-fi-factura]');
-      if (!btn || !bodyEl.contains(btn)) return;
-      const docto = btn.getAttribute('data-fi-factura');
-      if (docto) openFacturaDetail(docto);
+      const facturaBtn = e.target.closest('[data-fi-factura]');
+      if (facturaBtn && bodyEl.contains(facturaBtn)) {
+        const docto = facturaBtn.getAttribute('data-fi-factura');
+        if (docto) openFacturaDetail(docto);
+        return;
+      }
+      const contratoBtn = e.target.closest('[data-fi-contrato-idx]');
+      if (contratoBtn && bodyEl.contains(contratoBtn)) {
+        const idx = Number(contratoBtn.getAttribute('data-fi-contrato-idx'));
+        const row = Number.isFinite(idx) ? lastExportRows[idx] : null;
+        if (row) openContratoDetail(row);
+      }
     });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (contratoDetailUi?.isOpen?.()) {
+        closeContratoDetail();
+        return;
+      }
       if (facturaDetailUi?.isOpen?.()) {
         closeFacturaDetail();
         return;
@@ -1815,9 +1872,225 @@
     if (facturaDetailUi) facturaDetailUi.close();
   }
 
+  function openContratoDetail(row) {
+    ensureContratoDetailPanel().open(row);
+  }
+
+  function closeContratoDetail() {
+    if (contratoDetailUi) contratoDetailUi.close();
+  }
+
+  function ensureContratoDetailPanel() {
+    if (contratoDetailUi) return contratoDetailUi;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'ops-order-detail-backdrop';
+    backdrop.id = 'fiContratoDetailBackdrop';
+    backdrop.setAttribute('aria-hidden', 'true');
+
+    const panel = document.createElement('div');
+    panel.className = 'ops-order-detail';
+    panel.id = 'fiContratoDetail';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-hidden', 'true');
+    panel.setAttribute('aria-label', 'Detalle de contrato');
+    panel.innerHTML = `
+      <div class="ops-order-detail__header">
+        <div class="ops-order-detail__title-wrap">
+          <span class="material-symbols-outlined ops-order-detail__logo">description</span>
+          <div>
+            <h2 class="ops-order-detail__title" data-cd-title>Contrato</h2>
+            <span class="ops-order-detail__status" data-cd-status></span>
+          </div>
+        </div>
+        <div class="ops-order-detail__actions">
+          <button type="button" class="ops-order-detail__icon-btn" data-cd-expand title="Expandir" aria-label="Expandir">
+            <span class="material-symbols-outlined" data-cd-expand-icon>open_in_full</span>
+          </button>
+          <button type="button" class="ops-order-detail__icon-btn" data-cd-close title="Cerrar" aria-label="Cerrar">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </div>
+      <div class="ops-order-detail__body custom-scrollbar" data-cd-body></div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+
+    const titleEl = panel.querySelector('[data-cd-title]');
+    const statusEl = panel.querySelector('[data-cd-status]');
+    const bodyEl = panel.querySelector('[data-cd-body]');
+    const expandBtn = panel.querySelector('[data-cd-expand]');
+    const expandIcon = panel.querySelector('[data-cd-expand-icon]');
+    let expanded = false;
+
+    function setExpanded(next) {
+      expanded = Boolean(next);
+      panel.classList.toggle('ops-order-detail--expanded', expanded);
+      if (expandIcon) expandIcon.textContent = expanded ? 'close_fullscreen' : 'open_in_full';
+      if (expandBtn) expandBtn.title = expanded ? 'Contraer' : 'Expandir';
+    }
+
+    function isOpen() {
+      return panel.classList.contains('ops-order-detail--open');
+    }
+
+    function close() {
+      panel.classList.remove('ops-order-detail--open');
+      panel.setAttribute('aria-hidden', 'true');
+      backdrop.classList.remove('ops-order-detail-backdrop--visible');
+      backdrop.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('ops-order-detail-open');
+      setExpanded(false);
+    }
+
+    function row(label, value) {
+      return `
+        <div class="ops-orders-drawer__row">
+          <span class="lbl">${escapeHtml(label)}</span>
+          <span class="val">${escapeHtml(value == null || value === '' ? '—' : String(value))}</span>
+        </div>`;
+    }
+
+    function rowMoney(label, value) {
+      const v = value != null && Number.isFinite(Number(value)) ? money(value) : '—';
+      return `
+        <div class="ops-orders-drawer__row">
+          <span class="lbl">${escapeHtml(label)}</span>
+          <span class="val">${escapeHtml(v)}</span>
+        </div>`;
+    }
+
+    function open(record) {
+      const r = record || {};
+      const title = r.contrato || r.noContrato || r.vin || 'Contrato';
+      titleEl.textContent = title;
+      statusEl.textContent = [r.tipoCompra, r.especial].filter(Boolean).join(' · ') || 'Detalle F&I';
+
+      const pvas = (r.pvas || []).length
+        ? (r.pvas || []).map((p) => `
+            <div class="ops-orders-drawer__row">
+              <span class="lbl">${escapeHtml(p.label || p.key)}</span>
+              <span class="val">${p.monto != null ? escapeHtml(money(p.monto)) : '—'}</span>
+            </div>`).join('')
+        : '<p class="ops-order-detail__hint">Sin productos PVA en este contrato.</p>';
+
+      bodyEl.innerHTML = `
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>Identificación</h3>
+          </div>
+          ${row('No. contrato', r.contrato || r.noContrato)}
+          ${row('Factura', r.factura)}
+          ${row('VIN', r.vin)}
+          ${row('Fecha', r.fecha)}
+          ${row('Modalidad', r.modalidadLabel || r.modalidad)}
+        </section>
+
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>Cliente y equipo</h3>
+          </div>
+          ${row('Cliente', r.cliente)}
+          ${row('Asesor', r.asesor)}
+          ${row('Gerente F&I', r.gerenteFi || r.fi)}
+          ${row('AFI', r.afi)}
+        </section>
+
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>Unidad y plan</h3>
+          </div>
+          ${row('Unidad', r.unidad)}
+          ${row('Tipo compra', r.tipoCompra)}
+          ${row('Especial', r.especial)}
+          ${row('Plan', r.plan)}
+          ${row('Plan 2', r.plan2)}
+          ${row('Plazo', r.plazoMeses != null ? `${r.plazoMeses} meses` : null)}
+        </section>
+
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>Montos</h3>
+          </div>
+          ${rowMoney('Monto a financiar', r.montoFinanciar)}
+          ${rowMoney('Enganche', r.engancheMonto)}
+          ${row('Enganche %', r.enganchePct != null ? `${r.enganchePct}%` : null)}
+          ${rowMoney('Comisión', r.comision)}
+          ${rowMoney('MAF comisión', r.mafComision)}
+        </section>
+
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>OnStar</h3>
+          </div>
+          ${row('Con contrato OnStar', r.hasOnstarContrato ? 'Sí' : 'No')}
+          ${row('Plazo OnStar', r.plazoOnstar)}
+          ${rowMoney('Monto OnStar', r.onstarMonto)}
+        </section>
+
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>Productos PVA</h3>
+            <span>${num((r.pvas || []).length)}</span>
+          </div>
+          ${pvas}
+          ${rowMoney('Total PVAs', r.montoPvas)}
+        </section>
+
+        <section class="ops-order-detail__section">
+          <div class="ops-order-detail__section-head">
+            <h3>Otros</h3>
+          </div>
+          ${row('Seguro gratis', r.seguroGratis)}
+          ${row('Robo parcial', r.roboParcial)}
+        </section>
+      `;
+
+      setExpanded(true);
+      panel.classList.add('ops-order-detail--open');
+      panel.setAttribute('aria-hidden', 'false');
+      backdrop.classList.add('ops-order-detail-backdrop--visible');
+      backdrop.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('ops-order-detail-open');
+    }
+
+    backdrop.addEventListener('click', close);
+    panel.querySelector('[data-cd-close]')?.addEventListener('click', close);
+    expandBtn?.addEventListener('click', () => setExpanded(!expanded));
+
+    contratoDetailUi = { open, close, isOpen, panel };
+    return contratoDetailUi;
+  }
+
   function closeFiMixDrawer() {
+    closeContratoDetail();
     closeFacturaDetail();
     if (mixDrawerUi) mixDrawerUi.close();
+  }
+
+  function volumeTipoOf(c) {
+    const an = String(c?.tipoCompra || '').trim().toUpperCase();
+    const ao = String(c?.especial || '').toUpperCase();
+    if (ao.includes('FLOTILLA')) return 'flotilla';
+    if (an === 'SEMINUEVO') return 'seminuevo';
+    if (an === 'NUEVO') return 'nuevo';
+    return 'otro';
+  }
+
+  function volumeByTipoCompra(contracts = []) {
+    let nuevos = 0;
+    let seminuevos = 0;
+    let flotillas = 0;
+    for (const c of contracts || []) {
+      const tipo = volumeTipoOf(c);
+      if (tipo === 'flotilla') flotillas += 1;
+      else if (tipo === 'seminuevo') seminuevos += 1;
+      else if (tipo === 'nuevo') nuevos += 1;
+    }
+    return { nuevos, seminuevos, flotillas };
   }
 
   function renderKpis() {
@@ -1828,6 +2101,11 @@
     const sol = s.solicitudes || {};
     const pva = Object.fromEntries((s.porTipoPva || []).map((t) => [t.key, t]));
     const mixBlock = mixKpiGroupHtml(mix);
+    // Calcular en cliente (AN/AO) por si el API aún no trae los campos nuevos.
+    const vol = volumeByTipoCompra(state.data?.contratos || []);
+    const nNuevos = Number.isFinite(Number(s.unidadesNuevos)) ? Number(s.unidadesNuevos) : vol.nuevos;
+    const nSemi = Number.isFinite(Number(s.unidadesSeminuevos)) ? Number(s.unidadesSeminuevos) : vol.seminuevos;
+    const nFlot = Number.isFinite(Number(s.unidadesFlotilla)) ? Number(s.unidadesFlotilla) : vol.flotillas;
 
     if (!state.data?.fuente?.crm) {
       root.innerHTML = [
@@ -1850,7 +2128,27 @@
       ]),
       kpiGroup('Volumen F&I', [
         kpiCard('Contratos', num(s.contratos), 'colocados en el periodo', 'blue', 'contratos'),
-        kpiCard('Unidades', num(s.unidades), 'VIN distintos', 'green', 'unidades'),
+        kpiCard(
+          'Nuevos',
+          num(nNuevos),
+          `de ${num(s.contratos)} contratos`,
+          'green',
+          'unidadesNuevos'
+        ),
+        kpiCard(
+          'Seminuevos',
+          num(nSemi),
+          'en el periodo',
+          'amber',
+          'unidadesSeminuevos'
+        ),
+        kpiCard(
+          'Flotillas',
+          num(nFlot),
+          'restadas de Nuevos',
+          'slate',
+          'unidadesFlotilla'
+        ),
         kpiCard('Monto a financiar', moneyKpi(s.montoFinanciarTotal), `prom. ${moneyKpi(s.montoFinanciarPromedio)}`, 'violet', 'montoTotal'),
         kpiCard('Enganche prom.', moneyKpi(s.enganchePromedio), 'por contrato', 'amber', 'enganche'),
         kpiCard('Plazo prom.', s.plazoPromedio != null ? `${s.plazoPromedio} mes` : '—', 'meses contratados', 'slate', 'plazo'),
@@ -1981,42 +2279,72 @@
     }
   }
 
+  async function fetchVentasContext(fechaInicio, fechaFin) {
+    const res = await fetch(
+      `/api/ventas?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
+      { credentials: 'same-origin' }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Error ventas (${res.status})`);
+    const regs = (data.registros || []).map((row) => (
+      window.CanalesVenta?.enrichRegistro ? window.CanalesVenta.enrichRegistro(row) : row
+    ));
+    return {
+      registrosVentas: regs,
+      entregasSofia: data.entregasSofia || [],
+      porTipoVentaRetail: data.resumen?.porTipoVentaRetail || null,
+    };
+  }
+
+  function paint() {
+    renderKpis();
+    closeKpiDetail();
+    renderTable(contracts());
+  }
+
   async function load(fechaInicio, fechaFin, _porTipoVentaRetail, registrosVentas, entregasSofia, opts = {}) {
     const force = Boolean(opts.force);
     const key = `${fechaInicio}|${fechaFin}`;
     state.fechaInicio = fechaInicio;
     state.fechaFin = fechaFin;
+    state.desiredKey = key;
+    state.loadSeq = (state.loadSeq || 0) + 1;
+    const seq = state.loadSeq;
+    const isCurrent = () => state.loadSeq === seq && state.desiredKey === key;
 
-    const paint = () => {
-      renderKpis();
-      closeKpiDetail();
-      renderTable(contracts());
-    };
-
-    if (!force && state.cacheKey === key && state.data && !state.data?.fuente?.reason) {
+    if (
+      !force
+      && state.cacheKey === key
+      && state.data
+      && !state.data?.fuente?.reason
+      && state.mixReady
+    ) {
       paint();
       return state.data;
     }
+
+    // Misma clave en curso: reutilizar (evita anular la carga anterior).
     if (!force && state.inflightKey === key && state.inflightPromise) {
-      await state.inflightPromise;
-      paint();
-      return state.data;
+      return state.inflightPromise;
+    }
+
+    // Invalidar caché del periodo anterior para que una respuesta vieja no vuelva a pintar.
+    if (state.cacheKey && state.cacheKey !== key) {
+      state.cacheKey = null;
+      state.mixReady = false;
     }
 
     state.inflightKey = key;
+    if (els.subtitle) {
+      els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin} · Cargando contratos, facturas y SOFIA…`;
+    }
+    if (els.kpiRoot) {
+      els.kpiRoot.innerHTML = '<div class="fi-empty"><p>Cargando contratos, facturas y SOFIA…</p></div>';
+    }
+
     state.inflightPromise = (async () => {
-      const gerenteIndex = state.gerentesCatalog || await loadGerentesCatalog();
-      state.sofiaRegistros = enrichSofiaEntregas(entregasSofia || [], registrosVentas || [], gerenteIndex);
-      state.facturasGmfRegistros = buildFacturasGmf(registrosVentas || [], gerenteIndex, state.sofiaRegistros);
-      state.retailMix = buildSofiaGmfMix(state.sofiaRegistros, state.facturasGmfRegistros);
-      state.search = '';
-      state.mixSearch = '';
-      if (els.searchInput) els.searchInput.value = '';
-      await loadFacturaNotesIndex();
-      updateDisponiblesTimbrarMix();
-      if (els.subtitle) {
-        els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin} · Penetración GMF sobre entregas SOFIA`;
-      }
+      let regs = Array.isArray(registrosVentas) ? registrosVentas : [];
+      let sofia = Array.isArray(entregasSofia) ? entregasSofia : [];
 
       try {
         const res = await fetch(
@@ -2025,6 +2353,10 @@
         );
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `Error financiamiento (${res.status})`);
+
+        // Respuesta obsoleta (el usuario ya cambió el filtro).
+        if (!isCurrent()) return state.data;
+
         state.data = data;
         state.onstarTech = data.onstarTech || null;
         state.pvaTrimestreYtd = data.pvaTrimestreYtd || null;
@@ -2033,10 +2365,73 @@
           || (data.pvaTrimestreYtd?.anio && data.pvaTrimestreYtd?.trimestre
             ? `${data.pvaTrimestreYtd.anio}-T${data.pvaTrimestreYtd.trimestre}`
             : null);
+
+        const gerenteIndex = state.gerentesCatalog || await loadGerentesCatalog();
+        if (!isCurrent()) return state.data;
+
+        // Priorizar bundle del API (mismo periodo). Solo usar regs/sofia del cliente si vienen.
+        if (data.mixReady && data.sofiaGmfMix && !sofia.length && !regs.length) {
+          state.sofiaRegistros = (data.sofiaRegistros || []).map((r) => ({
+            ...r,
+            GERENTE_FI: resolveGerenteFi(r.VENDEDOR, gerenteIndex) || r.GERENTE_FI || 'Sin gerente F&I',
+          }));
+          state.facturasGmfRegistros = (data.facturasGmfRegistros || []).map((r) => ({
+            ...r,
+            GERENTE_FI: resolveGerenteFi(r.VENDEDOR, gerenteIndex) || r.GERENTE_FI || 'Sin gerente F&I',
+          }));
+          state.retailMix = data.sofiaGmfMix;
+          state.mixReady = true;
+        } else if (sofia.length || regs.length) {
+          state.sofiaRegistros = enrichSofiaEntregas(sofia, regs, gerenteIndex);
+          state.facturasGmfRegistros = buildFacturasGmf(regs, gerenteIndex, state.sofiaRegistros);
+          state.retailMix = buildSofiaGmfMix(state.sofiaRegistros, state.facturasGmfRegistros);
+          state.mixReady = true;
+        } else if (data.mixReady && data.sofiaGmfMix) {
+          state.sofiaRegistros = (data.sofiaRegistros || []).map((r) => ({
+            ...r,
+            GERENTE_FI: resolveGerenteFi(r.VENDEDOR, gerenteIndex) || r.GERENTE_FI || 'Sin gerente F&I',
+          }));
+          state.facturasGmfRegistros = (data.facturasGmfRegistros || []).map((r) => ({
+            ...r,
+            GERENTE_FI: resolveGerenteFi(r.VENDEDOR, gerenteIndex) || r.GERENTE_FI || 'Sin gerente F&I',
+          }));
+          state.retailMix = data.sofiaGmfMix;
+          state.mixReady = true;
+        } else {
+          const ctx = await fetchVentasContext(fechaInicio, fechaFin);
+          if (!isCurrent()) return state.data;
+          regs = ctx.registrosVentas;
+          sofia = ctx.entregasSofia;
+          state.sofiaRegistros = enrichSofiaEntregas(sofia, regs, gerenteIndex);
+          state.facturasGmfRegistros = buildFacturasGmf(regs, gerenteIndex, state.sofiaRegistros);
+          state.retailMix = buildSofiaGmfMix(state.sofiaRegistros, state.facturasGmfRegistros);
+          state.mixReady = true;
+        }
+
+        if (!isCurrent()) return state.data;
+
         state.cacheKey = key;
+        updateDisponiblesTimbrarMix();
+        if (els.subtitle) {
+          const mixNote = data.mixError
+            ? ` · Aviso facturas: ${data.mixError}`
+            : ' · Penetración GMF sobre entregas SOFIA';
+          els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin}${mixNote}`;
+        }
+        paint();
+
+        loadFacturaNotesIndex()
+          .then(() => {
+            if (!isCurrent() || state.cacheKey !== key) return;
+            updateDisponiblesTimbrarMix();
+            paint();
+          })
+          .catch(() => {});
       } catch (err) {
+        if (!isCurrent()) return state.data;
         console.error('[Financiamiento]', err);
         state.cacheKey = null;
+        state.mixReady = false;
         state.data = {
           fuente: { crm: false, reason: err.message },
           summary: {},
@@ -2044,12 +2439,13 @@
           solicitudes: { total: 0, aprobadas: 0, muestra: [] },
         };
         state.onstarTech = null;
-        state.pvaTrimestreYtd = null;
-        state.pvaTrimestresOpciones = [];
-        state.pvaQuarterKey = null;
+        state.retailMix = buildSofiaGmfMix([], []);
+        state.sofiaRegistros = [];
+        state.facturasGmfRegistros = [];
         if (els.subtitle) els.subtitle.textContent = err.message;
+        paint();
       } finally {
-        if (state.inflightKey === key) {
+        if (state.inflightKey === key && state.loadSeq === seq) {
           state.inflightKey = null;
           state.inflightPromise = null;
         }
@@ -2057,14 +2453,36 @@
       return state.data;
     })();
 
-    await state.inflightPromise;
-    paint();
-    return state.data;
+    return state.inflightPromise;
   }
 
   function hasCache(fechaInicio, fechaFin) {
-    return state.cacheKey === `${fechaInicio}|${fechaFin}` && state.data && !state.data?.fuente?.reason;
+    if (state.cacheKey !== `${fechaInicio}|${fechaFin}` || !state.data || state.data?.fuente?.reason) {
+      return false;
+    }
+    if (!state.mixReady) return false;
+    return true;
   }
+
+  async function applyVentasMix(registrosVentas, entregasSofia) {
+    const key = `${state.fechaInicio}|${state.fechaFin}`;
+    // No pisar otro periodo ni una carga más nueva.
+    if (state.desiredKey !== key || state.cacheKey !== key) return state.retailMix;
+    const seq = state.loadSeq;
+    const regs = Array.isArray(registrosVentas) ? registrosVentas : [];
+    const sofia = Array.isArray(entregasSofia) ? entregasSofia : [];
+    if (!sofia.length && !regs.length) return state.retailMix;
+    const gerenteIndex = state.gerentesCatalog || await loadGerentesCatalog();
+    if (state.loadSeq !== seq || state.desiredKey !== key) return state.retailMix;
+    state.sofiaRegistros = enrichSofiaEntregas(sofia, regs, gerenteIndex);
+    state.facturasGmfRegistros = buildFacturasGmf(regs, gerenteIndex, state.sofiaRegistros);
+    state.retailMix = buildSofiaGmfMix(state.sofiaRegistros, state.facturasGmfRegistros);
+    state.mixReady = true;
+    updateDisponiblesTimbrarMix();
+    paint();
+    return state.retailMix;
+  }
+
 
   function bindDom() {
     els.root = document.getElementById('secFinanciamiento');
@@ -2094,5 +2512,5 @@
     loadGerentesCatalog().catch(() => {});
   }
 
-  window.FinanciamientoVentas = { init, load, hasCache };
+  window.FinanciamientoVentas = { init, load, hasCache, applyVentasMix };
 })();

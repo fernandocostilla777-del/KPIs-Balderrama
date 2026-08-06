@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   'use strict';
 
   if (window.__salesPageInit) return;
@@ -1056,7 +1056,7 @@
     const ff = periodo.fechaFin || comparativoYtd?.corte || null;
     if (sub) {
       const rango = fi && ff
-        ? `${String(fi).slice(0, 10).split('-').reverse().join('/')} → ${String(ff).slice(0, 10).split('-').reverse().join('/')}`
+        ? `${String(fi).slice(0, 10).split('-').reverse().join('/')} â†’ ${String(ff).slice(0, 10).split('-').reverse().join('/')}`
         : 'YTD';
       sub.textContent = `Mejor versión por utilidad unitaria · ${rango}`;
     }
@@ -2233,7 +2233,7 @@
         const montoVentaUsado = rows.reduce((s, r) => s + (Number(r.montoVentaUsado) || 0), 0);
         const fi = els.fechaInicio?.value || '';
         const ff = els.fechaFin?.value || '';
-        const periodoLabel = fi && ff ? `${fi} → ${ff}` : 'Periodo seleccionado';
+        const periodoLabel = fi && ff ? `${fi} â†’ ${ff}` : 'Periodo seleccionado';
         summaryEl.innerHTML = `
           <div class="ops-orders-drawer__group">
             <h5>Resumen del periodo</h5>
@@ -2269,7 +2269,7 @@
         }));
         const fi = els.fechaInicio?.value || '';
         const ff = els.fechaFin?.value || '';
-        const periodoLabel = fi && ff ? `${fi} → ${ff}` : 'Periodo seleccionado';
+        const periodoLabel = fi && ff ? `${fi} â†’ ${ff}` : 'Periodo seleccionado';
         const topCarlines = countByField(rows, (r) => normalizeCarlineLabel(r.VEH_TIPOAUTO));
         summaryEl.innerHTML = `
           <div class="ops-orders-drawer__group">
@@ -2792,6 +2792,18 @@
     if (activeSalesTab === 'comisiones' && window.ComisionesVentas?.load) {
       sideLoads.push(window.ComisionesVentas.load(fechaInicio, fechaFin, { force: true }));
     }
+    // Financiamiento: arrancar de inmediato con el periodo del filtro (no esperar /api/ventas).
+    // Así no se queda pintado el mes anterior mientras carga ventas/SOFIA.
+    if (activeSalesTab === 'financiamiento' && window.FinanciamientoVentas?.load) {
+      sideLoads.push(window.FinanciamientoVentas.load(
+        fechaInicio,
+        fechaFin,
+        null,
+        [],
+        [],
+        { force: true },
+      ));
+    }
     const sideLoadPromise = Promise.allSettled(sideLoads);
 
     const refreshBtn = document.getElementById('btnRefreshEntregasSofia');
@@ -2978,15 +2990,9 @@
           registrosVentas: registrosActuales,
           entregasSofia: entregasActuales,
         };
-        if (activeSalesTab === 'financiamiento') {
-          await window.FinanciamientoVentas.load(
-            fechaInicio,
-            fechaFin,
-            resumen.porTipoVentaRetail,
-            registrosActuales,
-            entregasActuales,
-            { force: true },
-          );
+        if (activeSalesTab === 'financiamiento' && window.FinanciamientoVentas?.applyVentasMix) {
+          // La carga del periodo ya arrancó arriba; aquí solo enriquece el mix con ventas/SOFIA.
+          await window.FinanciamientoVentas.applyVentasMix(registrosActuales, entregasActuales);
         }
       }
 
@@ -3052,8 +3058,13 @@
       return;
     }
     const firstActivation = !sofiaLiveActive;
-    // Nunca pisar el filtro en pestañas de cohorte CRM (Leads/Afluencia).
-    if (firstActivation && activeSalesTab !== 'leads' && activeSalesTab !== 'afluencia') {
+    // Nunca pisar el filtro en pestañas CRM/histórico (Leads/Afluencia/Financiamiento).
+    if (
+      firstActivation
+      && activeSalesTab !== 'leads'
+      && activeSalesTab !== 'afluencia'
+      && activeSalesTab !== 'financiamiento'
+    ) {
       applySofiaLivePeriod(ctx, { force: true });
     }
     if (sofiaLiveActive && sofiaLiveTimer) return;
@@ -3082,9 +3093,9 @@
       const ctx = data?.context;
       if (!ctx?.active) return;
       if (typeof data.intervalMinutes === 'number') ctx.intervalMinutes = data.intervalMinutes;
-      // No forzar periodo SOFIA si la URL abre directo en Leads/Afluencia.
+      // No forzar periodo SOFIA si la URL abre directo en CRM/histórico.
       const bootTab = getSalesTabFromUrl();
-      if (bootTab !== 'leads' && bootTab !== 'afluencia') {
+      if (bootTab !== 'leads' && bootTab !== 'afluencia' && bootTab !== 'financiamiento') {
         applySofiaLivePeriod(ctx, { force: true });
       }
       syncSofiaLiveMode(ctx);
@@ -3250,17 +3261,21 @@
     if (!fi || !ff) return;
 
     if (tab === 'financiamiento') {
-      if (!pendingFinanciamiento || !window.FinanciamientoVentas?.load) return;
+      if (!window.FinanciamientoVentas?.load) return;
       const p = pendingFinanciamiento;
-      // Si ya está en cache, paint instantáneo; si no, carga sin bloquear el click.
-      if (window.FinanciamientoVentas.hasCache?.(p.fechaInicio, p.fechaFin)) {
-        await window.FinanciamientoVentas.load(
-          p.fechaInicio, p.fechaFin, p.porTipoVentaRetail, p.registrosVentas, p.entregasSofia,
-        );
+      const samePeriod = Boolean(p && p.fechaInicio === fi && p.fechaFin === ff);
+      const regs = samePeriod ? (p.registrosVentas || []) : [];
+      const sofia = samePeriod ? (p.entregasSofia || []) : [];
+      if (samePeriod && sofia.length > 0 && window.FinanciamientoVentas.hasCache?.(fi, ff)) {
+        await window.FinanciamientoVentas.load(fi, ff, p.porTipoVentaRetail, regs, sofia);
         return;
       }
       void window.FinanciamientoVentas.load(
-        p.fechaInicio, p.fechaFin, p.porTipoVentaRetail, p.registrosVentas, p.entregasSofia,
+        fi, ff,
+        samePeriod ? p.porTipoVentaRetail : null,
+        regs,
+        sofia,
+        { force: true },
       );
       return;
     }
@@ -3510,3 +3525,4 @@
     boot();
   }
 })();
+

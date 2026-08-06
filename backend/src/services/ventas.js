@@ -623,6 +623,59 @@ function buildTomasPorMes(registros, inicio, fin) {
   };
 }
 
+const VENTAS_SOFIA_CORE_TTL_MS = 5 * 60 * 1000;
+const ventasSofiaCoreCache = new Map();
+const ventasSofiaCoreInflight = new Map();
+
+/**
+ * Núcleo compartido: facturas DMS + entregas SOFIA del periodo.
+ * Usado por /api/ventas y por el dashboard de financiamiento para pintar todo de una vez.
+ */
+async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false } = {}) {
+  const inicio = parseDateInput(fechaInicio);
+  const fin = parseDateInput(fechaFin);
+  if (inicio > fin) {
+    throw new Error('La fecha inicial no puede ser mayor que la fecha final.');
+  }
+
+  const cacheKey = `${fechaInicio}|${fechaFin}|${incluirPorMes ? 1 : 0}`;
+  const hit = ventasSofiaCoreCache.get(cacheKey);
+  if (hit && (Date.now() - hit.at) < VENTAS_SOFIA_CORE_TTL_MS) {
+    return hit.data;
+  }
+  if (ventasSofiaCoreInflight.has(cacheKey)) {
+    return ventasSofiaCoreInflight.get(cacheKey);
+  }
+
+  const promise = (async () => {
+    const pool = await getPool();
+    pool.config.requestTimeout = 120000;
+    const request = pool.request();
+    request.input('fechaInicio', sql.Date, inicio);
+    request.input('fechaFin', sql.Date, fin);
+
+    const [result, sofiaEntregas] = await Promise.all([
+      request.query(buildVentasQuery()),
+      getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes }),
+    ]);
+
+    const data = {
+      registros: enrichVentasRows(result.recordset),
+      sofiaEntregas,
+      entregasSofia: sofiaEntregas.registrosEntrega ?? [],
+    };
+    ventasSofiaCoreCache.set(cacheKey, { at: Date.now(), data });
+    return data;
+  })();
+
+  ventasSofiaCoreInflight.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    ventasSofiaCoreInflight.delete(cacheKey);
+  }
+}
+
 async function getVentas({ fechaInicio, fechaFin }) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
@@ -631,20 +684,12 @@ async function getVentas({ fechaInicio, fechaFin }) {
     throw new Error('La fecha inicial no puede ser mayor que la fecha final.');
   }
 
-  const pool = await getPool();
-  pool.config.requestTimeout = 120000;
-
-  const request = pool.request();
-  request.input('fechaInicio', sql.Date, inicio);
-  request.input('fechaFin', sql.Date, fin);
-
   const incluirPorMes = isAcumuladoAnual(inicio, fin);
   const ytdRanges = buildYtdRanges(fechaFin);
   const sameAsYtd = fechaInicio === ytdRanges.inicioActual && fechaFin === ytdRanges.finActual;
 
-  const [result, sofiaEntregas, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
-    request.query(buildVentasQuery()),
-    getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes }),
+  const [core, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
+    getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes }),
     getComparativoYtd(fechaFin),
     getInventory({ planPisoPeriod: 'all' }).catch(() => null),
     getMejorUtilidadPorCarline({
@@ -671,7 +716,8 @@ async function getVentas({ fechaInicio, fechaFin }) {
       }),
   ]);
 
-  const rows = enrichVentasRows(result.recordset);
+  const rows = core.registros;
+  const sofiaEntregas = core.sofiaEntregas;
   const resumen = summarizeVentas(rows, inicio, fin, sofiaEntregas);
   resumen.unidadesApartadas = Number(inventorySnap?.summary?.availableApartadas ?? 0);
   resumen.totalTomasACuenta = Number(tomasACuenta.total || 0);
@@ -716,6 +762,7 @@ async function getVentas({ fechaInicio, fechaFin }) {
 
 module.exports = {
   getVentas,
+  getVentasSofiaCore,
   getTomasACuenta,
   parseDateInput,
 };

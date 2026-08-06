@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=45" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -22,6 +22,7 @@
 
 <nav class="eeff-tabs inventory-main-tabs" id="inventoryMainTabs" aria-label="Tipo de inventario">
 <button type="button" class="eeff-tab active" data-inventory-scope="autos">Autos nuevos</button>
+<button type="button" class="eeff-tab" data-inventory-scope="seminuevos">Autos seminuevos</button>
 <button type="button" class="eeff-tab" data-inventory-scope="postventa">Postventa</button>
 </nav>
 
@@ -284,6 +285,162 @@
 
 </div>
 
+<div id="panelInventarioSeminuevos" class="hidden">
+
+<section class="kpi-grid" id="semiKpiGrid">
+<button type="button" class="kpi-card kpi-card--blue kpi-card--interactive" data-semi-kpi="total" aria-expanded="false" title="Clic para ver unidades">
+<div class="kpi-card-head"><span class="kpi-title">Unidades en stock</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
+<div id="semiTotal" class="kpi-value">—</div>
+<p class="kpi-subtitle">Situación SFIS · físico seminuevo</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<button type="button" class="kpi-card kpi-card--amber kpi-card--interactive" data-semi-kpi="toma" aria-expanded="false" title="Clic para ver detalle de precios de toma">
+<div class="kpi-card-head"><span class="kpi-title">Precio de toma</span><span class="material-symbols-outlined kpi-icon">payments</span></div>
+<div id="semiValorAdq" class="kpi-value money">—</div>
+<p id="semiValorAdqSub" class="kpi-subtitle">Costo de toma / adquisición</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<button type="button" class="kpi-card kpi-card--slate kpi-card--interactive" data-semi-kpi="days" aria-expanded="false" title="Clic para ver unidades por días">
+<div class="kpi-card-head"><span class="kpi-title">Días prom. stock</span><span class="material-symbols-outlined kpi-icon">schedule</span></div>
+<div id="semiDays" class="kpi-value">—</div>
+<p class="kpi-subtitle">Desde fecha de adquisición</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" data-semi-kpi="ageing" aria-expanded="false" title="Clic para ver envejecidas">
+<div class="kpi-card-head"><span class="kpi-title">Envejecidas</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
+<div id="semiAgeing" class="kpi-value">—</div>
+<p id="semiAgeingSub" class="kpi-subtitle">60+ días en inventario</p>
+<span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+<div class="kpi-accent"></div>
+</button>
+</section>
+
+<section class="chart-grid" style="margin-top:8px">
+<div class="section-panel table-panel">
+<h3 class="section-title">Por marca</h3>
+<p class="section-subtitle">Distribución del stock seminuevo</p>
+<div class="table-scroll" style="max-height:320px">
+<table class="data-table">
+<thead>
+<tr>
+<th>Marca</th>
+<th class="cell-num">Unidades</th>
+<th class="cell-num">Días prom.</th>
+<th class="cell-money">Adquisición</th>
+<th class="cell-money">Venta</th>
+</tr>
+</thead>
+<tbody id="tblSemiMarca"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Antigüedad</h3>
+<p class="section-subtitle">Buckets de días en stock</p>
+<div class="table-scroll" style="max-height:320px">
+<table class="data-table">
+<thead>
+<tr>
+<th>Rango</th>
+<th class="cell-num">Unidades</th>
+</tr>
+</thead>
+<tbody id="tblSemiAgeing"></tbody>
+</table>
+</div>
+</div>
+</section>
+
+<section class="section-panel table-panel dashboard-section" id="semiRotacionSection">
+<div class="table-header-row">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Análisis de rotación</h3>
+<p class="section-subtitle" style="margin:0">Facturas históricas seminuevos (ADE_VTAFI tipo U) · últimos 12 meses · días de adquisición a factura</p>
+</div>
+<span id="semiTableCount" class="top-bar-meta">—</span>
+</div>
+
+<div class="semi-rotacion-summary" id="semiRotacionSummary" aria-live="polite"></div>
+
+<div class="semi-rotacion-grid">
+<div class="semi-rotacion-panel semi-rotacion-panel--best">
+<div class="semi-rotacion-panel__head">
+<span class="material-symbols-outlined">trending_up</span>
+<div>
+<h4>Mejor rotación</h4>
+<p>Menos días adquisición → factura</p>
+</div>
+<span class="semi-rotacion-panel__badge" id="semiRotBestMeta">—</span>
+</div>
+<div class="table-scroll semi-rotacion-panel__body">
+<table class="data-table">
+<thead>
+<tr>
+<th>#</th>
+<th>Factura / VIN</th>
+<th class="cell-num">Días</th>
+<th class="cell-money">Importe</th>
+<th>Carline</th>
+</tr>
+</thead>
+<tbody id="tblSemiRotBest"></tbody>
+</table>
+</div>
+</div>
+
+<div class="semi-rotacion-panel semi-rotacion-panel--worst">
+<div class="semi-rotacion-panel__head">
+<span class="material-symbols-outlined">trending_down</span>
+<div>
+<h4>Peor rotación</h4>
+<p>Más días en inventario antes de facturar</p>
+</div>
+<span class="semi-rotacion-panel__badge" id="semiRotWorstMeta">—</span>
+</div>
+<div class="table-scroll semi-rotacion-panel__body">
+<table class="data-table">
+<thead>
+<tr>
+<th>#</th>
+<th>Factura / VIN</th>
+<th class="cell-num">Días</th>
+<th class="cell-money">Importe</th>
+<th>Carline</th>
+</tr>
+</thead>
+<tbody id="tblSemiRotWorst"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<details class="semi-rotacion-all" id="semiRotacionAll">
+<summary>Ver facturas del periodo (<span id="semiRotAllCount">0</span>)</summary>
+<div class="table-scroll" style="margin-top:10px;max-height:360px">
+<table class="data-table">
+<thead>
+<tr>
+<th>Factura</th>
+<th>Fecha</th>
+<th>VIN</th>
+<th>Carline</th>
+<th class="cell-num">Días</th>
+<th class="cell-money">Importe</th>
+<th class="cell-money">Toma</th>
+<th>Adquisición</th>
+</tr>
+</thead>
+<tbody id="tblSemiUnits"></tbody>
+</table>
+</div>
+</details>
+</section>
+
+</div>
+
 <div id="panelInventarioPostventa" class="hidden">
 
 <section class="kpi-grid kpi-grid--eeff" id="kpiPostventaOverview">
@@ -391,6 +548,6 @@
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=4"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/inventory.js?v=27"></script>
+<script src="/js/inventory.js?v=42"></script>
 </body>
 </html>

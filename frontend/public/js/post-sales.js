@@ -13,6 +13,10 @@
   let refaccionesData = null;
   let refaccionesLoadedKey = '';
   let refaccionesSubTab = 'ventas';
+  let hypCobranzaData = null;
+  let hypCobranzaLoadedKey = '';
+  let openHypCobranzaKey = null;
+  let hypCobranzaAsegFilter = '';
   const charts = {};
   const MES_CURSO_LETRAS = ['N', 'D', 'Q', 'C', 'X', 'Y'];
   const MES_CURSO_LABELS = {
@@ -1033,10 +1037,20 @@
       antiguedad: 'Antigüedad',
       status: 'Estatus',
       mes: 'Mes',
+      aseguradora: 'Aseguradora',
     };
 
     function rowImporte(r) {
       const kpi = currentMeta.kpi;
+      if (String(kpi || '').startsWith('hypCob-')) {
+        if (kpi === 'hypCob-pendiente' || kpi === 'hypCob-saldo') {
+          return Number(r.saldo ?? r.importeAbierto ?? 0);
+        }
+        if (kpi === 'hypCob-parcial') {
+          return Number(r.saldo ?? r.importeAbierto ?? r.importeFacturado ?? 0);
+        }
+        return Number(r.importeFacturado || r.importe || 0);
+      }
       if (['facturadas', 'ticketFacturado', 'facturadoUltimoMes', 'mejorMes', 'cerradas'].includes(kpi)) {
         return Number(r.importeFacturado || r.importe || 0);
       }
@@ -1092,7 +1106,9 @@
       } else if (panel.classList.contains('ops-orders-drawer--open')) {
         placeNearKpi(
           document.querySelector('#kpiOperational [data-ops-kpi].is-open')
-            || document.querySelector('#tblAseg tr.row-active'),
+            || document.querySelector('#kpiHypCobranza [data-hyp-cob].is-open')
+            || document.querySelector('#tblAseg tr.row-active')
+            || document.querySelector('#tblHypCobranza tr.row-active'),
         );
       }
     }
@@ -1113,13 +1129,18 @@
       const key = openOpsKpiKey;
       openOpsKpiKey = null;
       openAseguradoraKey = null;
+      openHypCobranzaKey = null;
       document.querySelectorAll('#kpiOperational .kpi-card--clickable.is-open')
         .forEach((c) => c.classList.remove('is-open'));
       if (key) {
         document.querySelectorAll(`#kpiOperational [data-ops-kpi="${key}"]`)
           .forEach((c) => c.classList.remove('is-open'));
       }
+      document.querySelectorAll('#kpiHypCobranza .kpi-card--clickable.is-open')
+        .forEach((c) => c.classList.remove('is-open'));
       document.querySelectorAll('#tblAseg tr.row-active')
+        .forEach((tr) => tr.classList.remove('row-active'));
+      document.querySelectorAll('#tblHypCobranza tr.row-active')
         .forEach((tr) => tr.classList.remove('row-active'));
     }
 
@@ -1154,6 +1175,9 @@
       if (activeFilter.dim === 'mes') {
         return monthKeyOf(r) === activeFilter.value;
       }
+      if (activeFilter.dim === 'aseguradora') {
+        return String(r.aseguradora || 'Sin aseguradora') === activeFilter.value;
+      }
       return true;
     }
 
@@ -1182,6 +1206,13 @@
       const importeAsesor = sumBy(rows, (r) => r.asesor, (r) => rowImporte(r)).slice(0, 6);
       const porAntiguedad = countBy(rows, (r) => r.antiguedad || 'Sin antigüedad');
       const porStatus = countBy(rows, (r) => r.statusLabel || r.status || 'Sin estatus').slice(0, 8);
+      const isHypCob = String(currentMeta.kpi || '').startsWith('hypCob-');
+      const porAseguradora = sumBy(
+        rows,
+        (r) => r.aseguradora || 'Sin aseguradora',
+        (r) => rowImporte(r),
+      ).slice(0, 20);
+      const countAseguradora = countBy(rows, (r) => r.aseguradora || 'Sin aseguradora').slice(0, 20);
 
       const isActive = (dim, value) => activeFilter
         && activeFilter.dim === dim
@@ -1261,15 +1292,21 @@
           <div class="ops-orders-drawer__row"><span class="lbl">Registros</span><span class="val">${num(rows.length)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Importe relacionado</span><span class="val">${fmt.currency(importeTotal)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Alcance</span><span class="val">${escHtml(currentMeta.hint || 'Indicador operativo')}</span></div>
-          ${activeFilter ? '<p class="ops-orders-drawer__hint">Clic en un renglón para filtrar · clic otra vez para quitar</p>' : '<p class="ops-orders-drawer__hint">Clic en tipo, asesor, estatus o antigüedad para filtrar</p>'}
+          ${activeFilter
+            ? '<p class="ops-orders-drawer__hint">Clic en un renglón para filtrar · clic otra vez para quitar</p>'
+            : (isHypCob
+              ? '<p class="ops-orders-drawer__hint">Clic en una aseguradora para filtrar pendientes / facturas</p>'
+              : '<p class="ops-orders-drawer__hint">Clic en tipo, asesor, estatus o antigüedad para filtrar</p>')}
         </div>
         ${mejorMesBlock}
         ${weeklyBlock}
+        ${isHypCob ? block('Por aseguradora (saldo / importe)', 'aseguradora', porAseguradora, (x) => fmt.currency(x.value)) : ''}
+        ${isHypCob ? block('Por aseguradora (órdenes)', 'aseguradora', countAseguradora) : ''}
         ${block('Por tipo de orden', 'tipo', porTipo)}
         ${block('Por asesor', 'asesor', porAsesor)}
-        ${block('Importe por asesor', 'asesor', importeAsesor, (x) => fmt.currency(x.value))}
+        ${isHypCob ? '' : block('Importe por asesor', 'asesor', importeAsesor, (x) => fmt.currency(x.value))}
         ${block('Por estatus', 'status', porStatus)}
-        ${block('Por antigüedad', 'antiguedad', porAntiguedad)}
+        ${isHypCob ? '' : block('Por antigüedad', 'antiguedad', porAntiguedad)}
       `;
     }
 
@@ -1940,11 +1977,13 @@
     const isRef = currentArea === 'refacciones';
     const isOrdenes = currentArea === 'servicio' || currentArea === 'hyp';
     const isServicio = currentArea === 'servicio';
+    const isHyp = currentArea === 'hyp';
 
     document.getElementById('panelPosVentaHome')?.classList.toggle('hidden', !isHome);
     document.getElementById('panelPostVentaOrdenes')?.classList.toggle('hidden', !isOrdenes);
     document.getElementById('panelPostVentaRefacciones')?.classList.toggle('hidden', !isRef);
     document.getElementById('panelMesCursoNomenclatura')?.classList.toggle('hidden', !isServicio);
+    document.getElementById('panelHypCobranza')?.classList.toggle('hidden', !isHyp);
   }
 
   function countOrdersByArea(area) {
@@ -2274,6 +2313,262 @@
     setRefaccionesSubTab(refaccionesSubTab);
   }
 
+  function mapHypCobranzaRow(r) {
+    return {
+      ...r,
+      tipoOrden: r.segmentoLabel || r.tipoPorLetra || r.tipoOrden || '—',
+      statusLabel: r.pagoEstadoLabel || r.statusLabel || '—',
+      antiguedad: r.pagoEstadoLabel || '—',
+      importe: Number(r.importeFacturado || 0),
+      importeAbierto: Number(r.saldo || 0),
+      critica: r.pagoEstado === 'pendiente',
+      promesa: r.factura || '—',
+      dias: null,
+    };
+  }
+
+  function rowsForHypCobranza(key) {
+    const rows = (hypCobranzaData?.registros || []).map(mapHypCobranzaRow);
+    switch (key) {
+      case 'hypCob-body31':
+        return rows.filter((r) => r.segmento === 'body31');
+      case 'hypCob-matriz':
+        return rows.filter((r) => r.segmento === 'matriz');
+      case 'hypCob-pendiente':
+        return rows.filter((r) => r.pagoEstado === 'pendiente');
+      case 'hypCob-parcial':
+        return rows.filter((r) => r.pagoEstado === 'parcial');
+      case 'hypCob-pagado':
+        return rows.filter((r) => r.pagoEstado === 'pagado');
+      case 'hypCob-enviado':
+        return rows.filter((r) => r.enviadoAPago);
+      case 'hypCob-total':
+      default:
+        return rows;
+    }
+  }
+
+  function hypCobranzaMeta(key) {
+    const map = {
+      'hypCob-total': { title: 'Facturadas V/A', hint: 'Órdenes facturadas Body 31 (V*) y matriz (A*)', icon: 'receipt_long' },
+      'hypCob-body31': { title: 'Aseguradora Body 31', hint: 'Folio V* · sucursal 31', icon: 'garage' },
+      'hypCob-matriz': { title: 'Aseguradoras (matriz)', hint: 'Folio A* · sucursal matriz', icon: 'apartment' },
+      'hypCob-pendiente': { title: 'Pendiente de pago', hint: 'Sin aplicación CXC sobre la factura', icon: 'hourglass_empty' },
+      'hypCob-parcial': { title: 'Pago parcial / enviado', hint: 'Hay movimiento CXC pero aún hay saldo', icon: 'sync_alt' },
+      'hypCob-pagado': { title: 'Pagado', hint: 'Saldo cubierto por aplicaciones CXC', icon: 'paid' },
+      'hypCob-enviado': { title: 'Enviado a pago', hint: 'Con al menos un movimiento CXC', icon: 'send_money' },
+    };
+    return map[key] || { title: 'Cobranza aseguradoras', hint: '', icon: 'account_balance' };
+  }
+
+  function openHypCobranzaDetail(key, card) {
+    if (!hypCobranzaData) return;
+    if (openHypCobranzaKey === key) {
+      closeOpsOrdersDrawer();
+      return;
+    }
+    closeOpsOrdersDrawer();
+    openOpsKpiKey = null;
+    openAseguradoraKey = null;
+    openHypCobranzaKey = key;
+    document.querySelectorAll('#kpiOperational .kpi-card--clickable.is-open')
+      .forEach((c) => c.classList.remove('is-open'));
+    document.querySelectorAll('#tblAseg tr.row-active')
+      .forEach((tr) => tr.classList.remove('row-active'));
+    document.querySelectorAll('#kpiHypCobranza .kpi-card--clickable.is-open')
+      .forEach((c) => c.classList.remove('is-open'));
+    card?.classList.add('is-open');
+
+    const meta = hypCobranzaMeta(key);
+    let rows = rowsForHypCobranza(key);
+    const aseg = hypCobranzaAsegFilter || document.getElementById('fHypCobAseguradora')?.value || '';
+    if (aseg) {
+      rows = rows.filter((r) => String(r.aseguradora || 'Sin aseguradora') === aseg);
+    }
+    const title = aseg ? `${meta.title} · ${aseg}` : meta.title;
+    const hint = aseg
+      ? `${meta.hint} · filtro aseguradora: ${aseg}`
+      : `${meta.hint} · filtra por aseguradora en el panel izquierdo`;
+
+    openOpsOrdersDrawer(rows, card, {
+      kpi: key,
+      title,
+      hint,
+      icon: meta.icon,
+    });
+  }
+
+  function renderHypCobranza(data) {
+    const { fmt } = Dashboard;
+    const root = document.getElementById('kpiHypCobranza');
+    const body = document.getElementById('tblHypCobranza');
+    const metaEl = document.getElementById('hypCobranzaMeta');
+    const selAseg = document.getElementById('fHypCobAseguradora');
+    const selEstado = document.getElementById('fHypCobEstado');
+    if (!root || !body) return;
+
+    if (!data) {
+      root.innerHTML = '';
+      body.innerHTML = '<tr class="empty-row"><td colspan="9">Consulta el periodo para ver cobranza de aseguradoras.</td></tr>';
+      if (metaEl) metaEl.textContent = '—';
+      if (selAseg) selAseg.innerHTML = '<option value="">Todas</option>';
+      return;
+    }
+
+    const s = data.summary || {};
+    const allRows = data.registros || [];
+    const asegOptions = [...new Set(allRows.map((r) => String(r.aseguradora || 'Sin aseguradora').trim() || 'Sin aseguradora'))]
+      .sort((a, b) => a.localeCompare(b, 'es'));
+
+    if (selAseg) {
+      const prev = hypCobranzaAsegFilter || selAseg.value || '';
+      selAseg.innerHTML = `<option value="">Todas</option>${asegOptions.map((a) =>
+        `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('')}`;
+      if (prev && asegOptions.includes(prev)) {
+        selAseg.value = prev;
+        hypCobranzaAsegFilter = prev;
+      } else {
+        selAseg.value = '';
+        hypCobranzaAsegFilter = '';
+      }
+      if (!selAseg.dataset.bound) {
+        selAseg.dataset.bound = '1';
+        selAseg.addEventListener('change', () => {
+          hypCobranzaAsegFilter = selAseg.value || '';
+          renderHypCobranzaTable();
+        });
+      }
+    }
+    if (selEstado && !selEstado.dataset.bound) {
+      selEstado.dataset.bound = '1';
+      selEstado.addEventListener('change', () => renderHypCobranzaTable());
+    }
+
+    const card = (title, value, sub, cls, key) => `
+      <div class="kpi-card kpi-card--${cls || 'blue'} kpi-card--clickable" data-hyp-cob="${key}" role="button" tabindex="0" title="Clic para ver desglose">
+        <span class="kpi-title">${title}</span>
+        <div class="kpi-value${String(value).includes('$') ? ' money' : ''}">${value}</div>
+        ${sub ? `<p class="kpi-subtitle">${sub}</p>` : ''}
+        <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+        <div class="kpi-accent"></div>
+      </div>`;
+
+    root.innerHTML = [
+      kpiGroup('Volumen facturado', [
+        card('Facturadas V/A', fmt.number(s.totalFacturadas || 0), fmt.currency(s.importeFacturado || 0), 'blue', 'hypCob-total'),
+        card('Body 31 (V*)', fmt.number(s.body31?.ordenes || 0), `${fmt.currency(s.body31?.importe || 0)} · ${fmt.number(s.body31?.pendientes || 0)} pend.`, 'violet', 'hypCob-body31'),
+        card('Matriz (A*)', fmt.number(s.matriz?.ordenes || 0), `${fmt.currency(s.matriz?.importe || 0)} · ${fmt.number(s.matriz?.pendientes || 0)} pend.`, 'violet', 'hypCob-matriz'),
+      ]),
+      kpiGroup('Estado de cobranza', [
+        card('Pendiente de pago', fmt.number(s.pendientePago?.ordenes || 0), fmt.currency(s.pendientePago?.saldo || 0), 'rose', 'hypCob-pendiente'),
+        card('Parcial / enviado', fmt.number(s.enviadoParcial?.ordenes || 0), `saldo ${fmt.currency(s.enviadoParcial?.saldo || 0)}`, 'amber', 'hypCob-parcial'),
+        card('Pagado', fmt.number(s.pagado?.ordenes || 0), fmt.currency(s.pagado?.pagado || 0), 'green', 'hypCob-pagado'),
+        card('Enviado a pago', fmt.number(s.enviadoAPago?.ordenes || 0), 'con movimiento CXC', 'blue', 'hypCob-enviado'),
+      ]),
+    ].join('');
+
+    root.querySelectorAll('[data-hyp-cob]').forEach((el) => {
+      const open = () => {
+        const key = el.getAttribute('data-hyp-cob');
+        if (key === 'hypCob-pendiente' && selEstado) selEstado.value = 'pendiente';
+        openHypCobranzaDetail(key, el);
+      };
+      el.addEventListener('click', open);
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          open();
+        }
+      });
+    });
+
+    renderHypCobranzaTable();
+  }
+
+  function getHypCobranzaFilteredRows() {
+    const all = hypCobranzaData?.registros || [];
+    const aseg = hypCobranzaAsegFilter || document.getElementById('fHypCobAseguradora')?.value || '';
+    const estado = document.getElementById('fHypCobEstado')?.value || '';
+    return all.filter((r) => {
+      if (aseg && String(r.aseguradora || 'Sin aseguradora') !== aseg) return false;
+      if (estado && r.pagoEstado !== estado) return false;
+      return true;
+    });
+  }
+
+  function renderHypCobranzaTable() {
+    const { fmt } = Dashboard;
+    const body = document.getElementById('tblHypCobranza');
+    const metaEl = document.getElementById('hypCobranzaMeta');
+    if (!body) return;
+
+    if (!hypCobranzaData) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="9">Consulta el periodo para ver cobranza de aseguradoras.</td></tr>';
+      if (metaEl) metaEl.textContent = '—';
+      return;
+    }
+
+    const rows = getHypCobranzaFilteredRows();
+    const saldo = rows.reduce((acc, r) => acc + Number(r.saldo || 0), 0);
+    const aseg = hypCobranzaAsegFilter || document.getElementById('fHypCobAseguradora')?.value || '';
+    const estado = document.getElementById('fHypCobEstado')?.value || '';
+    const filterHint = [aseg || null, estado ? ({ pendiente: 'Pendiente', parcial: 'Parcial', pagado: 'Pagado' }[estado] || estado) : null]
+      .filter(Boolean)
+      .join(' · ');
+
+    if (metaEl) {
+      metaEl.textContent = filterHint
+        ? `${rows.length} factura(s) · ${filterHint} · saldo ${fmt.currency(saldo)}`
+        : `${rows.length} factura(s) · saldo ${fmt.currency(saldo)}`;
+    }
+
+    if (!rows.length) {
+      body.innerHTML = `<tr class="empty-row"><td colspan="9">${
+        aseg || estado ? 'Sin facturas con el filtro de aseguradora / estado actual.' : 'Sin órdenes facturadas V/A en el periodo.'
+      }</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = rows.map((r) => `
+      <tr data-hyp-orden="${escHtml(r.orden || '')}" title="Ver detalle">
+        <td><strong>${escHtml(r.orden || '—')}</strong></td>
+        <td>${escHtml(r.segmentoLabel || '—')}</td>
+        <td>${escHtml(r.aseguradora || '—')}</td>
+        <td>${escHtml(r.factura || '—')}</td>
+        <td>${escHtml(r.cierre || '—')}</td>
+        <td class="cell-num">${fmt.currency(r.importeFacturado || 0)}</td>
+        <td class="cell-num">${fmt.currency(r.totalAplicado || 0)}</td>
+        <td class="cell-num">${fmt.currency(r.saldo || 0)}</td>
+        <td>${escHtml(r.pagoEstadoLabel || '—')}</td>
+      </tr>`).join('');
+
+    body.querySelectorAll('tr[data-hyp-orden]').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        const orden = tr.getAttribute('data-hyp-orden');
+        if (!orden) return;
+        document.querySelectorAll('#tblHypCobranza tr.row-active')
+          .forEach((x) => x.classList.remove('row-active'));
+        tr.classList.add('row-active');
+        openOrderDetail(orden);
+      });
+    });
+  }
+
+  async function loadHypCobranza(fechaInicio, fechaFin, force = false) {
+    const key = `${fechaInicio}|${fechaFin}`;
+    if (!force && hypCobranzaData && hypCobranzaLoadedKey === key) {
+      renderHypCobranza(hypCobranzaData);
+      return hypCobranzaData;
+    }
+    const data = await Dashboard.api(
+      `/post-sales/hyp/aseguradoras-cobranza?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
+    );
+    hypCobranzaData = data;
+    hypCobranzaLoadedKey = key;
+    renderHypCobranza(data);
+    return data;
+  }
+
   async function loadRefaccionesPedidos(fechaInicio, fechaFin, force = false) {
     const key = `${fechaInicio}|${fechaFin}`;
     if (!force && refaccionesLoadedKey === key && refaccionesData) {
@@ -2340,6 +2635,23 @@
     }
 
     refreshDashboard();
+
+    if (currentArea === 'hyp') {
+      const fi = document.getElementById('fechaInicio')?.value;
+      const ff = document.getElementById('fechaFin')?.value;
+      if (fi && ff) {
+        try {
+          await loadHypCobranza(fi, ff);
+        } catch (err) {
+          console.warn('[HyP cobranza]', err.message);
+          renderHypCobranza(null);
+          const body = document.getElementById('tblHypCobranza');
+          if (body) {
+            body.innerHTML = `<tr class="empty-row"><td colspan="9">${escHtml(err.message || 'No se pudo cargar cobranza.')}</td></tr>`;
+          }
+        }
+      }
+    }
   }
 
   function refreshDashboard() {
@@ -2385,6 +2697,10 @@
     mesCursoNomenclatura = data.mesCursoNomenclatura || null;
     refaccionesData = null;
     refaccionesLoadedKey = '';
+    hypCobranzaData = null;
+    hypCobranzaLoadedKey = '';
+    openHypCobranzaKey = null;
+    hypCobranzaAsegFilter = '';
     populateFilterOptions(PostSalesAnalytics.buildFilterOptions(allRecords, openSnapshot));
     await setPostVentaArea(currentArea || getSectionFromUrl() || 'posventa');
     return allRecords.length;

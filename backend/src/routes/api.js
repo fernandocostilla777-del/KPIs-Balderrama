@@ -4,7 +4,9 @@ const { loadSalesExecutiveAnalytics } = require('../services/salesExecutiveAnaly
 const { getVentas } = require('../services/ventas');
 const { getInventory, getIntercambiosHistorico } = require('../services/inventoryService');
 const { getInventoryPostventa } = require('../services/inventoryPostventaService');
+const { getInventorySeminuevos } = require('../services/inventorySeminuevosService');
 const { getPostSales, getPostSalesOrderDetail } = require('../services/postSalesService');
+const { getHypAseguradorasCobranza } = require('../services/hypAseguradorasCobranza');
 const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/refaccionesPedidosService');
 const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
@@ -314,6 +316,15 @@ router.get('/inventory/postventa', async (req, res, next) => {
   }
 });
 
+router.get('/inventory/seminuevos', async (req, res, next) => {
+  try {
+    const mesesRotacion = Number(req.query.mesesRotacion || 12);
+    res.json(await getInventorySeminuevos({ mesesRotacion }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/post-sales', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
@@ -322,6 +333,16 @@ router.get('/post-sales', async (req, res, next) => {
     }
     res.json(await getPostSales({ fechaInicio, fechaFin }));
   } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/post-sales/hyp/aseguradoras-cobranza', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    res.json(await getHypAseguradorasCobranza({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });

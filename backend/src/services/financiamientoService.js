@@ -287,8 +287,10 @@ function indexCrmByVin(contracts = []) {
   return map;
 }
 
-function buildOnstarTechPenetracion(sofiaRows = [], crmContracts = [], refDate = new Date()) {
-  const bounds = currentMonthBounds(refDate);
+function buildOnstarTechPenetracion(sofiaRows = [], crmContracts = [], boundsOrRef = new Date()) {
+  const bounds = boundsOrRef && boundsOrRef.fechaInicio && boundsOrRef.fechaFin
+    ? boundsOrRef
+    : currentMonthBounds(boundsOrRef instanceof Date ? boundsOrRef : new Date());
   const crmByVin = indexCrmByVin(crmContracts);
   const elegibles = [];
 
@@ -350,25 +352,85 @@ function buildOnstarTechPenetracion(sofiaRows = [], crmContracts = [], refDate =
   };
 }
 
+function buildOnstarFromPeriodContracts(contracts = [], fechaInicio, fechaFin) {
+  const label = fechaInicio && fechaFin
+    ? `${String(fechaInicio).slice(5, 7)}/${String(fechaInicio).slice(0, 4)}`
+    : currentMonthBounds().label;
+  const elegibles = [];
+  for (const c of contracts || []) {
+    if (!isOnstarTechUnidad(c.unidad)) continue;
+    elegibles.push({
+      _kind: 'onstarTech',
+      onstarElegible: true,
+      fecha: c.fecha || null,
+      cliente: c.cliente || null,
+      asesor: c.asesor || null,
+      unidad: c.unidad || null,
+      vin: c.vin || null,
+      factura: c.factura || null,
+      contrato: c.contrato || null,
+      plan: c.plan || null,
+      tipoCompra: c.tipoCompra || null,
+      fi: c.fi || null,
+      afi: c.afi || null,
+      gerenteFi: c.fi || 'Sin gerente F&I',
+      hasOnstarContrato: Boolean(c.hasOnstarContrato),
+      plazoOnstar: c.plazoOnstar || null,
+      onstarMonto: c.onstarMonto ?? null,
+      montoFinanciar: c.montoFinanciar ?? null,
+      engancheMonto: c.engancheMonto ?? null,
+      plazoMeses: c.plazoMeses ?? null,
+      pvas: c.pvas || [],
+      cantidadPvas: c.cantidadPvas || 0,
+    });
+  }
+  const conContrato = elegibles.filter((c) => c.hasOnstarContrato);
+  return {
+    periodo: { fechaInicio, fechaFin, label },
+    fuente: 'crm_financiamiento',
+    totalSofiaMes: null,
+    elegibles: elegibles.length,
+    conContrato: conContrato.length,
+    sinContrato: elegibles.length - conContrato.length,
+    penetracionPct: pct(conContrato.length, elegibles.length),
+    muestra: elegibles,
+  };
+}
+
 async function loadOnstarTechMesActual(refDate = new Date()) {
-  const bounds = currentMonthBounds(refDate);
+  return loadOnstarTechForPeriod(currentMonthBounds(refDate));
+}
+
+async function loadOnstarTechForPeriod(bounds) {
+  const periodo = bounds?.fechaInicio && bounds?.fechaFin
+    ? {
+      fechaInicio: bounds.fechaInicio,
+      fechaFin: bounds.fechaFin,
+      label: bounds.label || `${String(bounds.fechaInicio).slice(5, 7)}/${String(bounds.fechaInicio).slice(0, 4)}`,
+    }
+    : currentMonthBounds();
+  // Ruta rápida para el dashboard: solo CRM del periodo (evita reconsultar SOFIA ~1 min).
+  if (bounds?.fast !== false) {
+    const crmPeriod = loadCrmContracts(periodo.fechaInicio, periodo.fechaFin);
+    return buildOnstarFromPeriodContracts(crmPeriod.contracts || [], periodo.fechaInicio, periodo.fechaFin);
+  }
   const crmAll = loadCrmContracts(null, null);
   let sofiaRows = [];
   try {
     const { getNotificacionesEntrega } = require('./sofia-entregas');
     const sofia = await getNotificacionesEntrega({
-      fechaInicio: bounds.fechaInicio,
-      fechaFin: bounds.fechaFin,
+      fechaInicio: periodo.fechaInicio,
+      fechaFin: periodo.fechaFin,
     });
     sofiaRows = sofia.registrosEntrega || [];
   } catch (err) {
-    console.warn('[OnStar] No se pudieron cargar entregas SOFIA del mes:', err.message);
+    console.warn('[OnStar] No se pudieron cargar entregas SOFIA del periodo:', err.message);
     return {
-      ...buildOnstarTechPenetracion([], crmAll.contracts || [], refDate),
+      ...buildOnstarTechPenetracion([], crmAll.contracts || [], periodo),
       error: err.message,
     };
   }
-  return buildOnstarTechPenetracion(sofiaRows, crmAll.contracts || [], refDate);
+  return buildOnstarTechPenetracion(sofiaRows, crmAll.contracts || [], periodo);
 }
 
 function countMap(items, keyFn) {
@@ -514,11 +576,30 @@ function loadSolicitudes(fechaInicio, fechaFin) {
   }
 }
 
+/** Flotilla en col. AO (especial). Se resta de Nuevos porque suelen venir como NUEVO en AN. */
+function isFlotillaContract(c) {
+  return String(c?.especial || '').toUpperCase().includes('FLOTILLA');
+}
+
+/** Seminuevo en col. AN (tipo_compra). */
+function isSeminuevoContract(c) {
+  return String(c?.tipoCompra || '').trim().toUpperCase() === 'SEMINUEVO';
+}
+
+/** Nuevo en col. AN (tipo_compra), excluyendo flotillas de AO. */
+function isNuevoContract(c) {
+  return String(c?.tipoCompra || '').trim().toUpperCase() === 'NUEVO' && !isFlotillaContract(c);
+}
+
 function buildSummary(contracts, solicitudes) {
   const montos = contracts.map((c) => Number(c.montoFinanciar)).filter((n) => Number.isFinite(n) && n > 0);
   const enganches = contracts.map((c) => Number(c.engancheMonto)).filter((n) => Number.isFinite(n) && n > 0);
   const plazos = contracts.map((c) => Number(c.plazoMeses)).filter((n) => Number.isFinite(n) && n > 0);
   const vins = new Set(contracts.map((c) => String(c.vin || '').toUpperCase()).filter(Boolean));
+
+  const contratosNuevos = contracts.filter(isNuevoContract);
+  const contratosSeminuevos = contracts.filter(isSeminuevoContract);
+  const contratosFlotilla = contracts.filter(isFlotillaContract);
 
   const conPva = contracts.filter((c) => c.cantidadPvas > 0);
   const montoTotalPvas = contracts.reduce((s, c) => s + Number(c.montoPvas || 0), 0);
@@ -542,6 +623,9 @@ function buildSummary(contracts, solicitudes) {
   return {
     contratos: contracts.length,
     unidades: vins.size,
+    unidadesNuevos: contratosNuevos.length,
+    unidadesSeminuevos: contratosSeminuevos.length,
+    unidadesFlotilla: contratosFlotilla.length,
     montoFinanciarTotal: roundMoney(montos.reduce((s, n) => s + n, 0)) || 0,
     montoFinanciarPromedio: roundMoney(avg(montos)),
     enganchePromedio: roundMoney(avg(enganches)),
@@ -737,6 +821,139 @@ function getPvaTrimestreYtd({ anio, trimestre } = {}) {
   };
 }
 
+function normKey(v) {
+  return String(v || '').trim().toUpperCase();
+}
+
+function tipoOfRow(row) {
+  return String(row?.TIPOVENTA || '').trim().toUpperCase() || '(SIN DATO)';
+}
+
+function enrichSofiaEntregasForMix(entregas, registrosVentas) {
+  const byVin = new Map();
+  const byFactura = new Map();
+  for (const r of registrosVentas || []) {
+    const vin = normKey(r.VTE_SERIE);
+    const doc = normKey(r.VTE_DOCTO);
+    if (vin) byVin.set(vin, r);
+    if (doc) byFactura.set(doc, r);
+  }
+
+  return (entregas || []).map((e) => {
+    const vin = normKey(e.SOF_VIN);
+    const fact = normKey(e.SOF_Factura);
+    const venta = (vin && byVin.get(vin)) || (fact && byFactura.get(fact)) || null;
+    const tipo = venta ? tipoOfRow(venta) : '(SIN DATO)';
+    const vendedor = venta?.VENDEDOR || e.SOF_CveUSu || null;
+    return {
+      ...e,
+      TIPOVENTA: tipo,
+      FORMAPAGO_ORIGINAL: venta?.FORMAPAGO_ORIGINAL || e.FORMAPAGO_ORIGINAL || null,
+      VENDEDOR: vendedor,
+      GERENTE_FI: 'Sin gerente F&I',
+      VEH_TIPOAUTO: venta?.VEH_TIPOAUTO || e.VEH_TIPOAUTO || null,
+      CANAL_LABEL: venta?.CANAL_LABEL || null,
+      VTE_DOCTO: venta?.VTE_DOCTO || e.SOF_Factura || null,
+      VTE_SERIE: venta?.VTE_SERIE || e.SOF_VIN || null,
+      VTE_FECHDOCTO: e.FECHA_PERIODO || e.SOF_FechFact || e.SOF_FechAct || null,
+      CLIENTE: e.CLIENTE || venta?.CLIENTE || null,
+      isGmf: tipo === 'GMF',
+      _match: venta ? (vin && byVin.has(vin) ? 'vin' : 'factura') : null,
+    };
+  });
+}
+
+function buildFacturasGmfForMix(registrosVentas, sofiaRows = []) {
+  const sofiaByFactura = new Set();
+  for (const e of sofiaRows || []) {
+    const fact = normKey(e.SOF_Factura || e.VTE_DOCTO);
+    if (fact) sofiaByFactura.add(fact);
+  }
+
+  return (registrosVentas || [])
+    .filter((r) => tipoOfRow(r) === 'GMF')
+    .map((r) => {
+      const docto = normKey(r.VTE_DOCTO);
+      return {
+        ...r,
+        SOF_Factura: r.VTE_DOCTO || null,
+        SOF_VIN: r.VTE_SERIE || null,
+        VTE_FECHDOCTO: r.VTE_FECHDOCTO || null,
+        GERENTE_FI: 'Sin gerente F&I',
+        isGmf: true,
+        enSofia: docto ? sofiaByFactura.has(docto) : false,
+        _match: 'factura',
+        _kind: 'facturaGmf',
+      };
+    });
+}
+
+function buildSofiaGmfMixPayload(sofiaRows = [], facturasGmf = []) {
+  const rows = sofiaRows || [];
+  const total = rows.length;
+  const gmf = rows.filter((r) => tipoOfRow(r) === 'GMF' || r?.isGmf === true).length;
+  const noGmf = total - gmf;
+  const sinMatch = rows.filter((r) => !r._match).length;
+  const facturasGmfCount = (facturasGmf || []).length;
+
+  const tipoMap = new Map();
+  for (const r of rows) {
+    const label = tipoOfRow(r);
+    tipoMap.set(label, (tipoMap.get(label) || 0) + 1);
+  }
+  const porTipo = [...tipoMap.entries()]
+    .map(([label, count]) => ({
+      label,
+      count,
+      pct: total ? Math.round((count / total) * 1000) / 10 : null,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const penetracionGmfPct = total ? Math.round((gmf / total) * 1000) / 10 : null;
+
+  return {
+    totalSofia: total,
+    facturasGmf: facturasGmfCount,
+    gmfDisponiblesTimbrar: 0,
+    gmf,
+    noGmf,
+    sinMatch,
+    penetracionGmfPct,
+    porTipo,
+    porFinanciera: porTipo.filter((e) => e.label === 'GMF' || (!CONTADO_TIPOS.has(e.label) && !EXCLUDE_TIPOS.has(e.label))),
+    totalRetail: total,
+    credito: gmf,
+    contado: noGmf,
+    penetracionCreditoPct: penetracionGmfPct,
+    penetracionContadoPct: total ? Math.round((noGmf / total) * 1000) / 10 : null,
+  };
+}
+
+async function loadSofiaGmfBundle(fechaInicio, fechaFin) {
+  try {
+    const { getVentasSofiaCore } = require('./ventas');
+    const core = await getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes: false });
+    const sofiaRegistros = enrichSofiaEntregasForMix(core.entregasSofia, core.registros);
+    const facturasGmfRegistros = buildFacturasGmfForMix(core.registros, sofiaRegistros);
+    const sofiaGmfMix = buildSofiaGmfMixPayload(sofiaRegistros, facturasGmfRegistros);
+    return {
+      mixReady: true,
+      sofiaGmfMix,
+      sofiaRegistros,
+      facturasGmfRegistros,
+    };
+  } catch (err) {
+    console.warn('[FI] sofia/gmf bundle:', err.message);
+    return {
+      mixReady: false,
+      mixError: err.message,
+      sofiaGmfMix: null,
+      sofiaRegistros: [],
+      facturasGmfRegistros: [],
+    };
+  }
+}
+
 /**
  * @param {{ fechaInicio: string, fechaFin: string, porTipoVentaRetail?: Array, pvaAnio?: number|string, pvaTrimestre?: number|string }} opts
  */
@@ -745,17 +962,21 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
 
+  // Facturas/SOFIA en paralelo con CRM (SQLite es inmediato; el cuello es DMS).
+  const mixBundlePromise = loadSofiaGmfBundle(fechaInicio, fechaFin);
+
   const crmData = loadCrmContracts(fechaInicio, fechaFin);
   const solicitudes = loadSolicitudes(fechaInicio, fechaFin);
   const contracts = crmData.contracts || [];
   const summary = buildSummary(contracts, solicitudes);
   const retailMix = buildRetailMix(porTipoVentaRetail);
 
-  // OnStar: entregas SOFIA del mes en curso ∩ tech OnStar, contrato desde Sheets
-  const onstarTech = await loadOnstarTechMesActual();
+  // OnStar rápido desde contratos CRM del periodo (sin reconsultar SOFIA).
+  const onstarTech = buildOnstarFromPeriodContracts(contracts, fechaInicio, fechaFin);
 
   // PVA: serie del trimestre (por defecto el en curso; independiente del periodo del dashboard)
   const pva = getPvaTrimestreYtd({ anio: pvaAnio, trimestre: pvaTrimestre });
+  const mixBundle = await mixBundlePromise;
 
   return {
     periodo: { fechaInicio, fechaFin },
@@ -765,12 +986,17 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
       tabla: 'crm_financiamiento',
     },
     summary,
-    retailMix,
+    retailMix: mixBundle.sofiaGmfMix || retailMix,
     onstarTech,
     pvaTrimestreYtd: pva.pvaTrimestreYtd,
     pvaTrimestresOpciones: pva.pvaTrimestresOpciones,
     contratos: contracts,
     solicitudes,
+    mixReady: mixBundle.mixReady,
+    mixError: mixBundle.mixError || null,
+    sofiaGmfMix: mixBundle.sofiaGmfMix,
+    sofiaRegistros: mixBundle.sofiaRegistros,
+    facturasGmfRegistros: mixBundle.facturasGmfRegistros,
   };
 }
 
@@ -779,12 +1005,17 @@ module.exports = {
   getPvaTrimestreYtd,
   getFinanciamientoAiAnalysis,
   buildRetailMix,
+  buildSofiaGmfMixPayload,
   buildOnstarTechPenetracion,
   buildPvaTrimestreYtd,
   listPvaTrimestreOpciones,
   quarterBounds,
   loadOnstarTechMesActual,
+  loadOnstarTechForPeriod,
   isOnstarTechUnidad,
+  isFlotillaContract,
+  isSeminuevoContract,
+  isNuevoContract,
   classifyModalidad,
   PVA_DEFS,
 };

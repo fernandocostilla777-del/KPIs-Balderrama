@@ -2,6 +2,11 @@ const { getPool, sql } = require('../db');
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
+/** Caché corta: Consultar ventas y Financiamiento comparten la misma consulta SOFIA. */
+const ENTREGAS_CACHE_TTL_MS = 5 * 60 * 1000;
+const entregasCache = new Map();
+const entregasInflight = new Map();
+
 /** Timbrados SOFIA: excluye flotilla contado (FLOT); sí incluye Flotilla GMF (FLOTGMF). */
 function isFlotillaExcluidaSofia(row) {
   const forma = String(row.FORMAPAGO_ORIGINAL || row.VTE_FORMAPAGO || '').trim().toUpperCase();
@@ -191,43 +196,62 @@ function buildEntregasPorMes(registros, inicio, fin) {
 }
 
 async function getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes = false }) {
-  const inicio = parseDateInput(fechaInicio);
-  const fin = parseDateInput(fechaFin);
-
-  const pool = await getPool();
-  const result = await pool.request()
-    .input('fechaInicio', sql.Date, inicio)
-    .input('fechaFin', sql.Date, fin)
-    .query(buildEntregasDetalleQuery());
-
-  const registrosBrutos = (result.recordset || []).map((row) => ({
-    ...row,
-    PREVIAS: Number(row.PREVIAS || 0) || 0,
-  }));
-  const excluidasFlotilla = registrosBrutos.filter(isFlotillaExcluidaSofia).length;
-  const registros = excludeFlotillaContadoSofia(registrosBrutos);
-  const totalEntregasSinPrevias = registros.filter((r) => r.PREVIAS === 0).length;
-  const totalFlotillaGmf = registros.filter(
-    (r) => String(r.FORMAPAGO_ORIGINAL || '').toUpperCase() === 'FLOTGMF'
-      || String(r.TIPOVENTA || '').toUpperCase() === 'FLOTILLA GMF',
-  ).length;
-
-  const payload = {
-    totalNotificacionesEntrega: registros.length,
-    totalEntregasSinPrevias,
-    totalEntregasConPrevias: registros.length - totalEntregasSinPrevias,
-    totalEntregasExcluidasFlotilla: excluidasFlotilla,
-    totalEntregasFlotillaGmf: totalFlotillaGmf,
-    excluyeFlotillaContado: true,
-    incluyeFlotillaGmf: true,
-    registrosEntrega: registros,
-  };
-
-  if (incluirPorMes) {
-    payload.entregasPorMes = buildEntregasPorMes(registros, inicio, fin);
+  const cacheKey = `${fechaInicio}|${fechaFin}|${incluirPorMes ? 1 : 0}`;
+  const hit = entregasCache.get(cacheKey);
+  if (hit && (Date.now() - hit.at) < ENTREGAS_CACHE_TTL_MS) {
+    return hit.data;
+  }
+  if (entregasInflight.has(cacheKey)) {
+    return entregasInflight.get(cacheKey);
   }
 
-  return payload;
+  const promise = (async () => {
+    const inicio = parseDateInput(fechaInicio);
+    const fin = parseDateInput(fechaFin);
+
+    const pool = await getPool();
+    const result = await pool.request()
+      .input('fechaInicio', sql.Date, inicio)
+      .input('fechaFin', sql.Date, fin)
+      .query(buildEntregasDetalleQuery());
+
+    const registrosBrutos = (result.recordset || []).map((row) => ({
+      ...row,
+      PREVIAS: Number(row.PREVIAS || 0) || 0,
+    }));
+    const excluidasFlotilla = registrosBrutos.filter(isFlotillaExcluidaSofia).length;
+    const registros = excludeFlotillaContadoSofia(registrosBrutos);
+    const totalEntregasSinPrevias = registros.filter((r) => r.PREVIAS === 0).length;
+    const totalFlotillaGmf = registros.filter(
+      (r) => String(r.FORMAPAGO_ORIGINAL || '').toUpperCase() === 'FLOTGMF'
+        || String(r.TIPOVENTA || '').toUpperCase() === 'FLOTILLA GMF',
+    ).length;
+
+    const payload = {
+      totalNotificacionesEntrega: registros.length,
+      totalEntregasSinPrevias,
+      totalEntregasConPrevias: registros.length - totalEntregasSinPrevias,
+      totalEntregasExcluidasFlotilla: excluidasFlotilla,
+      totalEntregasFlotillaGmf: totalFlotillaGmf,
+      excluyeFlotillaContado: true,
+      incluyeFlotillaGmf: true,
+      registrosEntrega: registros,
+    };
+
+    if (incluirPorMes) {
+      payload.entregasPorMes = buildEntregasPorMes(registros, inicio, fin);
+    }
+
+    entregasCache.set(cacheKey, { at: Date.now(), data: payload });
+    return payload;
+  })();
+
+  entregasInflight.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    entregasInflight.delete(cacheKey);
+  }
 }
 
 module.exports = {

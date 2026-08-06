@@ -137,6 +137,51 @@ HyP
 
 <section id="panelPostVentaOrdenes" class="postventa-area-panel hidden" data-ps-panel="ordenes">
 
+<section id="panelHypCobranza" class="section-panel dashboard-section hidden" data-hyp-cobranza>
+<h3 class="section-title">Cobranza aseguradoras</h3>
+<p class="section-subtitle">Órdenes facturadas V* (Body 31) y A* (matriz) · pendiente vs enviado/pagado por CXC</p>
+<div id="kpiHypCobranza"></div>
+<div class="table-header-row" style="margin-top:16px">
+<h4 class="section-title" style="margin-bottom:0;font-size:0.95rem">Detalle de facturas</h4>
+<span id="hypCobranzaMeta" class="top-bar-meta">—</span>
+</div>
+<div class="filter-row filter-row--compact" style="margin:10px 0 12px;gap:12px;flex-wrap:wrap;align-items:end">
+<label class="filter-field" style="min-width:220px;flex:1">
+<span class="filter-label">Aseguradora</span>
+<select id="fHypCobAseguradora" class="filter-select">
+<option value="">Todas</option>
+</select>
+</label>
+<label class="filter-field" style="min-width:180px">
+<span class="filter-label">Estado de pago</span>
+<select id="fHypCobEstado" class="filter-select">
+<option value="">Todos</option>
+<option value="pendiente">Pendiente de pago</option>
+<option value="parcial">Pago parcial / enviado</option>
+<option value="pagado">Pagado</option>
+</select>
+</label>
+</div>
+<div class="table-scroll">
+<table class="data-table data-table--selectable">
+<thead>
+<tr>
+<th>Orden</th>
+<th>Segmento</th>
+<th>Aseguradora</th>
+<th>Factura</th>
+<th>Cierre</th>
+<th class="cell-num">Facturado</th>
+<th class="cell-num">Aplicado</th>
+<th class="cell-num">Saldo</th>
+<th>Estado pago</th>
+</tr>
+</thead>
+<tbody id="tblHypCobranza"></tbody>
+</table>
+</div>
+</section>
+
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Indicadores operativos</h3>
 <p class="section-subtitle">Volumen, importes, antigüedad y operación de taller · clic en un KPI para ver el detalle</p>
@@ -463,6 +508,6 @@ Pendientes
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=4"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/post-sales.js?v=54"></script>
+<script src="/js/post-sales.js?v=56"></script>
 </body>
 </html>

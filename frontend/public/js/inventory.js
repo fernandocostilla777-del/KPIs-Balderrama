@@ -23,6 +23,10 @@ let inventoryScope = 'autos';
 let postventaData = null;
 let postventaArea = 'servicio';
 let postventaLoaded = false;
+let seminuevosData = null;
+let seminuevosLoaded = false;
+let activeSemiKpi = null;
+let semiDrawerUi = null;
 let chartsReady = false;
 let activeAutosKpi = null;
 let autosKpiFilter = null;
@@ -1399,25 +1403,34 @@ document.getElementById('planPisoPeriod')?.addEventListener('change', (e) => {
 });
 
 function setInventoryScope(scope) {
-  inventoryScope = scope === 'postventa' ? 'postventa' : 'autos';
+  const next = ['autos', 'seminuevos', 'postventa'].includes(scope) ? scope : 'autos';
+  inventoryScope = next;
   if (inventoryScope !== 'autos' && autosDrawerUi?.panel?.classList.contains('ops-orders-drawer--open')) {
     autosDrawerUi.close();
+  }
+  if (inventoryScope !== 'seminuevos' && semiDrawerUi?.panel?.classList.contains('ops-orders-drawer--open')) {
+    semiDrawerUi.close();
   }
   document.querySelectorAll('#inventoryMainTabs .eeff-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.inventoryScope === inventoryScope);
   });
   document.getElementById('panelInventarioAutos')?.classList.toggle('hidden', inventoryScope !== 'autos');
+  document.getElementById('panelInventarioSeminuevos')?.classList.toggle('hidden', inventoryScope !== 'seminuevos');
   document.getElementById('panelInventarioPostventa')?.classList.toggle('hidden', inventoryScope !== 'postventa');
 
   const title = document.querySelector('.top-bar-title');
   if (title) {
     title.textContent = inventoryScope === 'postventa'
       ? 'Inventario · Postventa'
-      : 'Gestión de Inventario';
+      : inventoryScope === 'seminuevos'
+        ? 'Inventario · Autos seminuevos'
+        : 'Gestión de Inventario';
   }
 
   if (inventoryScope === 'postventa') {
     loadInventoryPostventa();
+  } else if (inventoryScope === 'seminuevos') {
+    loadInventorySeminuevos();
   }
 }
 
@@ -1595,6 +1608,1146 @@ document.getElementById('inventoryPvTabs')?.addEventListener('click', (e) => {
 
 document.getElementById('buscarPostventaInv')?.addEventListener('input', () => {
   renderPostventaArea();
+});
+
+function escSemiHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderSeminuevosOverview(data) {
+  const { fmt, setText } = Dashboard;
+  const s = data?.summary || {};
+  setText('semiTotal', fmt.number(s.totalUnits || 0));
+  setText('semiValorAdq', moneyInt(s.valorAdquisicion || 0));
+  setText('semiValorAdqSub', `Ticket prom. ${moneyInt(s.ticketPromAdq || 0)}`);
+  setText('semiDays', fmt.number(s.diasPromedio || 0));
+  setText('semiAgeing', fmt.number(s.envejecidas || 0));
+  setText('semiAgeingSub', `${fmt.number(s.criticas || 0)} críticas · 90+ días`);
+
+  const marcaBody = document.getElementById('tblSemiMarca');
+  if (marcaBody) {
+    const rows = s.byMarca || [];
+    marcaBody.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td><strong>${escSemiHtml(r.marca)}</strong></td>
+          <td class="cell-num">${fmt.number(r.unidades)}</td>
+          <td class="cell-num">${r.diasPromedio != null ? fmt.number(r.diasPromedio) : '—'}</td>
+          <td class="cell-money">${moneyInt(r.valorAdquisicion || 0)}</td>
+          <td class="cell-money">${moneyInt(r.valorVenta || 0)}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="5">Sin unidades en stock.</td></tr>';
+  }
+
+  const ageingBody = document.getElementById('tblSemiAgeing');
+  if (ageingBody) {
+    const a = s.ageing || {};
+    const buckets = [
+      { key: '0-30', label: '0-30 días' },
+      { key: '31-60', label: '31-60 días' },
+      { key: '61-90', label: '61-90 días' },
+      { key: '90+', label: '90+ días' },
+      { key: 'sinFecha', label: 'Sin fecha adquisición' },
+    ];
+    ageingBody.innerHTML = buckets.map((b) => `
+      <tr>
+        <td>${b.label}</td>
+        <td class="cell-num"><strong>${fmt.number(a[b.key] || 0)}</strong></td>
+      </tr>`).join('');
+  }
+
+  renderSeminuevosUnitsTable();
+  syncSemiKpiCardState();
+}
+
+function rowsForSemiKpi(kpi) {
+  const units = seminuevosData?.units || [];
+  switch (kpi) {
+    case 'toma':
+      return units.filter((u) => Number(u.precioToma || 0) > 0);
+    case 'ageing':
+      return units.filter((u) => u.envejecida);
+    case 'days':
+    case 'total':
+    default:
+      return units.slice();
+  }
+}
+
+function semiKpiMeta(kpi) {
+  const map = {
+    total: { title: 'Unidades en stock', hint: 'Inventario vivo SFIS', icon: 'directions_car' },
+    toma: { title: 'Precio de toma', hint: 'VEH_TOMAIMPADQUI · costo de toma / adquisición', icon: 'payments' },
+    days: { title: 'Días en stock', hint: 'Desde VEH_SFECADQUI', icon: 'schedule' },
+    ageing: { title: 'Envejecidas 60+', hint: 'Unidades con 60 o más días en inventario', icon: 'warning' },
+  };
+  return map[kpi] || { title: 'Seminuevos', hint: '', icon: 'directions_car' };
+}
+
+function syncSemiKpiCardState() {
+  document.querySelectorAll('#semiKpiGrid [data-semi-kpi]').forEach((btn) => {
+    const open = btn.dataset.semiKpi === activeSemiKpi;
+    btn.classList.toggle('is-open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+}
+
+function moneyInt(n) {
+  const v = Math.round(Number(n) || 0);
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(v);
+}
+
+function moneyOrDash(fmt, n) {
+  const v = Number(n || 0);
+  return v > 0 ? moneyInt(v) : '—';
+}
+
+function semiUnitKey(u) {
+  if (u?.kind === 'factura' || u?.factura) {
+    return `F|${String(u.factura || '').toUpperCase()}|${String(u.vin || '').toUpperCase()}`;
+  }
+  return String(u?.vin || u?.noInventario || '').toUpperCase();
+}
+
+const SEMI_AGEING_LABELS = {
+  '0-30': '0–30 días',
+  '31-60': '31–60 días',
+  '61-90': '61–90 días',
+  '90+': '90+ días',
+  sinFecha: 'Sin fecha',
+};
+
+let semiUnitDetailUi = null;
+
+function ensureSemiUnitDetailPanel() {
+  if (semiUnitDetailUi) return semiUnitDetailUi;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'ops-order-detail-backdrop';
+  backdrop.id = 'semiUnitDetailBackdrop';
+  backdrop.setAttribute('aria-hidden', 'true');
+
+  const panel = document.createElement('div');
+  panel.className = 'ops-order-detail ops-order-detail--semi-ficha';
+  panel.id = 'semiUnitDetail';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-hidden', 'true');
+  panel.setAttribute('aria-label', 'Detalle unidad seminuevo');
+  panel.innerHTML = `
+    <div class="ops-order-detail__header">
+      <div class="ops-order-detail__title-wrap">
+        <span class="material-symbols-outlined ops-order-detail__logo">directions_car</span>
+        <div>
+          <h2 class="ops-order-detail__title">Detalle unidad</h2>
+          <span class="ops-order-detail__status" data-sud-status>Seminuevos</span>
+        </div>
+      </div>
+      <div class="ops-order-detail__actions">
+        <button type="button" class="ops-order-detail__icon-btn" data-sud-expand title="Expandir" aria-label="Expandir">
+          <span class="material-symbols-outlined" data-sud-expand-icon>open_in_full</span>
+        </button>
+        <button type="button" class="ops-order-detail__icon-btn" data-sud-close title="Cerrar" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="ops-order-detail__body custom-scrollbar" data-sud-body></div>
+  `;
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+
+  const statusEl = panel.querySelector('[data-sud-status]');
+  const bodyEl = panel.querySelector('[data-sud-body]');
+  const expandBtn = panel.querySelector('[data-sud-expand]');
+  const expandIcon = panel.querySelector('[data-sud-expand-icon]');
+  let expanded = false;
+
+  function setExpanded(next) {
+    expanded = Boolean(next);
+    panel.classList.toggle('ops-order-detail--expanded', expanded);
+    if (expandIcon) expandIcon.textContent = expanded ? 'close_fullscreen' : 'open_in_full';
+    if (expandBtn) expandBtn.title = expanded ? 'Contraer' : 'Expandir';
+  }
+
+  function isOpen() {
+    return panel.classList.contains('ops-order-detail--open');
+  }
+
+  function close() {
+    panel.classList.remove('ops-order-detail--open');
+    panel.setAttribute('aria-hidden', 'true');
+    backdrop.classList.remove('ops-order-detail-backdrop--visible');
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('ops-order-detail-open');
+    setExpanded(false);
+  }
+
+  function moneyCompact(value) {
+    const n = Math.round(Number(value) || 0);
+    if (!Number.isFinite(n) || n === 0) return '—';
+    const abs = Math.abs(n);
+    const sign = n < 0 ? '-' : '';
+    if (abs >= 1_000_000) {
+      const m = abs / 1_000_000;
+      return `${sign}$${m % 1 === 0 ? m.toFixed(0) : Math.round(m)}M`;
+    }
+    if (abs >= 1000) return `${sign}$${Math.round(abs / 1000)}K`;
+    return `${sign}${moneyInt(abs)}`;
+  }
+
+  function moneyFull(value, { allowZero = false } = {}) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    if (!allowZero && n === 0) return '—';
+    return moneyInt(n);
+  }
+
+  function titleCaseModel(modelo) {
+    return String(modelo || '')
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  function fichaRow(label, valueHtml) {
+    return `
+      <div class="semi-ficha__row">
+        <span class="semi-ficha__lbl">${escapeHtml(label)}</span>
+        <span class="semi-ficha__val">${valueHtml}</span>
+      </div>`;
+  }
+
+  function fichaRowText(label, value) {
+    const text = value == null || value === '' ? '—' : String(value);
+    return fichaRow(label, escapeHtml(text));
+  }
+
+  function open(unit) {
+    if (!unit) return;
+    const { fmt } = Dashboard;
+    const u = unit;
+    const isFactura = u.kind === 'factura' || Boolean(u.factura);
+    const modeloNice = titleCaseModel(u.modelo || u.carline);
+    const heroTitle = isFactura
+      ? (u.factura || [u.marca, modeloNice].filter(Boolean).join(' ') || 'Factura seminuevo')
+      : ([u.marca, modeloNice, u.anio].filter(Boolean).join(' ') || 'Seminuevo');
+    if (statusEl) {
+      statusEl.textContent = isFactura
+        ? [u.vin, u.fechaFactura, `${u.diasRotacion ?? u.daysInStock ?? '—'} d rotación`].filter(Boolean).join(' · ')
+        : ([u.marca, u.modelo, u.anio].filter(Boolean).join(' · ') || 'Detalle seminuevo');
+    }
+
+    const ageingLabel = SEMI_AGEING_LABELS[u.ageingBucket] || u.ageingBucket || '—';
+    const situacion = u.situacionLabel || u.situacion || '—';
+    const daysVal = u.diasRotacion ?? u.daysInStock;
+    const daysChip = daysVal != null && (u.ageingBucket === '90+' || daysVal >= 90)
+      ? '<span class="semi-ficha__chip semi-ficha__chip--danger">90+ días</span>'
+      : (u.envejecida
+        ? '<span class="semi-ficha__chip semi-ficha__chip--warn">60+ días</span>'
+        : '');
+    const kmLabel = u.km != null ? `${fmt.number(u.km)} km` : '—';
+    const margenVsGuia = Number(u.margenVsGuia);
+    const margenIcon = Number.isFinite(margenVsGuia) && margenVsGuia < 0
+      ? 'trending_down'
+      : 'trending_up';
+    const margenTone = Number.isFinite(margenVsGuia) && margenVsGuia < 0 ? 'down' : 'up';
+    const precioMostrar = u.importeFactura || u.precioVentaIva;
+
+    bodyEl.innerHTML = `
+      <div class="semi-ficha">
+        <header class="semi-ficha__hero">
+          <h3 class="semi-ficha__title">${escapeHtml(heroTitle)}</h3>
+          <p class="semi-ficha__meta">
+            <span class="semi-ficha__vin">${escapeHtml(u.vin || '—')}</span>
+            <span class="semi-ficha__sep">|</span>
+            <span>${isFactura
+              ? `Factura: <strong>${escapeHtml(u.factura || '—')}</strong>`
+              : `No. inventario: <strong>${escapeHtml(u.noInventario != null ? String(u.noInventario) : '—')}</strong>`}</span>
+          </p>
+          <div class="semi-ficha__badges">
+            <span class="semi-ficha__badge semi-ficha__badge--ok">${escapeHtml(situacion)}</span>
+            ${isFactura
+              ? `<span class="semi-ficha__badge semi-ficha__badge--muted">Rotación: ${daysVal != null ? `${daysVal} d` : '—'}</span>`
+              : `<span class="semi-ficha__badge semi-ficha__badge--muted">Toma USN: ${u.tomaUsn ? 'Sí' : 'No'}</span>`}
+          </div>
+        </header>
+
+        <div class="semi-ficha__kpis" role="group" aria-label="Resumen rápido">
+          <div class="semi-ficha__kpi">
+            <span class="semi-ficha__kpi-icon semi-ficha__kpi-icon--blue"><span class="material-symbols-outlined">attach_money</span></span>
+            <div>
+              <span class="semi-ficha__kpi-label">${isFactura ? 'Importe factura' : 'Precio de venta'}</span>
+              <strong class="semi-ficha__kpi-value">${escapeHtml(moneyCompact(precioMostrar))}</strong>
+            </div>
+          </div>
+          <div class="semi-ficha__kpi">
+            <span class="semi-ficha__kpi-icon semi-ficha__kpi-icon--violet"><span class="material-symbols-outlined">calendar_month</span></span>
+            <div>
+              <span class="semi-ficha__kpi-label">${isFactura ? 'Días rotación' : 'Días en stock'}</span>
+              <strong class="semi-ficha__kpi-value">${daysVal != null ? escapeHtml(fmt.number(daysVal)) : '—'}</strong>
+              ${daysChip}
+            </div>
+          </div>
+          <div class="semi-ficha__kpi">
+            <span class="semi-ficha__kpi-icon semi-ficha__kpi-icon--green"><span class="material-symbols-outlined">${isFactura ? 'receipt_long' : 'speed'}</span></span>
+            <div>
+              <span class="semi-ficha__kpi-label">${isFactura ? 'Fecha factura' : 'Kilometraje'}</span>
+              <strong class="semi-ficha__kpi-value">${escapeHtml(isFactura ? (u.fechaFactura || '—') : kmLabel)}</strong>
+            </div>
+          </div>
+          <div class="semi-ficha__kpi">
+            <span class="semi-ficha__kpi-icon semi-ficha__kpi-icon--sky"><span class="material-symbols-outlined">${isFactura ? 'event' : 'location_on'}</span></span>
+            <div>
+              <span class="semi-ficha__kpi-label">${isFactura ? 'Adquisición' : 'Ubicación'}</span>
+              <strong class="semi-ficha__kpi-value">${escapeHtml(isFactura ? (u.fechaAdquisicion || '—') : (u.ubicacion || '—'))}</strong>
+            </div>
+          </div>
+          <div class="semi-ficha__kpi">
+            <span class="semi-ficha__kpi-icon semi-ficha__kpi-icon--${margenTone}"><span class="material-symbols-outlined">${margenIcon}</span></span>
+            <div>
+              <span class="semi-ficha__kpi-label">Margen vs guía</span>
+              <strong class="semi-ficha__kpi-value">${escapeHtml(moneyCompact(u.margenVsGuia))}</strong>
+            </div>
+          </div>
+          <div class="semi-ficha__kpi">
+            <span class="semi-ficha__kpi-icon semi-ficha__kpi-icon--amber"><span class="material-symbols-outlined">verified_user</span></span>
+            <div>
+              <span class="semi-ficha__kpi-label">Estatus</span>
+              <strong class="semi-ficha__kpi-value semi-ficha__kpi-value--amber">${escapeHtml(situacion)}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="semi-ficha__grid">
+          <section class="semi-ficha__card">
+            <div class="semi-ficha__card-head">
+              <span class="semi-ficha__card-num">1</span>
+              <span class="material-symbols-outlined">badge</span>
+              <h4>Identificación</h4>
+            </div>
+            ${isFactura ? fichaRowText('Factura', u.factura) : ''}
+            ${fichaRowText('VIN', u.vin)}
+            ${isFactura ? fichaRowText('Fecha factura', u.fechaFactura) : fichaRowText('No. inventario', u.noInventario)}
+            ${fichaRowText('Situación', situacion)}
+            ${isFactura ? fichaRowText('Días rotación', daysVal) : fichaRowText('Toma USN', u.tomaUsn ? 'Sí' : 'No')}
+          </section>
+
+          <section class="semi-ficha__card">
+            <div class="semi-ficha__card-head">
+              <span class="semi-ficha__card-num">2</span>
+              <span class="material-symbols-outlined">directions_car</span>
+              <h4>Unidad</h4>
+            </div>
+            ${fichaRowText('Marca', u.marca)}
+            ${fichaRowText('Modelo / carline', u.modelo || u.carline)}
+            ${fichaRowText('Año', u.anio)}
+            ${fichaRowText('Color', u.color)}
+            ${isFactura ? fichaRowText('Fecha adquisición', u.fechaAdquisicion) : fichaRowText('Ubicación', u.ubicacion)}
+            ${isFactura ? '' : fichaRowText('Kilometraje', u.km != null ? kmLabel : null)}
+          </section>
+
+          <section class="semi-ficha__card">
+            <div class="semi-ficha__card-head">
+              <span class="semi-ficha__card-num">3</span>
+              <span class="material-symbols-outlined">payments</span>
+              <h4>Precios y rentabilidad</h4>
+            </div>
+            ${isFactura ? fichaRow('Importe factura', escapeHtml(moneyFull(u.importeFactura))) : ''}
+            ${fichaRow('Precio de toma', escapeHtml(moneyFull(u.precioToma)))}
+            ${fichaRow('Venta IVA incluido', escapeHtml(moneyFull(u.precioVentaIva)))}
+            ${fichaRow('Compra según guía', escapeHtml(moneyFull(u.precioCompraGuia)))}
+            ${fichaRow('Venta según guía', escapeHtml(moneyFull(u.precioVentaGuia)))}
+            ${fichaRow('Margen est. (venta – toma)', escapeHtml(moneyFull(u.margenEstimado, { allowZero: true })))}
+            ${fichaRow('Margen vs guía', escapeHtml(moneyFull(u.margenVsGuia, { allowZero: true })))}
+          </section>
+
+          <section class="semi-ficha__card semi-ficha__card--wide">
+            <div class="semi-ficha__card-head">
+              <span class="semi-ficha__card-num">4</span>
+              <span class="material-symbols-outlined">schedule</span>
+              <h4>${isFactura ? 'Rotación histórica' : 'Antigüedad'}</h4>
+            </div>
+            <div class="semi-ficha__ageing">
+              <div>
+                ${fichaRow(
+                  isFactura ? 'Días adquisición → factura' : 'Días en stock',
+                  `${daysVal != null ? escapeHtml(fmt.number(daysVal)) : '—'}${daysChip ? ` ${daysChip}` : ''}`,
+                )}
+                ${fichaRowText('Rango', ageingLabel)}
+                ${fichaRow(
+                  'Envejecida 60+',
+                  u.envejecida
+                    ? `${escapeHtml('Sí')} <span class="semi-ficha__chip semi-ficha__chip--warn"><span class="material-symbols-outlined" aria-hidden="true">warning</span> Envejecida 60+</span>`
+                    : escapeHtml('No'),
+                )}
+              </div>
+              <div>
+                ${fichaRow(
+                  'Fecha adquisición',
+                  `${escapeHtml(u.fechaAdquisicion || '—')} <span class="material-symbols-outlined semi-ficha__cal" aria-hidden="true">calendar_today</span>`,
+                )}
+                ${fichaRow(
+                  isFactura ? 'Fecha factura' : 'Fecha operación',
+                  `${escapeHtml((isFactura ? u.fechaFactura : u.fechaOperacion) || '—')} <span class="material-symbols-outlined semi-ficha__cal" aria-hidden="true">calendar_today</span>`,
+                )}
+                ${isFactura ? '' : fichaRowText('Alta control', u.fechaAltaControl)}
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    `;
+
+    setExpanded(true);
+    panel.classList.add('ops-order-detail--open');
+    panel.setAttribute('aria-hidden', 'false');
+    backdrop.classList.add('ops-order-detail-backdrop--visible');
+    backdrop.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('ops-order-detail-open');
+  }
+
+  backdrop.addEventListener('click', close);
+  panel.querySelector('[data-sud-close]')?.addEventListener('click', close);
+  expandBtn?.addEventListener('click', () => setExpanded(!expanded));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isOpen()) close();
+  });
+
+  semiUnitDetailUi = { open, close, isOpen, panel };
+  return semiUnitDetailUi;
+}
+
+function openSemiUnitDetail(unit) {
+  ensureSemiUnitDetailPanel().open(unit);
+}
+
+function downloadSemiKpiCsv(rows, title) {
+  const headers = [
+    'VIN', 'Marca', 'Modelo', 'Año', 'Días stock',
+    'Precio toma', 'Venta IVA incl.', 'Compra guía', 'Venta guía',
+    'Color', 'Ubicación', 'Fecha adquisición', 'Km',
+  ];
+  const lines = rows.map((u) => [
+    u.vin || '',
+    u.marca || '',
+    u.modelo || '',
+    u.anio || '',
+    u.daysInStock ?? '',
+    Number(u.precioToma || 0),
+    Number(u.precioVentaIva || 0),
+    Number(u.precioCompraGuia || 0),
+    Number(u.precioVentaGuia || 0),
+    u.color || '',
+    u.ubicacion || '',
+    u.fechaAdquisicion || '',
+    u.km ?? '',
+  ]);
+  const escapeCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers.map(escapeCell).join(',')]
+    .concat(lines.map((row) => row.map(escapeCell).join(',')))
+    .join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  const safe = String(title || 'seminuevos').replace(/[^\w\-]+/g, '_').slice(0, 40);
+  link.href = URL.createObjectURL(blob);
+  link.download = `seminuevos_${safe}_${stamp}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function ensureSemiKpiDrawer() {
+  if (semiDrawerUi) return semiDrawerUi;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'ops-orders-backdrop';
+  backdrop.id = 'semiKpiBackdrop';
+  backdrop.setAttribute('aria-hidden', 'true');
+
+  const panel = document.createElement('div');
+  panel.className = 'ops-orders-drawer';
+  panel.id = 'semiKpiDrawer';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-hidden', 'true');
+  panel.setAttribute('aria-label', 'Detalle seminuevos');
+  panel.innerHTML = `
+    <div class="ops-orders-drawer__header">
+      <div class="ops-orders-drawer__title-wrap">
+        <span class="material-symbols-outlined ops-orders-drawer__logo" data-semi-kpi-logo>airport_shuttle</span>
+        <div>
+          <h2 class="ops-orders-drawer__title" data-semi-kpi-title>Detalle seminuevos</h2>
+          <span class="ops-orders-drawer__status" data-semi-kpi-status>0 unidades</span>
+        </div>
+      </div>
+      <div class="ops-orders-drawer__actions">
+        <button type="button" class="ops-orders-drawer__icon-btn" data-semi-kpi-download title="Descargar CSV" aria-label="Descargar CSV">
+          <span class="material-symbols-outlined">download</span>
+        </button>
+        <button type="button" class="ops-orders-drawer__icon-btn" data-semi-kpi-expand title="Expandir" aria-label="Expandir panel">
+          <span class="material-symbols-outlined" data-semi-kpi-expand-icon>open_in_full</span>
+        </button>
+        <button type="button" class="ops-orders-drawer__icon-btn" data-semi-kpi-close title="Cerrar" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+    </div>
+    <div class="ops-orders-drawer__toolbar">
+      <label class="ops-orders-drawer__search" for="semiKpiSearch">
+        <span class="material-symbols-outlined" aria-hidden="true">search</span>
+        <input id="semiKpiSearch" type="search" placeholder="Buscar VIN, modelo, marca..." autocomplete="off"/>
+      </label>
+      <button type="button" class="ops-orders-drawer__filter-chip" data-semi-kpi-filter-chip hidden title="Quitar filtro"></button>
+      <span class="ops-orders-drawer__meta" data-semi-kpi-meta></span>
+    </div>
+    <div class="ops-orders-drawer__main">
+      <aside class="ops-orders-drawer__summary custom-scrollbar" data-semi-kpi-summary></aside>
+      <div class="ops-orders-drawer__body custom-scrollbar" data-semi-kpi-body></div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+
+  const statusEl = panel.querySelector('[data-semi-kpi-status]');
+  const metaEl = panel.querySelector('[data-semi-kpi-meta]');
+  const bodyEl = panel.querySelector('[data-semi-kpi-body]');
+  const summaryEl = panel.querySelector('[data-semi-kpi-summary]');
+  const searchEl = panel.querySelector('#semiKpiSearch');
+  const filterChip = panel.querySelector('[data-semi-kpi-filter-chip]');
+  const titleEl = panel.querySelector('[data-semi-kpi-title]');
+  const logoEl = panel.querySelector('[data-semi-kpi-logo]');
+  const expandBtn = panel.querySelector('[data-semi-kpi-expand]');
+  const expandIcon = panel.querySelector('[data-semi-kpi-expand-icon]');
+  const downloadBtn = panel.querySelector('[data-semi-kpi-download]');
+
+  let expanded = false;
+  let activeFilter = null;
+  let priceRangeFilter = null; // { min, max, extentMin, extentMax } | null
+  let sourceRows = [];
+  let lastExportRows = [];
+  let lastCard = null;
+  let currentMeta = { kpi: '', title: '', hint: '', icon: 'airport_shuttle' };
+
+  const FILTER_DIM_LABEL = {
+    marca: 'Marca',
+    modelo: 'Modelo',
+    ageing: 'Antigüedad',
+    precio: 'Rango de precios',
+  };
+
+  function getDrawerPriceExtent(rows) {
+    const prices = (rows || [])
+      .map((u) => Number(u.precioVentaIva || 0))
+      .filter((p) => p > 0);
+    if (!prices.length) return { min: 0, max: 100000, step: 10000 };
+    const rawMin = Math.min(...prices);
+    const rawMax = Math.max(...prices);
+    const step = rawMax - rawMin > 500_000 ? 25_000 : 10_000;
+    const min = Math.floor(rawMin / step) * step;
+    const max = Math.max(Math.ceil(rawMax / step) * step, min + step);
+    return { min, max, step };
+  }
+
+  function isPriceFilterActive() {
+    if (!priceRangeFilter) return false;
+    return priceRangeFilter.min > priceRangeFilter.extentMin
+      || priceRangeFilter.max < priceRangeFilter.extentMax;
+  }
+
+  function placeNearKpi(card) {
+    if (expanded) return;
+    const ref = card || document.getElementById('semiKpiGrid');
+    const rect = ref?.getBoundingClientRect?.();
+    let top = 96;
+    if (rect) top = Math.round(rect.bottom + 12);
+    top = Math.max(72, Math.min(top, Math.round(window.innerHeight * 0.28)));
+    const maxHeight = Math.max(360, window.innerHeight - top - 24);
+    panel.style.top = `${top}px`;
+    panel.style.right = window.innerWidth < 640 ? '12px' : '28px';
+    panel.style.left = window.innerWidth < 640 ? '12px' : 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.height = `${Math.min(680, maxHeight)}px`;
+  }
+
+  function clearPlacement() {
+    panel.style.top = '';
+    panel.style.right = '';
+    panel.style.left = '';
+    panel.style.bottom = '';
+    panel.style.height = '';
+  }
+
+  function setExpanded(next) {
+    expanded = Boolean(next);
+    panel.classList.toggle('ops-orders-drawer--expanded', expanded);
+    if (expandIcon) expandIcon.textContent = expanded ? 'close_fullscreen' : 'open_in_full';
+    if (expandBtn) expandBtn.title = expanded ? 'Contraer' : 'Expandir';
+    if (expanded) clearPlacement();
+    else if (panel.classList.contains('ops-orders-drawer--open')) placeNearKpi(lastCard);
+  }
+
+  function updateFilterChip() {
+    if (!filterChip) return;
+    if (isPriceFilterActive() && (!activeFilter || activeFilter.dim === 'precio')) {
+      filterChip.hidden = false;
+      filterChip.innerHTML = `
+        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+        Precio: ${escapeHtml(moneyInt(priceRangeFilter.min))} – ${escapeHtml(moneyInt(priceRangeFilter.max))}
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
+      return;
+    }
+    if (!activeFilter) {
+      filterChip.hidden = true;
+      filterChip.textContent = '';
+      return;
+    }
+    filterChip.hidden = false;
+    filterChip.innerHTML = `
+      <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+      ${escapeHtml(FILTER_DIM_LABEL[activeFilter.dim] || activeFilter.dim)}: ${escapeHtml(activeFilter.label || activeFilter.value)}
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
+  }
+
+  function matchesActiveFilter(u) {
+    if (isPriceFilterActive()) {
+      const p = Number(u.precioVentaIva || 0);
+      if (!(p > 0) || p < priceRangeFilter.min || p > priceRangeFilter.max) return false;
+    }
+    if (!activeFilter || activeFilter.dim === 'precio') return true;
+    const { dim, value } = activeFilter;
+    if (dim === 'marca') return String(u.marca || 'Sin marca') === value;
+    if (dim === 'modelo') return String(u.modelo || 'Sin modelo') === value;
+    if (dim === 'ageing') return String(u.ageingBucket || 'sinFecha') === value;
+    return true;
+  }
+
+  function setFilter(dim, value, label) {
+    if (activeFilter && activeFilter.dim === dim && activeFilter.value === value) activeFilter = null;
+    else activeFilter = { dim, value, label: label || value };
+    updateFilterChip();
+    renderList(searchEl?.value || '');
+  }
+
+  function clearFilter() {
+    activeFilter = null;
+    if (priceRangeFilter) {
+      priceRangeFilter = {
+        ...priceRangeFilter,
+        min: priceRangeFilter.extentMin,
+        max: priceRangeFilter.extentMax,
+      };
+    }
+    updateFilterChip();
+    renderList(searchEl?.value || '');
+  }
+
+  function filterBySearch(term, rows) {
+    const q = String(term || '').trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((u) => [
+      u.vin, u.modelo, u.marca, u.anio, u.color, u.ubicacion, u.fechaAdquisicion,
+    ].some((v) => String(v || '').toLowerCase().includes(q)));
+  }
+
+  function syncDrawerPriceSliderUi(root) {
+    if (!root || !priceRangeFilter) return;
+    const minInput = root.querySelector('[data-drawer-price-min]');
+    const maxInput = root.querySelector('[data-drawer-price-max]');
+    const rangeEl = root.querySelector('[data-drawer-price-range]');
+    const minVal = root.querySelector('[data-drawer-price-min-val]');
+    const maxVal = root.querySelector('[data-drawer-price-max-val]');
+    if (!minInput || !maxInput) return;
+    let min = Number(minInput.value);
+    let max = Number(maxInput.value);
+    if (min > max) {
+      if (document.activeElement === minInput) max = min;
+      else min = max;
+      minInput.value = String(min);
+      maxInput.value = String(max);
+    }
+    priceRangeFilter = { ...priceRangeFilter, min, max };
+    const span = Math.max(1, priceRangeFilter.extentMax - priceRangeFilter.extentMin);
+    const left = ((min - priceRangeFilter.extentMin) / span) * 100;
+    const right = ((max - priceRangeFilter.extentMin) / span) * 100;
+    if (rangeEl) {
+      rangeEl.style.left = `${left}%`;
+      rangeEl.style.right = `${100 - right}%`;
+    }
+    if (minVal) minVal.textContent = moneyInt(min);
+    if (maxVal) maxVal.textContent = moneyInt(max);
+  }
+
+  function bindDrawerPriceSlider(root) {
+    if (!root || root.dataset.bound === '1') return;
+    const minInput = root.querySelector('[data-drawer-price-min]');
+    const maxInput = root.querySelector('[data-drawer-price-max]');
+    if (!minInput || !maxInput) return;
+    const onInput = () => {
+      syncDrawerPriceSliderUi(root);
+      activeFilter = isPriceFilterActive()
+        ? {
+          dim: 'precio',
+          value: `${priceRangeFilter.min}-${priceRangeFilter.max}`,
+          label: `${moneyInt(priceRangeFilter.min)} – ${moneyInt(priceRangeFilter.max)}`,
+        }
+        : (activeFilter?.dim === 'precio' ? null : activeFilter);
+      updateFilterChip();
+      renderList(searchEl?.value || '', { keepSummary: true });
+    };
+    minInput.addEventListener('input', onInput);
+    maxInput.addEventListener('input', onInput);
+    root.dataset.bound = '1';
+  }
+
+  function renderSummary(rows) {
+    const isActive = (dim, value) => activeFilter && activeFilter.dim === dim && activeFilter.value === value;
+    const block = (titulo, dim, items) => `
+      <div class="ops-orders-drawer__group">
+        <h5>${escapeHtml(titulo)}</h5>
+        ${items.length
+          ? items.map((x) => `
+            <button type="button"
+              class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive(dim, x.label) ? ' is-active' : ''}"
+              data-semi-filter-dim="${escapeHtml(dim)}"
+              data-semi-filter-value="${escapeHtml(x.label)}"
+              data-semi-filter-label="${escapeHtml(x.display || x.label)}"
+              title="Filtrar por ${escapeHtml(x.display || x.label)}">
+              <span class="lbl">${escapeHtml(x.display || x.label)}</span>
+              <span class="val">${Number(x.value).toLocaleString('es-MX')}</span>
+            </button>`).join('')
+          : '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+      </div>`;
+
+    const sumToma = rows.reduce((s, u) => s + Number(u.precioToma || 0), 0);
+    const sumVenta = rows.reduce((s, u) => s + Number(u.precioVentaIva || 0), 0);
+    const sumGuia = rows.reduce((s, u) => s + Number(u.precioCompraGuia || 0), 0);
+    const envejecidas = rows.filter((u) => u.envejecida).length;
+    const avgDays = rows.length
+      ? Math.round(rows.reduce((s, u) => s + (Number(u.daysInStock) || 0), 0) / rows.length)
+      : 0;
+
+    const porAgeing = countByField(rows, (u) => u.ageingBucket || 'sinFecha')
+      .map((x) => ({
+        label: x.label,
+        display: SEMI_AGEING_LABELS[x.label] || x.label,
+        value: x.value,
+      }));
+
+    const extent = getDrawerPriceExtent(rows);
+    if (!priceRangeFilter || priceRangeFilter.extentMin !== extent.min || priceRangeFilter.extentMax !== extent.max) {
+      const keep = priceRangeFilter && isPriceFilterActive();
+      priceRangeFilter = {
+        extentMin: extent.min,
+        extentMax: extent.max,
+        min: keep ? Math.max(extent.min, Math.min(extent.max, priceRangeFilter.min)) : extent.min,
+        max: keep ? Math.max(extent.min, Math.min(extent.max, priceRangeFilter.max)) : extent.max,
+      };
+    }
+
+    const inPrice = rows.filter((u) => {
+      const p = Number(u.precioVentaIva || 0);
+      return p >= priceRangeFilter.min && p <= priceRangeFilter.max;
+    }).length;
+
+    summaryEl.innerHTML = `
+      <div class="ops-orders-drawer__group">
+        <h5>Resumen</h5>
+        <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+        <div class="ops-orders-drawer__row"><span class="lbl">Precio de toma</span><span class="val">${moneyInt(sumToma)}</span></div>
+        <div class="ops-orders-drawer__row"><span class="lbl">Venta IVA incl.</span><span class="val">${moneyInt(sumVenta)}</span></div>
+        <div class="ops-orders-drawer__row"><span class="lbl">Compra guía</span><span class="val">${moneyInt(sumGuia)}</span></div>
+        <div class="ops-orders-drawer__row"><span class="lbl">Días prom.</span><span class="val">${avgDays.toLocaleString('es-MX')}</span></div>
+        <div class="ops-orders-drawer__row"><span class="lbl">Envejecidas 60+</span><span class="val">${envejecidas.toLocaleString('es-MX')}</span></div>
+        <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+      </div>
+      ${block('Marca', 'marca', countByField(rows, (u) => u.marca || 'Sin marca').slice(0, 12))}
+      ${block('Modelo', 'modelo', countByField(rows, (u) => u.modelo || 'Sin modelo').slice(0, 12))}
+      ${block('Antigüedad', 'ageing', porAgeing)}
+      <div class="ops-orders-drawer__group">
+        <h5>Rango de precios</h5>
+        <p class="ops-orders-drawer__hint">Venta IVA incluido · ${inPrice.toLocaleString('es-MX')} en rango</p>
+        <div class="semi-price-slider semi-price-slider--drawer" data-drawer-price-slider>
+          <div class="semi-price-slider__values">
+            <span data-drawer-price-min-val>${escapeHtml(moneyInt(priceRangeFilter.min))}</span>
+            <span data-drawer-price-max-val>${escapeHtml(moneyInt(priceRangeFilter.max))}</span>
+          </div>
+          <div class="semi-price-slider__track-wrap">
+            <div class="semi-price-slider__rail"></div>
+            <div class="semi-price-slider__range" data-drawer-price-range></div>
+            <input type="range" class="semi-price-slider__input semi-price-slider__input--min" data-drawer-price-min
+              min="${extent.min}" max="${extent.max}" step="${extent.step}" value="${priceRangeFilter.min}" aria-label="Precio mínimo"/>
+            <input type="range" class="semi-price-slider__input semi-price-slider__input--max" data-drawer-price-max
+              min="${extent.min}" max="${extent.max}" step="${extent.step}" value="${priceRangeFilter.max}" aria-label="Precio máximo"/>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const sliderRoot = summaryEl.querySelector('[data-drawer-price-slider]');
+    bindDrawerPriceSlider(sliderRoot);
+    syncDrawerPriceSliderUi(sliderRoot);
+  }
+
+  function renderList(term = '', opts = {}) {
+    const { fmt } = Dashboard;
+    const filtered = filterBySearch(term, sourceRows).filter(matchesActiveFilter);
+    lastExportRows = filtered;
+
+    statusEl.textContent = `${filtered.length.toLocaleString('es-MX')} unidad(es)`;
+    metaEl.textContent = filtered.length !== sourceRows.length
+      ? `${filtered.length} de ${sourceRows.length}`
+      : `${sourceRows.length} registros`;
+
+    if (!opts.keepSummary) renderSummary(sourceRows);
+    else {
+      // actualizar solo conteo del hint de precio si el summary ya existe
+      const hint = summaryEl.querySelector('.ops-orders-drawer__group:last-child .ops-orders-drawer__hint');
+      if (hint && priceRangeFilter) {
+        const inPrice = sourceRows.filter((u) => {
+          const p = Number(u.precioVentaIva || 0);
+          return p >= priceRangeFilter.min && p <= priceRangeFilter.max;
+        }).length;
+        hint.textContent = `Venta IVA incluido · ${inPrice.toLocaleString('es-MX')} en rango`;
+      }
+    }
+
+    if (!filtered.length) {
+      bodyEl.innerHTML = `
+        <div class="ops-orders-drawer__empty">
+          <span class="material-symbols-outlined">inbox</span>
+          <p>${term || activeFilter || isPriceFilterActive() ? 'Sin coincidencias.' : 'No hay unidades para este indicador.'}</p>
+        </div>`;
+      return;
+    }
+
+    const sorted = filtered.slice().sort((a, b) => (b.daysInStock || 0) - (a.daysInStock || 0));
+
+    // Formato facturas nuevos + clic abre resumen estilo contratos F&I
+    bodyEl.innerHTML = `
+      <div class="ops-orders-drawer__list-head">
+        <span>Unidades seminuevos</span>
+        <span>${sorted.length.toLocaleString('es-MX')}</span>
+      </div>
+      ${sorted.map((u, idx) => `
+        <button type="button"
+          class="ops-orders-drawer__item${u.critica ? ' is-critical' : ''}"
+          data-semi-unit-idx="${idx}"
+          title="Ver detalle de la unidad">
+          <div class="ops-orders-drawer__item-head">
+            <strong>${escapeHtml(u.vin || 'Sin serie')}</strong>
+            <span class="ops-orders-drawer__tag">${u.daysInStock != null ? `${u.daysInStock} d` : 'SFIS'}</span>
+          </div>
+          <p class="ops-orders-drawer__msg">${escapeHtml(u.modelo || '—')} · ${escapeHtml(u.marca || '—')}${u.anio ? ` ${escapeHtml(u.anio)}` : ''}</p>
+          <div class="ops-orders-drawer__facts">
+            <span>${escapeHtml(u.fechaAdquisicion || '—')}</span>
+            <span>Toma ${escapeHtml(moneyOrDash(fmt, u.precioToma))}</span>
+            <span>Venta IVA ${escapeHtml(moneyOrDash(fmt, u.precioVentaIva))}</span>
+          </div>
+          <div class="ops-orders-drawer__facts ops-orders-drawer__facts--muted">
+            <span>Guía ${escapeHtml(moneyOrDash(fmt, u.precioCompraGuia))}</span>
+            <span>${escapeHtml(u.color || '—')}</span>
+            <span>${escapeHtml(u.ubicacion || '—')}</span>
+          </div>
+          <p class="ops-orders-drawer__sub">Inv. ${escapeHtml(u.noInventario != null ? String(u.noInventario) : '—')}${u.envejecida ? ' · Envejecida' : ''}${u.tomaUsn ? ' · Toma USN' : ''} · Clic para ver detalle</p>
+          <span class="ops-orders-drawer__open-hint">
+            <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+            Abrir detalle
+          </span>
+        </button>`).join('')}`;
+
+    bodyEl._semiListRows = sorted;
+  }
+
+  function close() {
+    semiUnitDetailUi?.close?.();
+    panel.classList.remove('ops-orders-drawer--open');
+    panel.setAttribute('aria-hidden', 'true');
+    backdrop.classList.remove('ops-orders-backdrop--visible');
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('ops-orders-drawer-open');
+    setExpanded(false);
+    clearPlacement();
+    activeFilter = null;
+    priceRangeFilter = null;
+    updateFilterChip();
+    activeSemiKpi = null;
+    syncSemiKpiCardState();
+  }
+
+  function open(kpi, card) {
+    if (activeSemiKpi === kpi && panel.classList.contains('ops-orders-drawer--open')) {
+      close();
+      return;
+    }
+    autosDrawerUi?.close?.();
+    semiUnitDetailUi?.close?.();
+    currentMeta = { kpi, ...semiKpiMeta(kpi) };
+    sourceRows = rowsForSemiKpi(kpi).slice();
+    lastCard = card || null;
+    activeSemiKpi = kpi;
+    activeFilter = null;
+    priceRangeFilter = null;
+    if (titleEl) titleEl.textContent = currentMeta.title;
+    if (logoEl) logoEl.textContent = currentMeta.icon;
+    panel.setAttribute('aria-label', currentMeta.title);
+    if (searchEl) {
+      searchEl.placeholder = 'Buscar VIN, modelo, marca, ubicación...';
+      searchEl.value = '';
+    }
+    updateFilterChip();
+    syncSemiKpiCardState();
+    placeNearKpi(card);
+    setExpanded(true);
+    renderList('');
+    panel.classList.add('ops-orders-drawer--open');
+    panel.setAttribute('aria-hidden', 'false');
+    backdrop.classList.add('ops-orders-backdrop--visible');
+    backdrop.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('ops-orders-drawer-open');
+    window.setTimeout(() => searchEl?.focus({ preventScroll: true }), 180);
+  }
+
+  panel.querySelector('[data-semi-kpi-close]')?.addEventListener('click', close);
+  backdrop.addEventListener('click', close);
+  expandBtn?.addEventListener('click', () => setExpanded(!expanded));
+  downloadBtn?.addEventListener('click', () => {
+    if (!lastExportRows.length) {
+      window.alert('No hay registros para descargar.');
+      return;
+    }
+    downloadSemiKpiCsv(lastExportRows, currentMeta.title);
+  });
+  searchEl?.addEventListener('input', () => renderList(searchEl.value));
+  filterChip?.addEventListener('click', clearFilter);
+  summaryEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-semi-filter-dim]');
+    if (!btn || !summaryEl.contains(btn)) return;
+    setFilter(
+      btn.dataset.semiFilterDim,
+      btn.dataset.semiFilterValue,
+      btn.dataset.semiFilterLabel || btn.dataset.semiFilterValue
+    );
+  });
+  bodyEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-semi-unit-idx]');
+    if (!btn || !bodyEl.contains(btn)) return;
+    const idx = Number(btn.getAttribute('data-semi-unit-idx'));
+    const rows = bodyEl._semiListRows || lastExportRows || [];
+    const record = rows[idx];
+    if (record) openSemiUnitDetail(record);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !panel.classList.contains('ops-orders-drawer--open')) return;
+    if (semiUnitDetailUi?.isOpen?.()) {
+      semiUnitDetailUi.close();
+      return;
+    }
+    close();
+  });
+
+  semiDrawerUi = { open, close, panel };
+  return semiDrawerUi;
+}
+
+function setActiveSemiKpi(kpiId) {
+  const card = document.querySelector(`#semiKpiGrid [data-semi-kpi="${kpiId}"]`);
+  ensureSemiKpiDrawer().open(kpiId, card);
+}
+
+function getSeminuevosRotacionFacturas() {
+  return seminuevosData?.rotacionHistorica?.facturas || [];
+}
+
+const SEMI_ROTACION_TOP_N = 8;
+
+function renderSemiRotacionRow(u, rank, tone) {
+  const { fmt } = Dashboard;
+  const days = u.diasRotacion ?? u.daysInStock;
+  const daysClass = days == null
+    ? ''
+    : days <= 30
+      ? 'semi-rot-days--good'
+      : days >= 90
+        ? 'semi-rot-days--bad'
+        : 'semi-rot-days--mid';
+  const importe = u.importeFactura || u.precioVentaIva;
+  return `
+    <tr class="${u.critica ? 'row-highlight' : ''} semi-rot-row semi-rot-row--${tone}"
+      data-semi-unit-key="${escSemiHtml(semiUnitKey(u))}"
+      style="cursor:pointer" title="Ver detalle de la factura">
+      <td class="cell-num semi-rot-rank">${rank}</td>
+      <td>
+        <strong>${escSemiHtml(u.factura || u.vin || '—')}</strong>
+        <div class="semi-rot-sub">${escSemiHtml(u.vin || '—')}${u.fechaFactura ? ` · ${escSemiHtml(u.fechaFactura)}` : ''}</div>
+      </td>
+      <td class="cell-num"><span class="semi-rot-days ${daysClass}">${days != null ? fmt.number(days) : '—'}</span></td>
+      <td class="cell-money">${moneyOrDash(fmt, importe)}</td>
+      <td>${escSemiHtml(u.carline || u.modelo || '—')}</td>
+    </tr>`;
+}
+
+function renderSeminuevosUnitsTable() {
+  const { fmt } = Dashboard;
+  const body = document.getElementById('tblSemiUnits');
+  const bestBody = document.getElementById('tblSemiRotBest');
+  const worstBody = document.getElementById('tblSemiRotWorst');
+  const countEl = document.getElementById('semiTableCount');
+  const allCountEl = document.getElementById('semiRotAllCount');
+  const summaryEl = document.getElementById('semiRotacionSummary');
+  const bestMeta = document.getElementById('semiRotBestMeta');
+  const worstMeta = document.getElementById('semiRotWorstMeta');
+  if (!body && !bestBody) return;
+
+  const rows = getSeminuevosRotacionFacturas();
+  const withDays = rows.filter((u) => (u.diasRotacion ?? u.daysInStock) != null);
+  const topN = SEMI_ROTACION_TOP_N;
+  const rotMeta = seminuevosData?.rotacionHistorica || {};
+
+  const best = withDays
+    .slice()
+    .sort((a, b) => (a.diasRotacion ?? a.daysInStock) - (b.diasRotacion ?? b.daysInStock)
+      || String(a.factura || '').localeCompare(String(b.factura || '')))
+    .slice(0, topN);
+  const worst = withDays
+    .slice()
+    .sort((a, b) => (b.diasRotacion ?? b.daysInStock) - (a.diasRotacion ?? a.daysInStock)
+      || String(a.factura || '').localeCompare(String(b.factura || '')))
+    .slice(0, topN);
+
+  const avgDays = withDays.length
+    ? Math.round(withDays.reduce((s, u) => s + (u.diasRotacion ?? u.daysInStock), 0) / withDays.length)
+    : null;
+  const sumVenta = rows.reduce((s, u) => s + Number(u.importeFactura || u.precioVentaIva || 0), 0);
+  const envejecidas = rows.filter((u) => u.envejecida).length;
+  const bestAvg = best.length
+    ? Math.round(best.reduce((s, u) => s + (u.diasRotacion ?? u.daysInStock), 0) / best.length)
+    : null;
+  const worstAvg = worst.length
+    ? Math.round(worst.reduce((s, u) => s + (u.diasRotacion ?? u.daysInStock), 0) / worst.length)
+    : null;
+
+  if (countEl) {
+    countEl.textContent = `${rows.length.toLocaleString('es-MX')} factura(s)`;
+  }
+  if (allCountEl) allCountEl.textContent = String(rows.length);
+  if (bestMeta) {
+    bestMeta.textContent = bestAvg != null ? `prom. ${bestAvg} d` : 'Sin datos';
+  }
+  if (worstMeta) {
+    worstMeta.textContent = worstAvg != null ? `prom. ${worstAvg} d` : 'Sin datos';
+  }
+
+  if (summaryEl) {
+    const errNote = rotMeta.error
+      ? `<div class="semi-rotacion-stat semi-rotacion-stat--wide"><span class="lbl">Aviso</span><strong>${escapeHtml(rotMeta.error)}</strong></div>`
+      : '';
+    summaryEl.innerHTML = `
+      <div class="semi-rotacion-stat">
+        <span class="lbl">Facturas</span>
+        <strong>${fmt.number(rows.length)}</strong>
+      </div>
+      <div class="semi-rotacion-stat">
+        <span class="lbl">Días prom. rotación</span>
+        <strong>${avgDays != null ? fmt.number(avgDays) : '—'}</strong>
+      </div>
+      <div class="semi-rotacion-stat">
+        <span class="lbl">Lentas 60+</span>
+        <strong>${fmt.number(envejecidas)}</strong>
+      </div>
+      <div class="semi-rotacion-stat">
+        <span class="lbl">Importe facturado</span>
+        <strong>${moneyInt(sumVenta)}</strong>
+      </div>
+      <div class="semi-rotacion-stat semi-rotacion-stat--wide">
+        <span class="lbl">Base histórica</span>
+        <strong>${fmt.number(rotMeta.meses || 12)} meses · ${escapeHtml(rotMeta.fuente || 'ADE_VTAFI U')} · ${escapeHtml(rotMeta.criterioDias || 'adquisición → factura')}</strong>
+      </div>
+      ${errNote}`;
+  }
+
+  if (bestBody) {
+    bestBody.innerHTML = best.length
+      ? best.map((u, i) => renderSemiRotacionRow(u, i + 1, 'best')).join('')
+      : '<tr class="empty-row"><td colspan="5">Sin facturas históricas de rotación en el periodo.</td></tr>';
+  }
+  if (worstBody) {
+    worstBody.innerHTML = worst.length
+      ? worst.map((u, i) => renderSemiRotacionRow(u, i + 1, 'worst')).join('')
+      : '<tr class="empty-row"><td colspan="5">Sin facturas históricas de rotación en el periodo.</td></tr>';
+  }
+
+  if (!body) return;
+
+  const allSorted = rows.slice().sort((a, b) =>
+    (b.diasRotacion ?? b.daysInStock ?? 0) - (a.diasRotacion ?? a.daysInStock ?? 0));
+  if (!allSorted.length) {
+    body.innerHTML = '<tr class="empty-row"><td colspan="8">Sin facturas históricas en el periodo.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = allSorted.map((u) => `
+    <tr class="${u.critica ? 'row-highlight' : ''}" data-semi-unit-key="${escSemiHtml(semiUnitKey(u))}" style="cursor:pointer" title="Ver detalle">
+      <td><strong>${escSemiHtml(u.factura || '—')}</strong></td>
+      <td>${escSemiHtml(u.fechaFactura || '—')}</td>
+      <td>${escSemiHtml(u.vin || '—')}</td>
+      <td>${escSemiHtml(u.carline || u.modelo || '—')}</td>
+      <td class="cell-num">${u.diasRotacion != null ? fmt.number(u.diasRotacion) : '—'}</td>
+      <td class="cell-money">${moneyOrDash(fmt, u.importeFactura || u.precioVentaIva)}</td>
+      <td class="cell-money">${moneyOrDash(fmt, u.precioToma)}</td>
+      <td>${escSemiHtml(u.fechaAdquisicion || '—')}</td>
+    </tr>`).join('');
+}
+
+async function loadInventorySeminuevos({ force = false } = {}) {
+  if (seminuevosLoaded && seminuevosData && !force) {
+    renderSeminuevosOverview(seminuevosData);
+    return seminuevosData;
+  }
+  const status = document.getElementById('sidebarStatus') || { textContent: '', className: '' };
+  try {
+    showLoading(true);
+    status.textContent = 'Cargando seminuevos y rotación histórica...';
+    status.className = 'sidebar-status-line';
+    seminuevosData = await api('/inventory/seminuevos?mesesRotacion=12');
+    seminuevosLoaded = true;
+    renderSeminuevosOverview(seminuevosData);
+    const facturas = seminuevosData.rotacionHistorica?.totalFacturas || 0;
+    status.textContent = `${(seminuevosData.summary?.totalUnits || 0).toLocaleString('es-MX')} en stock · ${facturas.toLocaleString('es-MX')} facturas históricas`;
+    status.className = 'sidebar-status-line';
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'sidebar-status-line status-error';
+    window.alert(err.message || 'No se pudo cargar el inventario de seminuevos.');
+  } finally {
+    showLoading(false);
+  }
+  return seminuevosData;
+}
+
+document.getElementById('semiRotacionSection')?.addEventListener('click', (e) => {
+  const row = e.target.closest('tr[data-semi-unit-key]');
+  if (!row || !document.getElementById('semiRotacionSection')?.contains(row)) return;
+  const key = row.dataset.semiUnitKey;
+  const record = (seminuevosData?.rotacionHistorica?.facturas || []).find((u) => semiUnitKey(u) === key);
+  if (record) openSemiUnitDetail(record);
+});
+
+document.getElementById('semiKpiGrid')?.addEventListener('click', (e) => {
+  const kpiBtn = e.target.closest('[data-semi-kpi]');
+  if (!kpiBtn) return;
+  e.preventDefault();
+  setActiveSemiKpi(kpiBtn.dataset.semiKpi);
 });
 
 document.getElementById('autosKpiGrid')?.addEventListener('click', (e) => {
@@ -1963,6 +3116,7 @@ document.getElementById('intHistFilterTabs')?.addEventListener('click', (e) => {
 
 const params = new URLSearchParams(window.location.search);
 if (params.get('tab') === 'postventa') setInventoryScope('postventa');
+else if (params.get('tab') === 'seminuevos') setInventoryScope('seminuevos');
 else setInventoryScope('autos');
 
 initPlanPisoKpiCard();

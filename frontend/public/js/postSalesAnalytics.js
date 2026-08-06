@@ -23,11 +23,25 @@
       : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
   }
 
-  /** Días de ciclo ingreso → cierre (facturadas). */
+  /** Días de espera típica de valuación aseguradora (se restan del ciclo). */
+  const CICLO_AJUSTE_VALUACION_DIAS = 3;
+
+  /** HyP: ciclo solo con ORE_FECHACIE en estas letras. */
+  const HYP_CICLO_LETRAS = new Set(['A', 'F', 'H', 'J', 'V', 'Z', '\u00D3', 'Ó']);
+
+  function letterOfCycle(r) {
+    const OT = global.PostSalesOrderTypes;
+    if (OT?.letterOfRecord) return OT.letterOfRecord(r);
+    const fromField = String(r?.letraOrden || '').trim().toUpperCase();
+    if (fromField) return fromField;
+    return String(r?.orden || '').trim().charAt(0).toUpperCase();
+  }
+
+  /** Días de ciclo ingreso → cierre (ORE_FECHACIE). HyP A/F/H/J/V/Z/Ó exige cierre. */
   function cycleDaysOf(r) {
-    if (r.diasCiclo != null && Number.isFinite(Number(r.diasCiclo))) {
-      return Math.max(0, Number(r.diasCiclo));
-    }
+    const letra = letterOfCycle(r);
+    const hypCore = HYP_CICLO_LETRAS.has(letra);
+
     if (r.ingresoDate && r.cierreDate) {
       const a = new Date(`${r.ingresoDate}T12:00:00`);
       const b = new Date(`${r.cierreDate}T12:00:00`);
@@ -35,7 +49,24 @@
         return Math.max(0, Math.round((b - a) / 86400000));
       }
     }
+    // Sin ORE_FECHACIE no hay ciclo válido para letras HyP core
+    if (hypCore) return null;
+
+    if (r.diasCiclo != null && Number.isFinite(Number(r.diasCiclo))) {
+      return Math.max(0, Number(r.diasCiclo));
+    }
     return null;
+  }
+
+  /** Ciclo neto: bruto − 3 d de espera de valuación aseguradora (mín. 0). */
+  function cycleDaysAjustadoOf(r) {
+    const d = cycleDaysOf(r);
+    if (d == null || !Number.isFinite(d)) return null;
+    return Math.max(0, d - CICLO_AJUSTE_VALUACION_DIAS);
+  }
+
+  function isHypCicloOrden(r) {
+    return HYP_CICLO_LETRAS.has(letterOfCycle(r));
   }
 
   function daysVsPromesaOf(r) {
@@ -237,6 +268,49 @@
     };
   }
 
+  /** Avance del mes calendario actual vs mejor mes (YTD). */
+  function buildMesEnCursoStats(monthlyYtd, mejorMesStats) {
+    const now = new Date();
+    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const entry = monthlyYtd.find(([k]) => k === key);
+    const importeFacturado = entry ? entry[1].importeFacturado : 0;
+    const facturadas = entry ? entry[1].facturadas : 0;
+    const ingresadas = entry ? entry[1].ingresadas : 0;
+    const diaDelMes = now.getDate();
+    const diasEnMes = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const mejorImporte = mejorMesStats?.importeFacturado || 0;
+    const ritmoProyectado = diaDelMes > 0 ? (importeFacturado / diaDelMes) * diasEnMes : 0;
+    const ranking = (mejorMesStats?.ranking || []).map((m) => ({
+      ...m,
+      esActual: m.key === key,
+    }));
+    const topMeses = ranking.slice(0, 8);
+
+    return {
+      key,
+      label: monthLabel(key),
+      importeFacturado,
+      facturadas,
+      ingresadas,
+      diaDelMes,
+      diasEnMes,
+      pctMesTranscurrido: Math.round((diaDelMes / diasEnMes) * 1000) / 10,
+      mejorMesLabel: mejorMesStats?.label || '—',
+      mejorMesKey: mejorMesStats?.key || null,
+      mejorMesImporte: mejorImporte,
+      pctVsMejor: mejorImporte > 0
+        ? Math.round((importeFacturado / mejorImporte) * 1000) / 10
+        : null,
+      gapVsMejor: mejorImporte - importeFacturado,
+      ritmoProyectado,
+      pctRitmoVsMejor: mejorImporte > 0
+        ? Math.round((ritmoProyectado / mejorImporte) * 1000) / 10
+        : null,
+      topMeses,
+      ranking,
+    };
+  }
+
   function computeDashboard(records, filters = {}, openSnapshot = [], ytdRecords = null) {
     const filtered = applyFilters(records, filters);
     const filteredOpen = applyFilters(openSnapshot, filters);
@@ -244,6 +318,15 @@
       ? applyFilters(ytdRecords, filters)
       : filtered;
     const facturadas = filtered.filter((r) => r.status === 'I');
+    const isAseguradora = (r) => {
+      const OT = global.PostSalesOrderTypes;
+      return OT && typeof OT.isAseguradora === 'function'
+        ? OT.isAseguradora(r)
+        : ['A', 'F', 'V'].includes(String(r?.letraOrden || r?.orden || '').trim().toUpperCase().charAt(0));
+    };
+    /** Ticket promedio: solo facturadas de aseguradoras (A / F / V). */
+    const facturadasAseg = facturadas.filter(isAseguradora);
+    const importeFacturadoAseg = sum(facturadasAseg, (r) => r.importeFacturado || r.importe);
     const importeIngresado = sum(filtered, (r) => r.importe);
     const importeFacturado = sum(facturadas, (r) => r.importeFacturado || r.importe);
     const importeAbiertoSnapshot = sum(filteredOpen, (r) => r.importeAbierto || r.importe);
@@ -285,8 +368,13 @@
     };
 
     // Operación de taller: tiempos de ciclo, estancia y cumplimiento de promesa
-    const ciclosFacturados = facturadas
-      .map(cycleDaysOf)
+    // HyP A/F/H/J/V/Z/Ó: ciclo solo con ORE_FECHACIE; neto = bruto − 3 d valuación
+    const areaKey = String(filters.area || '').toLowerCase();
+    const facturadasCiclo = areaKey === 'hyp'
+      ? facturadas.filter(isHypCicloOrden)
+      : facturadas;
+    const ciclosFacturados = facturadasCiclo
+      .map(cycleDaysAjustadoOf)
       .filter((d) => d != null && Number.isFinite(d));
     const estanciaAbiertas = filteredOpen
       .map((r) => Number(r.dias))
@@ -319,6 +407,7 @@
       tiempoPromCiclo: avgNums(ciclosFacturados),
       tiempoMedCiclo: medianNums(ciclosFacturados),
       ciclosConDato: ciclosFacturados.length,
+      cicloAjusteValuacionDias: CICLO_AJUSTE_VALUACION_DIAS,
       estanciaPromAbiertas: avgNums(estanciaAbiertas),
       estanciaMedAbiertas: medianNums(estanciaAbiertas),
       diasPromMecanica: stageDias(enMecanica),
@@ -344,9 +433,24 @@
     const lastMonth = monthly[monthly.length - 1];
     const prevMonth = monthly[monthly.length - 2];
     const { bestMonth, mejorMesStats } = buildMejorMesStats(monthlyYtd);
+    const mesEnCursoStats = buildMesEnCursoStats(monthlyYtd, mejorMesStats);
 
     const canceladas = filtered.filter((r) => r.status === 'C');
-    const cerradas = filtered.filter((r) => !OPEN.has(r.status));
+    /** Solo cerradas “puras”: no abiertas, no facturadas (I), no canceladas (C). */
+    const cerradas = filtered.filter((r) => {
+      const st = String(r.status || '').trim().toUpperCase();
+      return st && !OPEN.has(st) && st !== 'I' && st !== 'C';
+    });
+    const abiertasPeriodo = filtered.filter((r) => OPEN.has(String(r.status || '').trim().toUpperCase()));
+    const importeAbiertoPeriodo = sum(abiertasPeriodo, (r) => r.importeAbierto || r.importe);
+    const abiertasPeriodoKeys = new Set(
+      abiertasPeriodo.map((r) => String(r.orden || '').trim().toUpperCase()).filter(Boolean),
+    );
+    /** Backlog abierto actual menos las abiertas ingresadas en el periodo. */
+    const abiertasAcumuladasRows = filteredOpen.filter(
+      (r) => !abiertasPeriodoKeys.has(String(r.orden || '').trim().toUpperCase()),
+    );
+    const importeAbiertoAcumulado = sum(abiertasAcumuladasRows, (r) => r.importeAbierto || r.importe);
     const pctImporteFacturado = importeIngresado > 0
       ? Math.round((importeFacturado / importeIngresado) * 1000) / 10
       : 0;
@@ -356,10 +460,17 @@
       importeIngresado,
       abiertas: filteredOpen.length,
       importeAbierto: importeAbiertoSnapshot,
+      abiertasPeriodo: abiertasPeriodo.length,
+      importeAbiertoPeriodo,
+      pctAbiertasPeriodo: filtered.length
+        ? Math.round((abiertasPeriodo.length / filtered.length) * 1000) / 10
+        : 0,
+      abiertasAcumuladas: abiertasAcumuladasRows.length,
+      importeAbiertoAcumulado,
       facturadas: facturadas.length,
       importeFacturado,
       pctFacturado: filtered.length ? Math.round((facturadas.length / filtered.length) * 1000) / 10 : 0,
-      ticketPromFacturado: facturadas.length ? importeFacturado / facturadas.length : 0,
+      ticketPromFacturado: facturadasAseg.length ? importeFacturadoAseg / facturadasAseg.length : 0,
       canceladas: canceladas.length,
       cerradas: cerradas.length,
       pctCerrado: filtered.length ? Math.round((cerradas.length / filtered.length) * 1000) / 10 : 0,
@@ -377,13 +488,14 @@
       mejorMes: bestMonth ? monthLabel(bestMonth.key) : '—',
       mejorMesImporte: bestMonth ? bestMonth.importeFacturado : 0,
       riesgo120: sum(filteredOpen.filter((r) => r.antiguedad === '+120'), (r) => r.importeAbierto || r.importe),
-      ticketPromedio: facturadas.length ? importeFacturado / facturadas.length : 0,
+      ticketPromedio: facturadasAseg.length ? importeFacturadoAseg / facturadasAseg.length : 0,
       pctImporteFacturado,
       ticketPromIngresado: filtered.length ? importeIngresado / filtered.length : 0,
       ultimoMesLabel: lastMonth ? monthLabel(lastMonth[0]) : '—',
       ultimoMesKey: lastMonth ? lastMonth[0] : null,
       mejorMesKey: bestMonth ? bestMonth.key : null,
       mejorMesStats,
+      mesEnCursoStats,
       mejorMesAlcance: 'acumulado-anio',
       tieneMesAnterior: Boolean(prevMonth),
     };

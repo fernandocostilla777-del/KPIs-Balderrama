@@ -3114,6 +3114,177 @@ button.ops-orders-drawer__item:hover {
   margin-bottom: 22px;
 }
 
+@media (min-width: 640px) {
+  #kpiOperational .kpi-grid--ops-5 {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  #kpiOperational .kpi-card--span-2 {
+    grid-column: span 2;
+  }
+
+  #kpiOperational .kpi-card-spacer {
+    min-height: 1px;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* Mejor mes: rectángulo alto a la derecha (cubre Importes + Antigüedad) */
+#kpiOperational .kpi-ops-mejor-duo {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: stretch;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__main .kpi-group {
+  margin-bottom: 0;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__main .kpi-group .kpi-grid {
+  margin-bottom: 14px;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__side-title {
+  margin-bottom: 14px;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__side-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__side-body > .kpi-card--mejor-mes {
+  flex: 1;
+  width: 100%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-bottom: 18px;
+}
+
+#kpiOperational .kpi-ops-mejor-duo__side-body > .kpi-card--mejor-mes .kpi-value {
+  font-size: clamp(1.2rem, 2vw, 1.65rem);
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(96px, 0.85fr);
+  gap: 10px;
+  align-items: center;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-total .kpi-subtitle {
+  margin-top: 2px;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-mini-chart {
+  height: 56px;
+  position: relative;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-mini-caption {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.25;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-chart-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  margin-top: 4px;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-chart-label {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-chart {
+  flex: 1;
+  min-height: 110px;
+  position: relative;
+}
+
+#kpiOperational .kpi-card--mes-curso .mes-curso-foot {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+@media (max-width: 899px) {
+  #kpiOperational .kpi-card--mes-curso .mes-curso-head {
+    grid-template-columns: 1fr;
+  }
+
+  #kpiOperational .kpi-card--mes-curso .mes-curso-mini-chart {
+    height: 48px;
+  }
+}
+
+@media (min-width: 900px) {
+  #kpiOperational .kpi-ops-mejor-duo {
+    grid-template-columns: minmax(0, 3fr) minmax(200px, 2fr);
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  #kpiOperational .kpi-ops-mejor-duo__main .kpi-group:last-child .kpi-grid {
+    margin-bottom: 0;
+  }
+
+  #kpiOperational .kpi-ops-mejor-duo__side {
+    height: 100%;
+  }
+
+  #kpiOperational .kpi-ops-mejor-duo__side-body > .kpi-card--mejor-mes {
+    min-height: 100%;
+  }
+}
+
+@media (max-width: 639px) {
+  #kpiOperational .kpi-card-spacer {
+    display: none;
+  }
+
+  #kpiOperational .kpi-card--span-2 {
+    grid-column: auto;
+  }
+}
+
 #kpiOperational.kpi-summary,
 #kpiOperational {
   display: flex;
@@ -3576,6 +3747,20 @@ button.ops-orders-drawer__item:hover {
 
 .ops-orders-drawer--expanded .carry-over-sim-pct {
   font-size: clamp(42px, 4vw, 56px);
+}
+
+.carry-over-sim-card--vin {
+  background:
+    linear-gradient(165deg, rgba(239, 246, 255, 0.9) 0%, rgba(255, 255, 255, 0.55) 100%);
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+.carry-over-sim-card--vin .carry-over-sim-label {
+  color: #1d4ed8;
+}
+
+.carry-over-sim-card--vin .carry-over-sim-pct {
+  color: #1e40af;
 }
 
 .carry-over-units-pane {

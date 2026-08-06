@@ -30,6 +30,14 @@ const AREA_LETRAS = {
   hyp: ['A', 'F', 'H', 'J', 'V', 'Z', 'Ó'],
 };
 
+/**
+ * Asesores de HyP (nombres DMS): JAIR…, BRIAN… (Brayan/Bryan), EDEL…
+ * De ellos solo se atribuyen a HyP las letras I (interna) y E (empleados).
+ */
+const HYP_ASESORES = ['jair', 'brian', 'brayan', 'bryan', 'edel'];
+const HYP_ASESORES_EMPLEADOS = HYP_ASESORES;
+const HYP_ASESOR_LETRAS_INCLUIDAS = new Set(['I', 'E']);
+
 /** Folios de órdenes internas (Servicio + HyP). */
 const INTERNAS_LETRAS = new Set(['I', 'J', 'Ó', 'M', 'H', 'O']);
 
@@ -125,9 +133,39 @@ function letterOfRecord(record) {
 function matchesArea(record, area) {
   const key = String(area || '').toLowerCase();
   if (!key || key === 'posventa' || key === 'todas' || key === 'refacciones') return true;
+  const letra = letterOfRecord(record);
+  if (key === 'hyp') {
+    if (new Set(AREA_LETRAS.hyp).has(letra)) return true;
+    return isHypAsesorOrdenParaHyp(record);
+  }
+  if (key === 'servicio') {
+    if (!new Set(AREA_LETRAS.servicio).has(letra)) return false;
+    if (isHypAsesorOrdenParaHyp(record)) return false;
+    return true;
+  }
   const letras = AREA_LETRAS[key];
   if (!letras) return true;
-  return new Set(letras).has(letterOfRecord(record));
+  return new Set(letras).has(letra);
+}
+
+/** Órdenes de asesores HyP (Jair, Brian/Brayan, Edel). */
+function isHypAsesor(record) {
+  const asesor = stripAccents(record?.asesor || '');
+  if (!asesor) return false;
+  return HYP_ASESORES.some((name) => {
+    const re = new RegExp(`(?:^|[^a-z])${name}(?:[^a-z]|$)`);
+    return re.test(asesor);
+  });
+}
+
+/** Asesor HyP + letra I o E → cuenta en HyP. */
+function isHypAsesorOrdenParaHyp(record) {
+  if (!isHypAsesor(record)) return false;
+  return HYP_ASESOR_LETRAS_INCLUIDAS.has(letterOfRecord(record));
+}
+
+function isHypEmpleadoAsesor(record) {
+  return isHypAsesorOrdenParaHyp(record);
 }
 
 function findNomenclaturaGroup(tipo) {
@@ -269,12 +307,18 @@ function nomenclaturaHelpText() {
 module.exports = {
   TIPO_POR_LETRA,
   AREA_LETRAS,
+  HYP_ASESORES,
+  HYP_ASESORES_EMPLEADOS,
+  HYP_ASESOR_LETRAS_INCLUIDAS,
   INTERNAS_LETRAS,
   NOMENCLATURA_GRUPOS,
   OPEN_STATUSES,
   firstLetter,
   letterOfRecord,
   matchesArea,
+  isHypAsesor,
+  isHypAsesorOrdenParaHyp,
+  isHypEmpleadoAsesor,
   findNomenclaturaGroup,
   resolveNomenclatura,
   normalizeTipo,

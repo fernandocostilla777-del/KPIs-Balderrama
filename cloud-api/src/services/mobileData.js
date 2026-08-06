@@ -43,6 +43,10 @@ const AREA_LETRAS = {
   servicio: ['C', 'D', 'G', 'I', 'K', 'N', 'O', 'Q', 'S', 'X', 'Y', 'Á', 'M', 'E', 'R'],
   hyp: ['A', 'F', 'H', 'J', 'V', 'Z', 'Ó'],
 };
+/** Asesores HyP: órdenes de empleados (E) cuentan en HyP. */
+const HYP_ASESORES_EMPLEADOS = ['jair', 'brian', 'brayan', 'bryan', 'edel'];
+const HYP_ASESORES = HYP_ASESORES_EMPLEADOS;
+const HYP_ASESOR_LETRAS_INCLUIDAS = new Set(['I', 'E']);
 const OPEN_STATUSES = new Set(['A', 'T', 'D', 'P']);
 
 function normalizeArea(area) {
@@ -58,12 +62,47 @@ function letterOfPayload(payload = {}) {
   return String(payload.orden || payload.ORE_IDORDEN || '').trim().charAt(0).toUpperCase();
 }
 
+function stripAccents(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isHypAsesorPayload(payload = {}) {
+  const asesor = stripAccents(payload.asesor || '');
+  if (!asesor) return false;
+  return HYP_ASESORES.some((name) => {
+    const re = new RegExp(`(?:^|[^a-z])${name}(?:[^a-z]|$)`);
+    return re.test(asesor);
+  });
+}
+
+function isHypAsesorOrdenParaHypPayload(payload = {}) {
+  if (!isHypAsesorPayload(payload)) return false;
+  return HYP_ASESOR_LETRAS_INCLUIDAS.has(letterOfPayload(payload));
+}
+
+function isHypEmpleadoAsesorPayload(payload = {}) {
+  return isHypAsesorOrdenParaHypPayload(payload);
+}
+
 function matchesAreaPayload(payload, area) {
   const key = normalizeArea(area);
   if (key === 'posventa') return true;
+  const letra = letterOfPayload(payload);
+  if (key === 'hyp') {
+    if ((AREA_LETRAS.hyp || []).includes(letra)) return true;
+    return isHypAsesorOrdenParaHypPayload(payload);
+  }
+  if (key === 'servicio') {
+    if (!(AREA_LETRAS.servicio || []).includes(letra)) return false;
+    if (isHypAsesorOrdenParaHypPayload(payload)) return false;
+    return true;
+  }
   const letras = AREA_LETRAS[key];
   if (!letras) return true;
-  return letras.includes(letterOfPayload(payload));
+  return letras.includes(letra);
 }
 
 function matchesEstatusPayload(payload, estatus) {

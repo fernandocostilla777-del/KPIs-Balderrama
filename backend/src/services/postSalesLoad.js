@@ -11,6 +11,9 @@ const STATUS_LABELS = {
 
 const OPEN_STATUSES = new Set(['A', 'T', 'D', 'P']);
 
+/** Letras HyP cuyo ciclo se calcula solo con ORE_FECHACIE (cierre real). */
+const HYP_CICLO_LETRAS = new Set(['A', 'F', 'H', 'J', 'V', 'Z', 'Ó']);
+
 /** Nomenclaturas del acumulado diario mes en curso (excl. canceladas) */
 const NOMENCLATURA_MES_CURSO = ['N', 'D', 'Q', 'C', 'X', 'Y'];
 
@@ -122,11 +125,14 @@ function mapRow(row, { snapshot = false } = {}) {
     dias = Math.max(0, dias || 0);
   }
 
-  // Ciclo real de taller: ingreso → cierre (facturadas/cerradas). Abiertas usan estancia (días).
+  const { letra: letraOrden, tipo: tipoPorLetra } = mapTipoPorLetra(row.orden);
+
+  // Ciclo real de taller: ingreso → cierre (ORE_FECHACIE).
+  // Para HyP A/F/H/J/V/Z/Ó solo se calcula si hay ORE_FECHACIE (no se inventa).
   let diasCiclo = null;
   if (ingresoDate && cierreDate) {
     diasCiclo = Math.max(0, Math.round((cierreDate - ingresoDate) / 86400000));
-  } else if (!isOpen && ingresoDate) {
+  } else if (!isOpen && ingresoDate && !HYP_CICLO_LETRAS.has(letraOrden)) {
     diasCiclo = dias;
   }
 
@@ -155,7 +161,6 @@ function mapRow(row, { snapshot = false } = {}) {
   const semaforo = calcSemaforo(dias, isOpen);
   const antiguedad = calcAntiguedadBucket(dias, isOpen);
   const excluido = incompleto || status === 'C';
-  const { letra: letraOrden, tipo: tipoPorLetra } = mapTipoPorLetra(row.orden);
   const refaccionesLineas = Math.max(0, Number(row.refaccionesLineas ?? row.RefaccionesLineas ?? 0));
   // "Cargadas" = hay líneas RE en el detalle de la orden
   const conRefacciones = refaccionesLineas > 0;
@@ -175,6 +180,7 @@ function mapRow(row, { snapshot = false } = {}) {
     ingreso: row.ingreso || '',
     ingresoDate: ingresoDate ? ingresoDate.toISOString().slice(0, 10) : null,
     cierre: row.cierre || '',
+    cierreDate: cierreDate ? cierreDate.toISOString().slice(0, 10) : null,
     promesa: row.promesa || '',
     promesaDate: promesaDate ? promesaDate.toISOString().slice(0, 10) : null,
     dias,

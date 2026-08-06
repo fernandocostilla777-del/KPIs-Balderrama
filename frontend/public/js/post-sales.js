@@ -192,13 +192,13 @@
     if (current && options.includes(current)) sel.value = current;
   }
 
-  function populateTipoMulti(options) {
+  function populateTipoMulti(options, { selectAll = false } = {}) {
     const box = document.getElementById('fTipoOptions');
     if (!box) return;
     const prev = new Set(getSelectedTipos());
     const hadSelection = prev.size > 0;
     box.innerHTML = (options || []).map((o) => {
-      const checked = !hadSelection || prev.has(o) ? ' checked' : '';
+      const checked = selectAll || !hadSelection || prev.has(o) ? ' checked' : '';
       return `
         <label class="filter-multi__item">
           <input type="checkbox" value="${escHtml(o)}"${checked}/>
@@ -208,19 +208,20 @@
     updateTipoLabel();
   }
 
-  function populateFilterOptions(options) {
+  function populateFilterOptions(options, opts = {}) {
     populateSelect(FILTER_IDS.status, options.status, 'Todos');
     populateSelect(FILTER_IDS.asesor, options.asesor, 'Todos');
-    populateTipoMulti(options.tipo);
+    populateTipoMulti(options.tipo, opts);
     populateSelect(FILTER_IDS.antiguedad, options.antiguedad, 'Todas');
   }
 
-  function kpiCard(title, value, sub, cls, id, opsKey) {
+  function kpiCard(title, value, sub, cls, id, opsKey, extraClass = '') {
     const idAttr = id ? ` id="${id}"` : '';
     const opsAttr = opsKey ? ` data-ops-kpi="${opsKey}"` : '';
     const interactive = opsKey ? ' kpi-card--clickable' : '';
     const role = opsKey ? ' role="button" tabindex="0"' : '';
-    return `<div class="kpi-card kpi-card--${cls || 'blue'}${interactive}"${idAttr}${opsAttr}${role} title="${opsKey ? 'Clic para ver desglose' : ''}">
+    const extra = extraClass ? ` ${extraClass}` : '';
+    return `<div class="kpi-card kpi-card--${cls || 'blue'}${interactive}${extra}"${idAttr}${opsAttr}${role} title="${opsKey ? 'Clic para ver desglose' : ''}">
       <span class="kpi-title">${title}</span>
       <div class="kpi-value${String(value).includes('$') ? ' money' : ''}">${value}</div>
       ${sub ? `<p class="kpi-subtitle">${sub}</p>` : ''}
@@ -229,8 +230,58 @@
     </div>`;
   }
 
-  function kpiGroup(title, cards) {
-    return `<div class="kpi-group"><h4 class="kpi-group-title">${title}</h4><div class="kpi-grid">${cards.join('')}</div></div>`;
+  function kpiSpacer() {
+    return '<div class="kpi-card-spacer" aria-hidden="true"></div>';
+  }
+
+  function kpiGroup(title, cards, gridClass = '') {
+    const gridCls = gridClass ? ` ${gridClass}` : '';
+    return `<div class="kpi-group"><h4 class="kpi-group-title">${title}</h4><div class="kpi-grid${gridCls}">${cards.join('')}</div></div>`;
+  }
+
+  /** Importes + antigüedad a la izquierda; Mes en curso (vs mejor) como rectángulo alto a la derecha. */
+  function kpiImportesAgingConMejorMes(importesCards, agingCards, mejorMesCard) {
+    return `<div class="kpi-ops-mejor-duo">
+      <div class="kpi-ops-mejor-duo__main">
+        ${kpiGroup('Importes y tickets', importesCards)}
+        ${kpiGroup('Antigüedad de abiertas', agingCards)}
+      </div>
+      <div class="kpi-ops-mejor-duo__side">
+        <h4 class="kpi-group-title kpi-ops-mejor-duo__side-title">Mes en curso</h4>
+        <div class="kpi-ops-mejor-duo__side-body">${mejorMesCard}</div>
+      </div>
+    </div>`;
+  }
+
+  function kpiMesEnCursoCard(s) {
+    const mc = s.mesEnCursoStats;
+    if (!mc) {
+      return kpiCard('Vas del mes', '—', 'Sin datos del año', 'green', null, 'mejorMes', 'kpi-card--mejor-mes');
+    }
+    const pct = mc.pctVsMejor == null ? '—' : `${mc.pctVsMejor}%`;
+    const ritmo = mc.pctRitmoVsMejor == null
+      ? ''
+      : ` · ritmo proy. ${mc.pctRitmoVsMejor}% del mejor`;
+    return `<div class="kpi-card kpi-card--green kpi-card--clickable kpi-card--mejor-mes kpi-card--mes-curso" data-ops-kpi="mejorMes" role="button" tabindex="0" title="Clic para ver desglose">
+      <span class="kpi-title">Vas del mes · ${escHtml(mc.label)}</span>
+      <div class="mes-curso-head">
+        <div class="mes-curso-total">
+          <div class="kpi-value money">${Dashboard.fmt.currency(mc.importeFacturado)}</div>
+          <p class="kpi-subtitle">día ${mc.diaDelMes}/${mc.diasEnMes} · ${Dashboard.fmt.number(mc.facturadas)} facturadas</p>
+        </div>
+        <div class="mes-curso-mini">
+          <div class="mes-curso-mini-chart"><canvas id="cMesCursoMini" aria-label="Comparativo mes vs mejor"></canvas></div>
+          <p class="mes-curso-mini-caption">${pct} del mejor (${escHtml(mc.mejorMesLabel)})</p>
+        </div>
+      </div>
+      <div class="mes-curso-chart-wrap">
+        <p class="mes-curso-chart-label">Mejores meses del año</p>
+        <div class="mes-curso-chart"><canvas id="cMesCursoRanking" aria-label="Ranking de mejores meses"></canvas></div>
+      </div>
+      <p class="kpi-subtitle mes-curso-foot">Proyección ${Dashboard.fmt.currency(mc.ritmoProyectado)} vs mejor ${Dashboard.fmt.currency(mc.mejorMesImporte)}${ritmo}</p>
+      <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+      <div class="kpi-accent"></div>
+    </div>`;
   }
 
   function growthLabel(value, prevHasData) {
@@ -286,20 +337,41 @@
     switch (kpi) {
       case 'ingresadas': return filtered;
       case 'facturadas': return filtered.filter((r) => r.status === 'I');
-      case 'abiertas': return open;
+      case 'abiertas': {
+        const periodoKeys = new Set(
+          filtered
+            .filter((r) => ['A', 'T', 'D', 'P'].includes(String(r.status || '').trim().toUpperCase()))
+            .map((r) => String(r.orden || '').trim().toUpperCase())
+            .filter(Boolean),
+        );
+        return open.filter((r) => !periodoKeys.has(String(r.orden || '').trim().toUpperCase()));
+      }
+      case 'abiertasPeriodo': return filtered.filter((r) => ['A', 'T', 'D', 'P'].includes(String(r.status || '').trim().toUpperCase()));
       case 'canceladas': return filtered.filter((r) => r.status === 'C');
-      case 'cerradas': return filtered.filter((r) => !['A', 'T', 'D', 'P'].includes(r.status));
+      case 'cerradas': return filtered.filter((r) => {
+        const st = String(r.status || '').trim().toUpperCase();
+        return st && !['A', 'T', 'D', 'P', 'I', 'C'].includes(st);
+      });
       case 'importeIngresado': return filtered;
-      case 'ticketFacturado': return filtered.filter((r) => r.status === 'I');
+      case 'ticketFacturado': return filtered.filter((r) => {
+        if (r.status !== 'I') return false;
+        return PostSalesOrderTypes.isAseguradora
+          ? PostSalesOrderTypes.isAseguradora(r)
+          : ['A', 'F', 'V'].includes(String(r?.letraOrden || r?.orden || '').trim().toUpperCase().charAt(0));
+      });
       case 'facturadoUltimoMes': {
         const key = s.ultimoMesKey;
         if (!key) return [];
         return filtered.filter((r) => r.status === 'I' && monthKeyOf(r) === key);
       }
-      case 'mejorMes':
-        // Facturadas del acumulado del año (YTD), no del periodo filtrado
-        return PostSalesAnalytics.applyFilters(ytdRecords.length ? ytdRecords : allRecords, getFilters())
+      case 'mejorMes': {
+        // Facturadas del mes calendario en curso (YTD)
+        const mesKey = s.mesEnCursoStats?.key;
+        const rows = PostSalesAnalytics.applyFilters(ytdRecords.length ? ytdRecords : allRecords, getFilters())
           .filter((r) => r.status === 'I');
+        if (!mesKey) return rows;
+        return rows.filter((r) => monthKeyOf(r) === mesKey);
+      }
       case 'aging0_30': return open.filter((r) => r.antiguedad === '0-30');
       case 'aging31_60': return open.filter((r) => r.antiguedad === '31-60');
       case 'aging61_90': return open.filter((r) => r.antiguedad === '61-90');
@@ -310,8 +382,17 @@
       case 'promesasVencidas': return open.filter((r) => r.promesaVencida);
       case 'promedioSemanal': return filtered;
       case 'tiempoPromCiclo':
-      case 'tiempoMedCiclo':
-        return filtered.filter((r) => r.status === 'I' && (r.cierreDate || r.diasCiclo != null));
+      case 'tiempoMedCiclo': {
+        const hypCiclo = new Set(['A', 'F', 'H', 'J', 'V', 'Z', 'Ó', '\u00D3']);
+        return filtered.filter((r) => {
+          if (r.status !== 'I' || !r.cierreDate) return false;
+          if (currentArea === 'hyp') {
+            const L = OT?.letterOfRecord?.(r) || String(r.letraOrden || r.orden || '').trim().charAt(0).toUpperCase();
+            return hypCiclo.has(L);
+          }
+          return true;
+        });
+      }
       case 'estanciaPromAbiertas':
         return open;
       case 'diasPromMecanica':
@@ -348,19 +429,36 @@
     const s = dash?.summary || {};
     const o = dash?.operations || {};
     const map = {
-      ingresadas: { title: 'Órdenes ingresadas', hint: 'Todas las órdenes del periodo filtrado' },
+      ingresadas: {
+        title: 'Órdenes ingresadas',
+        hint: 'Órdenes del periodo · unidades únicas validadas por VIN (MO+RE de misma serie = 1 unidad)',
+      },
       facturadas: { title: 'Facturadas', hint: 'Status I · importe facturado' },
-      abiertas: { title: 'Abiertas hoy', hint: 'Snapshot de órdenes abiertas en taller' },
+      abiertas: {
+        title: 'Abiertas acumuladas',
+        hint: 'Backlog abierto actual menos las abiertas ingresadas en el periodo',
+      },
+      abiertasPeriodo: {
+        title: 'Abiertas del periodo',
+        hint: 'De las ingresadas en el rango, las que siguen abiertas (A/T/D/P)',
+      },
       canceladas: { title: 'Canceladas', hint: 'Status C en el periodo' },
-      cerradas: { title: 'Cerradas', hint: 'Facturadas + canceladas del periodo (ya no abiertas)' },
+      cerradas: {
+        title: 'Cerradas',
+        hint: 'Ingresadas del periodo que no están abiertas, ni facturadas (I), ni canceladas (C)',
+      },
       importeIngresado: { title: 'Importe ingresado', hint: 'Suma de importes de órdenes del periodo' },
-      ticketFacturado: { title: 'Ticket prom. facturado', hint: 'Promedio por orden facturada' },
+      ticketFacturado: { title: 'Ticket prom. facturado', hint: 'Promedio por orden facturada de aseguradoras (A / F / V)' },
       facturadoUltimoMes: { title: `Facturado · ${s.ultimoMesLabel || 'último mes'}`, hint: 'Órdenes facturadas del último mes del periodo' },
       mejorMes: {
-        title: `Mejor mes · ${s.mejorMes || '—'}`,
-        hint: s.mejorMesStats
-          ? `Acumulado ${ytdMeta?.year || 'del año'} · #1 de ${s.mejorMesStats.mesesComparados} meses`
-          : 'Mayor importe facturado en el acumulado del año',
+        title: s.mesEnCursoStats
+          ? `Vas del mes · ${s.mesEnCursoStats.label}`
+          : `Mejor mes · ${s.mejorMes || '—'}`,
+        hint: s.mesEnCursoStats
+          ? `Facturado del mes en curso vs mejor mes ${s.mesEnCursoStats.mejorMesLabel || ''} (${ytdMeta?.year || 'YTD'})`
+          : (s.mejorMesStats
+            ? `Acumulado ${ytdMeta?.year || 'del año'} · #1 de ${s.mejorMesStats.mesesComparados} meses`
+            : 'Comparativo mensual del año'),
       },
       aging0_30: { title: 'Abiertas 0-30 días', hint: 'Backlog reciente' },
       aging31_60: { title: 'Abiertas 31-60 días', hint: 'Antigüedad media' },
@@ -373,11 +471,11 @@
       promedioSemanal: { title: 'Promedio semanal', hint: 'Ritmo de ingreso por semana del periodo' },
       tiempoPromCiclo: {
         title: 'Tiempo promedio de ciclo',
-        hint: `Promedio ingreso → cierre en facturadas (${o.ciclosConDato || 0} con fechas)`,
+        hint: `ORE_FECHAORD → ORE_FECHACIE − ${o.cicloAjusteValuacionDias || 3} d valuación · letras A/F/H/J/V/Z/Ó (${o.ciclosConDato || 0} con cierre)`,
       },
       tiempoMedCiclo: {
         title: 'Tiempo mediano de ciclo',
-        hint: 'Mediana de días ingreso → cierre en facturadas',
+        hint: `Mediana ORE_FECHAORD → ORE_FECHACIE − ${o.cicloAjusteValuacionDias || 3} d valuación (A/F/H/J/V/Z/Ó)`,
       },
       estanciaPromAbiertas: {
         title: 'Estancia promedio abiertas',
@@ -485,7 +583,7 @@
       titulo: 'Por tipo de orden',
       rows: countBy(rows, (r) => r.tipoOrden || r.tipo).slice(0, 8).map((x) => ({ label: x.label, value: num(x.value) })),
     });
-    if (['importeIngresado', 'ticketFacturado', 'facturadoUltimoMes', 'mejorMes', 'abiertas', 'aging120p', 'criticas60', 'conRefacciones', 'tiempoPromCiclo', 'retrasoPromesa'].includes(kpi)) {
+    if (['importeIngresado', 'ticketFacturado', 'facturadoUltimoMes', 'mejorMes', 'abiertas', 'abiertasPeriodo', 'aging120p', 'criticas60', 'conRefacciones', 'tiempoPromCiclo', 'retrasoPromesa'].includes(kpi)) {
       sections.push({
         titulo: 'Importe por asesor',
         rows: sumBy(rows, (r) => r.asesor, (r) => r.importeAbierto || r.importeFacturado || r.importe)
@@ -540,6 +638,95 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function normalizeVin(value) {
+    return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  /** Aseguradoras que suelen abrir MO + refacciones (2 órdenes = 1 unidad). */
+  const ASEG_DOBLE_ORDEN = ['CHUBB', 'ZURICH', 'BANORTE'];
+
+  function isAsegDobleOrden(aseguradora) {
+    const a = String(aseguradora || '').trim().toUpperCase();
+    if (!a) return false;
+    return ASEG_DOBLE_ORDEN.some((name) => a.includes(name));
+  }
+
+  /**
+   * Unidades ingresadas sin repetir VIN/serie.
+   * CHUBB / ZURICH / BANORTE suelen tener 2 órdenes (MO + refacciones) por unidad.
+   */
+  function computeUnidadesPorVin(rows = []) {
+    const byVin = new Map();
+    let sinSerie = 0;
+    let ordenesAsegDoble = 0;
+
+    for (const r of rows) {
+      if (isAsegDobleOrden(r.aseguradora)) ordenesAsegDoble += 1;
+      const vin = normalizeVin(r.serie);
+      if (!vin) {
+        sinSerie += 1;
+        continue;
+      }
+      if (!byVin.has(vin)) byVin.set(vin, []);
+      byVin.get(vin).push(r);
+    }
+
+    const vinsMulti = [...byVin.entries()].filter(([, list]) => list.length > 1);
+    const ordenesExtra = vinsMulti.reduce((s, [, list]) => s + (list.length - 1), 0);
+    const unidadesConVin = byVin.size;
+    const unidades = unidadesConVin + sinSerie;
+    const ordenes = rows.length;
+    const pctUnicas = ordenes > 0 ? Math.round((unidades / ordenes) * 1000) / 10 : 0;
+
+    const porAsegMulti = new Map();
+    for (const [, list] of vinsMulti) {
+      const aseg = String(list[0]?.aseguradora || 'Sin aseguradora').trim() || 'Sin aseguradora';
+      const cur = porAsegMulti.get(aseg) || { unidades: 0, ordenes: 0 };
+      cur.unidades += 1;
+      cur.ordenes += list.length;
+      porAsegMulti.set(aseg, cur);
+    }
+
+    return {
+      ordenes,
+      unidades,
+      unidadesConVin,
+      sinSerie,
+      vinsConMultiOrden: vinsMulti.length,
+      ordenesExtra,
+      pctUnicas,
+      ordenesAsegDoble,
+      porAsegMulti: [...porAsegMulti.entries()]
+        .map(([label, v]) => ({ label, ...v }))
+        .sort((a, b) => b.ordenes - a.ordenes),
+    };
+  }
+
+  function kpiUnidadesVinCard(stats) {
+    const num = (v) => Number(v || 0).toLocaleString('es-MX');
+    if (!stats || !stats.ordenes) {
+      return `
+        <div class="ops-orders-drawer__group ops-orders-drawer__group--carry-sim">
+          <aside class="carry-over-sim-card carry-over-sim-card--drawer carry-over-sim-card--vin" aria-label="Unidades por VIN">
+            <span class="carry-over-sim-label">Unidades ingresadas · VIN único</span>
+            <div class="carry-over-sim-pct">0</div>
+            <p class="carry-over-sim-formula">Sin órdenes en el periodo</p>
+          </aside>
+        </div>`;
+    }
+    return `
+      <div class="ops-orders-drawer__group ops-orders-drawer__group--carry-sim">
+        <aside class="carry-over-sim-card carry-over-sim-card--drawer carry-over-sim-card--vin" aria-label="Unidades por VIN">
+          <span class="carry-over-sim-label">Unidades ingresadas · VIN único</span>
+          <div class="carry-over-sim-pct">${num(stats.unidades)}</div>
+          <p class="carry-over-sim-formula">
+            ${num(stats.ordenes)} órdenes → ${num(stats.unidades)} unidades
+            (${stats.pctUnicas}% sin repetir serie)
+          </p>
+        </aside>
+      </div>`;
   }
 
   function stampFile() {
@@ -1059,7 +1246,7 @@
         return Number(r.importeFacturado || r.importe || 0);
       }
       if ([
-        'abiertas', 'aging0_30', 'aging31_60', 'aging61_90', 'aging91_120', 'aging120p',
+        'abiertas', 'abiertasPeriodo', 'aging0_30', 'aging31_60', 'aging61_90', 'aging91_120', 'aging120p',
         'criticas60', 'conRefacciones', 'promesasVencidas', 'sinImporte', 'sinAseguradora', 'sinPromesa', 'sinFecha',
         'estanciaPromAbiertas',
       ].includes(kpi)) {
@@ -1265,11 +1452,26 @@
         : '';
 
       const ms = currentMeta.kpi === 'mejorMes' ? (lastDash?.summary?.mejorMesStats || null) : null;
+      const mc = currentMeta.kpi === 'mejorMes' ? (lastDash?.summary?.mesEnCursoStats || null) : null;
       const signPct = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`);
-      const mejorMesBlock = ms
+      const mesCursoBlock = mc
         ? `
         <div class="ops-orders-drawer__group ops-orders-drawer__group--mejor">
-          <h5>Comparativo · por qué es el mejor</h5>
+          <h5>Vas del mes · ${escHtml(mc.label)}</h5>
+          <div class="ops-orders-drawer__row"><span class="lbl">Facturado del mes</span><span class="val">${fmt.currency(mc.importeFacturado)}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Día del mes</span><span class="val">${mc.diaDelMes} / ${mc.diasEnMes} (${mc.pctMesTranscurrido}%)</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Órdenes facturadas</span><span class="val">${num(mc.facturadas)}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Mejor mes del año</span><span class="val">${escHtml(mc.mejorMesLabel)} · ${fmt.currency(mc.mejorMesImporte)}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">% vs mejor mes</span><span class="val">${mc.pctVsMejor == null ? '—' : `${mc.pctVsMejor}%`}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Falta para empatar</span><span class="val">${fmt.currency(Math.max(0, mc.gapVsMejor || 0))}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Proyección a fin de mes</span><span class="val">${fmt.currency(mc.ritmoProyectado)} · ${mc.pctRitmoVsMejor == null ? '—' : `${mc.pctRitmoVsMejor}% del mejor`}</span></div>
+        </div>`
+        : '';
+      const mejorMesBlock = ms
+        ? `
+        ${mesCursoBlock}
+        <div class="ops-orders-drawer__group ops-orders-drawer__group--mejor">
+          <h5>Comparativo · mejor mes del año</h5>
           <div class="ops-orders-drawer__row"><span class="lbl">Mes ganador</span><span class="val">${escHtml(ms.label)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Facturado del mes</span><span class="val">${fmt.currency(ms.importeFacturado)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Órdenes facturadas</span><span class="val">${num(ms.facturadas)}</span></div>
@@ -1294,16 +1496,21 @@
               data-ops-filter-value="${escHtml(m.key)}"
               data-ops-filter-label="${escHtml(m.label)}"
               title="Ver órdenes de ${escHtml(m.label)}">
-              <span class="lbl">${m.posicion}. ${escHtml(m.label)}${m.esMejor ? ' ★' : ''}</span>
+              <span class="lbl">${m.posicion}. ${escHtml(m.label)}${m.esMejor ? ' ★' : ''}${m.key === mc?.key ? ' · actual' : ''}</span>
               <span class="val">${fmt.currency(m.importeFacturado)}</span>
             </button>`).join('') || '<p class="ops-orders-drawer__hint">Sin meses</p>'}
         </div>`
-        : '';
+        : mesCursoBlock;
+
+      const vinStats = currentMeta.kpi === 'ingresadas' ? computeUnidadesPorVin(rows) : null;
+      const vinBlock = vinStats ? kpiUnidadesVinCard(vinStats) : '';
 
       summaryEl.innerHTML = `
+        ${vinBlock}
         <div class="ops-orders-drawer__group">
           <h5>Resumen</h5>
           <div class="ops-orders-drawer__row"><span class="lbl">Registros</span><span class="val">${num(rows.length)}</span></div>
+          ${vinStats ? `<div class="ops-orders-drawer__row"><span class="lbl">Unidades (VIN único)</span><span class="val">${num(vinStats.unidades)}</span></div>` : ''}
           <div class="ops-orders-drawer__row"><span class="lbl">Importe relacionado</span><span class="val">${fmt.currency(importeTotal)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Alcance</span><span class="val">${escHtml(currentMeta.hint || 'Indicador operativo')}</span></div>
           ${activeFilter
@@ -1405,9 +1612,9 @@
       if (searchEl) searchEl.value = '';
       activeFilter = null;
       if (currentMeta.kpi === 'mejorMes') {
-        const ms = lastDash?.summary?.mejorMesStats;
-        if (ms?.key) {
-          activeFilter = { dim: 'mes', value: ms.key, label: ms.label };
+        const mc = lastDash?.summary?.mesEnCursoStats;
+        if (mc?.key) {
+          activeFilter = { dim: 'mes', value: mc.key, label: mc.label };
         }
       }
       updateFilterChip();
@@ -1494,12 +1701,13 @@
       ingresadas: 'input',
       facturadas: 'check_circle',
       abiertas: 'pending_actions',
+      abiertasPeriodo: 'hourglass_top',
       canceladas: 'cancel',
       cerradas: 'task_alt',
       importeIngresado: 'payments',
       ticketFacturado: 'receipt_long',
       facturadoUltimoMes: 'calendar_month',
-      mejorMes: 'emoji_events',
+      mejorMes: 'calendar_month',
       aging0_30: 'schedule',
       aging31_60: 'hourglass_bottom',
       aging61_90: 'hourglass_top',
@@ -1606,6 +1814,101 @@
     });
   }
 
+  function renderMesEnCursoCharts(s) {
+    const mc = s?.mesEnCursoStats;
+    destroyChart('cMesCursoMini');
+    destroyChart('cMesCursoRanking');
+    const miniEl = document.getElementById('cMesCursoMini');
+    const rankEl = document.getElementById('cMesCursoRanking');
+    if (!mc || !miniEl || !rankEl || typeof Chart === 'undefined') return;
+
+    const { chartColors, chartOptions, fmt } = Dashboard;
+    const moneyTick = (v) => {
+      const n = Number(v) || 0;
+      if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+      if (Math.abs(n) >= 1e3) return `$${Math.round(n / 1e3)}k`;
+      return fmt.currency(n);
+    };
+
+    charts.cMesCursoMini = new Chart(miniEl, {
+      type: 'bar',
+      data: {
+        labels: ['Vas', 'Mejor'],
+        datasets: [{
+          data: [mc.importeFacturado || 0, mc.mejorMesImporte || 0],
+          backgroundColor: [chartColors.primary, chartColors.secondary],
+          borderRadius: 5,
+          barThickness: 12,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 400 },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: { label: (ctx) => fmt.currency(ctx.raw || 0) },
+          },
+        },
+        scales: {
+          x: { display: false, beginAtZero: true, grid: { display: false } },
+          y: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: { font: { size: 10, weight: '700' }, color: '#64748b' },
+          },
+        },
+      },
+    });
+
+    const top = Array.isArray(mc.topMeses) ? mc.topMeses : [];
+    const bg = top.map((m) => {
+      if (m.esActual) return chartColors.primary;
+      if (m.esMejor) return chartColors.secondary;
+      return 'rgba(148, 163, 184, 0.5)';
+    });
+
+    charts.cMesCursoRanking = new Chart(rankEl, {
+      type: 'bar',
+      data: {
+        labels: top.map((m) => m.label),
+        datasets: [{
+          data: top.map((m) => m.importeFacturado || 0),
+          backgroundColor: bg,
+          borderRadius: 6,
+          maxBarThickness: 28,
+        }],
+      },
+      options: chartOptions({
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const m = top[ctx.dataIndex];
+                const tags = [m?.esMejor ? 'mejor' : null, m?.esActual ? 'mes actual' : null].filter(Boolean);
+                return `${fmt.currency(ctx.raw || 0)}${tags.length ? ` · ${tags.join(', ')}` : ''}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 10, weight: '600' }, maxRotation: 40, minRotation: 0 },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { font: { size: 10 }, callback: moneyTick },
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+        },
+      }),
+    });
+  }
+
   function renderKpis(d) {
     const { fmt } = Dashboard;
     const s = d.summary || { ...d.executive, ...d.finance };
@@ -1630,50 +1933,62 @@
 
     document.getElementById('kpiOperational').innerHTML = [
       kpiGroup('Volumen del periodo', [
-        kpiCard('Órdenes ingresadas', fmt.number(s.totalOrdenes), 'en el rango de fechas', 'blue', null, 'ingresadas'),
+        kpiCard(
+          'Órdenes ingresadas',
+          fmt.number(s.totalOrdenes),
+          currentArea === 'hyp'
+            ? 'HyP A/F/H/J/V/Z/Ó + I/E de Jair/Brian/Edel · por ingreso'
+            : 'en el rango de fechas',
+          'blue',
+          null,
+          'ingresadas',
+        ),
         kpiCard('Facturadas', fmt.number(s.facturadas), `${s.pctFacturado}% del total`, 'green', null, 'facturadas'),
+        kpiCard('Canceladas', fmt.number(s.canceladas), 'en el periodo', 'rose', null, 'canceladas'),
+        kpiCard(
+          'Abiertas del periodo',
+          fmt.number(s.abiertasPeriodo || 0),
+          `${s.pctAbiertasPeriodo || 0}% de ingresadas · ${fmt.currency(s.importeAbiertoPeriodo || 0)}`,
+          'amber',
+          null,
+          'abiertasPeriodo',
+        ),
         kpiCard(
           'Cerradas',
           fmt.number(s.cerradas),
-          `${s.pctCerrado || 0}% del periodo · ${fmt.number(s.facturadas)} fact. · ${fmt.number(s.canceladas)} canc.`,
+          `${s.pctCerrado || 0}% del periodo · sin facturar ni cancelar`,
           'violet',
           null,
           'cerradas',
         ),
-        kpiCard('Abiertas hoy', fmt.number(s.abiertas), fmt.currency(s.importeAbierto), 'amber', null, 'abiertas'),
-        kpiCard('Canceladas', fmt.number(s.canceladas), 'en el periodo', 'rose', null, 'canceladas'),
-      ]),
-      kpiGroup('Importes y tickets', [
-        kpiCard('Importe ingresado', fmt.currency(s.importeIngresado), `ticket prom. ${fmt.currency(s.ticketPromIngresado)}`, 'violet', null, 'importeIngresado'),
-        kpiCard('Ticket prom. facturado', fmt.currency(s.ticketPromFacturado), 'por orden facturada', 'blue', null, 'ticketFacturado'),
-        kpiCard(`Facturado · ${s.ultimoMesLabel}`, fmt.currency(s.facturadoUltimoMes), 'último mes del periodo', 'violet', null, 'facturadoUltimoMes'),
         kpiCard(
-          'Mejor mes',
-          fmt.currency(s.mejorMesImporte),
-          (() => {
-            const ms = s.mejorMesStats;
-            const year = ytdMeta?.year ? ` · ${ytdMeta.year}` : '';
-            if (!ms) return `Acumulado del año${year}`;
-            const vs = ms.vsPromedioPct == null ? '' : ` · ${ms.vsPromedioPct > 0 ? '+' : ''}${ms.vsPromedioPct}% vs prom.`;
-            return `${ms.label}${vs} · #1/${ms.mesesComparados}${year}`;
-          })(),
-          'green',
+          'Abiertas acumuladas',
+          fmt.number(s.abiertasAcumuladas ?? Math.max(0, (s.abiertas || 0) - (s.abiertasPeriodo || 0))),
+          `${fmt.currency(s.importeAbiertoAcumulado ?? s.importeAbierto)} · excluye abiertas del periodo`,
+          'amber',
           null,
-          'mejorMes',
+          'abiertas',
         ),
       ]),
-      kpiGroup('Antigüedad de abiertas', [
-        kpiCard('0-30 días', fmt.number(a.b0_30), 'backlog reciente', 'green', null, 'aging0_30'),
-        kpiCard('31-60 días', fmt.number(a.b31_60), '', 'amber', null, 'aging31_60'),
-        kpiCard('61-90 días', fmt.number(a.b61_90), '', 'rose', null, 'aging61_90'),
-        kpiCard('91-120 días', fmt.number(a.b91_120), '', 'rose', 'psAging91', 'aging91_120'),
-        kpiCard('+120 días', fmt.number(a.b120p), '', 'rose', 'psAging120', 'aging120p'),
-      ]),
+        kpiImportesAgingConMejorMes(
+        [
+          kpiCard('Importe ingresado', fmt.currency(s.importeIngresado), `ticket prom. ${fmt.currency(s.ticketPromIngresado)}`, 'violet', null, 'importeIngresado'),
+          kpiCard('Ticket prom. facturado', fmt.currency(s.ticketPromFacturado), 'aseguradoras A / F / V', 'blue', null, 'ticketFacturado'),
+          kpiCard(`Facturado · ${s.ultimoMesLabel}`, fmt.currency(s.facturadoUltimoMes), 'último mes del periodo', 'violet', null, 'facturadoUltimoMes'),
+        ],
+        [
+          kpiCard('0-30 días', fmt.number(a.b0_30), 'backlog reciente', 'green', null, 'aging0_30'),
+          kpiCard('31-60 días', fmt.number(a.b31_60), '', 'amber', null, 'aging31_60'),
+          kpiCard('61-90 días', fmt.number(a.b61_90), '', 'rose', null, 'aging61_90'),
+          kpiCard('+120 días', fmt.number(a.b120p), '', 'rose', 'psAging120', 'aging120p'),
+        ],
+        kpiMesEnCursoCard(s),
+      ),
       kpiGroup('Operación de taller', [
         kpiCard(
           'Tiempo prom. ciclo',
           `${fmt.number(o.tiempoPromCiclo || 0)} d`,
-          `${fmt.number(o.ciclosConDato || 0)} facturadas con ingreso/cierre`,
+          `${fmt.number(o.ciclosConDato || 0)} con ORE_FECHACIE · A/F/H/J/V/Z/Ó · −${o.cicloAjusteValuacionDias || 3} d`,
           'blue',
           'psTiempoCiclo',
           'tiempoPromCiclo',
@@ -1738,6 +2053,7 @@
     ].join('');
 
     bindOpsKpiCards();
+    renderMesEnCursoCharts(s);
     if (openOpsKpiKey) {
       const card = document.querySelector(`#kpiOperational [data-ops-kpi="${openOpsKpiKey}"]`);
       if (card) {
@@ -1895,16 +2211,6 @@
         })),
       },
       options: chartOptions({ scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }),
-    });
-
-    destroyChart('cTipo');
-    charts.cTipo = new Chart(document.getElementById('cTipo'), {
-      type: 'bar',
-      data: {
-        labels: c.tipoOrden.map((x) => x.label.slice(0, 18)),
-        datasets: [{ label: 'Órdenes', data: c.tipoOrden.map((x) => x.value), backgroundColor: chartColors.secondary, borderRadius: 8 }],
-      },
-      options: chartOptions({ indexAxis: 'y', plugins: { legend: { display: false } } }),
     });
   }
 

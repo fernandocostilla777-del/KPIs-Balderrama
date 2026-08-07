@@ -1,0 +1,102 @@
+s
+323 AUTOMOTRIZ BALDERRAMA PUEBLA
+Noviembre
+Volumen de Referencia 164 Día Tráfico Solicitudes Facturación Entregas
+Market Share Objetivo 18.8% 1-Nov-25 22 16 1 1
+Industria Estimada 872 2-Nov-25 45 31 4 3
+3-Nov-25 67 47 8 6
+MS CV 2013 4-Nov-25 89 63 9 8
+5-Nov-25 112 78 9 8
+6-Nov-25 134 94 13 11
+Noviembre 7-Nov-25 156 109 18 15
+IND.PROY. MAY IND.PROY. JUN 8-Nov-25 179 125 23 20
+El promedio de tiempo de entrega en el distribuidor es: 9-Nov-25 201 141 28 24
+Fecha Límite Facturas / Entregas 10-Nov-25 223 156 34 29
+11-Nov-25 246 172 37 32
+El distribuidor inicia el mes con un CarryOver de Facturas: 3 12-Nov-25 268 188 37 32
+Durante el mes se deben facturar: 173 13-Nov-25 290 203 42 37
+Debe facturar antes de 11/24/2025 173 14-Nov-25 313 219 49 41
+Quedando un CarryOver de Facturas: 12 15-Nov-25 335 234 55 47
+16-Nov-25 357 250 61 52
+Deberias generar un ingreso de solicitudes mínimo de: 484 17-Nov-25 379 266 67 57
+Para generar un volumen de contratos de: 115 18-Nov-25 402 281 71 61
+Generando Penetración para Scorecard de: 70% 19-Nov-25 424 297 71 61
+20-Nov-25 446 313 78 66
+Tomando un promedio de 5 ventas/asesor IND.PROY. JUL	21-Nov-25 469 328 85 71
+Tu equipo comercial debería tener este numero de asesores: 22-Nov-25 491 344 92 77
+23-Nov-25 513 359 100 83
+24-Nov-25 536 375 108 89
+25-Nov-25 558 391 112 95
+Línea Tráfico Solicitudes Facturas Entregas 26-Nov-25 580 406 112 95
+27-Nov-25 603 422 120 103
+Beat HB 0 0 0 0 28-Nov-25 625 438 128 110
+Beat NB 0 0 0 0 29-Nov-25 647 453 138 118
+Aveo HB 104 73 26 25 30-Nov-25 670 469 149 129
+Aveo NB 104 73 26 24 1-Dec-25 692 484 173 164
+Aveo 0 0 0 0
+Onix 84 59 21 19 9.5
+Cavalier 0 0 0 0
+Camaro 0 0 0 0
+Corvette 0 0 0 0 0
+Total Pasajeros 292 204 73 68
+Tracker 8 6 2 2 2
+Trax 36 25 9 9 9
+Captiva 64 45 16 15
+Groove 80 56 20 19
+Blazer 0 0 0 0 0
+Traverse 8 6 2 2 2
+Tahoe 4 3 1 1 1
+Suburban 8 6 2 2 2
+Bolt 0 0 0 0
+Equinox EV 0 0 0 0
+Blazer EV 0 0 0 0
+Spark EUV 4 3 1 1
+Total Suv's 212 148 53 51
+Colorado 4 3 1 1
+Silverado / Cheyenne Reg Cab 4 3 1 1 1
+Silverado / Cheyenne Crew Cab 8 6 2 2 1
+S10 MAX Chassis Cab 20 14 5 5 2
+S10 MAX Crew Cab 56 39 14 13
+S10 MAX Regular Cab 16 11 4 4
+Silverado 3500 0 0 0 0
+Montana 12 8 3 3 0
+3
+Total Pick up's 120 84 30 29
+Tornado Van 64 45 16 15
+Express Cargo Van 0 0 0 0
+Express Passenger Van 0 0 0 0
+Express Max 4 3 1 1
+Total Van's 68 48 17 16
+TOTAL 692 485 173 164 32.5
+TAC Nuevos
+Certificaciones/Garantía Plus
+Ventas Seminuevos
+6. OBJETIVO SEMINUEVOS (5pts)
+5. OBJETIVO ACCESORIOS
+4
+TOTAL OnStar 17
+4. OBJETIVO DIARIO
+2. INDICADORES CLAVE "KPI"
+Proyección Diaria
+$262,400
+Ventas Essentials Multianual (12%)
+13	Ventas Essentials Anual (40%)
+7. OBJETIVO OnStar
+11
+7
+33
+30
+Contratos GMF
+Van's
+3. Oportunidad por línea de producto
+1. REFERENCIA MENSUAL
+Desglose por línea de producto
+Pick up's
+7
+11/24/2025
+Pasajeros
+33
+Suv's
+
+-- 1 of 1 --
+

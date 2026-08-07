@@ -90,6 +90,7 @@ const PAGE_LABELS = {
   sales: 'Ventas / F&I / utilidad',
   forecast: 'Pronóstico',
   inventory: 'Inventario',
+  'lista-precios': 'Lista de precios',
   contabilidad: 'Contabilidad / EEFF',
   'post-sales': 'PostVenta / taller',
   seguimiento: 'Seguimiento 360 / CRM / leads',

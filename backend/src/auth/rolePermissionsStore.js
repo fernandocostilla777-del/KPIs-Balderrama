@@ -34,6 +34,13 @@ const PAGE_CATALOG = [
     apiPrefixes: ['/inventory'],
   },
   {
+    id: 'lista-precios',
+    label: 'Lista de precios',
+    description: 'Catálogo de precios de lista por modelo y versión.',
+    homePath: '/lista-precios.html',
+    apiPrefixes: ['/lista-precios'],
+  },
+  {
     id: 'contabilidad',
     label: 'Contabilidad',
     description: 'EEFF y cuentas contables.',
@@ -67,7 +74,7 @@ const PAGE_BY_ID = Object.fromEntries(PAGE_CATALOG.map((p) => [p.id, p]));
 const VALID_PAGE_IDS = new Set(PAGE_CATALOG.map((p) => p.id));
 
 const HOME_PRIORITY = [
-  'overview', 'sales', 'post-sales', 'inventory', 'contabilidad', 'forecast', 'seguimiento', 'admin',
+  'overview', 'sales', 'post-sales', 'inventory', 'lista-precios', 'contabilidad', 'forecast', 'seguimiento', 'admin',
 ];
 
 function ensureDir() {

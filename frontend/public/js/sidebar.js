@@ -4,6 +4,7 @@
     { id: 'sales', href: '/sales.html', icon: 'bar_chart', label: 'Ventas' },
     { id: 'post-sales', href: '/post-sales.html', icon: 'handshake', label: 'PostVenta' },
     { id: 'inventory', href: '/inventory.html', icon: 'inventory_2', label: 'Inventario' },
+    { id: 'lista-precios', href: '/lista-precios.html', icon: 'sell', label: 'Lista de precios' },
     { id: 'contabilidad', href: '/contabilidad.html', icon: 'account_balance', label: 'Contabilidad' },
     { id: 'forecast', href: '/forecast.html', icon: 'timeline', label: 'Pronóstico' },
     { id: 'seguimiento', href: '/seguimiento.html', icon: 'person_search', label: 'Seguimiento 360' },

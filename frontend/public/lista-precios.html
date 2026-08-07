@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Lista de precios | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=53" rel="stylesheet"/>
+</head>
+<body class="dashboard-body" data-page="lista-precios">
+<div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
+<aside id="sidebar"></aside>
+<main class="main-shell">
+<header class="top-bar">
+<div class="top-bar-actions">
+<span class="top-bar-title">Lista de precios</span>
+</div>
+<div class="top-bar-actions" style="flex-wrap:wrap;gap:8px">
+<select id="sectionSelect" class="filter-select" title="Guía de planes">
+<option value="administracion">Guía Administración</option>
+<option value="bono-toma-cuenta">Bono Toma a Cuenta</option>
+</select>
+<select id="modeloSelect" class="filter-select">
+<option value="">Seleccionar modelo…</option>
+</select>
+<label class="filter-label" style="display:flex;align-items:center;gap:6px;margin:0">
+<input type="checkbox" id="soloStockChk" checked/>
+Solo con stock
+</label>
+<button type="button" id="btnConsultar" class="btn-glass btn-primary">Actualizar</button>
+</div>
+</header>
+<div class="main-content custom-scrollbar">
+
+<p id="metaVigencia" class="lp-meta"></p>
+
+<div id="lpEmpty" class="lp-empty section-panel">
+<span class="material-symbols-outlined">directions_car</span>
+<h3>Selecciona un modelo</h3>
+<p>Elige un modelo del catálogo para ver ficha, promociones y existencia.</p>
+</div>
+
+<article id="lpFicha" class="lp-ficha hidden" aria-live="polite">
+
+<section class="lp-hero">
+<div class="lp-hero-visual" id="lpHeroVisual" aria-hidden="true">
+<span class="material-symbols-outlined lp-hero-car">directions_car</span>
+<div class="lp-hero-brand">CHEVROLET</div>
+</div>
+<div class="lp-hero-copy">
+<div class="lp-hero-top">
+<div>
+<p id="lpCarroceria" class="lp-kicker">—</p>
+<h1 id="lpTitle" class="lp-title">—</h1>
+</div>
+<div id="lpHeroColors" class="lp-hero-colors" aria-label="Colores en inventario"></div>
+</div>
+<div id="lpVersionTabs" class="lp-version-tabs" role="tablist" aria-label="Versiones"></div>
+</div>
+</section>
+
+<section id="lpSummary" class="lp-summary-grid"></section>
+
+<section class="lp-mid-grid">
+<div class="lp-card">
+<h3 class="lp-card-title" id="lpFichaTitle">Ficha técnica</h3>
+<div id="lpSpecs" class="lp-spec-sections"></div>
+</div>
+<div class="lp-card">
+<h3 class="lp-card-title" id="lpStockTitle">Existencia</h3>
+<div id="lpStock" class="lp-stock"></div>
+</div>
+</section>
+
+<section class="lp-card">
+<div class="lp-card-head-row">
+<h3 class="lp-card-title" id="lpPromoTitle" style="margin:0">Promociones aplicables</h3>
+<span class="lp-chip-soft">Según guía vigente</span>
+</div>
+<div id="lpPromos" class="lp-promos-grid"></div>
+</section>
+
+<section class="lp-card lp-compare-card">
+<h3 class="lp-card-title" id="lpCompareTitle">Comparativo de promociones</h3>
+<div class="table-scroll">
+<table class="data-table lp-compare-table">
+<thead>
+<tr>
+<th>Plan de compra</th>
+<th class="num">Precio final desde</th>
+<th class="num">Descuento</th>
+<th class="num">Descuento %</th>
+<th>Tasa / Factor</th>
+<th>Seguro gratis</th>
+<th>Beneficio destacado</th>
+</tr>
+</thead>
+<tbody id="lpCompareBody"></tbody>
+</table>
+</div>
+<p id="lpFootNote" class="lp-footnote"></p>
+</section>
+
+</article>
+
+</div>
+</main>
+<script src="/js/auth-client.js"></script>
+<script src="/js/shared.js?v=5"></script>
+<script src="/js/sidebar.js?v=10"></script>
+<script src="/js/topbar.js?v=17"></script>
+<script src="/js/mobile-nav.js"></script>
+<script src="/js/assistant-bubble.js?v=6"></script>
+<script src="/js/lista-precios.js?v=6"></script>
+</body>
+</html>

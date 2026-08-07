@@ -19,6 +19,33 @@
   let hypGarantiasData = null;
   let hypGarantiasLoadedKey = '';
   let openHypGarantiasKey = null;
+  /** Segmentación HyP: grupos Externas / Internas (filtro por letra de orden). */
+  const HYP_OPS_CHIP_GROUPS = [
+    {
+      id: 'externas',
+      legend: 'Externas',
+      chips: [
+        { key: 'A', label: 'Aseguradoras', title: 'A — Aseguradoras' },
+        { key: 'F', label: 'Aseg. particulares', title: 'F — Aseguradoras particulares' },
+        { key: 'V', label: 'Aseguradora Body 31', title: 'V — Aseguradora Body 31' },
+        { key: 'Z', label: 'Particulares Body 31', title: 'Z — Particulares Body 31' },
+      ],
+    },
+    {
+      id: 'internas',
+      legend: 'Internas',
+      chips: [
+        { key: 'J', label: 'Interna HyP', title: 'J — Interna HYP' },
+        { key: 'H', label: 'Seminuevos HyP', title: 'H — Interna seminuevos HYP' },
+        { key: 'Ó', label: 'Nuevos HyP', title: 'Ó — Interna nuevos HYP' },
+        { key: 'I', label: 'Interna', title: 'I — Interna (Jair / Brian / Edel)' },
+        { key: 'E', label: 'Empleados', title: 'E — Empleados (Jair / Brian / Edel)' },
+      ],
+    },
+  ];
+  const HYP_OPS_CHIP_DEFS = HYP_OPS_CHIP_GROUPS.flatMap((g) => g.chips);
+  const HYP_OPS_ALL_KEYS = HYP_OPS_CHIP_DEFS.map((c) => c.key);
+  let hypOpsLetras = new Set(HYP_OPS_ALL_KEYS);
   const charts = {};
   const MES_CURSO_LETRAS = ['N', 'D', 'Q', 'C', 'X', 'Y'];
   const MES_CURSO_LABELS = {
@@ -172,9 +199,12 @@
     }
     return {
       area: currentArea || 'servicio',
+      fechaInicio: document.getElementById('fechaInicio')?.value || '',
+      fechaFin: document.getElementById('fechaFin')?.value || '',
       status: document.getElementById(FILTER_IDS.status)?.value || '',
       asesor: document.getElementById(FILTER_IDS.asesor)?.value || '',
       tipo,
+      hypLetras: currentArea === 'hyp' ? [...hypOpsLetras] : null,
       antiguedad: document.getElementById(FILTER_IDS.antiguedad)?.value || '',
       importeMin: document.getElementById(FILTER_IDS.importeMin)?.value || '',
       importeMax: document.getElementById(FILTER_IDS.importeMax)?.value || '',
@@ -182,6 +212,79 @@
       promesaVencida: document.getElementById(FILTER_IDS.promesaVencida)?.checked || false,
       buscar: document.getElementById(FILTER_IDS.buscar)?.value || '',
     };
+  }
+
+  function hypOpsAllSelected() {
+    return HYP_OPS_ALL_KEYS.every((k) => hypOpsLetras.has(k));
+  }
+
+  function ensureHypOpsChips() {
+    const wrap = document.getElementById('hypOpsTipoChips');
+    if (!wrap || wrap.dataset.ready === '1') return wrap;
+
+    const chipBtn = (c) => `
+      <button type="button" class="chip hyp-seg__chip active" data-hyp-ops-letra="${c.key}"
+        aria-pressed="true" title="${escHtml(c.title)}">${escHtml(c.label)}</button>`;
+
+    const groupsHtml = HYP_OPS_CHIP_GROUPS.map((g) => `
+      <div class="hyp-seg__group" data-hyp-seg-group="${escHtml(g.id)}">
+        <span class="hyp-seg__legend">${escHtml(g.legend)}</span>
+        <div class="hyp-seg__chips">${g.chips.map(chipBtn).join('')}</div>
+      </div>`).join('');
+
+    wrap.innerHTML = `
+      <button type="button" class="chip hyp-seg__chip hyp-seg__chip--all active" data-hyp-ops-all
+        aria-pressed="true" title="Mostrar todos los tipos">Todas</button>
+      ${groupsHtml}`;
+    wrap.dataset.ready = '1';
+
+    wrap.addEventListener('click', (e) => {
+      const allBtn = e.target.closest('[data-hyp-ops-all]');
+      if (allBtn) {
+        hypOpsLetras = new Set(HYP_OPS_ALL_KEYS);
+        syncHypOpsChips();
+        refreshDashboard();
+        return;
+      }
+      const btn = e.target.closest('[data-hyp-ops-letra]');
+      if (!btn) return;
+      const letra = btn.getAttribute('data-hyp-ops-letra');
+      if (!letra) return;
+      if (hypOpsLetras.has(letra)) {
+        if (hypOpsLetras.size <= 1) return;
+        hypOpsLetras.delete(letra);
+      } else {
+        hypOpsLetras.add(letra);
+      }
+      syncHypOpsChips();
+      refreshDashboard();
+    });
+    return wrap;
+  }
+
+  function syncHypOpsChips() {
+    const wrap = ensureHypOpsChips();
+    if (!wrap) return;
+    const allOn = hypOpsAllSelected();
+    const allBtn = wrap.querySelector('[data-hyp-ops-all]');
+    if (allBtn) {
+      allBtn.classList.toggle('active', allOn);
+      allBtn.setAttribute('aria-pressed', allOn ? 'true' : 'false');
+    }
+    wrap.querySelectorAll('[data-hyp-ops-letra]').forEach((btn) => {
+      const letra = btn.getAttribute('data-hyp-ops-letra');
+      const on = hypOpsLetras.has(letra);
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function updateHypOpsChipsVisibility() {
+    const bar = document.getElementById('hypSegmentacionBar');
+    const wrap = ensureHypOpsChips();
+    const show = currentArea === 'hyp';
+    bar?.classList.toggle('hidden', !show);
+    if (show && wrap) syncHypOpsChips();
   }
 
   function populateSelect(id, options, allLabel) {
@@ -239,7 +342,7 @@
     return `<div class="kpi-group"><h4 class="kpi-group-title">${title}</h4><div class="kpi-grid${gridCls}">${cards.join('')}</div></div>`;
   }
 
-  /** Importes + antigüedad a la izquierda; Mes en curso (vs mejor) como rectángulo alto a la derecha. */
+  /** Importes + antigüedad a la izquierda; Resultado mensual (vs mejor) a la derecha. */
   function kpiImportesAgingConMejorMes(importesCards, agingCards, mejorMesCard) {
     return `<div class="kpi-ops-mejor-duo">
       <div class="kpi-ops-mejor-duo__main">
@@ -247,7 +350,7 @@
         ${kpiGroup('Antigüedad de abiertas', agingCards)}
       </div>
       <div class="kpi-ops-mejor-duo__side">
-        <h4 class="kpi-group-title kpi-ops-mejor-duo__side-title">Mes en curso</h4>
+        <h4 class="kpi-group-title kpi-ops-mejor-duo__side-title">Resultado mensual</h4>
         <div class="kpi-ops-mejor-duo__side-body">${mejorMesCard}</div>
       </div>
     </div>`;
@@ -256,18 +359,24 @@
   function kpiMesEnCursoCard(s) {
     const mc = s.mesEnCursoStats;
     if (!mc) {
-      return kpiCard('Vas del mes', '—', 'Sin datos del año', 'green', null, 'mejorMes', 'kpi-card--mejor-mes');
+      return kpiCard('Resultado mensual', '—', 'Sin datos del año', 'green', null, 'mejorMes', 'kpi-card--mejor-mes');
     }
     const pct = mc.pctVsMejor == null ? '—' : `${mc.pctVsMejor}%`;
     const ritmo = mc.pctRitmoVsMejor == null
       ? ''
       : ` · ritmo proy. ${mc.pctRitmoVsMejor}% del mejor`;
+    const avanceLabel = mc.mesCerrado
+      ? `mes completo · ${Dashboard.fmt.number(mc.facturadas)} facturadas`
+      : `día ${mc.diaDelMes}/${mc.diasEnMes} · ${Dashboard.fmt.number(mc.facturadas)} facturadas`;
+    const footLabel = mc.mesCerrado
+      ? `Resultado ${Dashboard.fmt.currency(mc.importeFacturado)} vs mejor ${Dashboard.fmt.currency(mc.mejorMesImporte)}${pct !== '—' ? ` · ${pct} del mejor` : ''}`
+      : `Proyección ${Dashboard.fmt.currency(mc.ritmoProyectado)} vs mejor ${Dashboard.fmt.currency(mc.mejorMesImporte)}${ritmo}`;
     return `<div class="kpi-card kpi-card--green kpi-card--clickable kpi-card--mejor-mes kpi-card--mes-curso" data-ops-kpi="mejorMes" role="button" tabindex="0" title="Clic para ver desglose">
-      <span class="kpi-title">Vas del mes · ${escHtml(mc.label)}</span>
+      <span class="kpi-title">Resultado mensual · ${escHtml(mc.label)}</span>
       <div class="mes-curso-head">
         <div class="mes-curso-total">
           <div class="kpi-value money">${Dashboard.fmt.currency(mc.importeFacturado)}</div>
-          <p class="kpi-subtitle">día ${mc.diaDelMes}/${mc.diasEnMes} · ${Dashboard.fmt.number(mc.facturadas)} facturadas</p>
+          <p class="kpi-subtitle">${avanceLabel}</p>
         </div>
         <div class="mes-curso-mini">
           <div class="mes-curso-mini-chart"><canvas id="cMesCursoMini" aria-label="Comparativo mes vs mejor"></canvas></div>
@@ -278,7 +387,7 @@
         <p class="mes-curso-chart-label">Mejores meses del año</p>
         <div class="mes-curso-chart"><canvas id="cMesCursoRanking" aria-label="Ranking de mejores meses"></canvas></div>
       </div>
-      <p class="kpi-subtitle mes-curso-foot">Proyección ${Dashboard.fmt.currency(mc.ritmoProyectado)} vs mejor ${Dashboard.fmt.currency(mc.mejorMesImporte)}${ritmo}</p>
+      <p class="kpi-subtitle mes-curso-foot">${footLabel}</p>
       <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
       <div class="kpi-accent"></div>
     </div>`;
@@ -452,10 +561,10 @@
       facturadoUltimoMes: { title: `Facturado · ${s.ultimoMesLabel || 'último mes'}`, hint: 'Órdenes facturadas del último mes del periodo' },
       mejorMes: {
         title: s.mesEnCursoStats
-          ? `Vas del mes · ${s.mesEnCursoStats.label}`
+          ? `Resultado mensual · ${s.mesEnCursoStats.label}`
           : `Mejor mes · ${s.mejorMes || '—'}`,
         hint: s.mesEnCursoStats
-          ? `Facturado del mes en curso vs mejor mes ${s.mesEnCursoStats.mejorMesLabel || ''} (${ytdMeta?.year || 'YTD'})`
+          ? `Facturado del mes del filtro (${s.mesEnCursoStats.label}) vs mejor mes ${s.mesEnCursoStats.mejorMesLabel || ''} (${ytdMeta?.year || 'YTD'})`
           : (s.mejorMesStats
             ? `Acumulado ${ytdMeta?.year || 'del año'} · #1 de ${s.mejorMesStats.mesesComparados} meses`
             : 'Comparativo mensual del año'),
@@ -1457,7 +1566,7 @@
       const mesCursoBlock = mc
         ? `
         <div class="ops-orders-drawer__group ops-orders-drawer__group--mejor">
-          <h5>Vas del mes · ${escHtml(mc.label)}</h5>
+          <h5>Resultado mensual · ${escHtml(mc.label)}</h5>
           <div class="ops-orders-drawer__row"><span class="lbl">Facturado del mes</span><span class="val">${fmt.currency(mc.importeFacturado)}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Día del mes</span><span class="val">${mc.diaDelMes} / ${mc.diasEnMes} (${mc.pctMesTranscurrido}%)</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Órdenes facturadas</span><span class="val">${num(mc.facturadas)}</span></div>
@@ -1823,17 +1932,12 @@
     if (!mc || !miniEl || !rankEl || typeof Chart === 'undefined') return;
 
     const { chartColors, chartOptions, fmt } = Dashboard;
-    const moneyTick = (v) => {
-      const n = Number(v) || 0;
-      if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-      if (Math.abs(n) >= 1e3) return `$${Math.round(n / 1e3)}k`;
-      return fmt.currency(n);
-    };
+    const moneyTick = (v) => fmt.currency(Number(v) || 0);
 
     charts.cMesCursoMini = new Chart(miniEl, {
       type: 'bar',
       data: {
-        labels: ['Vas', 'Mejor'],
+        labels: ['Mes', 'Mejor'],
         datasets: [{
           data: [mc.importeFacturado || 0, mc.mejorMesImporte || 0],
           backgroundColor: [chartColors.primary, chartColors.secondary],
@@ -1901,7 +2005,11 @@
           },
           y: {
             beginAtZero: true,
-            ticks: { font: { size: 10 }, callback: moneyTick },
+            ticks: {
+              font: { size: 9 },
+              callback: moneyTick,
+              maxTicksLimit: 6,
+            },
             grid: { color: 'rgba(148, 163, 184, 0.18)' },
           },
         },
@@ -1936,9 +2044,7 @@
         kpiCard(
           'Órdenes ingresadas',
           fmt.number(s.totalOrdenes),
-          currentArea === 'hyp'
-            ? 'HyP A/F/H/J/V/Z/Ó + I/E de Jair/Brian/Edel · por ingreso'
-            : 'en el rango de fechas',
+          'En el periodo',
           'blue',
           null,
           'ingresadas',
@@ -2311,6 +2417,7 @@
     document.querySelectorAll('#panelPostVentaOrdenes [data-hyp-hide]').forEach((el) => {
       el.classList.toggle('hidden', isHyp);
     });
+    updateHypOpsChipsVisibility();
   }
 
   function countOrdersByArea(area) {

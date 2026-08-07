@@ -144,6 +144,27 @@
       rows = [];
     }
 
+    // Filtro rápido HyP por letra (chips de indicadores operativos)
+    if (area === 'hyp' && filters.hypLetras != null) {
+      const letras = Array.isArray(filters.hypLetras)
+        ? filters.hypLetras.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean)
+        : [];
+      if (!letras.length) {
+        rows = [];
+      } else {
+        const set = new Set(letras);
+        const letterOf = (r) => {
+          if (global.PostSalesOrderTypes?.letterOfRecord) {
+            return global.PostSalesOrderTypes.letterOfRecord(r);
+          }
+          const fromField = String(r?.letraOrden || '').trim().toUpperCase();
+          if (fromField) return fromField;
+          return String(r?.orden || '').trim().charAt(0).toUpperCase();
+        };
+        rows = rows.filter((r) => set.has(letterOf(r)));
+      }
+    }
+
     if (filters.status) rows = rows.filter((r) => r.statusGroup === filters.status || r.statusLabel === filters.status);
     if (filters.asesor) rows = rows.filter((r) => r.asesor === filters.asesor);
     if (filters.aseguradora) rows = rows.filter((r) => (r.aseguradora || 'Sin aseguradora') === filters.aseguradora);
@@ -268,21 +289,40 @@
     };
   }
 
-  /** Avance del mes calendario actual vs mejor mes (YTD). */
-  function buildMesEnCursoStats(monthlyYtd, mejorMesStats) {
+  /** Mes de referencia del filtro de fechas (prioridad: fechaFin → fechaInicio → hoy). */
+  function resolveMesReferencia(filters = {}) {
+    const fin = String(filters.fechaFin || '').trim().slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(fin)) return fin;
+    const ini = String(filters.fechaInicio || '').trim().slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(ini)) return ini;
     const now = new Date();
-    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  /** Resultado del mes del filtro vs mejor mes (YTD). */
+  function buildMesEnCursoStats(monthlyYtd, mejorMesStats, filters = {}) {
+    const key = resolveMesReferencia(filters);
+    const [y, m] = key.split('-').map(Number);
     const entry = monthlyYtd.find(([k]) => k === key);
     const importeFacturado = entry ? entry[1].importeFacturado : 0;
     const facturadas = entry ? entry[1].facturadas : 0;
     const ingresadas = entry ? entry[1].ingresadas : 0;
-    const diaDelMes = now.getDate();
-    const diasEnMes = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const now = new Date();
+    const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const diasEnMes = new Date(y, m, 0).getDate();
+    let diaDelMes;
+    if (key === nowKey) {
+      diaDelMes = now.getDate();
+    } else if (key < nowKey) {
+      diaDelMes = diasEnMes;
+    } else {
+      diaDelMes = 0;
+    }
     const mejorImporte = mejorMesStats?.importeFacturado || 0;
     const ritmoProyectado = diaDelMes > 0 ? (importeFacturado / diaDelMes) * diasEnMes : 0;
-    const ranking = (mejorMesStats?.ranking || []).map((m) => ({
-      ...m,
-      esActual: m.key === key,
+    const ranking = (mejorMesStats?.ranking || []).map((row) => ({
+      ...row,
+      esActual: row.key === key,
     }));
     const topMeses = ranking.slice(0, 8);
 
@@ -294,7 +334,10 @@
       ingresadas,
       diaDelMes,
       diasEnMes,
-      pctMesTranscurrido: Math.round((diaDelMes / diasEnMes) * 1000) / 10,
+      pctMesTranscurrido: diasEnMes > 0
+        ? Math.round((diaDelMes / diasEnMes) * 1000) / 10
+        : 0,
+      mesCerrado: key < nowKey,
       mejorMesLabel: mejorMesStats?.label || '—',
       mejorMesKey: mejorMesStats?.key || null,
       mejorMesImporte: mejorImporte,
@@ -433,7 +476,7 @@
     const lastMonth = monthly[monthly.length - 1];
     const prevMonth = monthly[monthly.length - 2];
     const { bestMonth, mejorMesStats } = buildMejorMesStats(monthlyYtd);
-    const mesEnCursoStats = buildMesEnCursoStats(monthlyYtd, mejorMesStats);
+    const mesEnCursoStats = buildMesEnCursoStats(monthlyYtd, mejorMesStats, filters);
 
     const canceladas = filtered.filter((r) => r.status === 'C');
     /** Solo cerradas “puras”: no abiertas, no facturadas (I), no canceladas (C). */

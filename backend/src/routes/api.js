@@ -5,6 +5,7 @@ const { getVentas } = require('../services/ventas');
 const { getInventory, getIntercambiosHistorico } = require('../services/inventoryService');
 const { getInventoryPostventa } = require('../services/inventoryPostventaService');
 const { getInventorySeminuevos } = require('../services/inventorySeminuevosService');
+const { getListaPrecios, getListaPreciosFicha } = require('../services/listaPreciosService');
 const { getPostSales, getPostSalesOrderDetail } = require('../services/postSalesService');
 const { getHypAseguradorasCobranza, getHypGarantiasCobranza } = require('../services/hypAseguradorasCobranza');
 const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/refaccionesPedidosService');
@@ -282,6 +283,25 @@ router.get('/overview', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     res.json(await getOverview({ fechaInicio, fechaFin }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/lista-precios', async (req, res, next) => {
+  try {
+    const vista = String(req.query.vista || 'ficha').toLowerCase();
+    const filters = {
+      section: req.query.section,
+      tipoPago: req.query.tipoPago,
+      modelo: req.query.modelo,
+      q: req.query.q,
+      soloConStock: req.query.soloConStock,
+    };
+    const data = vista === 'tabla'
+      ? await getListaPrecios(filters)
+      : await getListaPreciosFicha(filters);
+    res.json(data);
   } catch (err) {
     next(err);
   }

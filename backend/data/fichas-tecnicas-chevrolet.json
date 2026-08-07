@@ -1,0 +1,104 @@
+{
+  "AVEO HB": {
+    "carroceria": "Hatchback",
+    "default": {
+      "desempeno": [
+        { "label": "Motor", "value": "1.5L" },
+        { "label": "Potencia", "value": "98 hp @ 5,800 rpm" },
+        { "label": "Torque", "value": "105 lb-pie @ 4,000 rpm" },
+        { "label": "Transmisión", "value": "Manual 5 velocidades" },
+        { "label": "Tracción", "value": "Delantera" }
+      ],
+      "seguridad": [
+        { "label": "Frenos ABS", "value": "Sí" },
+        { "label": "Airbags", "value": "6" },
+        { "label": "Control de estabilidad", "value": "Sí" },
+        { "label": "Asistente de arranque", "value": "Sí" },
+        { "label": "Cinturones de 3 puntos", "value": "5" }
+      ],
+      "confort": [
+        { "label": "Pantalla táctil", "value": "8\"" },
+        { "label": "Apple CarPlay / Android Auto", "value": "Sí" },
+        { "label": "Aire acondicionado", "value": "Sí" },
+        { "label": "Cristales eléctricos", "value": "Delanteros" },
+        { "label": "Cámara de reversa", "value": "Sí" }
+      ]
+    },
+    "byVersion": {
+      "LT Plus": {},
+      "LT Manual": {
+        "confort": [
+          { "label": "Pantalla táctil", "value": "7\"" },
+          { "label": "Apple CarPlay / Android Auto", "value": "Sí" },
+          { "label": "Aire acondicionado", "value": "Sí" },
+          { "label": "Cristales eléctricos", "value": "Delanteros" },
+          { "label": "Cámara de reversa", "value": "Sí" }
+        ]
+      },
+      "LS Manual": {
+        "confort": [
+          { "label": "Pantalla táctil", "value": "—" },
+          { "label": "Apple CarPlay / Android Auto", "value": "—" },
+          { "label": "Aire acondicionado", "value": "Sí" },
+          { "label": "Cristales eléctricos", "value": "Delanteros" },
+          { "label": "Cámara de reversa", "value": "—" }
+        ]
+      },
+      "Black Edition": {}
+    }
+  },
+  "AVEO NB": {
+    "carroceria": "Sedán",
+    "default": {
+      "desempeno": [
+        { "label": "Motor", "value": "1.5L" },
+        { "label": "Potencia", "value": "98 hp @ 5,800 rpm" },
+        { "label": "Torque", "value": "105 lb-pie @ 4,000 rpm" },
+        { "label": "Transmisión", "value": "Manual 5 velocidades" },
+        { "label": "Tracción", "value": "Delantera" }
+      ],
+      "seguridad": [
+        { "label": "Frenos ABS", "value": "Sí" },
+        { "label": "Airbags", "value": "6" },
+        { "label": "Control de estabilidad", "value": "Sí" },
+        { "label": "Asistente de arranque", "value": "Sí" },
+        { "label": "Cinturones de 3 puntos", "value": "5" }
+      ],
+      "confort": [
+        { "label": "Pantalla táctil", "value": "8\"" },
+        { "label": "Apple CarPlay / Android Auto", "value": "Sí" },
+        { "label": "Aire acondicionado", "value": "Sí" },
+        { "label": "Cristales eléctricos", "value": "Delanteros" },
+        { "label": "Cámara de reversa", "value": "Sí" }
+      ]
+    },
+    "byVersion": {}
+  },
+  "ONIX": {
+    "carroceria": "Sedán",
+    "default": {
+      "desempeno": [
+        { "label": "Motor", "value": "1.0L / 1.2L Turbo" },
+        { "label": "Potencia", "value": "Según versión" },
+        { "label": "Torque", "value": "Según versión" },
+        { "label": "Transmisión", "value": "MT / AT" },
+        { "label": "Tracción", "value": "Delantera" }
+      ],
+      "seguridad": [
+        { "label": "Frenos ABS", "value": "Sí" },
+        { "label": "Airbags", "value": "Según versión" },
+        { "label": "Control de estabilidad", "value": "Sí" },
+        { "label": "Asistente de arranque", "value": "Sí" },
+        { "label": "Cinturones de 3 puntos", "value": "Sí" }
+      ],
+      "confort": [
+        { "label": "Pantalla táctil", "value": "Según versión" },
+        { "label": "Apple CarPlay / Android Auto", "value": "Sí" },
+        { "label": "Aire acondicionado", "value": "Sí" },
+        { "label": "Cristales eléctricos", "value": "Sí" },
+        { "label": "Cámara de reversa", "value": "Según versión" }
+      ]
+    },
+    "byVersion": {}
+  }
+}

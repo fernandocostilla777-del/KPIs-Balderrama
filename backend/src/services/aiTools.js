@@ -987,6 +987,7 @@ function getRolesAcceso({ rol } = {}) {
     sales: 'Ventas / F&I / Leads',
     forecast: 'Pronóstico',
     inventory: 'Inventario',
+    'lista-precios': 'Lista de precios',
     contabilidad: 'Contabilidad / EEFF',
     'post-sales': 'PostVenta',
     seguimiento: 'Seguimiento 360',

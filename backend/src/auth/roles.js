@@ -13,7 +13,7 @@ const ROLE_DEFAULTS = {
   administracion: {
     id: 'administracion',
     label: 'Administración',
-    pages: ['admin', 'overview', 'sales', 'forecast', 'inventory', 'contabilidad', 'post-sales', 'seguimiento'],
+    pages: ['admin', 'overview', 'sales', 'forecast', 'inventory', 'lista-precios', 'contabilidad', 'post-sales', 'seguimiento'],
     homePath: '/',
     canManageUsers: true,
     apiPrefixes: ['*'],
@@ -21,16 +21,16 @@ const ROLE_DEFAULTS = {
   direccion: {
     id: 'direccion',
     label: 'Dirección',
-    pages: ['overview', 'sales', 'forecast', 'inventory', 'contabilidad', 'post-sales', 'seguimiento'],
+    pages: ['overview', 'sales', 'forecast', 'inventory', 'lista-precios', 'contabilidad', 'post-sales', 'seguimiento'],
     homePath: '/',
     apiPrefixes: ['*'],
   },
   gerencia_comercial: {
     id: 'gerencia_comercial',
     label: 'Gerencia Comercial',
-    pages: ['sales', 'forecast', 'seguimiento'],
+    pages: ['sales', 'forecast', 'lista-precios', 'seguimiento'],
     homePath: '/sales.html',
-    apiPrefixes: ['/ventas', '/forecast', '/crm', '/ai', '/health'],
+    apiPrefixes: ['/ventas', '/forecast', '/lista-precios', '/crm', '/ai', '/health'],
   },
   contabilidad: {
     id: 'contabilidad',

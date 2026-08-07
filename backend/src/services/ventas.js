@@ -631,7 +631,7 @@ const ventasSofiaCoreInflight = new Map();
  * Núcleo compartido: facturas DMS + entregas SOFIA del periodo.
  * Usado por /api/ventas y por el dashboard de financiamiento para pintar todo de una vez.
  */
-async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false } = {}) {
+async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false, fresh = false } = {}) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
   if (inicio > fin) {
@@ -639,9 +639,13 @@ async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false
   }
 
   const cacheKey = `${fechaInicio}|${fechaFin}|${incluirPorMes ? 1 : 0}`;
-  const hit = ventasSofiaCoreCache.get(cacheKey);
-  if (hit && (Date.now() - hit.at) < VENTAS_SOFIA_CORE_TTL_MS) {
-    return hit.data;
+  if (fresh) {
+    ventasSofiaCoreCache.delete(cacheKey);
+  } else {
+    const hit = ventasSofiaCoreCache.get(cacheKey);
+    if (hit && (Date.now() - hit.at) < VENTAS_SOFIA_CORE_TTL_MS) {
+      return hit.data;
+    }
   }
   if (ventasSofiaCoreInflight.has(cacheKey)) {
     return ventasSofiaCoreInflight.get(cacheKey);
@@ -656,7 +660,7 @@ async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false
 
     const [result, sofiaEntregas] = await Promise.all([
       request.query(buildVentasQuery()),
-      getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes }),
+      getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes, fresh }),
     ]);
 
     const data = {
@@ -676,7 +680,7 @@ async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false
   }
 }
 
-async function getVentas({ fechaInicio, fechaFin }) {
+async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
 
@@ -689,7 +693,7 @@ async function getVentas({ fechaInicio, fechaFin }) {
   const sameAsYtd = fechaInicio === ytdRanges.inicioActual && fechaFin === ytdRanges.finActual;
 
   const [core, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
-    getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes }),
+    getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes, fresh }),
     getComparativoYtd(fechaFin),
     getInventory({ planPisoPeriod: 'all' }).catch(() => null),
     getMejorUtilidadPorCarline({
@@ -765,4 +769,13 @@ module.exports = {
   getVentasSofiaCore,
   getTomasACuenta,
   parseDateInput,
+  clearVentasSofiaCaches() {
+    ventasSofiaCoreCache.clear();
+    ventasSofiaCoreInflight.clear();
+    try {
+      require('./sofia-entregas').clearEntregasCache();
+    } catch {
+      /* ignore */
+    }
+  },
 };

@@ -44,6 +44,11 @@
     prorationPostventaSum: document.getElementById('prorationPostventaSum'),
     btnSaveProration: document.getElementById('btnSaveProration'),
     btnResetProration: document.getElementById('btnResetProration'),
+    listaPreciosCatalogMeta: document.getElementById('listaPreciosCatalogMeta'),
+    listaPreciosFile: document.getElementById('listaPreciosFile'),
+    listaPreciosFileName: document.getElementById('listaPreciosFileName'),
+    listaPreciosUploadStatus: document.getElementById('listaPreciosUploadStatus'),
+    btnUploadListaPrecios: document.getElementById('btnUploadListaPrecios'),
   };
 
   let roles = [];
@@ -479,6 +484,95 @@
     }
   }
 
+  function formatListaPreciosMeta(data) {
+    if (!data?.exists) {
+      return 'Aún no hay catálogo publicado. Suba el PDF completo mensual de Planes Chevrolet.';
+    }
+    const parts = [];
+    if (data.vigencia) parts.push(`Vigencia: ${data.vigencia}`);
+    if (data.sourceFile) parts.push(`Archivo: ${data.sourceFile}`);
+    if (data.stats) {
+      parts.push(`${data.stats.administracion || 0} planes administración · ${data.stats.bonoTomaCuenta || 0} bono TAC · ${data.stats.modelos || data.modelos?.length || 0} modelos`);
+      if (data.stats.paginasAdministracion) parts.push(`págs. admin ${data.stats.paginasAdministracion}`);
+      if (data.stats.paginasBonoTomaCuenta) parts.push(`págs. bono ${data.stats.paginasBonoTomaCuenta}`);
+      if (data.stats.sinModelo) parts.push(`${data.stats.sinModelo} sin modelo`);
+    }
+    if (data.uploadedAt || data.fileUpdatedAt) {
+      parts.push(`Actualizado: ${formatDate(data.uploadedAt || data.fileUpdatedAt)}`);
+    }
+    if (data.uploadedBy) parts.push(`por ${data.uploadedBy}`);
+    return parts.join(' · ');
+  }
+
+  async function loadListaPreciosCatalog() {
+    if (!els.listaPreciosCatalogMeta) return;
+    try {
+      const data = await api('/auth/lista-precios/catalog');
+      els.listaPreciosCatalogMeta.textContent = formatListaPreciosMeta(data);
+    } catch (err) {
+      els.listaPreciosCatalogMeta.textContent = err.message || 'No se pudo leer el catálogo vigente.';
+    }
+  }
+
+  function syncListaPreciosFileUi() {
+    const file = els.listaPreciosFile?.files?.[0];
+    if (els.listaPreciosFileName) {
+      els.listaPreciosFileName.textContent = file
+        ? `${file.name} · ${(file.size / (1024 * 1024)).toFixed(2)} MB`
+        : 'Ningún archivo seleccionado';
+    }
+    if (els.btnUploadListaPrecios) {
+      els.btnUploadListaPrecios.disabled = !file;
+    }
+  }
+
+  async function uploadListaPrecios() {
+    const file = els.listaPreciosFile?.files?.[0];
+    if (!file) {
+      showMessage('Seleccione el PDF de la lista de precios.', 'error');
+      return;
+    }
+    if (els.listaPreciosUploadStatus) {
+      els.listaPreciosUploadStatus.textContent = 'Procesando PDF… esto puede tardar unos segundos.';
+    }
+    showLoading(true);
+    els.btnUploadListaPrecios.disabled = true;
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch('/api/auth/lista-precios/upload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body,
+      });
+      if (res.status === 401) {
+        window.location.href = `/login.html?returnUrl=${encodeURIComponent(window.location.pathname)}`;
+        throw new Error('Sesión expirada');
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      showMessage(`Lista publicada. Vigencia: ${data.vigencia || '—'} · ${data.stats?.administracion || 0} planes.`, 'success');
+      if (els.listaPreciosUploadStatus) {
+        els.listaPreciosUploadStatus.textContent = formatListaPreciosMeta({
+          exists: true,
+          ...data,
+          modelos: data.catalog?.modelos,
+        });
+      }
+      if (els.listaPreciosFile) els.listaPreciosFile.value = '';
+      syncListaPreciosFileUi();
+      await loadListaPreciosCatalog();
+    } catch (err) {
+      showMessage(err.message || 'No se pudo publicar la lista.', 'error');
+      if (els.listaPreciosUploadStatus) {
+        els.listaPreciosUploadStatus.textContent = err.message || 'Error al procesar el PDF.';
+      }
+      syncListaPreciosFileUi();
+    } finally {
+      showLoading(false);
+    }
+  }
+
   async function saveProration({ reset = false } = {}) {
     showLoading(true);
     try {
@@ -629,6 +723,9 @@
   els.prorationVentasBody?.addEventListener('input', updateProrationTotals);
   els.prorationPostventaBody?.addEventListener('input', updateProrationTotals);
 
+  els.listaPreciosFile?.addEventListener('change', syncListaPreciosFileUi);
+  els.btnUploadListaPrecios?.addEventListener('click', () => uploadListaPrecios());
+
   els.tableBody?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
@@ -637,5 +734,6 @@
     if (btn.dataset.action === 'delete') removeUser(username);
   });
 
-  Promise.all([loadUsers(), loadRolePermissions(), loadAlertPrefs(), loadProration()]);
+  Promise.all([loadUsers(), loadRolePermissions(), loadAlertPrefs(), loadProration(), loadListaPreciosCatalog()]);
+  syncListaPreciosFileUi();
 })();

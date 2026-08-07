@@ -293,4 +293,46 @@ router.put('/admin-expense-proration', requireUserManager, (req, res) => {
   }
 });
 
+const multer = require('multer');
+const planesUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const name = String(file.originalname || '').toLowerCase();
+    const ok = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
+    if (!ok) return cb(new Error('Solo se permiten archivos PDF de la guía mensual de planes.'));
+    cb(null, true);
+  },
+});
+
+router.get('/lista-precios/catalog', requireUserManager, (_req, res) => {
+  try {
+    const { getActivePlansMeta } = require('../services/planesChevroletParser');
+    res.json(getActivePlansMeta());
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'No se pudo leer el catálogo vigente.' });
+  }
+});
+
+router.post('/lista-precios/upload', requireUserManager, (req, res) => {
+  planesUpload.single('file')(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Error al subir el archivo.' });
+    }
+    if (!req.file?.buffer?.length) {
+      return res.status(400).json({ error: 'Seleccione un PDF de la lista de precios mensual.' });
+    }
+    try {
+      const { publishPlanesPdf } = require('../services/planesChevroletParser');
+      const result = await publishPlanesPdf(req.file.buffer, {
+        originalName: req.file.originalname,
+        uploadedBy: req.session?.username || null,
+      });
+      res.json(result);
+    } catch (e) {
+      res.status(e.status || 500).json({ error: e.message || 'No se pudo procesar el PDF.' });
+    }
+  });
+});
+
 module.exports = router;

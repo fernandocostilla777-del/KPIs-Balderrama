@@ -99,13 +99,14 @@ function getGoals({ fechaInicio, fechaFin }) {
     retail: retailSaved ?? historic?.retail ?? null,
     sofia: sofiaSaved ?? historic?.sofia ?? null,
     updatedAt: period.updatedAt ?? null,
+    updatedBy: period.updatedBy ?? null,
     retailSource: retailSaved != null ? 'saved' : (historic ? 'historic' : null),
     sofiaSource: sofiaSaved != null ? 'saved' : (historic ? 'historic' : null),
     historicMonth: historic?.label ?? null,
   };
 }
 
-function setGoals({ fechaInicio, fechaFin, retail, sofia }) {
+function setGoals({ fechaInicio, fechaFin, retail, sofia, updatedBy }) {
   if (!fechaInicio || !fechaFin) {
     throw new Error('fechaInicio y fechaFin son requeridos.');
   }
@@ -120,6 +121,7 @@ function setGoals({ fechaInicio, fechaFin, retail, sofia }) {
 
   if (retail !== undefined) next.retail = parseGoal(retail);
   if (sofia !== undefined) next.sofia = parseGoal(sofia);
+  if (updatedBy) next.updatedBy = String(updatedBy);
 
   store.periods[key] = next;
   saveStore(store);

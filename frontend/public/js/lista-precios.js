@@ -62,22 +62,6 @@
     return modelo.versions.find((v) => versionKey(v) === state.versionKey) || modelo.versions[0];
   }
 
-  function renderHeroColors(version) {
-    const el = document.getElementById('lpHeroColors');
-    if (!el) return;
-    const colores = version.colores || [];
-    if (!colores.length) {
-      el.innerHTML = '<span class="lp-hero-colors-empty">Sin colores en stock</span>';
-      return;
-    }
-    el.innerHTML = colores.map((c) => `
-      <span class="lp-hero-color-chip" title="${esc(c.label)} · ${c.unidades} u.">
-        <span class="lp-swatch" style="background:${esc(c.hex)};border-color:${esc(c.border)}"></span>
-        <span class="lp-hero-color-name">${esc(c.label)}</span>
-        <strong>${c.unidades}</strong>
-      </span>`).join('');
-  }
-
   function renderTabs(modelo) {
     document.getElementById('lpVersionTabs').innerHTML = (modelo.versions || []).map((v) => {
       const key = versionKey(v);
@@ -98,7 +82,7 @@
         tag: 'Mejor precio',
         tone: 'accent',
       },
-      { icon: 'attach_money', label: 'MSRP', value: money(s.msrp || version.msrp) },
+      { icon: 'attach_money', label: 'Precio de Venta GMMX', value: money(s.msrp || version.msrp) },
       {
         icon: 'sell',
         label: 'Descuento máximo',
@@ -139,7 +123,10 @@
   function renderSpecs(version) {
     document.getElementById('lpFichaTitle').textContent = `Ficha técnica ${version.version}`;
     const ficha = version.fichaTecnica || { secciones: [] };
-    document.getElementById('lpSpecs').innerHTML = (ficha.secciones || []).map((sec) => `
+    const fuente = ficha.fuente
+      ? `<p class="lp-footnote" style="margin-top:10px">Fuente: <a href="${esc(ficha.fuente)}" target="_blank" rel="noopener noreferrer">${esc(ficha.excelModelo || 'Chevrolet México')}</a>${ficha.excelVersion ? ` · ${esc(ficha.excelVersion)}` : ''}</p>`
+      : '';
+    document.getElementById('lpSpecs').innerHTML = ((ficha.secciones || []).map((sec) => `
       <div class="lp-spec-block">
         <h4>${esc(sec.titulo)}</h4>
         <ul>
@@ -149,7 +136,7 @@
               <strong>${esc(it.value)}</strong>
             </li>`).join('')}
         </ul>
-      </div>`).join('') || '<p class="lp-muted">Sin ficha técnica cargada para este modelo.</p>';
+      </div>`).join('') || '<p class="lp-muted">Sin ficha técnica cargada para este modelo.</p>') + fuente;
   }
 
   function renderStock(version) {
@@ -261,7 +248,6 @@
     document.getElementById('lpCarroceria').textContent = modelo.carroceria || version.carroceria || 'Chevrolet';
     document.getElementById('lpHeroVisual').dataset.modelo = modelo.modelo;
 
-    renderHeroColors(version);
     renderTabs(modelo);
     renderSummary(version);
     renderSpecs(version);

@@ -43,18 +43,22 @@ const CARROCERIA_BY_MODELO = {
 let cachedPlans = null;
 let cachedPlansAt = 0;
 let cachedFichas = null;
+let cachedFichasAt = 0;
 
 function loadFichasTecnicas() {
-  if (cachedFichas) return cachedFichas;
+  const mtime = fs.existsSync(FICHAS_JSON) ? fs.statSync(FICHAS_JSON).mtimeMs : 0;
+  if (cachedFichas && cachedFichasAt === mtime) return cachedFichas;
   try {
     if (fs.existsSync(FICHAS_JSON)) {
       cachedFichas = JSON.parse(fs.readFileSync(FICHAS_JSON, 'utf8'));
+      cachedFichasAt = mtime;
       return cachedFichas;
     }
   } catch {
     /* ignore */
   }
   cachedFichas = {};
+  cachedFichasAt = mtime;
   return cachedFichas;
 }
 
@@ -76,6 +80,11 @@ function loadPlansCatalog() {
   cachedPlans = JSON.parse(fs.readFileSync(PLANS_JSON, 'utf8'));
   cachedPlansAt = mtime;
   return cachedPlans;
+}
+
+function invalidatePlansCache() {
+  cachedPlans = null;
+  cachedPlansAt = 0;
 }
 
 function extractPaqueteFromTipoAuto(tipoAuto) {
@@ -432,7 +441,11 @@ async function getListaPrecios(filters = {}) {
 function inferTransmision(version) {
   const v = normalizeKey(version);
   if (v.includes('CVT')) return 'CVT';
-  if (v.includes(' AT') || v.endsWith(' AT') || v.includes('/ AT') || v.includes('AUTOM')) return 'Automática';
+  // Aveo LT Plus (y similares) son CVT aunque el nombre no diga AT/CVT
+  if (v.includes('PLUS') && !v.includes('MANUAL') && !v.includes(' MT')) return 'CVT';
+  if (v.includes(' AT') || v.endsWith(' AT') || v.includes('/ AT') || v.includes('AUTOM') || v.includes(' TA ')) {
+    return 'Automática';
+  }
   if (v.includes(' MT') || v.includes('/ MT') || v.includes('MANUAL')) return 'Manual';
   return '—';
 }
@@ -502,26 +515,128 @@ function colorKey(name) {
   return { label, ...colorSwatch(label) };
 }
 
+function scoreFichaVersionMatch(planVersion, excelVersion) {
+  const a = normalizeKey(planVersion);
+  const b = normalizeKey(excelVersion);
+  if (!a || !b) return 0;
+  if (a === b) return 100;
+  if (a.includes(b) || b.includes(a)) return 88;
+  const aliases = [
+    ['LS MT', 'LS MANUAL'],
+    ['LS AT', 'LS AUTOMATICA'],
+    ['LT MT', 'LT MANUAL'],
+    ['LT AT', 'LT AUTOMATICA'],
+    ['BLACK EDITION', 'LT TM BLACK EDITION'],
+    ['LT 5', 'LT 5 PASAJEROS'],
+    ['LT 7', 'LT 7 PASAJEROS'],
+    ['ACTIV BI TONO', 'ACTIV BITONO'],
+    ['CARGO LS', 'LS MANUAL'],
+    ['SWB LT', 'VERSION CORTA'],
+    ['LWB LT', 'VERSION LARGA'],
+    ['CREW CAB', 'DOBLE CABINA'],
+    ['WT V8 4X2 RC', 'CABINA REGULAR 4X2'],
+    ['WT V8 4X4 RC', 'CABINA REGULAR 4X4'],
+    ['CUSTOM 4X4 CC', 'CUSTOM'],
+    ['HIGH COUNTRY 6 2L', 'HIGH COUNTRY'],
+    ['ZR2 BISON 4X4', 'ZR2 BISON'],
+    ['ZR2 4X4', 'ZR2'],
+    ['Z71 4X4', 'Z71'],
+  ];
+  for (const [x, y] of aliases) {
+    if ((a.includes(x) && b.includes(y)) || (a.includes(y) && b.includes(x))) return 86;
+  }
+  const aTok = a.split(' ').filter((t) => t.length > 1);
+  const bTok = b.split(' ').filter((t) => t.length > 1);
+  if (!aTok.length || !bTok.length) return 0;
+  const hits = aTok.filter((t) => bTok.includes(t)).length;
+  const ratio = hits / Math.max(aTok.length, bTok.length);
+  if (ratio >= 0.75) return 70;
+  if (ratio >= 0.5) return 50;
+  return 0;
+}
+
+function resolveFichaVersionEntry(entry, versionLabel) {
+  const by = entry?.byVersion || {};
+  if (!versionLabel) return entry?.default || null;
+  if (by[versionLabel]) return by[versionLabel];
+
+  const nk = normalizeKey(versionLabel);
+  for (const [k, v] of Object.entries(by)) {
+    if (normalizeKey(k) === nk) return v;
+  }
+
+  let best = null;
+  let bestScore = 0;
+  let bestKeyLen = 0;
+  for (const [k, v] of Object.entries(by)) {
+    const score = Math.max(
+      scoreFichaVersionMatch(versionLabel, k),
+      scoreFichaVersionMatch(versionLabel, v.excelVersion || k)
+    );
+    const keyLen = normalizeKey(v.excelVersion || k).length;
+    // Preferir coincidencias más específicas (LT Plus > LT Manual)
+    if (score > bestScore || (score === bestScore && score >= 70 && keyLen > bestKeyLen)) {
+      bestScore = score;
+      best = v;
+      bestKeyLen = keyLen;
+    }
+  }
+  // Umbral alto para no confundir LT Plus con LT Manual
+  if (bestScore >= 70) return best;
+  return entry?.default || null;
+}
+
+function applyTransmisionHint(desempeno, transmision) {
+  const items = [...(desempeno || [])];
+  const idx = items.findIndex((r) => /transmisi/i.test(r.label));
+  if (idx < 0) return items;
+  const current = String(items[idx].value || '').trim();
+  // Nunca pisar un valor de ficha oficial (CVT, Manual 6 vel., etc.)
+  if (current && !/^—$|^-$/i.test(current)) return items;
+  if (!transmision || transmision === '—') return items;
+  items[idx] = { ...items[idx], value: transmision };
+  return items;
+}
+
 function buildFichaTecnica(modelo, versionLabel, paquete, anio, msrp) {
   const fichas = loadFichasTecnicas();
   const entry = fichas[modelo];
   const transmision = inferTransmision(versionLabel);
+  const resolved = resolveFichaVersionEntry(entry, versionLabel);
 
+  if (resolved && (resolved.desempeno || resolved.seguridad || resolved.confort)) {
+    const desempeno = applyTransmisionHint(resolved.desempeno || [], transmision);
+
+    const secciones = [
+      { id: 'desempeno', titulo: 'Desempeño', items: desempeno },
+      { id: 'seguridad', titulo: 'Seguridad', items: resolved.seguridad || [] },
+      { id: 'confort', titulo: 'Confort y tecnología', items: resolved.confort || [] },
+    ];
+    if ((resolved.diferencial || []).length) {
+      secciones.push({
+        id: 'diferencial',
+        titulo: 'Equipamiento de la versión',
+        items: resolved.diferencial,
+      });
+    }
+
+    return {
+      carroceria: entry.carroceria || CARROCERIA_BY_MODELO[modelo] || null,
+      excelModelo: resolved.excelModelo || entry.excelModelo || null,
+      excelVersion: resolved.excelVersion || versionLabel || null,
+      fuente: resolved.fuente || null,
+      secciones,
+    };
+  }
+
+  // Compat: estructura antigua (default + overrides parciales)
   if (entry?.default) {
     const override = entry.byVersion?.[versionLabel] || {};
-    const desempeno = [...(override.desempeno || entry.default.desempeno || [])];
-    // Ajustar transmisión si la versión indica AT/MT
-    const idx = desempeno.findIndex((r) => /transmisi/i.test(r.label));
-    if (idx >= 0 && transmision !== '—') {
-      desempeno[idx] = {
-        ...desempeno[idx],
-        value: transmision === 'Automática'
-          ? 'Automática'
-          : transmision === 'CVT'
-            ? 'CVT'
-            : (desempeno[idx].value || 'Manual 5 velocidades'),
-      };
-    }
+    const hasFullOverride = Array.isArray(override.desempeno) && override.desempeno.length;
+    const desempeno = applyTransmisionHint(
+      hasFullOverride ? override.desempeno : (entry.default.desempeno || []),
+      transmision
+    );
     return {
       carroceria: entry.carroceria || CARROCERIA_BY_MODELO[modelo] || null,
       secciones: [
@@ -550,7 +665,7 @@ function buildFichaTecnica(modelo, versionLabel, paquete, anio, msrp) {
         titulo: 'Versión',
         items: [
           { label: 'Versión', value: versionLabel || '—' },
-          { label: 'MSRP', value: msrp ? `$${Number(msrp).toLocaleString('es-MX')}` : '—' },
+          { label: 'Precio de Venta GMMX', value: msrp ? `$${Number(msrp).toLocaleString('es-MX')}` : '—' },
           { label: 'Fuente', value: 'Planes Chevrolet MY26' },
         ],
       },
@@ -821,4 +936,5 @@ module.exports = {
   getListaPrecios,
   getListaPreciosFicha,
   loadPlansCatalog,
+  invalidatePlansCache,
 };

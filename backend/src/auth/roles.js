@@ -32,6 +32,13 @@ const ROLE_DEFAULTS = {
     homePath: '/sales.html',
     apiPrefixes: ['/ventas', '/forecast', '/lista-precios', '/crm', '/ai', '/health'],
   },
+  vendedor: {
+    id: 'vendedor',
+    label: 'Vendedor',
+    pages: ['sales', 'lista-precios', 'seguimiento'],
+    homePath: '/seguimiento.html',
+    apiPrefixes: ['/ventas', '/lista-precios', '/crm', '/ai', '/health'],
+  },
   contabilidad: {
     id: 'contabilidad',
     label: 'Contabilidad',
@@ -51,6 +58,8 @@ const USERNAME_TO_ROLE = {
   'gerente.general': 'direccion',
   gerencia: 'gerencia_comercial',
   comercial: 'gerencia_comercial',
+  vendedor: 'vendedor',
+  ventas: 'vendedor',
   contabilidad: 'contabilidad',
   contraloria: 'contabilidad',
 };

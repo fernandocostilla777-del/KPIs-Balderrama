@@ -52,6 +52,29 @@ const NOMENCLATURA_GRUPOS = [
     letras: ['I', 'J', 'Ó', 'M', 'H', 'O'],
     aliases: ['interna', 'internas', 'interno', 'internos'],
   },
+  /**
+   * Segmentación UI de la pestaña HyP (chips Externas / Internas).
+   * Distinto de "internas" clásico (incluye M/O de Servicio).
+   */
+  {
+    id: 'externas',
+    label: 'Externas HyP',
+    letras: ['A', 'F', 'V', 'Z'],
+    aliases: ['externa', 'externas', 'hyp externas', 'externas hyp', 'segmentacion externas'],
+  },
+  {
+    id: 'hyp_internas',
+    label: 'Internas HyP',
+    letras: ['J', 'H', 'Ó', 'I', 'E'],
+    aliases: [
+      'hyp internas',
+      'internas hyp',
+      'interna hyp',
+      'segmentacion internas',
+      'internas hojalateria',
+      'internas pintura',
+    ],
+  },
   {
     id: 'normales',
     label: 'Normales',

@@ -42,6 +42,15 @@ const ROLE_SCOPES = {
     ],
     label: 'Gerencia comercial',
   },
+  vendedor: {
+    pages: ['metrics', 'seguimiento', 'assistant', 'profile'],
+    metricSections: ['ventas', 'seguimiento'],
+    tools: [
+      'consultar_ventas',
+      'resumen_seguimiento_360',
+    ],
+    label: 'Vendedor',
+  },
   contabilidad: {
     pages: ['metrics', 'assistant', 'profile'],
     metricSections: ['contabilidad'],

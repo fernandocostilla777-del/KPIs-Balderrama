@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=61" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -111,7 +111,7 @@ Comisiones
 <div class="kpi-card kpi-card--magenta kpi-card--interactive" id="kpiCardEntregasSofia" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle de entregas SOFIA">
 <div class="kpi-card-head"><span class="kpi-title">Notif. entrega SOFIA</span></div>
 <div id="kpiEntregasSofia" class="kpi-value">0</div>
-<p id="kpiEntregasSofiaSub" class="kpi-subtitle">Sin flotilla · sí Flotilla GMF</p>
+<p id="kpiEntregasSofiaSub" class="kpi-subtitle">—</p>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="sofia"></span></div>
 </div>
 <button type="button" id="btnRefreshEntregasSofia" class="kpi-card-refresh-btn" title="Actualizar notificaciones SOFIA (manual)" aria-label="Actualizar notificaciones de entrega SOFIA">
@@ -125,7 +125,7 @@ Comisiones
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="carryOver"></span></div>
 </button>
-<div class="kpi-card kpi-card--violet" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye flotilla FLOT; sí cuenta Flotilla GMF (FLOTGMF).">
+<div class="kpi-card kpi-card--violet" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
 <div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
 <div id="kpiCobertura" class="kpi-value">—</div>
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="cobertura"></span></div>
@@ -1025,6 +1025,6 @@ Exportar CSV
 <script src="/js/leads.js?v=13"></script>
 <script src="/js/afluencia.js?v=10"></script>
 <script src="/js/comisiones.js?v=2"></script>
-<script src="/js/sales.js?v=89"></script>
+<script src="/js/sales.js?v=93"></script>
 </body>
 </html>

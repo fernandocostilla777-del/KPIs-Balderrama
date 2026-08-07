@@ -1622,6 +1622,49 @@ const BUILDERS = {
     return blocks.filter(Boolean);
   },
   ejecutar_consulta_sql: blocksFromSql,
+  consultar_lista_precios: (data) => {
+    if (!data) return [];
+    if (data.available === false) {
+      return [insightCard('warn', 'Lista de precios', 'No hay catálogo de planes vigente publicado.')].filter(Boolean);
+    }
+    const blocks = [];
+    const k = data.kpis || {};
+    blocks.push(kpiRow(`Lista de precios · ${data.seccionLabel || data.seccion || 'Planes'}`, [
+      kpiItem('Vigencia', data.vigencia || '—', { icon: 'event' }),
+      kpiItem('Modelos', fmtNum((data.modelos || []).length), {
+        icon: 'directions_car',
+        sub: data.fuentePdf || undefined,
+      }),
+      kpiItem('Versiones c/stock', fmtNum(k.versionesConStock ?? k.conStock ?? '—'), { icon: 'inventory_2' }),
+      kpiItem('Unidades', fmtNum(k.unidadesDisponibles ?? k.stockTotal ?? '—'), { icon: 'garage' }),
+    ]));
+    const rows = [];
+    for (const m of (data.modelos || []).slice(0, 8)) {
+      for (const v of (m.versions || []).slice(0, 2)) {
+        rows.push([
+          m.modelo,
+          v.version,
+          fmtMoney(v.precioVentaGmmx ?? v.msrp),
+          fmtNum(v.stockDisponible),
+          fmtMoney(v.resumen?.precioFinalDesde),
+        ]);
+      }
+    }
+    if (rows.length) {
+      blocks.push(dataTable(
+        'Precio de Venta GMMX · muestra',
+        ['Modelo', 'Versión', 'GMMX', 'Stock', 'Desde'],
+        rows,
+      ));
+    }
+    const stockBars = (data.modelos || [])
+      .map((m) => ({ label: m.modelo, count: Number(m.stockTotal || 0) }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count);
+    const chart = barChart('Stock por modelo', stockBars, { horizontal: true, seriesLabel: 'Unidades' });
+    if (chart) blocks.push(chart);
+    return blocks.filter(Boolean);
+  },
 };
 
 function buildVisualizations(toolSnapshots = []) {

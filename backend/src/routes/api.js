@@ -21,6 +21,9 @@ const { getContabilidad } = require('../services/contabilidadService');
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
 const { isConfigured, runChat, DEFAULT_MODEL } = require('../services/aiAgent');
+const { canManageUsers } = require('../auth/roles');
+const { isAuthEnabled } = require('../auth/session');
+const { requireSession } = require('../auth/middleware');
 
 const router = express.Router();
 
@@ -48,13 +51,24 @@ router.get('/ventas/objetivos', (req, res) => {
   }
 });
 
-router.put('/ventas/objetivos', (req, res) => {
+router.put('/ventas/objetivos', requireSession, (req, res) => {
   try {
+    if (isAuthEnabled() && !canManageUsers(req.session?.role)) {
+      return res.status(403).json({
+        error: 'Solo Administración puede modificar los objetivos de Avance Facturas GMMX y Entregas SOFIA.',
+      });
+    }
     const { fechaInicio, fechaFin, retail, sofia } = req.body || {};
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'fechaInicio y fechaFin son requeridos.' });
     }
-    res.json(setGoals({ fechaInicio, fechaFin, retail, sofia }));
+    res.json(setGoals({
+      fechaInicio,
+      fechaFin,
+      retail,
+      sofia,
+      updatedBy: req.session?.username || null,
+    }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -62,11 +76,19 @@ router.put('/ventas/objetivos', (req, res) => {
 
 router.get('/ventas', async (req, res, next) => {
   try {
-    const { fechaInicio, fechaFin } = req.query;
+    const { fechaInicio, fechaFin, fresh } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    const data = await getVentas({ fechaInicio, fechaFin });
+    const forceFresh = ['1', 'true', 'yes'].includes(String(fresh || '').toLowerCase());
+    if (forceFresh) {
+      try {
+        require('../services/ventas').clearVentasSofiaCaches();
+      } catch {
+        /* ignore */
+      }
+    }
+    const data = await getVentas({ fechaInicio, fechaFin, fresh: forceFresh });
     let sofiaLiveUpdate = { active: false };
     try {
       const status = require('../services/sofiaMonthEndLive').getStatus();

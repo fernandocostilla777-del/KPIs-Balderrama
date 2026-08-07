@@ -29,6 +29,7 @@ const WEB_MODULE_RULES = `
 - Inventario refacciones/HyP → consultar_inventario_postventa
 - Refacciones (utilidad / días sin venta) → consultar_refacciones
 - Post-venta → consultar_postventa
+- Lista de precios / planes Chevrolet / Precio de Venta GMMX → consultar_lista_precios
 - Excel → generar_excel
 - Contabilidad / EEFF → consultar_contabilidad
 - Pronóstico → consultar_pronostico
@@ -66,13 +67,20 @@ const WEB_MODULE_RULES = `
 - Conversión leads / canal de leads → resumen_leads (agruparPor=canal)
 - Citas que aún no compran → resumen_leads con listar="citas_sin_compra" y periodo=mes_actual
 - Presión comercial / embudo vs histórico / mix HIGH END vs meta → consultar_recomendaciones_directivas
+- Precio / plan / bono / stock de un modelo → consultar_lista_precios
 
 ### Inventario
 - Plan piso / envejecidas / sin previas / modelos con más interés → consultar_inventario
 - Nuevos vs seminuevos → consultar_inventario y aclara que el tablero prioriza **autos nuevos**; seminuevos no son el catálogo principal
 
+### Lista de precios
+- Precio de Venta GMMX / MSRP / planes GMF / bono toma a cuenta / ficha / stock por versión → consultar_lista_precios
+- “¿Está vigente la lista?” → consultar_lista_precios (mira vigencia/fuentePdf/publicado)
+- Aveo LT Plus = CVT automática (no digas manual)
+
 ### Postventa
 - Órdenes abiertas críticas / facturadas / HyP vs Servicio / productividad asesor → consultar_postventa
+- Segmentación HyP Externas (A,F,V,Z) / Internas HyP (J,H,Ó,I,E) → consultar_postventa area=hyp + tipo=externas|hyp_internas
 - Refacciones trabadas +90 / top utilidad → consultar_refacciones (+ consultar_inventario_postventa si stock)
 
 ### Pronóstico
@@ -83,7 +91,8 @@ const WEB_MODULE_RULES = `
 - Actividad / conversión por vendedor → listar_vendedores_360 + resumen_vendedor_360
 
 ### Admin
-- Roles / PostVenta / Gerencia Comercial / alertas por perfil → consultar_roles_acceso
+- Roles / PostVenta / Gerencia Comercial / Vendedor / alertas por perfil → consultar_roles_acceso
+- Vigencia lista de precios / planes publicados → consultar_lista_precios (la carga del PDF la hace un admin en la UI; el asistente solo consulta)
 
 ## Reglas adicionales (solo web)
 4. Conteo por modelo/marca/HIGH END → **consultar_ventas_modelo** (YTD si no dan fechas).
@@ -91,6 +100,7 @@ const WEB_MODULE_RULES = `
 5. Ventas generales → consultar_ventas o consultar_resumen_ejecutivo.
 5b. Riesgos/oportunidades/alertas → **consultar_riesgos_oportunidades**. NUNCA digas que no tienes acceso: llama la herramienta.
 5c. Recomendaciones directivas / presión / mix / cuellos → **consultar_recomendaciones_directivas**.
+5d. Precios / planes Chevrolet → **consultar_lista_precios**. Di «Precio de Venta GMMX» (no solo MSRP).
 6. Pronóstico: KPIs + serie mensual.
 6b. CRM 360 → buscar_cliente_crm → historico_cliente_crm.
 6c. Leads → resumen_leads. Citas sin compra → listar="citas_sin_compra".

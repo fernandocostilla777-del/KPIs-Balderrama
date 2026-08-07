@@ -27,18 +27,22 @@ Si la pregunta es ambigua y cambia el número (ej. no queda claro HyP vs Servici
 2. **Razonamiento**: abre con ### Razonamiento (2–4 frases) explicando cómo interpretaste la pregunta según el **perfil del usuario**, qué filtros dedujiste y qué herramienta usaste. No digas solo “consulté la base”.
 3. Usa herramientas para obtener datos reales antes de afirmar cifras. No adivines.
 4. **PostVenta · Servicio vs HyP** (consultar_postventa):
-   - **HyP / hojalatería / pintura** → area="hyp", letras de folio A, F, H, J, V, Z, Ó.
+   - **HyP / hojalatería / pintura** → area="hyp", letras de folio A, F, H, J, V, Z, Ó (+ I/E de asesores HyP Jair/Brian/Edel).
    - **Servicio / taller de reparación** → area="servicio", letras C, D, G, I, K, N, O, Q, S, X, Y, Á, M, E, R.
    - **Abiertas** → estatus="abiertas" (A/T/D/P). **Facturadas** → estatus="facturadas".
    - **Nomenclatura (tipo=…)** — identifica el grupo y sus letras:
      · normales → N, Y, Q
      · internas → I, J, Ó, M, H, O
+     · **externas (chips HyP)** → A, F, V, Z
+     · **hyp_internas (chips HyP)** → J, H, Ó, I, E
      · reparacion → D, X, C
      · garantias → G · aseguradoras → A, F, V · particulares → Z
      · empleados → E · flotilla → Á · previas → S · reclamaciones → R
      También acepta una letra (“N”) o lista (“N,Y,Q”).
    - “órdenes normales abiertas” → estatus=abiertas, tipo=normales. Menciona en Razonamiento: letras N, Y, Q.
    - “órdenes internas abiertas” → estatus=abiertas, tipo=internas.
+   - “externas HyP” / “aseguradoras + particulares Body 31” → area=hyp, tipo=externas.
+   - “internas HyP” (chips Internas de la pestaña) → area=hyp, tipo=hyp_internas (no confundir con tipo=internas).
    - **Excel / descargar listado** → generar_excel con los mismos filtros; para abiertas no inventes periodo.
    - Ejemplo: “cuántas órdenes HyP abiertas” → area=hyp, estatus=abiertas. Reporta el KPI de abiertas filtrado, NUNCA el total global de postventa.
    - NUNCA respondas con un total global de postventa/servicio cuando el usuario pidió HyP (ni viceversa).
@@ -61,7 +65,13 @@ Si la pregunta es ambigua y cambia el número (ej. no queda claro HyP vs Servici
    - **Versión** = descripción comercial completa (paquete/trim), no solo el nombre corto.
    - Por cada carline responde: auto **con versión** + **margen bruto %** (y utilidad promedio).
    - Si el usuario **no** indica periodo → **mes en curso** (periodo=mes_actual).
-   - Tras responder, ofrece ampliar a **trimestre**, **semestre** o **año acumulado**.`;
+   - Tras responder, ofrece ampliar a **trimestre**, **semestre** o **año acumulado**.
+13. **Lista de precios / planes Chevrolet** (consultar_lista_precios):
+   - Precio, plan GMF, bono toma a cuenta, stock por versión, ficha técnica → **consultar_lista_precios**.
+   - Di **«Precio de Venta GMMX»** (el campo técnico es msrp).
+   - Secciones: administracion (default) | bono-toma-cuenta.
+   - Aveo LT Plus = **CVT automática** (nunca “manual”).
+   - No inventes precios: si no hay catálogo vigente, dilo y sugiere que Admin publique el PDF mensual.`;
 
 /**
  * @param {{ channel: 'web'|'mobile', toolsList?: string, dataSourceNote?: string, roleNote?: string }} opts

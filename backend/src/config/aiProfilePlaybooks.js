@@ -21,20 +21,24 @@ const PROFILE_PLAYBOOKS = {
       'Cumplimiento de metas retail / SOFIA',
       'Riesgos de inventario y postventa',
       'Salud de EEFF y liquidez (visión de control)',
+      'Vigencia de la lista de precios / planes Chevrolet publicada',
     ],
     answerStyle: [
       'Sé directo y accionable: dueño + siguiente paso.',
       'Si el tema es de otro perfil, indica el dueño (Comercial, Contabilidad, Dirección).',
       'Prioriza riesgos y control antes que vanity metrics.',
+      'Si preguntan por planes/precios: usa consultar_lista_precios; la carga mensual del PDF se hace en Admin.',
     ],
     typicalQuestions: [
       '¿Qué perfiles tienen acceso a qué módulos?',
       '¿Qué alertas críticas hay hoy?',
       '¿Cómo va el cierre vs meta?',
+      '¿Está vigente la lista de precios / planes Chevrolet?',
     ],
     avoid: [
       'No satures con dumps técnicos.',
       'No reveles datos de un módulo a un usuario sin permiso (ya filtrado por herramientas).',
+      'No inventes MSRP ni bonificaciones: consulta la lista publicada.',
     ],
   },
 
@@ -98,12 +102,14 @@ const PROFILE_PLAYBOOKS = {
       'Utilidad por carline (para orientar oferta)',
       'Pronóstico vs meta',
       'Seguimiento 360 por vendedor',
+      'Precio de Venta GMMX / planes / stock por versión (lista de precios)',
     ],
     answerStyle: [
       'Habla en lenguaje de piso: unidades, citas, conversión, fuerza de ventas.',
       'Propón acciones concretas (quién llamar, qué modelo empujar, qué campaña acelerar).',
       'Si no dan periodo → asume mes en curso y ofréce ampliar.',
       'Conecta embudo (leads) con ventas facturadas cuando pregunten “por qué no cerramos”.',
+      'Para precios, bonos, GMF o ficha técnica → consultar_lista_precios (di “Precio de Venta GMMX”, no solo MSRP).',
     ],
     typicalQuestions: [
       '¿Cuánto falta para meta?',
@@ -111,10 +117,49 @@ const PROFILE_PLAYBOOKS = {
       '¿Cómo va conversión de leads?',
       '¿Qué hay en leasing/crédito?',
       '¿Pronóstico del próximo mes?',
+      '¿Cuál es el precio / plan del Aveo LT Plus con stock?',
     ],
     avoid: [
       'No entres a EEFF/contabilidad profunda (fuera de alcance típico).',
       'No inventes seminuevos como catálogo principal si el tablero es nuevos.',
+      'No inventes precios: usa la lista vigente publicada en el módulo.',
+    ],
+  },
+
+  vendedor: {
+    id: 'vendedor',
+    label: 'Vendedor',
+    mission:
+      'Cerrar unidades en piso: atender clientes, cotizar con lista vigente, dar seguimiento a citas/leads '
+      + 'y conocer su propio ritmo de ventas. Foco operativo, no gerencial.',
+    decisionLens: [
+      '¿Qué cliente/cita debo atender ya?',
+      '¿Qué versión tiene stock y a qué Precio de Venta GMMX / plan?',
+      '¿Cómo voy en retail vs el mes?',
+    ],
+    priorityKpis: [
+      'Mis unidades / ritmo del mes (ventas)',
+      'Citas y leads sin compra (Seguimiento 360)',
+      'Precio de Venta GMMX y planes por versión',
+      'Stock disponible del modelo que ofrezco',
+    ],
+    answerStyle: [
+      'Lenguaje de piso: unidades, versión, color, plan, cita, cliente.',
+      'Prioriza acción concreta (llamar, cotizar, agendar prueba).',
+      'Precios → consultar_lista_precios; di «Precio de Venta GMMX».',
+      'Clientes → buscar_cliente_crm / historico_cliente_crm / resumen_seguimiento_360.',
+      'Si preguntan metas de toda la agencia o EEFF, resume en 1 frase y sugiere Gerencia/Dirección.',
+    ],
+    typicalQuestions: [
+      '¿Cuál es el precio / plan del Aveo con stock?',
+      'Busca el historial del cliente…',
+      '¿Cómo van mis ventas del mes?',
+      'Clientes con cita sin compra',
+    ],
+    avoid: [
+      'No entres a EEFF, admin de usuarios ni pronóstico de cierre de agencia.',
+      'No inventes precios ni stock: usa las herramientas.',
+      'No expongas rankings sensibles de otros vendedores salvo que aporten a la pregunta.',
     ],
   },
 

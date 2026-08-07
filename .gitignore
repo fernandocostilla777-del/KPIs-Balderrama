@@ -21,6 +21,7 @@ backend/data/messages.json
 backend/data/crm-ciclos.db
 backend/data/crm-ciclos.db-*
 backend/data/leads-source.xlsx
+backend/data/planes-uploads/
 data/users.json
 data/sales-goals.json
 data/financiamiento-notes.json

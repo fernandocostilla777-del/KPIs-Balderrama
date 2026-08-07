@@ -22,6 +22,8 @@ const { getInventoryPostventa } = require('./inventoryPostventaService');
 const { getRefaccionesDashboard } = require('./refaccionesPedidosService');
 const { getRole, listRoles } = require('../auth/roles');
 const { getProfilePlaybook } = require('../config/aiProfilePlaybooks');
+const { getListaPreciosFicha } = require('./listaPreciosService');
+const { getActivePlansMeta } = require('./planesChevroletParser');
 const {
   getUserMemory,
   rememberFact,
@@ -241,14 +243,14 @@ const TOOL_DEFINITIONS = [
     function: {
       name: 'consultar_roles_acceso',
       description:
-        'Catálogo de roles del dashboard (Administración, Dirección, Gerencia Comercial, Contabilidad): '
+        'Catálogo de roles del dashboard (Administración, Dirección, Gerencia Comercial, Vendedor, Contabilidad): '
         + 'páginas/módulos que ve cada perfil y capacidades. Úsala para preguntas de administración de accesos.',
       parameters: {
         type: 'object',
         properties: {
           rol: {
             type: 'string',
-            description: 'Opcional: administracion | direccion | gerencia_comercial | contabilidad',
+            description: 'Opcional: administracion | direccion | gerencia_comercial | vendedor | contabilidad',
           },
         },
       },
@@ -306,15 +308,17 @@ const TOOL_DEFINITIONS = [
       name: 'consultar_postventa',
       description:
         'Post-venta / taller: órdenes de Servicio o HyP. '
-        + 'OBLIGATORIO usar area="hyp" para hojalatería y pintura (folios A,F,H,J,V,Z,Ó) '
+        + 'OBLIGATORIO usar area="hyp" para hojalatería y pintura (folios A,F,H,J,V,Z,Ó; también I/E de asesores HyP Jair/Brian/Edel) '
         + 'y area="servicio" para órdenes de servicio (C,D,G,I,K,N,O,Q,S,X,Y,Á,M,E,R). '
         + 'Para abiertas usa estatus="abiertas" (snapshot actual; fechas opcionales). '
         + 'Nomenclatura con tipo=…: internas (I,J,Ó,M,H,O), normales (N,Y,Q), reparacion (D,X,C), '
         + 'garantias (G), aseguradoras (A,F,V), particulares (Z), empleados (E), flotilla (Á), previas (S), reclamaciones (R). '
+        + 'Segmentación UI HyP (chips): externas = A,F,V,Z; hyp_internas = J,H,Ó,I,E. '
         + 'También acepta una letra (“N”) o lista (“N,Y,Q”). '
         + `Catálogo: ${nomenclaturaHelpText()}. `
         + 'Ejemplo: “órdenes normales abiertas” → estatus=abiertas, tipo=normales (sin fechas). '
         + 'Ejemplo: “órdenes internas abiertas” → estatus=abiertas, tipo=internas. '
+        + 'Ejemplo HyP: “externas HyP abiertas” → area=hyp, estatus=abiertas, tipo=externas. '
         + 'Ejemplo: “órdenes HyP abiertas de 2025” → area=hyp, estatus=abiertas, fechaInicio=2025-01-01, fechaFin=2025-12-31. '
         + 'En la respuesta menciona qué letras aplicaste (filtros.nomenclatura). '
         + 'Responde con resumen.totalFiltrado o resumen.abiertasActualesDelArea; NUNCA uses un total global sin filtrar.',
@@ -336,8 +340,48 @@ const TOOL_DEFINITIONS = [
           tipo: {
             type: 'string',
             description:
-              'Nomenclatura: normales | internas | reparacion | garantias | aseguradoras | particulares | '
+              'Nomenclatura: normales | internas | externas | hyp_internas | reparacion | garantias | aseguradoras | particulares | '
               + 'empleados | flotilla | previas | reclamaciones | letra (N) | lista (N,Y,Q)',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_lista_precios',
+      description:
+        'Lista de precios Chevrolet vigente (planes Guía Administración o Bono Toma a Cuenta) cruzada con inventario y ficha técnica. '
+        + 'Úsala para: Precio de Venta GMMX (campo msrp en datos), bonificaciones, descuentos, planes GMF/contado/leasing, stock por versión/color, '
+        + 'ficha técnica (motor, transmisión — Aveo LT Plus = CVT automática), vigencia del PDF publicado. '
+        + 'Secciones: administracion (default) | bono-toma-cuenta. '
+        + 'Si preguntan precio, plan, bono o stock de un modelo → esta herramienta (no inventes cifras). '
+        + 'Admin publica el PDF mensual; tú solo lees el catálogo vigente.',
+      parameters: {
+        type: 'object',
+        properties: {
+          section: {
+            type: 'string',
+            enum: ['administracion', 'bono-toma-cuenta'],
+            description: 'Guía Administración (default) o Bono Toma a Cuenta',
+          },
+          modelo: {
+            type: 'string',
+            description: 'Carline / modelo (ej. AVEO, TRAVERSE, EQUINOX EV). Vacío = todos con stock.',
+          },
+          q: {
+            type: 'string',
+            description: 'Búsqueda libre en modelo/versión/código GMF',
+          },
+          soloConStock: {
+            type: 'boolean',
+            description: 'true (default) = solo versiones con existencia; false = catálogo completo',
+          },
+          detalle: {
+            type: 'string',
+            enum: ['resumen', 'completo'],
+            description: 'resumen (default) o completo (más planes por versión)',
           },
         },
       },
@@ -1017,7 +1061,105 @@ function getRolesAcceso({ rol } = {}) {
     roles: filtered.length ? filtered : all,
     alertasTipos: listAlertTypes().map((t) => ({ id: t.id, label: t.label, category: t.category })),
     preferenciasAlertasPorRol: getPrefs(),
-    nota: 'Gerencia Comercial ve Ventas, Pronóstico y Seguimiento 360. Contabilidad solo Contabilidad/EEFF. Dirección y Administración ven el tablero completo.',
+    nota:
+      'Vendedor ve Ventas, Lista de precios y Seguimiento 360 (sin Pronóstico). '
+      + 'Gerencia Comercial ve Ventas, Pronóstico, Lista de precios y Seguimiento 360. '
+      + 'Contabilidad solo Contabilidad/EEFF. Dirección y Administración ven el tablero completo '
+      + '(Admin puede publicar el PDF mensual de planes Chevrolet).',
+  };
+}
+
+async function shapeListaPreciosForAi(args = {}) {
+  const section = args.section === 'bono-toma-cuenta' ? 'bono-toma-cuenta' : 'administracion';
+  const detalleCompleto = String(args.detalle || 'resumen').toLowerCase() === 'completo';
+  const soloConStock = args.soloConStock !== false && args.soloConStock !== '0' && args.soloConStock !== 'false';
+  const meta = getActivePlansMeta();
+  const data = await getListaPreciosFicha({
+    section,
+    modelo: args.modelo || '',
+    q: args.q || '',
+    soloConStock,
+  });
+
+  const versionLimit = detalleCompleto ? 20 : 8;
+  const planLimit = detalleCompleto ? 8 : 3;
+  const modelos = (data.modelos || []).slice(0, detalleCompleto ? 25 : 12).map((m) => ({
+    modelo: m.modelo,
+    anio: m.anio,
+    titulo: m.titulo,
+    stockTotal: m.stockTotal,
+    badgeSeguro: m.badgeSeguro,
+    versions: (m.versions || []).slice(0, versionLimit).map((v) => {
+      const planes = (v.planes || []).slice(0, planLimit).map((p) => ({
+        tipoPago: p.tipoPago,
+        nombre: p.nombre,
+        precioFinal: p.precioFinal,
+        bonificacion: p.bonificacion,
+        descuento: p.descuentoMostrador ?? p.descuento,
+        tasaGmf: p.tasaGmf || p.tasaFactor,
+        enganche: p.enganche,
+        recomendado: Boolean(p.recomendado),
+        seguroGratis: p.seguroGratis,
+      }));
+      const ficha = v.fichaTecnica || {};
+      const desempeno = Array.isArray(ficha.desempeno) ? ficha.desempeno.slice(0, 4) : [];
+      return {
+        version: v.version,
+        paquete: v.paquete,
+        precioVentaGmmx: v.msrp,
+        msrp: v.msrp,
+        stockDisponible: v.stockDisponible,
+        stockApartadas: v.stockApartadas,
+        colores: (v.colores || []).slice(0, 6).map((c) => ({
+          label: c.label,
+          disponibles: c.disponibles,
+          apartadas: c.apartadas,
+        })),
+        resumen: v.summary ? {
+          precioFinalDesde: v.summary.precioFinalDesde,
+          descuentoMaximo: v.summary.descuentoMaximo,
+          descuentoPct: v.summary.descuentoPct,
+          seguroGratis: v.summary.seguroGratis,
+          tasaGmfDesde: v.summary.tasaGmfDesde,
+          leasingFactor: v.summary.leasingFactor,
+        } : null,
+        ficha: {
+          transmision: desempeno.find((x) => /transmisi/i.test(x.label || ''))?.value
+            || (typeof ficha.transmision === 'string' ? ficha.transmision : null),
+          highlights: desempeno.map((x) => `${x.label}: ${x.value}`),
+        },
+        planes,
+      };
+    }),
+  }));
+
+  return {
+    available: Boolean(meta.exists),
+    vigencia: meta.vigencia || data.meta?.vigencia || null,
+    fuentePdf: meta.sourceFile || data.meta?.sourceFile || null,
+    publicado: {
+      uploadedAt: meta.uploadedAt || null,
+      uploadedBy: meta.uploadedBy || null,
+      parsedAt: meta.parsedAt || null,
+    },
+    seccion: section,
+    seccionLabel: section === 'bono-toma-cuenta' ? 'Bono Toma a Cuenta' : 'Guía Administración',
+    notaUi:
+      'En la interfaz el campo MSRP se muestra como «Precio de Venta GMMX». '
+      + 'Aveo LT Plus = transmisión CVT (automática), no manual. '
+      + 'El PDF mensual lo publica Administración (solo Guía Administración + Bono Toma a Cuenta del índice).',
+    kpis: data.kpis || null,
+    catalogoModelos: meta.modelos || data.catalog?.modelos || [],
+    filtros: {
+      modelo: args.modelo || null,
+      q: args.q || null,
+      soloConStock,
+      detalle: detalleCompleto ? 'completo' : 'resumen',
+    },
+    modelos,
+    instruccionRespuesta:
+      'Responde con Precio de Venta GMMX, mejor plan/precio final, stock y 1 dato de ficha si aporta. '
+      + 'Menciona vigencia/fuente si está disponible. No inventes precios fuera de este resultado.',
   };
 }
 
@@ -1284,6 +1426,9 @@ async function executeTool(name, args = {}, context = {}) {
         estatus: args.estatus || 'todas',
         tipo: args.tipo || null,
       });
+      break;
+    case 'consultar_lista_precios':
+      result = await shapeListaPreciosForAi(args);
       break;
     case 'consultar_contabilidad':
       result = await getContabilidad(args);

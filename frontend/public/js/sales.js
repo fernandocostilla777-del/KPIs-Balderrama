@@ -1,7 +1,8 @@
 ﻿(function () {
   'use strict';
 
-  if (window.__salesPageInit) return;
+  const SALES_JS_BUILD = 93;
+  if (window.__salesPageInitBuild === SALES_JS_BUILD) return;
 
   let registrosActuales = [];
   let entregasActuales = [];
@@ -251,6 +252,36 @@
     sofia: 'autointel_goal_sofia',
   };
   let goalsSaveTimer = null;
+  /** Solo Administración (canManageUsers) puede editar; el resto solo lee el valor compartido. */
+  let canEditGoals = false;
+
+  function applyGoalEditMode() {
+    const editable = Boolean(canEditGoals);
+    [els.goalRetailInput, els.goalSofiaInput].forEach((input) => {
+      if (!input) return;
+      input.readOnly = !editable;
+      input.tabIndex = editable ? 0 : -1;
+      input.title = editable
+        ? 'Objetivo compartido del periodo (editable por Administración)'
+        : 'Solo Administración puede modificar este objetivo';
+    });
+    document.querySelectorAll('[data-goal-step]').forEach((btn) => {
+      btn.disabled = !editable;
+      btn.hidden = !editable;
+    });
+    els.goalRetailPanel?.classList.toggle('goal-chart-panel--readonly', !editable);
+    els.goalSofiaPanel?.classList.toggle('goal-chart-panel--readonly', !editable);
+  }
+
+  async function resolveGoalEditPermission() {
+    try {
+      const session = await window.DashboardAuth?.getSession?.();
+      canEditGoals = Boolean(session?.canManageUsers || session?.devBypass);
+    } catch {
+      canEditGoals = false;
+    }
+    applyGoalEditMode();
+  }
 
   async function fetchSharedGoals() {
     const fechaInicio = els?.fechaInicio?.value;
@@ -268,7 +299,7 @@
     if (els.goalSofiaInput) els.goalSofiaInput.value = data.sofia ?? '';
     updateGoalHistoricLabels(data);
 
-    const needsMigrate = data.retail == null && data.sofia == null;
+    const needsMigrate = canEditGoals && data.retail == null && data.sofia == null;
     if (needsMigrate) {
       const legacyRetail = localStorage.getItem(GOAL_STORAGE_KEYS.retail);
       const legacySofia = localStorage.getItem(GOAL_STORAGE_KEYS.sofia);
@@ -286,19 +317,26 @@
     const retailLabel = els.goalRetailPanel?.querySelector('.goal-target-label');
     const sofiaLabel = els.goalSofiaPanel?.querySelector('.goal-target-label');
     const month = data?.historicMonth;
+    const baseRetail = month && data.retailSource === 'historic'
+      ? `Objetivo del periodo · histórico ${month}`
+      : 'Objetivo del periodo';
+    const baseSofia = month && data.sofiaSource === 'historic'
+      ? `Objetivo del periodo · histórico ${month}`
+      : 'Objetivo del periodo';
     if (retailLabel) {
-      retailLabel.textContent = month && data.retailSource === 'historic'
-        ? `Objetivo del periodo · histórico ${month}`
-        : 'Objetivo del periodo';
+      retailLabel.textContent = canEditGoals
+        ? baseRetail
+        : `${baseRetail} · solo Administración edita`;
     }
     if (sofiaLabel) {
-      sofiaLabel.textContent = month && data.sofiaSource === 'historic'
-        ? `Objetivo del periodo · histórico ${month}`
-        : 'Objetivo del periodo';
+      sofiaLabel.textContent = canEditGoals
+        ? baseSofia
+        : `${baseSofia} · solo Administración edita`;
     }
   }
 
   async function persistSharedGoals() {
+    if (!canEditGoals) return;
     const fechaInicio = els?.fechaInicio?.value;
     const fechaFin = els?.fechaFin?.value;
     if (!fechaInicio || !fechaFin) return;
@@ -319,6 +357,7 @@
   }
 
   function scheduleSaveGoals() {
+    if (!canEditGoals) return;
     clearTimeout(goalsSaveTimer);
     goalsSaveTimer = setTimeout(() => {
       persistSharedGoals().catch((err) => {
@@ -397,6 +436,7 @@
       await fetchSharedGoals();
     } catch (err) {
       console.error('[Goals load]', err);
+      if (!canEditGoals) return;
       const retail = localStorage.getItem(GOAL_STORAGE_KEYS.retail);
       const sofia = localStorage.getItem(GOAL_STORAGE_KEYS.sofia);
       if (retail && els.goalRetailInput) els.goalRetailInput.value = retail;
@@ -789,6 +829,7 @@
   }
 
   function onGoalInputChange(which) {
+    if (!canEditGoals) return;
     saveGoal();
     updateGoalHistoricLabels({ retailSource: 'saved', sofiaSource: 'saved' });
     const actual = which === 'retail' ? goalActualRetail : goalActualSofia;
@@ -800,6 +841,7 @@
   }
 
   function adjustGoal(which, delta) {
+    if (!canEditGoals) return;
     const input = which === 'retail' ? els.goalRetailInput : els.goalSofiaInput;
     if (!input) return;
     const current = parseInt(input.value, 10);
@@ -1540,7 +1582,7 @@
       },
       sofia: {
         title: 'Notificaciones SOFIA',
-        hint: 'Timbrados SOFIA · sin flotilla (FLOT) · sí incluye Flotilla GMF',
+        hint: 'Timbrados SOFIA por fecha de registro · sin FLOT · FLOTGMF solo si contrato AO ≠ flotilla',
         icon: 'notifications_active',
         card: () => els.kpiCardEntregasSofia,
       },
@@ -2334,7 +2376,7 @@
               </div>
               <p class="ops-orders-drawer__msg">${escapeHtml(r.CLIENTE || '—')} · Factura ${escapeHtml(r.SOF_Factura || '—')}</p>
               <div class="ops-orders-drawer__facts">
-                <span>${escapeHtml(r.FECHA_PERIODO ?? r.SOF_FechFact ?? '—')}</span>
+                <span>${escapeHtml(r.SOF_FechAct || r.FECHA_PERIODO || '—')}</span>
                 <span>Previas ${Number(r.PREVIAS || 0)}</span>
                 <span>${escapeHtml(r.SOF_CveUSu || '—')}</span>
               </div>
@@ -2528,8 +2570,8 @@
       const ff = els.fechaFin?.value || 'fin';
       if (currentMeta.kpi === 'sofia') {
         downloadCsv(
-          ['FechaFactura', 'FechaRegistro', 'Hora', 'Factura', 'VIN', 'Previas', 'Pedido', 'NoTransaccion', 'Cliente', 'Estatus', 'Usuario'],
-          ['FECHA_PERIODO', 'SOF_FechAct', 'SOF_HoraAct', 'SOF_Factura', 'SOF_VIN', 'PREVIAS', 'SOF_Pedido', 'SOF_NoTransaccion', 'CLIENTE', 'SOF_Estatus', 'SOF_CveUSu'],
+          ['FechaRegistro', 'FechaFactura', 'Hora', 'Factura', 'VIN', 'Previas', 'Pedido', 'NoTransaccion', 'Cliente', 'Estatus', 'Usuario'],
+          ['SOF_FechAct', 'FECHA_FACTURA', 'SOF_HoraAct', 'SOF_Factura', 'SOF_VIN', 'PREVIAS', 'SOF_Pedido', 'SOF_NoTransaccion', 'CLIENTE', 'SOF_Estatus', 'SOF_CveUSu'],
           lastExportRows,
           `entregas_sofia_${fi}_${ff}.csv`
         );
@@ -2660,7 +2702,9 @@
       return `<tr class="empty-row"><td colspan="11">${emptyMessage || 'No hay notificaciones de entrega en el periodo.'}</td></tr>`;
     }
     return rows.map((row) => `<tr class="row-sofia">
-      <td>${row.FECHA_PERIODO ?? row.SOF_FechFact ?? ''}</td><td>${row.SOF_FechAct ?? ''}</td><td>${row.SOF_HoraAct ?? ''}</td>
+      <td>${row.SOF_FechAct ?? row.FECHA_PERIODO ?? ''}</td>
+      <td>${row.FECHA_FACTURA ?? row.SOF_FechFact ?? ''}</td>
+      <td>${row.SOF_HoraAct ?? ''}</td>
       <td>${row.SOF_Factura ?? ''}</td><td>${row.SOF_VIN ?? ''}</td>
       <td class="cell-num">${Number(row.PREVIAS || 0)}</td>
       <td>${row.SOF_Pedido ?? ''}</td>
@@ -2693,8 +2737,8 @@
 
     if (meta) meta.classList.add('hidden');
     els.sofiaPanelResumen.textContent = n
-      ? `${n} notificación${n === 1 ? '' : 'es'} en el periodo (sin flotilla · sí Flotilla GMF)`
-      : 'No hay notificaciones de entrega en el periodo (flotilla FLOT exenta; Flotilla GMF sí cuenta).';
+      ? `${n} notificación${n === 1 ? '' : 'es'} en el periodo (sin FLOT · FLOTGMF solo menudeo)`
+      : 'No hay notificaciones de entrega en el periodo (FLOT exenta; FLOTGMF con contrato flotilla AO no cuenta).';
   }
 
   function clearSofiaPreviewSearch() {
@@ -2752,7 +2796,7 @@
     const q = term.trim().toLowerCase();
     if (!q) return base;
     return base.filter((row) =>
-      [row.FECHA_PERIODO, row.SOF_FechAct, row.SOF_HoraAct, row.SOF_Factura, row.SOF_VIN, row.PREVIAS, row.SOF_Pedido, row.SOF_NoTransaccion, row.CLIENTE, row.SOF_Estatus, row.SOF_CveUSu]
+      [row.SOF_FechAct, row.FECHA_FACTURA || row.SOF_FechFact, row.SOF_HoraAct, row.SOF_Factura, row.SOF_VIN, row.PREVIAS, row.SOF_Pedido, row.SOF_NoTransaccion, row.CLIENTE, row.SOF_Estatus, row.SOF_CveUSu]
         .some((val) => String(val ?? '').toLowerCase().includes(q))
     );
   }
@@ -2773,7 +2817,7 @@
     URL.revokeObjectURL(link.href);
   }
 
-  async function consultar({ quiet = false } = {}) {
+  async function consultar({ quiet = false, fresh = false } = {}) {
     const fechaInicio = els.fechaInicio.value;
     const fechaFin = els.fechaFin.value;
     if (!fechaInicio || !fechaFin) { setStatus('Seleccione ambas fechas', 'error'); return; }
@@ -2818,7 +2862,9 @@
     }
 
     try {
-      const response = await fetch(`/api/ventas?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`, { credentials: 'same-origin' });
+      const qs = new URLSearchParams({ fechaInicio, fechaFin });
+      if (fresh) qs.set('fresh', '1');
+      const response = await fetch(`/api/ventas?${qs.toString()}`, { credentials: 'same-origin' });
       const raw = await response.text();
       let data;
       try {
@@ -2832,9 +2878,10 @@
       }
       if (!response.ok) throw new Error(data.error || `Error al consultar (${response.status})`);
 
-      registrosActuales = data.registros.map((row) => CanalesVenta.enrichRegistro(row));
-      entregasActuales = data.entregasSofia ?? [];
-      tomasACuentaActuales = data.tomasACuenta ?? [];
+      const registrosRaw = Array.isArray(data.registros) ? data.registros : [];
+      registrosActuales = registrosRaw.map((row) => CanalesVenta.enrichRegistro(row));
+      entregasActuales = Array.isArray(data.entregasSofia) ? data.entregasSofia : [];
+      tomasACuentaActuales = Array.isArray(data.tomasACuenta) ? data.tomasACuenta : [];
       tomasACuentaMeta = data.tomasACuentaMeta || {
         porModeloToma: [],
         montoAdquisicion: 0,
@@ -2843,6 +2890,9 @@
         montoVentasUsado: 0,
       };
       const { resumen } = data;
+      if (!resumen || typeof resumen !== 'object') {
+        throw new Error('La API de ventas no devolvió resumen. Reinicie el backend.');
+      }
 
       if (!resumen.porCanal?.length) resumen.porCanal = CanalesVenta.countByCanal(registrosActuales);
 
@@ -2854,7 +2904,7 @@
       renderTomasSection(resumen, data.tomasMensual);
       if (els.kpiEntregasSofiaSub) {
         const stamp = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-        els.kpiEntregasSofiaSub.textContent = `Sin flotilla · sí GMF · ${stamp}`;
+        els.kpiEntregasSofiaSub.textContent = `Actualizado ${stamp}`;
       }
 
       await fetchSharedGoals().catch((err) => console.warn('[Goals]', err.message));
@@ -2869,7 +2919,6 @@
       renderCharts(resumen);
       renderYtdChart(data.comparativoYtd);
       renderCarlineUtilidad(data.utilidadCarline, data.comparativoYtd);
-      lastUtilidadCarline = data.utilidadCarline || null;
       if (ventasDrawerUi?.isOpen?.()) {
         ventasDrawerUi.refresh();
       }
@@ -2885,6 +2934,7 @@
       if (!quiet) compactFilters?.closeAll?.();
 
       if (window.KpiInsights?.apply) {
+        try {
         const tomasRows = tomasACuentaActuales || [];
         const tomasTotal = Number(resumen.totalTomasACuenta ?? tomasRows.length ?? 0);
         const tomasVendidos = Number(
@@ -2961,7 +3011,7 @@
             totalAnterior: lastYtd.totalAnterior,
           } : null,
           utilidadCarline: (() => {
-            const uc = data.utilidadCarline || lastUtilidadCarline;
+            const uc = data.utilidadCarline;
             if (!uc) return null;
             return {
               available: uc.available !== false,
@@ -2980,6 +3030,9 @@
             };
           })(),
         });
+        } catch (insightErr) {
+          console.warn('[KpiInsights]', insightErr);
+        }
       }
 
       if (window.FinanciamientoVentas?.load) {
@@ -2991,8 +3044,11 @@
           entregasSofia: entregasActuales,
         };
         if (activeSalesTab === 'financiamiento' && window.FinanciamientoVentas?.applyVentasMix) {
-          // La carga del periodo ya arrancó arriba; aquí solo enriquece el mix con ventas/SOFIA.
-          await window.FinanciamientoVentas.applyVentasMix(registrosActuales, entregasActuales);
+          try {
+            await window.FinanciamientoVentas.applyVentasMix(registrosActuales, entregasActuales);
+          } catch (fiErr) {
+            console.warn('[Financiamiento mix]', fiErr.message);
+          }
         }
       }
 
@@ -3008,7 +3064,10 @@
     } catch (err) {
       console.error('[Sales]', err);
       if (!quiet) setStatus(err.message, 'error');
-      if (els.kpiEntregasSofiaSub) els.kpiEntregasSofiaSub.textContent = 'Error al actualizar SOFIA';
+      if (els.kpiEntregasSofiaSub) {
+        const short = String(err.message || 'Error al actualizar SOFIA').slice(0, 90);
+        els.kpiEntregasSofiaSub.textContent = quiet ? short : 'Error al actualizar SOFIA';
+      }
     } finally {
       await sideLoadPromise;
       if (!quiet) {
@@ -3419,7 +3478,9 @@
     document.getElementById('btnRefreshEntregasSofia')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      consultar({ quiet: true });
+      consultar({ quiet: true, fresh: true }).catch((err) => {
+        console.error('[SOFIA refresh]', err);
+      });
     });
     els.btnExportar.addEventListener('click', () => downloadCsv(
       ['Fecha', 'Documento', 'Vendedor', 'Cliente', 'Serie', 'Modelo', 'Anio', 'Color', 'Departamento', 'TipoVenta', 'FormaPago'],
@@ -3498,6 +3559,7 @@
 
       bindElements();
       bindEvents();
+      await resolveGoalEditPermission();
       window.FinanciamientoVentas?.init?.();
       window.LeadsVentas?.init?.();
       window.AfluenciaVentas?.init?.();
@@ -3509,6 +3571,7 @@
       await switchSalesTab(getSalesTabFromUrl());
       await consultar();
       window.__salesPageInit = true;
+      window.__salesPageInitBuild = SALES_JS_BUILD;
     } catch (err) {
       console.error('[Sales init]', err);
       const badge = document.getElementById('statusBadge');

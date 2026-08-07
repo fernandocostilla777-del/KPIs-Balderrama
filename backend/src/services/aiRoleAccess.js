@@ -38,6 +38,7 @@ const PAGE_AI_TOOLS = {
     'consultar_objetivos_ventas',
     'consultar_financiamiento',
     'consultar_utilidad_carline',
+    'consultar_lista_precios',
     'resumen_leads',
     'consultar_riesgos_oportunidades',
     'consultar_recomendaciones_directivas',
@@ -67,6 +68,10 @@ const PAGE_AI_TOOLS = {
     'consultar_riesgos_oportunidades',
     'generar_excel',
   ],
+  'lista-precios': [
+    'consultar_lista_precios',
+    'consultar_inventario',
+  ],
   seguimiento: [
     'buscar_cliente_crm',
     'historico_cliente_crm',
@@ -82,6 +87,7 @@ const PAGE_AI_TOOLS = {
   ],
   admin: [
     'consultar_roles_acceso',
+    'consultar_lista_precios',
   ],
 };
 

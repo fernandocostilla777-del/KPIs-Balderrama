@@ -82,6 +82,11 @@ const DEFAULT_PREFS = {
     'inventario_sin_previas',
     'sistema',
   ],
+  vendedor: [
+    'entregas_sin_previa',
+    'inventario_sin_previas',
+    'sistema',
+  ],
   contabilidad: [
     'plan_piso',
     'sin_timbrar',

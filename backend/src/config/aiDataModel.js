@@ -32,20 +32,33 @@ Para "¿cuántos Aveo se vendieron?":
 
 ### Post-venta
 - SER_ORDEN: órdenes de taller (ingreso, facturación, importes, asesor). El área se define por la **primera letra del folio** (ORE_IDORDEN):
-  - **HyP**: A, F, H, J, V, Z, Ó
+  - **HyP**: A, F, H, J, V, Z, Ó (también I/E si el asesor es HyP: Jair, Brian/Brayan, Edel)
   - **Servicio**: C, D, G, I, K, N, O, Q, S, X, Y, Á, M, E, R
 - Abiertas = estatus A/T/D/P; Facturadas = I; Canceladas = C.
 - Herramienta: consultar_postventa con area=hyp|servicio y estatus=abiertas|facturadas|todas.
+- **Segmentación UI HyP (chips)**:
+  - **Externas** → tipo=externas → letras A, F, V, Z
+  - **Internas HyP** → tipo=hyp_internas → letras J, H, Ó, I, E
+  - No confundir hyp_internas con tipo=internas (I,J,Ó,M,H,O) del catálogo general de nomenclatura.
+
+### Lista de precios (planes Chevrolet)
+- Fuente: PDF mensual de planes GM parseado (Guía Administración + Bono Toma a Cuenta desde el índice del PDF).
+- JSON activo + cruce con inventario DMS y fichas técnicas Excel 2026 por versión.
+- En UI: **Precio de Venta GMMX** = campo MSRP del plan.
+- Aveo **LT Plus** = transmisión **CVT (automática)**, no Manual.
+- Herramienta: **consultar_lista_precios** (section=administracion|bono-toma-cuenta, modelo, soloConStock).
+- Publicación: Admin sube el PDF; el asistente solo consulta el catálogo vigente (vigencia/fuente).
 
 ### Contabilidad / EEFF
 - CON_CTAS01{AAAA}: saldos por cuenta y mes (CTA_GPOCONT, CTA_NUMCTA).
 - Prefijos 0400-000N = ingreso por sucursal; 0600 = costo; 0700 = gastos operación.
 
 ### Reglas de razonamiento
-- Antes de SQL ad-hoc, preferir herramientas especializadas (consultar_ventas_modelo, consultar_ventas).
+- Antes de SQL ad-hoc, preferir herramientas especializadas (consultar_ventas_modelo, consultar_ventas, consultar_lista_precios).
 - Si preguntan por modelo/marca/unidad específica → consultar_ventas_modelo.
 - Si preguntan totales generales → consultar_ventas o consultar_resumen_ejecutivo.
-- Explica en 1-2 frases qué tablas relacionaste y por qué.
+- Si preguntan precio/plan/bono/stock de versión → consultar_lista_precios.
+- Explica en 1-2 frases qué tablas/fuentes relacionaste y por qué.
 
 ### Seguimiento 360 (CRM Balderrama Ciclos + DMS)
 - Vista **por cliente**: buscar_cliente_crm → historico_cliente_crm.

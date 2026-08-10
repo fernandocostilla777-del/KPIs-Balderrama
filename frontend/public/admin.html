@@ -6,7 +6,7 @@
 <title>Administración | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=59" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=60" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="admin">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -194,6 +194,34 @@
 <p id="listaPreciosFileName" class="admin-hint">Ningún archivo seleccionado</p>
 <div id="listaPreciosUploadStatus" class="admin-hint" aria-live="polite"></div>
 </div>
+
+<div class="admin-lista-precios-images">
+<div class="admin-header" style="margin-top:22px;margin-bottom:10px">
+<div>
+<h3 class="section-title" style="font-size:1.05rem;margin:0">Imágenes por modelo</h3>
+<p class="admin-subtitle" style="margin-top:4px">Suba una foto por carline (JPG, PNG o WEBP, máx. 5&nbsp;MB). Se muestra en el listado de precios.</p>
+</div>
+<span id="listaPreciosImagesMeta" class="admin-hint">—</span>
+</div>
+<div class="admin-lista-precios-image-form">
+<label class="admin-field">
+<span>Modelo</span>
+<select id="listaPreciosImageModelo">
+<option value="">Seleccionar modelo…</option>
+</select>
+</label>
+<label class="admin-field admin-file-field">
+<span>Imagen</span>
+<input type="file" id="listaPreciosImageFile" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"/>
+</label>
+<button type="button" class="btn-glass btn-primary" id="btnUploadListaPreciosImage" disabled>
+<span class="material-symbols-outlined">image</span>
+<span>Subir imagen</span>
+</button>
+</div>
+<p id="listaPreciosImageStatus" class="admin-hint" aria-live="polite"></p>
+<div id="listaPreciosImagesGrid" class="admin-lp-images-grid"></div>
+</div>
 </section>
 
 <section class="section-panel dashboard-section admin-form-panel hidden" id="userFormPanel">
@@ -240,6 +268,6 @@ Usuario activo
 <script src="/js/sidebar.js?v=10"></script>
 <script src="/js/topbar.js?v=17"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/admin.js?v=6"></script>
+<script src="/js/admin.js?v=7"></script>
 </body>
 </html>

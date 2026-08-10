@@ -49,6 +49,12 @@
     listaPreciosFileName: document.getElementById('listaPreciosFileName'),
     listaPreciosUploadStatus: document.getElementById('listaPreciosUploadStatus'),
     btnUploadListaPrecios: document.getElementById('btnUploadListaPrecios'),
+    listaPreciosImageModelo: document.getElementById('listaPreciosImageModelo'),
+    listaPreciosImageFile: document.getElementById('listaPreciosImageFile'),
+    btnUploadListaPreciosImage: document.getElementById('btnUploadListaPreciosImage'),
+    listaPreciosImageStatus: document.getElementById('listaPreciosImageStatus'),
+    listaPreciosImagesMeta: document.getElementById('listaPreciosImagesMeta'),
+    listaPreciosImagesGrid: document.getElementById('listaPreciosImagesGrid'),
   };
 
   let roles = [];
@@ -562,12 +568,135 @@
       if (els.listaPreciosFile) els.listaPreciosFile.value = '';
       syncListaPreciosFileUi();
       await loadListaPreciosCatalog();
+      await loadListaPreciosImages();
     } catch (err) {
       showMessage(err.message || 'No se pudo publicar la lista.', 'error');
       if (els.listaPreciosUploadStatus) {
         els.listaPreciosUploadStatus.textContent = err.message || 'Error al procesar el PDF.';
       }
       syncListaPreciosFileUi();
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  function syncListaPreciosImageUi() {
+    const modelo = els.listaPreciosImageModelo?.value || '';
+    const file = els.listaPreciosImageFile?.files?.[0];
+    if (els.btnUploadListaPreciosImage) {
+      els.btnUploadListaPreciosImage.disabled = !(modelo && file);
+    }
+  }
+
+  function renderListaPreciosImages(modelos = []) {
+    if (!els.listaPreciosImagesGrid) return;
+    const withImg = modelos.filter((m) => m.imagen?.url);
+    if (!withImg.length) {
+      els.listaPreciosImagesGrid.innerHTML = '<p class="admin-hint">Aún no hay imágenes cargadas.</p>';
+      return;
+    }
+    els.listaPreciosImagesGrid.innerHTML = withImg.map((m) => `
+      <article class="admin-lp-image-card" data-modelo="${esc(m.modelo)}">
+        <img src="${esc(m.imagen.url)}" alt="${esc(m.modelo)}" loading="lazy"/>
+        <div class="admin-lp-image-meta">
+          <strong>${esc(m.modelo)}</strong>
+          <span>${m.imagen.uploadedAt ? formatDate(m.imagen.uploadedAt) : '—'}${m.imagen.uploadedBy ? ` · ${esc(m.imagen.uploadedBy)}` : ''}</span>
+        </div>
+        <button type="button" class="btn-glass btn-secondary admin-lp-image-delete" data-action="delete-lp-image" data-modelo="${esc(m.modelo)}" title="Eliminar imagen">
+          <span class="material-symbols-outlined">delete</span>
+        </button>
+      </article>`).join('');
+  }
+
+  async function loadListaPreciosImages() {
+    if (!els.listaPreciosImageModelo && !els.listaPreciosImagesGrid) return;
+    try {
+      const data = await api('/auth/lista-precios/images');
+      const modelos = data.modelos || [];
+      const selected = els.listaPreciosImageModelo?.value || '';
+      if (els.listaPreciosImageModelo) {
+        els.listaPreciosImageModelo.innerHTML = `<option value="">Seleccionar modelo…</option>${
+          modelos.map((m) => `<option value="${esc(m.modelo)}">${esc(m.modelo)}${m.imagen ? ' · con imagen' : ''}</option>`).join('')
+        }`;
+        if (selected && [...els.listaPreciosImageModelo.options].some((o) => o.value === selected)) {
+          els.listaPreciosImageModelo.value = selected;
+        }
+      }
+      if (els.listaPreciosImagesMeta) {
+        els.listaPreciosImagesMeta.textContent = `${data.totalConImagen || 0} de ${modelos.length} con imagen`;
+      }
+      renderListaPreciosImages(modelos);
+      syncListaPreciosImageUi();
+    } catch (err) {
+      if (els.listaPreciosImagesMeta) {
+        els.listaPreciosImagesMeta.textContent = err.message || 'No se pudieron cargar las imágenes.';
+      }
+    }
+  }
+
+  async function uploadListaPreciosImage() {
+    const modelo = els.listaPreciosImageModelo?.value || '';
+    const file = els.listaPreciosImageFile?.files?.[0];
+    if (!modelo || !file) {
+      showMessage('Seleccione modelo e imagen.', 'error');
+      return;
+    }
+    if (els.listaPreciosImageStatus) {
+      els.listaPreciosImageStatus.textContent = `Subiendo imagen de ${modelo}…`;
+    }
+    showLoading(true);
+    if (els.btnUploadListaPreciosImage) els.btnUploadListaPreciosImage.disabled = true;
+    try {
+      const body = new FormData();
+      body.append('modelo', modelo);
+      body.append('file', file);
+      const res = await fetch('/api/auth/lista-precios/images', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body,
+      });
+      if (res.status === 401) {
+        window.location.href = `/login.html?returnUrl=${encodeURIComponent(window.location.pathname)}`;
+        throw new Error('Sesión expirada');
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      showMessage(`Imagen de ${modelo} publicada.`, 'success');
+      if (els.listaPreciosImageStatus) {
+        els.listaPreciosImageStatus.textContent = `Imagen de ${modelo} actualizada.`;
+      }
+      if (els.listaPreciosImageFile) els.listaPreciosImageFile.value = '';
+      await loadListaPreciosImages();
+    } catch (err) {
+      showMessage(err.message || 'No se pudo subir la imagen.', 'error');
+      if (els.listaPreciosImageStatus) {
+        els.listaPreciosImageStatus.textContent = err.message || 'Error al subir.';
+      }
+      syncListaPreciosImageUi();
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  async function deleteListaPreciosImage(modelo) {
+    if (!modelo) return;
+    if (!window.confirm(`¿Eliminar la imagen de ${modelo}?`)) return;
+    showLoading(true);
+    try {
+      const res = await fetch(`/api/auth/lista-precios/images/${encodeURIComponent(modelo)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (res.status === 401) {
+        window.location.href = `/login.html?returnUrl=${encodeURIComponent(window.location.pathname)}`;
+        throw new Error('Sesión expirada');
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      showMessage(`Imagen de ${modelo} eliminada.`, 'success');
+      await loadListaPreciosImages();
+    } catch (err) {
+      showMessage(err.message || 'No se pudo eliminar la imagen.', 'error');
     } finally {
       showLoading(false);
     }
@@ -725,6 +854,14 @@
 
   els.listaPreciosFile?.addEventListener('change', syncListaPreciosFileUi);
   els.btnUploadListaPrecios?.addEventListener('click', () => uploadListaPrecios());
+  els.listaPreciosImageModelo?.addEventListener('change', syncListaPreciosImageUi);
+  els.listaPreciosImageFile?.addEventListener('change', syncListaPreciosImageUi);
+  els.btnUploadListaPreciosImage?.addEventListener('click', () => uploadListaPreciosImage());
+  els.listaPreciosImagesGrid?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="delete-lp-image"]');
+    if (!btn) return;
+    deleteListaPreciosImage(btn.dataset.modelo);
+  });
 
   els.tableBody?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
@@ -734,6 +871,14 @@
     if (btn.dataset.action === 'delete') removeUser(username);
   });
 
-  Promise.all([loadUsers(), loadRolePermissions(), loadAlertPrefs(), loadProration(), loadListaPreciosCatalog()]);
+  Promise.all([
+    loadUsers(),
+    loadRolePermissions(),
+    loadAlertPrefs(),
+    loadProration(),
+    loadListaPreciosCatalog(),
+    loadListaPreciosImages(),
+  ]);
   syncListaPreciosFileUi();
+  syncListaPreciosImageUi();
 })();

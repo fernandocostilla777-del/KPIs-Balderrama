@@ -1,0 +1,813 @@
+{
+  "meta": {
+    "anio": 2026,
+    "mercado": "México",
+    "actualizado": "2026-08-07",
+    "metodologia": "Benchmarking comercial MX 2026: rivales directos por segmento, precio de entrada publicado y oferta vigente (crédito/bonos). Tecnología, seguridad y rendimiento según fichas/prensa de marca. Precios sujetos a cambio; verificar con cada distribuidor.",
+    "fuentes": [
+      "Guía de planes Chevrolet MY26 (precio lista / precio final agencia)",
+      "Fichas técnicas Chevrolet cargadas en catálogo",
+      "Oferta pública México 2026: Nissan, Toyota, Kia, VW, Hyundai, BYD, Ford, Geely (prensa y sitios de marca)"
+    ]
+  },
+  "byModelo": {
+    "AVEO HB": {
+      "segmento": "Hatchback subcompacto de volumen",
+      "criterio": "Mismo precio de entrada (~$250–380 mil), uso urbano, 5 plazas, comprador primer auto / flota ligera.",
+      "nuestroResumen": {
+        "tecnologia": "Audio básico / conectividad según versión; enfoque valor",
+        "seguridad": "6 bolsas, ABS 4 ruedas, StabiliTrak, ISOFIX",
+        "rendimiento": "1.5L 98 HP · 105 lb-pie · TM6 / CVT"
+      },
+      "competidores": [
+        {
+          "marca": "Hyundai",
+          "modelo": "Grand i10",
+          "precioListaDesde": 289900,
+          "ofertaVigente": "Entrada de segmento; planes Hyundai Finance según mes",
+          "tecnologia": "Pantalla táctil y Apple CarPlay/Android Auto en versiones medias",
+          "seguridad": "Hasta 6 bolsas + ABS/ESC según versión",
+          "rendimiento": "1.2L ~83 HP · eficiente en ciudad"
+        },
+        {
+          "marca": "Suzuki",
+          "modelo": "Swift",
+          "precioListaDesde": 329990,
+          "ofertaVigente": "Promos de enganche / tasa según campaña Suzuki",
+          "tecnologia": "Pantalla 7–9” con proyección de smartphone",
+          "seguridad": "6 bolsas, ESC, cámara de reversa en gamas altas",
+          "rendimiento": "1.2L ~83–90 HP · ligero y ágil"
+        },
+        {
+          "marca": "MG",
+          "modelo": "MG3",
+          "precioListaDesde": 299900,
+          "ofertaVigente": "Precios agresivos de marca china; bonos de lanzamiento variables",
+          "tecnologia": "Pantalla grande y conectividad de serie en la mayoría de versiones",
+          "seguridad": "6 bolsas + ADAS básicos en tope",
+          "rendimiento": "1.5L ~112 HP · más potencia en el rango"
+        }
+      ]
+    },
+    "AVEO NB": {
+      "segmento": "Sedán subcompacto #1 de volumen MX",
+      "criterio": "Rivales del sedán más vendido: precio, cajuela, flotas y crédito accesible.",
+      "nuestroResumen": {
+        "tecnologia": "Conectividad según versión; cajuela ~475 L",
+        "seguridad": "6 bolsas, ABS, StabiliTrak, ISOFIX",
+        "rendimiento": "1.5L 98 HP · 105 lb-pie · TM6 / CVT"
+      },
+      "competidores": [
+        {
+          "marca": "Nissan",
+          "modelo": "Versa 2026",
+          "precioListaDesde": 374900,
+          "ofertaVigente": "Precio especial con crédito desde ~$321,900 (Sense Base TM); baja hasta $53 mil vs lista",
+          "tecnologia": "Pantalla + CarPlay/Android Auto; ADAS en Advance/Exclusive",
+          "seguridad": "6 bolsas + paquete ADAS (frenado emergencia, carril) en gamas altas",
+          "rendimiento": "1.6L ~118 HP · CVT · referente de segmento"
+        },
+        {
+          "marca": "Toyota",
+          "modelo": "Yaris Sedán",
+          "precioListaDesde": 327700,
+          "ofertaVigente": "Planes Toyota Financial; fuerte reventa",
+          "tecnologia": "Pantalla 8” + CarPlay/Android Auto desde base",
+          "seguridad": "6 bolsas, ESC, cámara, TPMS; Toyota Safety Sense en tope",
+          "rendimiento": "1.5L 107 HP · TM5 / CVT"
+        },
+        {
+          "marca": "Kia",
+          "modelo": "K3 Sedán",
+          "precioListaDesde": 339900,
+          "ofertaVigente": "Bonos Kia Finance y seguros según campaña",
+          "tecnologia": "Pantalla amplia y conectividad de serie",
+          "seguridad": "6 bolsas + ADAS en versiones medias/altas",
+          "rendimiento": "1.6L ~123 HP · buena relación potencia/precio"
+        }
+      ]
+    },
+    "ONIX": {
+      "segmento": "Sedán subcompacto premium de entrada",
+      "criterio": "Un escalón sobre Aveo: turbo/tecnología y comprador que compara Virtus/K3/MG5.",
+      "nuestroResumen": {
+        "tecnologia": "Bluetooth/USB; pantalla y cámara desde LT",
+        "seguridad": "6 bolsas, ABS; cámara/sensores desde LT",
+        "rendimiento": "1.3L 101 HP (base) / turbo en versiones altas"
+      },
+      "competidores": [
+        {
+          "marca": "Volkswagen",
+          "modelo": "Virtus",
+          "precioListaDesde": 389900,
+          "ofertaVigente": "Planes VW Credit; a menudo con seguro/accesorios",
+          "tecnologia": "Digital Cockpit y App-Connect en gamas medias",
+          "seguridad": "6 bolsas + Front Assist en Highline",
+          "rendimiento": "1.6 MSI ~110 HP · Tiptronic"
+        },
+        {
+          "marca": "MG",
+          "modelo": "MG5",
+          "precioListaDesde": 299900,
+          "ofertaVigente": "Precio lista muy agresivo; garantía extendida típica de MG",
+          "tecnologia": "Pantalla grande y conectividad de serie",
+          "seguridad": "Hasta 6 bolsas + ADAS en tope",
+          "rendimiento": "1.5L turbo ~170 HP en versiones altas"
+        },
+        {
+          "marca": "Nissan",
+          "modelo": "Versa Exclusive",
+          "precioListaDesde": 417900,
+          "ofertaVigente": "Con crédito especial ~$417,900 tope (antes $470,900)",
+          "tecnologia": "Mejor pack multimedia + ADAS del Versa",
+          "seguridad": "Paquete ADAS completo Exclusive",
+          "rendimiento": "1.6L · CVT"
+        }
+      ]
+    },
+    "GROOVE NG": {
+      "segmento": "SUV subcompacta de acceso (B-SUV)",
+      "criterio": "Primer SUV: precio < $500 mil, turbo, pantalla grande.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 10.25” · CarPlay / Android Auto",
+        "seguridad": "6 bolsas + AEB / alerta colisión / carril",
+        "rendimiento": "1.5T 149 HP · 188 lb-pie"
+      },
+      "competidores": [
+        {
+          "marca": "Kia",
+          "modelo": "Sonet",
+          "precioListaDesde": 389900,
+          "ofertaVigente": "Bonos Kia; fuerte penetración flota/retail",
+          "tecnologia": "Pantalla 8–10” y conectividad",
+          "seguridad": "6 bolsas + ADAS selectos",
+          "rendimiento": "1.5L ~115 HP · CVT"
+        },
+        {
+          "marca": "Toyota",
+          "modelo": "Raize",
+          "precioListaDesde": 419900,
+          "ofertaVigente": "Planes Toyota; reventa alta",
+          "tecnologia": "Pantalla táctil + proyección smartphone",
+          "seguridad": "6 bolsas + Toyota Safety Sense en tope",
+          "rendimiento": "1.2T ~98–116 HP · CVT / AWD opcional"
+        },
+        {
+          "marca": "Nissan",
+          "modelo": "Kicks Advance (promo crédito)",
+          "precioListaDesde": 562900,
+          "ofertaVigente": "Con financiamiento desde ~$452,900 (−$110 mil vs lista)",
+          "tecnologia": "Pantalla 12.3” · CarPlay/AA inalámbricos",
+          "seguridad": "ProPilot Assist / ADAS desde Advance",
+          "rendimiento": "2.0L 142 HP · CVT · ~21.4 km/l declarado"
+        }
+      ]
+    },
+    "TRACKER": {
+      "segmento": "SUV subcompacta volumen / flota",
+      "criterio": "Competencia directa Kicks / Creta / T-Cross por precio y cajuela.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla HD · Wireless Phone Projection · OnStar",
+        "seguridad": "6 bolsas, StabiliTrak; punto ciego en Premier",
+        "rendimiento": "1.2T 130 HP · 140 lb-pie · AT6 · 18.6 km/l"
+      },
+      "competidores": [
+        {
+          "marca": "Nissan",
+          "modelo": "Kicks 2026",
+          "precioListaDesde": 562900,
+          "ofertaVigente": "Crédito: Advance $452,900 · Exclusive $506,900 · Platinum $562,900",
+          "tecnologia": "Pantalla 12.3” · Bose en tope · Wi‑Fi",
+          "seguridad": "ADAS amplio + ProPilot Assist",
+          "rendimiento": "2.0L 142 HP · CVT · autonomía ~837 km/tanque declarada"
+        },
+        {
+          "marca": "Hyundai",
+          "modelo": "Creta",
+          "precioListaDesde": 479900,
+          "ofertaVigente": "Hyundai Finance + seguros según mes",
+          "tecnologia": "Pantalla 10.25” · Bluelink",
+          "seguridad": "Hasta 6 bolsas + SmartSense en gamas altas",
+          "rendimiento": "2.0L ~149 HP / 1.5T según versión"
+        },
+        {
+          "marca": "Volkswagen",
+          "modelo": "T-Cross",
+          "precioListaDesde": 469900,
+          "ofertaVigente": "VW Credit; paquetes de servicio",
+          "tecnologia": "App-Connect · Digital Cockpit opcional",
+          "seguridad": "Front Assist / Lane Assist en Highline",
+          "rendimiento": "1.6 MSI ~110 HP · Tiptronic"
+        }
+      ]
+    },
+    "TRAX": {
+      "segmento": "SUV subcompacta aspiracional / diseño",
+      "criterio": "Rivales Creta, Kicks, Seltos, HR-V, CX-30 por estilo y tech.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 11” · CarPlay/AA inalámbricos · OnStar",
+        "seguridad": "6 bolsas · AEB / colisión frontal · IntelliBeam",
+        "rendimiento": "1.2T 137 HP · 162 lb-pie · AT6 · 17.5 km/l"
+      },
+      "competidores": [
+        {
+          "marca": "Nissan",
+          "modelo": "Kicks Platinum",
+          "precioListaDesde": 633900,
+          "ofertaVigente": "Con crédito ~$562,900",
+          "tecnologia": "Top multimedia + techo / Bose",
+          "seguridad": "ProPilot Assist completo",
+          "rendimiento": "2.0L 142 HP · CVT"
+        },
+        {
+          "marca": "Kia",
+          "modelo": "Seltos",
+          "precioListaDesde": 499900,
+          "ofertaVigente": "Bonos Kia Finance frecuentes",
+          "tecnologia": "Pantalla dual / UVO según versión",
+          "seguridad": "ADAS Kia Drive Wise en EX/SX",
+          "rendimiento": "1.6 / 2.0 · CVT o DCT"
+        },
+        {
+          "marca": "Honda",
+          "modelo": "HR-V",
+          "precioListaDesde": 569900,
+          "ofertaVigente": "Honda Finance; fuerte valor residual",
+          "tecnologia": "Honda Sensing + pantalla 9”",
+          "seguridad": "Honda Sensing de serie en gamas actuales",
+          "rendimiento": "2.0L ~158 HP · CVT"
+        }
+      ]
+    },
+    "CAPTIVA": {
+      "segmento": "SUV compacta familiar (espacio/precio)",
+      "criterio": "Familias que comparan Taos, Creta Grand, Seat Ateca, Song Pro.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 10.4” · OnStar según versión",
+        "seguridad": "6 bolsas, StabiliTrak; 360° en superiores",
+        "rendimiento": "1.5T 144 HP · 184 lb-pie · CVT"
+      },
+      "competidores": [
+        {
+          "marca": "Volkswagen",
+          "modelo": "Taos",
+          "precioListaDesde": 579900,
+          "ofertaVigente": "VW Credit + bonos de agencia",
+          "tecnologia": "Digital Cockpit · App-Connect",
+          "seguridad": "Front Assist · Side Assist en Highline",
+          "rendimiento": "1.4 TSI 150 HP · Tiptronic 8"
+        },
+        {
+          "marca": "Hyundai",
+          "modelo": "Creta Grand / Creta",
+          "precioListaDesde": 529900,
+          "ofertaVigente": "Hyundai Finance",
+          "tecnologia": "Pantalla 10.25” · Bluelink",
+          "seguridad": "SmartSense en tope",
+          "rendimiento": "2.0L ~149 HP"
+        },
+        {
+          "marca": "BYD",
+          "modelo": "Song Pro DM-i",
+          "precioListaDesde": 499800,
+          "ofertaVigente": "PHEV desde ~$499,800; autonomía EV ~71 km",
+          "tecnologia": "Pantalla grande · ecosistema BYD",
+          "seguridad": "ADAS DiPilot según versión",
+          "rendimiento": "Híbrido enchufable · ~1,000 km total declarado"
+        }
+      ]
+    },
+    "CAPTIVA HIBRIDA": {
+      "segmento": "SUV PHEV compacta",
+      "criterio": "Rivales PHEV/híbridos: Song Plus, Geely EX5 EM-i, RAV4 Hybrid.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 15.6” · clúster 8.8”",
+        "seguridad": "Hasta 8 ADAS · ACC · AEB",
+        "rendimiento": "201 HP comb. · 75 km EV EPA · 1,075 km total"
+      },
+      "competidores": [
+        {
+          "marca": "BYD",
+          "modelo": "Song Plus DM-i",
+          "precioListaDesde": 599880,
+          "ofertaVigente": "Comfort desde ~$599,880 · Flagship ~$699,880",
+          "tecnologia": "Pantalla 12.3” · Blade Battery",
+          "seguridad": "ADAS DiPilot",
+          "rendimiento": "~236 HP comb. · 51–100 km EV · >1,000 km total"
+        },
+        {
+          "marca": "Geely",
+          "modelo": "EX5 EM-i",
+          "precioListaDesde": 569990,
+          "ofertaVigente": "Desde $569,990 (GL) / $599,990",
+          "tecnologia": "Geely App · audio premium en tope",
+          "seguridad": "ADAS de serie en PHEV Geely",
+          "rendimiento": "Hasta 259 HP · autonomía total ~1,000 km declarada"
+        },
+        {
+          "marca": "Toyota",
+          "modelo": "RAV4 Hybrid",
+          "precioListaDesde": 789900,
+          "ofertaVigente": "Toyota Financial; reventa líder",
+          "tecnologia": "Toyota Safety Sense 3.0 · multimedia",
+          "seguridad": "TSS completo de serie",
+          "rendimiento": "Híbrido no enchufable · AWD disponible · ~22+ km/l"
+        }
+      ]
+    },
+    "SPARK EUV": {
+      "segmento": "Crossover urbano eléctrico de acceso",
+      "criterio": "EVs urbanos: Dolphin Mini, Yuan Up, Seagull-class.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 10.1” · CarPlay/AA · clúster 8.8”",
+        "seguridad": "6 bolsas · ACC · AEB · 360° · carril",
+        "rendimiento": "100 HP · 40 kWh · 281 km EPA / 360 km NEDC"
+      },
+      "competidores": [
+        {
+          "marca": "BYD",
+          "modelo": "Dolphin Mini",
+          "precioListaDesde": 399800,
+          "ofertaVigente": "Desde ~$399,800 · Comfort ~$415,800",
+          "tecnologia": "Pantalla rotativa / ecosistema BYD",
+          "seguridad": "ADAS urbanos básicos/medios",
+          "rendimiento": "Hasta ~405 km (Comfort) · Blade Battery"
+        },
+        {
+          "marca": "BYD",
+          "modelo": "Yuan Up",
+          "precioListaDesde": 458000,
+          "ofertaVigente": "GL ~$458,000 · GS ~$548,000",
+          "tecnologia": "SUV-EV compacto con buena pantalla",
+          "seguridad": "ADAS según versión",
+          "rendimiento": "301–401 km según batería"
+        },
+        {
+          "marca": "Jac / otras",
+          "modelo": "E10X / urbanos EV",
+          "precioListaDesde": 379000,
+          "ofertaVigente": "Precios de entrada agresivos; red de servicio variable",
+          "tecnologia": "Conectividad básica a media",
+          "seguridad": "Pack urbano básico",
+          "rendimiento": "Autonomía NEDC ~300 km típica"
+        }
+      ]
+    },
+    "EQUINOX EV": {
+      "segmento": "SUV eléctrica compacta / media",
+      "criterio": "Vs Tesla Model Y acceso, BYD Tang/Sealion class, Kia EV5.",
+      "nuestroResumen": {
+        "tecnologia": "Google integrado · OnStar · pantallas grandes",
+        "seguridad": "8 bolsas · Chevy Safety Assist · 360°",
+        "rendimiento": "241 HP · hasta 513 km EPA · FWD"
+      },
+      "competidores": [
+        {
+          "marca": "Tesla",
+          "modelo": "Model Y (RWD)",
+          "precioListaDesde": 899990,
+          "ofertaVigente": "Precio de fábrica Tesla; incentivos variables",
+          "tecnologia": "Autopilot · pantalla 15” · OTA",
+          "seguridad": "5 estrellas NHTSA (ref.) · Autopilot",
+          "rendimiento": "~455–500+ km · aceleración superior"
+        },
+        {
+          "marca": "BYD",
+          "modelo": "Sealion 7 / Tang EV (rango)",
+          "precioListaDesde": 899900,
+          "ofertaVigente": "Tang EV desde ~$1.29M; Sealion según versión",
+          "tecnologia": "DiLink · Blade Battery",
+          "seguridad": "ADAS DiPilot",
+          "rendimiento": "400–500+ km según versión"
+        },
+        {
+          "marca": "Kia",
+          "modelo": "EV5 / Niro EV (si disponible)",
+          "precioListaDesde": 899000,
+          "ofertaVigente": "Kia Finance EV; chequear stock",
+          "tecnologia": "Pantallas duales · conectividad Kia",
+          "seguridad": "ADAS Drive Wise",
+          "rendimiento": "Autonomía WLTP/EPA según batería"
+        }
+      ]
+    },
+    "BLAZER EV": {
+      "segmento": "SUV eléctrica performance / aspiracional",
+      "criterio": "Vs Model Y AWD, Mustang Mach-E, Ioniq 5.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 17.7” · clúster 11” · Google",
+        "seguridad": "7 bolsas · Chevy Safety Assist · 360°",
+        "rendimiento": "331 HP · AWD · 449 km EPA · DC 150 kW"
+      },
+      "competidores": [
+        {
+          "marca": "Tesla",
+          "modelo": "Model Y Long Range / AWD",
+          "precioListaDesde": 1049990,
+          "ofertaVigente": "Precio Tesla MX; Supercharger",
+          "tecnologia": "Autopilot · OTA · red Supercharger",
+          "seguridad": "Autopilot + seguridad activa",
+          "rendimiento": "Mayor autonomía y aceleración típica"
+        },
+        {
+          "marca": "Ford",
+          "modelo": "Mustang Mach-E",
+          "precioListaDesde": 1199900,
+          "ofertaVigente": "Ford Credit; bonos EV variables",
+          "tecnologia": "SYNC 4A · pantallas grandes",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "AWD · autonomía ~400–500 km según pack"
+        },
+        {
+          "marca": "Hyundai",
+          "modelo": "Ioniq 5",
+          "precioListaDesde": 1099900,
+          "ofertaVigente": "Hyundai Finance EV",
+          "tecnologia": "Carga ultrarrápida 800V · pantallas duales",
+          "seguridad": "SmartSense",
+          "rendimiento": "Hasta ~480 km · carga DC muy rápida"
+        }
+      ]
+    },
+    "TRAVERSE": {
+      "segmento": "SUV 3 filas mediana",
+      "criterio": "Familias 7 plazas: Pilot, Pathfinder, CX-90, Santa Fe.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 17.7” · Google · OnStar",
+        "seguridad": "Chevy Safety Assist · punto ciego · Teen Driver",
+        "rendimiento": "2.5T 328 HP · 326 lb-pie · AT8 · remolque 1,500 kg"
+      },
+      "competidores": [
+        {
+          "marca": "Honda",
+          "modelo": "Pilot",
+          "precioListaDesde": 1199900,
+          "ofertaVigente": "Honda Finance",
+          "tecnologia": "Honda Sensing · pantallas duales",
+          "seguridad": "Honda Sensing de serie",
+          "rendimiento": "3.5 V6 ~285 HP · 8/9 plazas según config"
+        },
+        {
+          "marca": "Nissan",
+          "modelo": "Pathfinder",
+          "precioListaDesde": 1099900,
+          "ofertaVigente": "Nissan Finance + bonos",
+          "tecnologia": "Pantalla 9–12” · ProPilot en tope",
+          "seguridad": "ADAS Nissan Safety Shield",
+          "rendimiento": "3.5 V6 ~284 HP · 4WD opcional"
+        },
+        {
+          "marca": "Mazda",
+          "modelo": "CX-90",
+          "precioListaDesde": 1099900,
+          "ofertaVigente": "Mazda Finance; i-Activ AWD",
+          "tecnologia": "Mazda Connect · audio Bose",
+          "seguridad": "i-Activsense",
+          "rendimiento": "3.3 turbo mild-hybrid · enfoque premium"
+        }
+      ]
+    },
+    "TAHOE": {
+      "segmento": "SUV full-size 3 filas",
+      "criterio": "Vs Ford Expedition, Toyota Sequoia, Jeep Wagoneer.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 17.7” · Bose · Google",
+        "seguridad": "7 bolsas · ADAS colisión/carril/peatón",
+        "rendimiento": "5.3 V8 355 HP · 383 lb-pie · AT10 · 4x4 · ~9.7 km/l"
+      },
+      "competidores": [
+        {
+          "marca": "Ford",
+          "modelo": "Expedition",
+          "precioListaDesde": 1899900,
+          "ofertaVigente": "Ford Credit; paquetes remolque",
+          "tecnologia": "SYNC 4 · pantallas grandes",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "3.5 EcoBoost ~400 HP · remolque alto"
+        },
+        {
+          "marca": "Toyota",
+          "modelo": "Sequoia",
+          "precioListaDesde": 1999900,
+          "ofertaVigente": "Toyota Financial; híbrido",
+          "tecnologia": "Multimedia Toyota · Safety Sense",
+          "seguridad": "TSS 2.5+ / 3.0",
+          "rendimiento": "i-Force Max híbrido · torque alto"
+        },
+        {
+          "marca": "Jeep",
+          "modelo": "Wagoneer",
+          "precioListaDesde": 1899900,
+          "ofertaVigente": "Stellantis Finance",
+          "tecnologia": "Uconnect 5 · pantallas múltiples",
+          "seguridad": "ADAS Stellantis",
+          "rendimiento": "3.0 Hurricane / V8 según versión"
+        }
+      ]
+    },
+    "SUBURBAN": {
+      "segmento": "SUV full-size extendida",
+      "criterio": "Máximo espacio: Expedition Max, Sequoia, Wagoneer L.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 17.7” · 2 pantallas traseras 12.6” · Bose",
+        "seguridad": "7 bolsas · ADAS · cámara 360°",
+        "rendimiento": "5.3 V8 355 HP · AT10 · 8 pax · cajuela hasta 4,092 L"
+      },
+      "competidores": [
+        {
+          "marca": "Ford",
+          "modelo": "Expedition Max",
+          "precioListaDesde": 1999900,
+          "ofertaVigente": "Ford Credit",
+          "tecnologia": "SYNC 4 · asientos power-fold",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "3.5 EcoBoost · mayor remolque de segmento"
+        },
+        {
+          "marca": "Jeep",
+          "modelo": "Wagoneer L",
+          "precioListaDesde": 2099900,
+          "ofertaVigente": "Stellantis Finance",
+          "tecnologia": "Uconnect premium",
+          "seguridad": "ADAS completo",
+          "rendimiento": "Batalla de lujo americano full-size"
+        },
+        {
+          "marca": "GMC",
+          "modelo": "Yukon XL",
+          "precioListaDesde": 2199900,
+          "ofertaVigente": "Misma plataforma GM; posicionamiento premium",
+          "tecnologia": "Super Cruise en tope · pantallas grandes",
+          "seguridad": "ADAS GM + Super Cruise opcional",
+          "rendimiento": "5.3 / 6.2 V8 según versión"
+        }
+      ]
+    },
+    "S10 MAX": {
+      "segmento": "Pickup trabajo acceso / chasis-cabina",
+      "criterio": "Vs Frontier flota, Hilux entrada, RAM 700, JAC.",
+      "nuestroResumen": {
+        "tecnologia": "Radio/Bluetooth básico",
+        "seguridad": "2 bolsas · ABS/EBD",
+        "rendimiento": "2.4L 141 HP · 148 lb-pie · TM5 · carga 1,200 kg"
+      },
+      "competidores": [
+        {
+          "marca": "Nissan",
+          "modelo": "NP300 / Frontier flota",
+          "precioListaDesde": 489900,
+          "ofertaVigente": "Planes flota Nissan; refacciones ubicuas",
+          "tecnologia": "Multimedia básica a media",
+          "seguridad": "2–6 bolsas según versión",
+          "rendimiento": "2.5L gasolina · enfoque durabilidad flota"
+        },
+        {
+          "marca": "JAC",
+          "modelo": "Frison / T8",
+          "precioListaDesde": 449900,
+          "ofertaVigente": "Precio agresivo; garantía comercial",
+          "tecnologia": "Pantalla táctil en versiones medias",
+          "seguridad": "ABS + bolsas según pack",
+          "rendimiento": "2.0T diésel/gasolina según mercado"
+        },
+        {
+          "marca": "Toyota",
+          "modelo": "Hilux (entrada)",
+          "precioListaDesde": 689900,
+          "ofertaVigente": "Mayor precio; reventa #1",
+          "tecnologia": "Multimedia Toyota",
+          "seguridad": "Más ADAS en gamas actuales",
+          "rendimiento": "2.4/2.8 diésel · referente residual"
+        }
+      ]
+    },
+    "MONTANA": {
+      "segmento": "Pickup compacta lifestyle / urbana",
+      "criterio": "Vs Saveiro, Oroch, Maverick (rango superior), Strada.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 11” · Wireless Phone Projection · clúster 8”",
+        "seguridad": "6 bolsas · StabiliTrak · cámara HD",
+        "rendimiento": "1.2T 130 HP · AT6 · carga 600 kg · 19.3 km/l lab"
+      },
+      "competidores": [
+        {
+          "marca": "Volkswagen",
+          "modelo": "Saveiro",
+          "precioListaDesde": 389900,
+          "ofertaVigente": "VW Credit; enfoque trabajo ligero",
+          "tecnologia": "Multimedia básica/media",
+          "seguridad": "ABS + bolsas limitadas en base",
+          "rendimiento": "1.6 MSI · caja abierta compacta"
+        },
+        {
+          "marca": "Renault",
+          "modelo": "Oroch",
+          "precioListaDesde": 449900,
+          "ofertaVigente": "Renault Finance",
+          "tecnologia": "Easy Link",
+          "seguridad": "4–6 bolsas según versión",
+          "rendimiento": "1.3T · doble cabina"
+        },
+        {
+          "marca": "Ford",
+          "modelo": "Maverick Hybrid",
+          "precioListaDesde": 770700,
+          "ofertaVigente": "XLT Híbrida desde ~$770,700 (hecha en MX)",
+          "tecnologia": "SYNC · asistencia avanzada",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "2.5 híbrido 162 HP · mejor eficiencia del rango"
+        }
+      ]
+    },
+    "COLORADO": {
+      "segmento": "Pickup mediana mid-size",
+      "criterio": "Vs Tacoma, Ranger, Frontier, Hilux tope.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 11” · Google · OnStar",
+        "seguridad": "6 bolsas · AEB/carril · descenso pendientes",
+        "rendimiento": "2.7T 310 HP · 430 lb-pie · AT8 · 4x4 · remolque 3,493 kg"
+      },
+      "competidores": [
+        {
+          "marca": "Toyota",
+          "modelo": "Tacoma",
+          "precioListaDesde": 1099900,
+          "ofertaVigente": "Toyota Financial; reventa excepcional",
+          "tecnologia": "Multimedia Toyota · Safety Sense",
+          "seguridad": "TSS de serie",
+          "rendimiento": "2.4T i-Force · híbrido en tope · off-road fuerte"
+        },
+        {
+          "marca": "Ford",
+          "modelo": "Ranger",
+          "precioListaDesde": 999900,
+          "ofertaVigente": "Ford Credit; enfoque tech + trabajo",
+          "tecnologia": "SYNC 4A · ADAS avanzados",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "2.3 EcoBoost / diésel según versión"
+        },
+        {
+          "marca": "Nissan",
+          "modelo": "Frontier",
+          "precioListaDesde": 889900,
+          "ofertaVigente": "Nissan Finance; flotas",
+          "tecnologia": "Pantalla 8–9”",
+          "seguridad": "ADAS en gamas altas",
+          "rendimiento": "3.8 V6 · torque y capacidad de carga"
+        }
+      ]
+    },
+    "SILVERADO": {
+      "segmento": "Pickup full-size",
+      "criterio": "Vs F-150, RAM 1500, Tundra.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 7”+ · CarPlay/AA · OnStar 4G",
+        "seguridad": "6 bolsas · StabiliTrak · cámara",
+        "rendimiento": "5.3 V8 355 HP · AT10 · carga 786 kg · remolque 4,037 kg"
+      },
+      "competidores": [
+        {
+          "marca": "Ford",
+          "modelo": "F-150",
+          "precioListaDesde": 1099900,
+          "ofertaVigente": "Ford Credit; líder histórico full-size",
+          "tecnologia": "SYNC 4 · Pro Power Onboard en tope",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "2.7/3.5 EcoBoost / PowerBoost híbrido"
+        },
+        {
+          "marca": "RAM",
+          "modelo": "1500",
+          "precioListaDesde": 1149900,
+          "ofertaVigente": "Stellantis Finance; confort de cabina",
+          "tecnologia": "Uconnect 5 · pantallas grandes",
+          "seguridad": "ADAS Stellantis",
+          "rendimiento": "3.6 Pentastar / Hurricane / HEMI según versión"
+        },
+        {
+          "marca": "Toyota",
+          "modelo": "Tundra",
+          "precioListaDesde": 1249900,
+          "ofertaVigente": "Toyota Financial; i-Force Max",
+          "tecnologia": "Multimedia Toyota · TSS",
+          "seguridad": "TSS completo",
+          "rendimiento": "i-Force / i-Force Max híbrido · remolque alto"
+        }
+      ]
+    },
+    "TORNADO VAN": {
+      "segmento": "Van carga ligera urbana",
+      "criterio": "Vs Kangoo, Partner, NF 35, Hiace entrada.",
+      "nuestroResumen": {
+        "tecnologia": "Radio AM/FM Bluetooth",
+        "seguridad": "2 bolsas · ABS",
+        "rendimiento": "1.5L 103 HP · TM6 · 16.3 km/l · 650 kg / 3.3 m³"
+      },
+      "competidores": [
+        {
+          "marca": "Renault",
+          "modelo": "Kangoo",
+          "precioListaDesde": 389900,
+          "ofertaVigente": "Renault Finance comercial",
+          "tecnologia": "Multimedia básica",
+          "seguridad": "ABS + bolsas",
+          "rendimiento": "1.6 · volumen de carga similar"
+        },
+        {
+          "marca": "Peugeot",
+          "modelo": "Partner",
+          "precioListaDesde": 399900,
+          "ofertaVigente": "Stellantis comercial",
+          "tecnologia": "Pantalla táctil en versiones",
+          "seguridad": "ABS + asistencias básicas",
+          "rendimiento": "1.6 · enfoque flota urbana"
+        },
+        {
+          "marca": "Nissan",
+          "modelo": "Urvan / NV (entrada)",
+          "precioListaDesde": 549900,
+          "ofertaVigente": "Planes flota Nissan",
+          "tecnologia": "Básica comercial",
+          "seguridad": "Pack comercial",
+          "rendimiento": "Mayor volumen; más cara"
+        }
+      ]
+    },
+    "EXPRESS": {
+      "segmento": "Van carga media diésel",
+      "criterio": "Vs Sprinter 316, Master, Transit Custom.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 12.3” · CarPlay/AA",
+        "seguridad": "2 bolsas · cámara HD · sensores · TPMS",
+        "rendimiento": "2.0T diésel 167 HP · 276 lb-pie · 1,295 kg / 8.3 m³ · 13.6 km/l"
+      },
+      "competidores": [
+        {
+          "marca": "Mercedes-Benz",
+          "modelo": "Sprinter",
+          "precioListaDesde": 999900,
+          "ofertaVigente": "Mercedes Financial; premium flota",
+          "tecnologia": "MBUX · ADAS opcionales",
+          "seguridad": "ADAS Mercedes disponibles",
+          "rendimiento": "Diésel · mayor residual y red servicio"
+        },
+        {
+          "marca": "Renault",
+          "modelo": "Master",
+          "precioListaDesde": 789900,
+          "ofertaVigente": "Renault comercial",
+          "tecnologia": "Multimedia comercial",
+          "seguridad": "ABS + packs opcionales",
+          "rendimiento": "Diésel · gran volumen"
+        },
+        {
+          "marca": "Ford",
+          "modelo": "Transit",
+          "precioListaDesde": 849900,
+          "ofertaVigente": "Ford Credit comercial",
+          "tecnologia": "SYNC · asistencias",
+          "seguridad": "Co-Pilot360 selecto",
+          "rendimiento": "Gasolina/diésel · amplia red"
+        }
+      ]
+    },
+    "EXPRESS MAX EV": {
+      "segmento": "Van carga eléctrica",
+      "criterio": "Vs eSprinter, e-Transit, Maxus EV30/eDeliver.",
+      "nuestroResumen": {
+        "tecnologia": "Pantalla 12.3” · CarPlay/AA",
+        "seguridad": "2 bolsas · cámara · sensores · TPMS",
+        "rendimiento": "204 HP · 77 kWh · 277 km · carga 1,480 kg / 5.9 m³"
+      },
+      "competidores": [
+        {
+          "marca": "Ford",
+          "modelo": "E-Transit",
+          "precioListaDesde": 1299900,
+          "ofertaVigente": "Ford Pro / Credit flota EV",
+          "tecnologia": "SYNC · Ford Pro telemática",
+          "seguridad": "Co-Pilot360",
+          "rendimiento": "Autonomía flota ~200–300 km típica"
+        },
+        {
+          "marca": "Mercedes-Benz",
+          "modelo": "eSprinter",
+          "precioListaDesde": 1499900,
+          "ofertaVigente": "Mercedes Financial flota",
+          "tecnologia": "MBUX · telemática",
+          "seguridad": "ADAS premium",
+          "rendimiento": "Autonomía y carga DC superiores en tope"
+        },
+        {
+          "marca": "Maxus / SAIC",
+          "modelo": "eDeliver / EV30",
+          "precioListaDesde": 899900,
+          "ofertaVigente": "Precio agresivo EV comercial",
+          "tecnologia": "Multimedia comercial",
+          "seguridad": "Pack básico/medio",
+          "rendimiento": "Autonomía NEDC competitiva; red en crecimiento"
+        }
+      ]
+    }
+  }
+}

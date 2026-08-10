@@ -940,9 +940,24 @@
           Aseguradora: o.aseguradora || '',
           Teléfono: o.celular || o.telefono || '',
           Correo: o.correo || '',
+          Proceso: data?.proceso?.actualLabel || data?.proceso?.resumen || '',
+          'Proceso detalle': data?.proceso?.resumen || '',
         }],
       },
     ];
+    if (data?.proceso?.etapas?.length) {
+      sheets.push({
+        name: 'Proceso taller',
+        rows: data.proceso.etapas.map((e) => ({
+          Etapa: e.label || '',
+          Estatus: e.statusLabel || e.status || '',
+          'Fecha fin': e.fechaFin || '',
+          Mecánico: e.mecanico || '',
+          Actual: e.current ? 'Sí' : '',
+          Terminada: e.done ? 'Sí' : '',
+        })),
+      });
+    }
     if (cargo.length) sheets.push({ name: 'Desglose cargo', rows: cargo });
     sheets.push({ name: 'Mano de obra', rows: (data?.manoObra || []).map(mapLine) });
     if ((data?.refacciones || []).length) {
@@ -1079,6 +1094,7 @@
       const mo = data.manoObra || [];
       const hyp = data.hyp || [];
       const totals = data.totals || {};
+      const proceso = data.proceso || {};
       const importeOrden = Number(totals.total || o.importeAbierto || o.importe || 0);
 
       const isFacturada = String(o.status || '').toUpperCase() === 'I' || Boolean(o.factura);
@@ -1087,9 +1103,12 @@
         : (isFacturada ? 'Sin número capturado' : '—');
 
       titleEl.textContent = `Orden ${o.orden || ''}`.trim() || 'Orden';
+      const procesoBadge = proceso.disponible && proceso.actualLabel
+        ? ` · ${proceso.actualLabel}`
+        : '';
       statusEl.textContent = o.factura
-        ? `${o.statusLabel || o.status || '—'} · Factura ${o.factura} · ${fmt.money(importeOrden)}`
-        : `${o.statusLabel || o.status || '—'} · ${o.antiguedad || '—'} · ${fmt.money(importeOrden)}`;
+        ? `${o.statusLabel || o.status || '—'} · Factura ${o.factura} · ${fmt.money(importeOrden)}${procesoBadge}`
+        : `${o.statusLabel || o.status || '—'} · ${o.antiguedad || '—'} · ${fmt.money(importeOrden)}${procesoBadge}`;
 
       const lineRows = (rows) => rows.length
         ? rows.map((l) => `
@@ -1133,6 +1152,42 @@
           </div>
         </section>`;
 
+      const procesoSection = (() => {
+        const etapas = proceso.etapas || [];
+        if (!proceso.disponible || !etapas.length) {
+          return `
+            <section class="ops-order-detail__section ops-order-detail__proceso">
+              <div class="ops-order-detail__section-head">
+                <h3>Proceso de taller</h3>
+                <span>Sin datos</span>
+              </div>
+              <p class="ops-order-detail__hint">No hay líneas de hojalatería, pintura, pulido u otras etapas de proceso en el detalle.</p>
+            </section>`;
+        }
+        const steps = etapas.map((e) => {
+          const tone = e.current ? 'current' : (e.done ? 'done' : 'pending');
+          const icon = e.done ? 'check_circle' : (e.current ? 'pending' : 'radio_button_unchecked');
+          return `
+            <li class="ops-proceso-step ops-proceso-step--${tone}">
+              <span class="material-symbols-outlined ops-proceso-step__icon">${icon}</span>
+              <div class="ops-proceso-step__body">
+                <strong>${escHtml(e.label)}</strong>
+                <span>${escHtml(e.statusLabel || '—')}${e.fechaFin ? ` · ${escHtml(e.fechaFin)}` : ''}${e.mecanico ? ` · ${escHtml(e.mecanico)}` : ''}</span>
+              </div>
+            </li>`;
+        }).join('');
+        return `
+          <section class="ops-order-detail__section ops-order-detail__proceso">
+            <div class="ops-order-detail__section-head">
+              <h3>Proceso de taller</h3>
+              <span>${escHtml(proceso.actualLabel || '—')}</span>
+            </div>
+            <p class="ops-order-detail__proceso-resumen">${escHtml(proceso.resumen || '')}</p>
+            <ol class="ops-proceso-track">${steps}</ol>
+            <p class="ops-order-detail__hint">Inferido del detalle de la orden (líneas terminadas vs pendientes).</p>
+          </section>`;
+      })();
+
       bodyEl.innerHTML = `
         <section class="ops-order-detail__meta">
           <div class="ops-order-detail__meta-grid">
@@ -1154,10 +1209,13 @@
             <div><span class="lbl">Promesa</span><strong>${escHtml(o.promesa || '—')}</strong></div>
             <div><span class="lbl">Días</span><strong>${o.dias != null ? Number(o.dias) : '—'}</strong></div>
             <div><span class="lbl">Importe orden</span><strong>${fmt.money(importeOrden)}</strong></div>
+            <div><span class="lbl">Proceso</span><strong>${escHtml(proceso.disponible ? (proceso.actualLabel || proceso.resumen || '—') : 'Sin datos')}</strong></div>
             <div><span class="lbl">Teléfono</span><strong>${escHtml(o.celular || o.telefono || '—')}</strong></div>
             <div><span class="lbl">Correo</span><strong>${escHtml(o.correo || '—')}</strong></div>
           </div>
         </section>
+
+        ${procesoSection}
 
         <section class="ops-order-detail__section">
           <div class="ops-order-detail__section-head">

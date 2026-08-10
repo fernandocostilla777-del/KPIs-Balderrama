@@ -347,9 +347,141 @@ function classifyDetBucket(clasific) {
   const c = String(clasific || '').trim().toUpperCase();
   if (c === 'RE') return 'refacciones';
   if (c.startsWith('MO')) return 'manoObra';
-  if (c === 'HP' || c === 'TTHP' || c.startsWith('HP')) return 'hyp';
+  // HP = hojalatería, PI = pintura/pulido/lavado, TTHP = trabajos terceros HyP
+  if (c === 'HP' || c === 'PI' || c === 'TTHP' || c.startsWith('HP') || c.startsWith('PI')) return 'hyp';
   if (c === 'VA') return 'valuacion';
   return 'otros';
+}
+
+/** Flujo operativo típico HyP (orden de etapas). */
+const PROCESO_ETAPAS = [
+  { id: 'desarme', label: 'Desarme', order: 1, re: /DESARM/i },
+  { id: 'hojalateria', label: 'Hojalatería', order: 2, re: /HOJAL/i },
+  { id: 'pintura', label: 'Pintura', order: 3, re: /PINT/i },
+  { id: 'armado', label: 'Armado', order: 4, re: /ARMAD/i },
+  { id: 'pulido', label: 'Pulido', order: 5, re: /PULID/i },
+  { id: 'lavado', label: 'Lavado', order: 6, re: /LAVAD/i },
+];
+
+const LINE_STATUS_LABELS = {
+  T: 'Terminado',
+  S: 'Pendiente',
+  A: 'Activo',
+  X: 'Cancelado',
+  P: 'Pendiente',
+};
+
+function matchProcesoEtapa(descripcion) {
+  const d = String(descripcion || '');
+  if (!d.trim()) return null;
+  // Pulido antes que Pintura para no capturar "descontaminacion de pintura" como pulido vía PINT
+  // (pulido no contiene PINT; pintura no contiene PULID normalmente)
+  for (const etapa of PROCESO_ETAPAS) {
+    if (etapa.id === 'pintura' && /PULID/i.test(d)) continue;
+    if (etapa.re.test(d)) return etapa;
+  }
+  return null;
+}
+
+/**
+ * Infiere proceso HyP desde líneas SER_ORDENDET (MO HOJALATERIA, MO PINTURA, PULIDO…).
+ * ORD_STATUS: T=terminado (suele traer fecha fin), S=pendiente.
+ */
+function buildProcesoTaller(lines) {
+  const byId = new Map();
+
+  for (const line of lines || []) {
+    const st = String(line.status || '').trim().toUpperCase();
+    if (st === 'X') continue;
+    const etapa = matchProcesoEtapa(line.descripcion);
+    if (!etapa) continue;
+
+    if (!byId.has(etapa.id)) {
+      byId.set(etapa.id, {
+        id: etapa.id,
+        label: etapa.label,
+        order: etapa.order,
+        statuses: [],
+        fechaFin: '',
+        mecanico: '',
+        descripcion: line.descripcion || '',
+        lineas: 0,
+      });
+    }
+    const row = byId.get(etapa.id);
+    row.lineas += 1;
+    row.statuses.push(st || 'S');
+    if (line.descripcion) row.descripcion = line.descripcion;
+    if (st === 'T' && line.fechaFin) row.fechaFin = line.fechaFin;
+    if (line.mecanico) row.mecanico = line.mecanico;
+  }
+
+  const etapas = [...byId.values()]
+    .map((row) => {
+      const pendiente = row.statuses.some((s) => s === 'S' || s === 'A' || s === 'P');
+      const status = pendiente ? (row.statuses.find((s) => s === 'S' || s === 'A' || s === 'P') || 'S') : 'T';
+      return {
+        id: row.id,
+        label: row.label,
+        order: row.order,
+        status,
+        statusLabel: LINE_STATUS_LABELS[status] || status,
+        fechaFin: status === 'T' ? row.fechaFin : '',
+        mecanico: row.mecanico,
+        descripcion: row.descripcion,
+        lineas: row.lineas,
+        done: status === 'T',
+        current: false,
+      };
+    })
+    .sort((a, b) => a.order - b.order);
+
+  if (!etapas.length) {
+    return {
+      disponible: false,
+      actual: null,
+      actualLabel: null,
+      ultimaTerminada: null,
+      siguiente: null,
+      resumen: 'Sin líneas de proceso (hojalatería / pintura / pulido / etc.)',
+      etapas: [],
+      fuente: 'SER_ORDENDET',
+    };
+  }
+
+  const terminadas = etapas.filter((e) => e.done);
+  const pendientes = etapas.filter((e) => !e.done);
+  const ultimaTerminada = terminadas.length ? terminadas[terminadas.length - 1] : null;
+  const siguiente = pendientes.length ? pendientes[0] : null;
+  const actual = siguiente || ultimaTerminada;
+  if (siguiente) {
+    const idx = etapas.findIndex((e) => e.id === siguiente.id);
+    if (idx >= 0) etapas[idx].current = true;
+  }
+
+  let resumen = '';
+  if (siguiente && ultimaTerminada) {
+    resumen = `${siguiente.label} (pendiente) · última terminada: ${ultimaTerminada.label}`;
+  } else if (siguiente) {
+    resumen = `En ${siguiente.label}`;
+  } else if (ultimaTerminada) {
+    resumen = `Proceso completo hasta ${ultimaTerminada.label}`;
+  }
+
+  return {
+    disponible: true,
+    actual: actual ? actual.id : null,
+    actualLabel: actual ? actual.label : null,
+    ultimaTerminada: ultimaTerminada
+      ? { id: ultimaTerminada.id, label: ultimaTerminada.label, fechaFin: ultimaTerminada.fechaFin }
+      : null,
+    siguiente: siguiente
+      ? { id: siguiente.id, label: siguiente.label, status: siguiente.status }
+      : null,
+    resumen,
+    etapas,
+    fuente: 'SER_ORDENDET',
+  };
 }
 
 function bucketLabel(bucket) {
@@ -472,6 +604,7 @@ async function loadOrderDetail(ordenId) {
       LTRIM(RTRIM(ISNULL(ORD_STATUS, ''))) AS status,
       LTRIM(RTRIM(ISNULL(ORD_MECANICO, ''))) AS mecanico,
       LTRIM(RTRIM(ISNULL(ORD_FECHSUR, ''))) AS fechaSurtido,
+      LTRIM(RTRIM(ISNULL(ORD_FECHAFIN, ''))) AS fechaFin,
       LTRIM(RTRIM(ISNULL(ord_comentarios, ''))) AS comentarios,
       LTRIM(RTRIM(ISNULL(ord_observaciones, ''))) AS observaciones
     FROM SER_ORDENDET
@@ -498,12 +631,16 @@ async function loadOrderDetail(ordenId) {
       total: amounts.total,
       costo: Number(row.costo || 0),
       status: row.status || '',
+      statusLabel: LINE_STATUS_LABELS[String(row.status || '').trim().toUpperCase()] || row.status || '',
       mecanico: row.mecanico || '',
       fechaSurtido: row.fechaSurtido || '',
+      fechaFin: row.fechaFin || '',
       comentarios: row.comentarios || '',
       observaciones: row.observaciones || '',
     };
   });
+
+  const proceso = buildProcesoTaller(lines);
 
   const cargo = {
     refacciones: { label: 'Refacciones', lineas: 0, subtotal: 0, iva: 0, total: 0 },
@@ -570,6 +707,7 @@ async function loadOrderDetail(ordenId) {
     orden: header,
     cargo: cargoList,
     totals,
+    proceso,
     refacciones,
     manoObra,
     hyp,
@@ -682,10 +820,12 @@ module.exports = {
   loadOpenSnapshot,
   loadOrderDetail,
   loadMesCursoNomenclatura,
+  buildProcesoTaller,
   mapRow,
   mapTipoPorLetra,
   TIPO_POR_LETRA,
   NOMENCLATURA_MES_CURSO,
   STATUS_LABELS,
   OPEN_STATUSES,
+  PROCESO_ETAPAS,
 };

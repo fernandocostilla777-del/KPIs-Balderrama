@@ -103,8 +103,14 @@
       {
         icon: 'key',
         label: 'Leasing',
-        value: s.leasingFactor ? `Desde ${s.leasingFactor}` : '—',
-        sub: s.leasingFactor ? 'Factor leasing' : null,
+        value: s.leasingFactor
+          ? `Desde ${s.leasingFactor}`
+          : (s.leasingPrecioDesde ? money(s.leasingPrecioDesde) : '—'),
+        sub: s.leasingFactor
+          ? 'Factor leasing'
+          : (s.leasingPrecioDesde
+            ? (s.leasingBeneficio || 'Opción para empresa')
+            : null),
       },
     ];
     document.getElementById('lpSummary').innerHTML = cards.map((c) => `
@@ -114,8 +120,7 @@
           <div class="lp-summary-label">${esc(c.label)}</div>
           <div class="lp-summary-value">${esc(c.value)}</div>
           ${c.tag ? `<span class="lp-tag">${esc(c.tag)}</span>` : ''}
-          ${c.sub && !c.tag ? `<div class="lp-summary-sub">${esc(c.sub)}</div>` : ''}
-          ${c.sub && c.tag ? `<div class="lp-summary-sub">${esc(c.sub)}</div>` : ''}
+          ${c.sub ? `<div class="lp-summary-sub">${esc(c.sub)}</div>` : ''}
         </div>
       </div>`).join('');
   }
@@ -141,16 +146,17 @@
 
   function renderStock(version) {
     document.getElementById('lpStockTitle').textContent = `Existencia ${version.version}`;
-    const total = version.stockTotal ?? ((version.stockDisponible || 0) + (version.stockApartadas || 0));
+    const disponibles = version.stockDisponible || 0;
+    const apartadas = version.stockApartadas || 0;
     const colores = version.colores || [];
     document.getElementById('lpStock').innerHTML = `
       <div class="lp-stock-total">
-        <div class="lp-stock-total-n">${total}</div>
+        <div class="lp-stock-total-n">${disponibles}</div>
         <div>
-          <div class="lp-stock-total-label">unidades en inventario</div>
+          <div class="lp-stock-total-label">unidades disponibles</div>
           <div class="lp-stock-split">
-            <span class="lp-pill lp-pill--ok">${version.stockDisponible || 0} disponibles</span>
-            <span class="lp-pill lp-pill--muted">${version.stockApartadas || 0} apartadas</span>
+            <span class="lp-pill lp-pill--ok">${disponibles} disponibles</span>
+            ${apartadas > 0 ? `<span class="lp-pill lp-pill--muted">${apartadas} apartadas (no disponibles)</span>` : ''}
           </div>
         </div>
       </div>
@@ -164,9 +170,9 @@
                 <strong>${esc(c.label)}</strong>
                 <span class="lp-color-state lp-color-state--${esc(c.estadoTone || 'ok')}">${esc(c.estado || 'Disponible')}</span>
               </div>
-              <span class="lp-color-n">${c.unidades}</span>
+              <span class="lp-color-n">${c.disponibles ?? c.unidades}</span>
             </li>`).join('')}
-        </ul>` : '<p class="lp-muted">Sin unidades en inventario para esta versión.</p>'}`;
+        </ul>` : '<p class="lp-muted">Sin unidades disponibles para esta versión.</p>'}`;
   }
 
   function renderPromos(version) {
@@ -226,6 +232,46 @@
       : 'Precios y promociones sujetos a cambios sin previo aviso.';
   }
 
+  function renderBenchmark(modelo) {
+    const section = document.getElementById('lpBenchmarkSection');
+    const bm = modelo?.benchmarking;
+    if (!section) return;
+    if (!bm?.filas?.length) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.classList.remove('hidden');
+    document.getElementById('lpBenchmarkTitle').textContent =
+      `Benchmarking competitivo — ${modelo.modelo}`;
+    const chip = document.getElementById('lpBenchmarkChip');
+    if (chip) {
+      chip.textContent = bm.segmento || `MX ${bm.anio || 2026}`;
+      chip.hidden = false;
+    }
+    document.getElementById('lpBenchmarkCriterio').textContent = bm.criterio || '';
+    document.getElementById('lpBenchmarkBody').innerHTML = bm.filas.map((row) => `
+      <tr class="${row.esNuestro ? 'lp-row-ours' : ''}">
+        <td>
+          <div class="lp-bench-vehicle">
+            ${row.esNuestro ? '<span class="lp-tag">Nuestro</span>' : ''}
+            <strong>${esc(row.marca)}</strong>
+            <span>${esc(row.modelo)}</span>
+          </div>
+        </td>
+        <td class="num"><strong>${esc(row.precio)}</strong></td>
+        <td>${esc(row.oferta)}</td>
+        <td>${esc(row.tecnologia)}</td>
+        <td>${esc(row.seguridad)}</td>
+        <td>${esc(row.rendimiento)}</td>
+      </tr>`).join('');
+    const parts = [
+      bm.actualizado ? `Actualizado ${bm.actualizado}` : null,
+      'Precios de rivales: oferta pública México; verificar en piso.',
+      bm.metodologia || null,
+    ].filter(Boolean);
+    document.getElementById('lpBenchmarkNote').textContent = parts.join(' · ');
+  }
+
   function paint() {
     const modelo = currentModelo();
     const empty = document.getElementById('lpEmpty');
@@ -247,6 +293,24 @@
     document.getElementById('lpTitle').textContent = modelo.titulo || `Chevrolet ${modelo.modelo}`;
     document.getElementById('lpCarroceria').textContent = modelo.carroceria || version.carroceria || 'Chevrolet';
     document.getElementById('lpHeroVisual').dataset.modelo = modelo.modelo;
+    const heroImg = document.getElementById('lpHeroImg');
+    const heroIcon = document.getElementById('lpHeroIcon');
+    const imgUrl = modelo.imagenUrl || modelo.imagen?.url || '';
+    if (heroImg && heroIcon) {
+      if (imgUrl) {
+        heroImg.src = imgUrl;
+        heroImg.alt = `Chevrolet ${modelo.modelo}`;
+        heroImg.classList.remove('hidden');
+        heroIcon.classList.add('hidden');
+        document.getElementById('lpHeroVisual').classList.add('has-photo');
+      } else {
+        heroImg.removeAttribute('src');
+        heroImg.alt = '';
+        heroImg.classList.add('hidden');
+        heroIcon.classList.remove('hidden');
+        document.getElementById('lpHeroVisual').classList.remove('has-photo');
+      }
+    }
 
     renderTabs(modelo);
     renderSummary(version);
@@ -254,6 +318,7 @@
     renderStock(version);
     renderPromos(version);
     renderCompare(version);
+    renderBenchmark(modelo);
   }
 
   function fillModeloSelect(options, preferred) {

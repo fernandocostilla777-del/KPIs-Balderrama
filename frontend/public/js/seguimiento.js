@@ -1018,15 +1018,18 @@
     setText('kSolicitudes', h.resumen?.totalSolicitudes ?? 0);
     setText('kPruebasManejo', h.resumen?.totalPruebasManejo ?? 0);
     setText('kOrdenes', (h.ordenesServicio || []).length);
-    setText('kImporteTaller', money(h.resumen?.importeTaller || 0));
-    const periodo = h.periodoOrdenes || {};
-    const periodText = periodo.fechaInicio || periodo.fechaFin
-      ? `${periodo.fechaInicio || 'Inicio'} — ${periodo.fechaFin || 'Hoy'}`
-      : 'Todo el histórico';
-    setText(
-      'kImporteTallerSub',
-      `${periodText} · facturado ${money(h.resumen?.importeFacturadoTaller || 0)} · abierto ${money(h.resumen?.importeAbiertoTaller || 0)}`
-    );
+    const clv = h.clv || {};
+    setText('kClv', money(clv.clv != null ? clv.clv : h.resumen?.clv || 0));
+    const varPct = clv.variacionPct != null ? Number(clv.variacionPct) : h.resumen?.clvVariacionPct;
+    if (varPct == null || Number.isNaN(varPct)) {
+      setText('kClvVar', 'Sin comparación de periodo');
+    } else {
+      const arrow = varPct > 0 ? '↑' : (varPct < 0 ? '↓' : '→');
+      setText('kClvVar', `${arrow} ${Math.abs(varPct).toFixed(1)}% vs. periodo anterior`);
+    }
+    setText('kClvSub', clv.segmentoLabel
+      ? `Valor promedio por cliente · ${clv.segmentoLabel}`
+      : 'Valor promedio por cliente');
 
     renderClientCharts(h);
 
@@ -1344,6 +1347,48 @@
           ],
         };
       }
+      case 'clv': {
+        const clv = h.clv || {};
+        const comp = clv.composicion || {};
+        const chartRows = (clv.chart || []).filter((x) => Number(x.value || 0) > 0);
+        const segRows = (clv.segmentacion || []).map((s) => ({
+          label: s.label,
+          value: s.activo ? 'Este cliente' : '—',
+          badge: s.activo ? s.label : null,
+        }));
+        return {
+          title: 'CLV Promedio',
+          value: money(clv.clv || 0),
+          chart: {
+            canvasId: 'chartClvComposicion',
+            labels: chartRows.map((x) => x.label),
+            values: chartRows.map((x) => Number(x.value || 0)),
+          },
+          sections: [
+            { titulo: 'Resumen', rows: [
+              { label: 'CLV Promedio', value: money(clv.clv || 0) },
+              { label: 'Clientes analizados', value: num(clv.clientesAnalizados || 1) },
+              { label: 'CLV total', value: money(clv.clvTotal || clv.clv || 0) },
+              { label: 'Variación vs periodo anterior', value: clv.variacionPct == null
+                ? '—'
+                : `${clv.variacionPct > 0 ? '↑' : (clv.variacionPct < 0 ? '↓' : '→')} ${Math.abs(Number(clv.variacionPct)).toFixed(1)}%` },
+              { label: 'Segmento', value: clv.segmentoLabel || '—' },
+            ] },
+            { titulo: 'Composición del CLV', rows: [
+              { label: 'Venta vehículo', value: money(comp.ventaVehiculo || 0) },
+              { label: 'Financiamiento', value: money(comp.financiamiento || 0) },
+              { label: 'Accesorios', value: money(comp.accesorios || 0) },
+              { label: 'Servicio', value: money(comp.servicio || 0) },
+              { label: 'Refacciones', value: money(comp.refacciones || 0) },
+              { label: 'Centro de Colisión', value: money(comp.colision || 0) },
+              { label: 'Renovación', value: money(comp.renovacion || 0) },
+            ] },
+            { titulo: 'Segmentación por CLV', rows: segRows.length
+              ? segRows
+              : [{ label: 'Sin segmentación', value: '—' }] },
+          ],
+        };
+      }
       case 'importeTaller': {
         const noCanceladas = ordenes.filter((o) => String(o.status || '').toUpperCase() !== 'C');
         const porAnio = sumByYear(noCanceladas, (o) => o.ingreso || o.cierre, (o) => o.importe);
@@ -1484,6 +1529,7 @@
 
   function closeKpiDetail() {
     openKpiKey = null;
+    destroyChart('chartClvComposicion');
     ['clientKpiDetail', 'cierresKpiDetail'].forEach((id) => {
       const p = el(id);
       if (p) {
@@ -1521,6 +1567,16 @@
             </div>`).join('')}
         </div>`).join('');
 
+    const chart = detail.chart && detail.chart.labels?.length
+      ? `
+        <div class="kpi-detail-group kpi-detail-group--chart">
+          <h5>Composición promedio del CLV</h5>
+          <div class="chart-card" style="min-height:220px;padding:8px 12px">
+            <div class="chart-wrap"><canvas id="${esc(detail.chart.canvasId || 'chartKpiDetail')}"></canvas></div>
+          </div>
+        </div>`
+      : '';
+
     panel.innerHTML = `
       <div class="kpi-detail-panel__head">
         <div>
@@ -1536,6 +1592,7 @@
       </div>
       <div class="kpi-detail-grid">
         ${sectionsHtml || '<p style="color:#94a3b8;margin:8px 0">Sin información para desglosar</p>'}
+        ${chart}
       </div>
       ${gotoId ? `
       <div class="kpi-detail-panel__footer">
@@ -1549,6 +1606,36 @@
     panel.querySelector('[data-goto-detail]')?.addEventListener('click', (e) => {
       gotoSection(e.currentTarget.dataset.gotoDetail);
     });
+
+    if (detail.chart && detail.chart.labels?.length) {
+      const palette = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#e11d48', '#0f766e'];
+      createChart(detail.chart.canvasId || 'chartKpiDetail', detail.chart.canvasId || 'chartKpiDetail', {
+        type: 'doughnut',
+        data: {
+          labels: detail.chart.labels,
+          datasets: [{
+            data: detail.chart.values,
+            backgroundColor: detail.chart.labels.map((_, i) => palette[i % palette.length]),
+            borderWidth: 0,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const v = Number(ctx.raw || 0);
+                  return ` ${ctx.label}: ${money(v)}`;
+                },
+              },
+            },
+          },
+        },
+      });
+    }
 
     openKpiKey = key;
     sourceEl?.classList.add('is-open');

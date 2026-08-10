@@ -6,7 +6,7 @@
 <title>Lista de precios | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=58" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=66" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="lista-precios">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -45,8 +45,8 @@ Solo con stock
 
 <section class="lp-hero">
 <div class="lp-hero-visual" id="lpHeroVisual" aria-hidden="true">
-<span class="material-symbols-outlined lp-hero-car">directions_car</span>
-<div class="lp-hero-brand">CHEVROLET</div>
+<img id="lpHeroImg" class="lp-hero-img hidden" alt="" loading="lazy"/>
+<span class="material-symbols-outlined lp-hero-car" id="lpHeroIcon">directions_car</span>
 </div>
 <div class="lp-hero-copy">
 <div class="lp-hero-top">
@@ -101,6 +101,30 @@ Solo con stock
 <p id="lpFootNote" class="lp-footnote"></p>
 </section>
 
+<section class="lp-card lp-benchmark-card" id="lpBenchmarkSection">
+<div class="lp-card-head-row">
+<h3 class="lp-card-title" id="lpBenchmarkTitle" style="margin:0">Benchmarking competitivo</h3>
+<span class="lp-chip-soft" id="lpBenchmarkChip">MX 2026</span>
+</div>
+<p id="lpBenchmarkCriterio" class="lp-benchmark-criterio"></p>
+<div class="table-scroll">
+<table class="data-table lp-benchmark-table">
+<thead>
+<tr>
+<th>Vehículo</th>
+<th class="num">Precio</th>
+<th>Oferta comercial vigente</th>
+<th>Tecnología</th>
+<th>Seguridad</th>
+<th>Rendimiento</th>
+</tr>
+</thead>
+<tbody id="lpBenchmarkBody"></tbody>
+</table>
+</div>
+<p id="lpBenchmarkNote" class="lp-footnote"></p>
+</section>
+
 </article>
 
 </div>
@@ -111,6 +135,6 @@ Solo con stock
 <script src="/js/topbar.js?v=17"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/lista-precios.js?v=9"></script>
+<script src="/js/lista-precios.js?v=16"></script>
 </body>
 </html>

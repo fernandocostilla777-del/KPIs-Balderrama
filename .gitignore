@@ -22,6 +22,8 @@ backend/data/crm-ciclos.db
 backend/data/crm-ciclos.db-*
 backend/data/leads-source.xlsx
 backend/data/planes-uploads/
+backend/data/lista-precios-images/*
+!backend/data/lista-precios-images/.gitkeep
 data/users.json
 data/sales-goals.json
 data/financiamiento-notes.json

@@ -11,8 +11,10 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { query } = require('../db');
+const { firstLetter, AREA_LETRAS } = require('./postSalesOrderTypes');
 
 const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const HYP_LETRAS = new Set(AREA_LETRAS.hyp || ['A', 'F', 'H', 'J', 'V', 'Z', 'Ó']);
 
 function normalizeVin(v) {
   if (v == null) return null;
@@ -538,6 +540,233 @@ function toIsoDate(value) {
   return text || null;
 }
 
+function inDateRange(isoDate, fechaInicio, fechaFin) {
+  if (!fechaInicio && !fechaFin) return true;
+  const d = toIsoDate(isoDate);
+  if (!d) return false;
+  if (fechaInicio && d < fechaInicio) return false;
+  if (fechaFin && d > fechaFin) return false;
+  return true;
+}
+
+function previousPeriodRange(fechaInicio, fechaFin) {
+  if (!fechaInicio || !fechaFin) return null;
+  const start = new Date(`${fechaInicio}T00:00:00`);
+  const end = new Date(`${fechaFin}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null;
+  const days = Math.round((end - start) / 86400000) + 1;
+  const prevEnd = new Date(start);
+  prevEnd.setDate(prevEnd.getDate() - 1);
+  const prevStart = new Date(prevEnd);
+  prevStart.setDate(prevStart.getDate() - days + 1);
+  return {
+    fechaInicio: toIsoDate(prevStart),
+    fechaFin: toIsoDate(prevEnd),
+  };
+}
+
+function roundMoney(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function isHypOrden(orden) {
+  const letter = firstLetter(orden?.orden || orden);
+  return HYP_LETRAS.has(letter);
+}
+
+/**
+ * CLV del cliente (ficha 360): valor económico disponible sin restar CAC.
+ * Componentes: utilidad venta, F&I (comisiones/PVAs), accesorios, servicio,
+ * refacciones (si no hay split, 0), colisión (HyP), renovación (2ª+ unidad).
+ */
+function buildClienteClv({
+  contratos = [],
+  ordenes = [],
+  unidadesSql = [],
+  fechaInicio = null,
+  fechaFin = null,
+  clvAnterior = null,
+} = {}) {
+  const composicion = {
+    ventaVehiculo: 0,
+    financiamiento: 0,
+    seguros: 0,
+    accesorios: 0,
+    servicio: 0,
+    refacciones: 0,
+    colision: 0,
+    renovacion: 0,
+  };
+
+  const ventas = [];
+  for (const u of unidadesSql || []) {
+    for (const f of u.facturasVentaSql || []) {
+      if (!inDateRange(f.fechaFactura, fechaInicio, fechaFin)) continue;
+      const utilidad = f.utilidad != null ? Number(f.utilidad) : null;
+      const aporte = utilidad != null ? utilidad : 0;
+      composicion.ventaVehiculo += aporte;
+      ventas.push({
+        serie: f.serie || u.vin,
+        factura: f.facturaVenta,
+        fecha: toIsoDate(f.fechaFactura),
+        utilidad: aporte,
+        ventaSubtotal: Number(f.ventaSubtotal || 0),
+      });
+    }
+  }
+  ventas.sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')));
+  if (ventas.length > 1) {
+    const renovacion = ventas.slice(1).reduce((s, v) => s + Number(v.utilidad || 0), 0);
+    composicion.renovacion += renovacion;
+    composicion.ventaVehiculo = Math.max(0, composicion.ventaVehiculo - renovacion);
+  }
+
+  for (const c of contratos || []) {
+    const fecha = c.fecha_compra_valida || c.fecha_compra || c.fecha_timbrado || c.fecha;
+    if (!inDateRange(fecha, fechaInicio, fechaFin)) continue;
+    const comision = Number(c.comision || 0);
+    const gap = Number(c.gap_monto || 0);
+    const garantia = Number(c.garantia_extendida_monto || 0);
+    const onstar = Number(c.onstar_monto || 0);
+    const mantto = Number(c.mantenimiento_integrado_monto || 0);
+    const accesorios = Number(c.accesorios_monto || 0);
+    composicion.financiamiento += comision + gap + garantia + onstar + mantto;
+    composicion.accesorios += accesorios;
+    // Sin prima de seguro en CRM: se deja en 0 (solo nombre de aseguradora).
+  }
+
+  for (const o of ordenes || []) {
+    if (String(o.status || '').toUpperCase() === 'C') continue;
+    const fecha = o.ingreso || o.cierre;
+    if (!inDateRange(fecha, fechaInicio, fechaFin)) continue;
+    const importe = Number(o.importe || 0);
+    if (importe <= 0) continue;
+    if (isHypOrden(o)) composicion.colision += importe;
+    else composicion.servicio += importe;
+  }
+
+  Object.keys(composicion).forEach((k) => {
+    composicion[k] = roundMoney(composicion[k]);
+  });
+
+  const clv = roundMoney(Object.values(composicion).reduce((s, n) => s + n, 0));
+
+  let segmento = 'bajo';
+  let segmentoLabel = 'Bajo valor';
+  const ultimaOrden = (ordenes || [])
+    .map((o) => toIsoDate(o.ingreso || o.cierre))
+    .filter(Boolean)
+    .sort()
+    .pop();
+  const hoy = toIsoDate(new Date());
+  const diasSinVisita = ultimaOrden && hoy
+    ? Math.round((new Date(`${hoy}T00:00:00`) - new Date(`${ultimaOrden}T00:00:00`)) / 86400000)
+    : null;
+  if (diasSinVisita != null && diasSinVisita > 365 && clv < 40000) {
+    segmento = 'riesgo';
+    segmentoLabel = 'En riesgo';
+  } else if (clv >= 100000) {
+    segmento = 'alto';
+    segmentoLabel = 'Alto valor';
+  } else if (clv >= 40000) {
+    segmento = 'medio';
+    segmentoLabel = 'Valor medio';
+  } else if (clv > 0) {
+    segmento = 'bajo';
+    segmentoLabel = 'Bajo valor';
+  } else {
+    segmento = 'riesgo';
+    segmentoLabel = 'En riesgo';
+  }
+
+  let variacionPct = null;
+  if (clvAnterior && Number.isFinite(Number(clvAnterior.clv))) {
+    const prev = Number(clvAnterior.clv);
+    if (prev > 0) variacionPct = Math.round(((clv - prev) / prev) * 1000) / 10;
+    else if (clv > 0) variacionPct = 100;
+    else variacionPct = 0;
+  }
+
+  const chart = [
+    { id: 'ventaVehiculo', label: 'Venta vehículo', value: composicion.ventaVehiculo },
+    { id: 'financiamiento', label: 'Financiamiento', value: composicion.financiamiento },
+    { id: 'servicio', label: 'Servicio', value: composicion.servicio },
+    { id: 'refacciones', label: 'Refacciones', value: composicion.refacciones },
+    { id: 'colision', label: 'Centro de Colisión', value: composicion.colision },
+    { id: 'renovacion', label: 'Renovación', value: composicion.renovacion },
+  ];
+
+  return {
+    clv,
+    clientesAnalizados: 1,
+    clvTotal: clv,
+    variacionPct,
+    composicion: {
+      ...composicion,
+      seguros: composicion.seguros,
+    },
+    chart,
+    segmento,
+    segmentoLabel,
+    segmentacion: [
+      { id: 'alto', label: 'Alto valor', activo: segmento === 'alto' },
+      { id: 'medio', label: 'Valor medio', activo: segmento === 'medio' },
+      { id: 'bajo', label: 'Bajo valor', activo: segmento === 'bajo' },
+      { id: 'riesgo', label: 'En riesgo', activo: segmento === 'riesgo' },
+    ],
+    periodo: { fechaInicio, fechaFin },
+    nota: 'CLV ≈ valor generado disponible (sin CAC). Financiamiento usa comisiones/PVAs, no el monto a financiar.',
+  };
+}
+
+async function attachClvToHistory(payload, {
+  contratos,
+  ordenes,
+  unidadesSql,
+  fechaInicio,
+  fechaFin,
+  vinsForPrev = [],
+} = {}) {
+  let clvAnterior = null;
+  const prev = previousPeriodRange(fechaInicio, fechaFin);
+  if (prev && vinsForPrev.length) {
+    try {
+      const prevEnrich = await enrichByVins(vinsForPrev, {
+        fechaInicio: prev.fechaInicio,
+        fechaFin: prev.fechaFin,
+      });
+      clvAnterior = buildClienteClv({
+        contratos,
+        ordenes: prevEnrich.ordenesServicio || [],
+        unidadesSql: prevEnrich.unidades || unidadesSql,
+        fechaInicio: prev.fechaInicio,
+        fechaFin: prev.fechaFin,
+      });
+    } catch (_) {
+      clvAnterior = null;
+    }
+  }
+
+  const clv = buildClienteClv({
+    contratos,
+    ordenes,
+    unidadesSql,
+    fechaInicio,
+    fechaFin,
+    clvAnterior,
+  });
+
+  payload.clv = clv;
+  payload.resumen = {
+    ...(payload.resumen || {}),
+    clv: clv.clv,
+    clvVariacionPct: clv.variacionPct,
+    clvSegmento: clv.segmentoLabel,
+  };
+  return payload;
+}
+
+
 function validHistoricalDate(...values) {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -953,12 +1182,28 @@ async function enrichByVins(vins, {
           veh.VEH_ANMODELO AS anModelo,
           LTRIM(RTRIM(veh.VEH_SITUACION)) AS situacion,
           v.VTE_IDCLIENTE AS idClienteDms,
-          LTRIM(RTRIM(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))) AS clienteDms
+          LTRIM(RTRIM(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))) AS clienteDms,
+          COALESCE(
+            NULLIF(lv.SUBTOTAL, 0),
+            NULLIF(veh.VEH_SSUBTOTAL, 0),
+            CASE WHEN ISNULL(v.VTE_IMPORTEMON, 0) > 0 THEN ROUND(v.VTE_IMPORTEMON / 1.16, 2) ELSE 0 END
+          ) AS ventaSubtotal,
+          COALESCE(
+            NULLIF(lv.COSTO, 0),
+            NULLIF(lv.pen_costo1, 0) - ISNULL(lv.BONIFICACION, 0) - ISNULL(lv.PARTICIPACION, 0),
+            NULLIF(veh.VEH_COSTO1, 0) - ISNULL(veh.VEH_REBATE, 0) - ISNULL(veh.VEH_PARTICIP, 0),
+            0
+          ) AS costoNeto,
+          ISNULL(lv.VEH_MISELANEOS, ISNULL(veh.VEH_MISELANEOS, 0)) AS gastos,
+          CASE WHEN lv.VTE_DOCTO IS NOT NULL THEN 1 ELSE 0 END AS tieneLibro
         FROM ADE_VTAFI v
         INNER JOIN SER_VEHICULO veh
           ON veh.VEH_NUMSERIE = v.VTE_SERIE
           AND veh.VEH_NOINVENTA > 0
         LEFT JOIN PER_PERSONAS c ON c.PER_IDPERSONA = v.VTE_IDCLIENTE
+        LEFT JOIN UNI_TEMLIBROVENTAS lv
+          ON lv.VTE_DOCTO = v.VTE_DOCTO
+          AND lv.VTE_ORGSTATUS = 'I'
         WHERE v.VTE_TIPODOCTO = 'A'
           AND v.VTE_STATUS = 'I'
           AND (${matchSql('v.VTE_SERIE')})
@@ -1023,8 +1268,25 @@ async function enrichByVins(vins, {
       };
     });
 
+    const ventasCalculadas = ventasRows.map((row) => {
+      const ventaSubtotal = Number(row.ventaSubtotal || 0);
+      const costoNeto = Number(row.costoNeto || 0);
+      const gastos = Number(row.gastos || 0);
+      const tieneLibro = Number(row.tieneLibro || 0) === 1;
+      const utilidad = (tieneLibro || costoNeto > 0)
+        ? Math.round((ventaSubtotal - costoNeto - gastos) * 100) / 100
+        : null;
+      return {
+        ...row,
+        ventaSubtotal,
+        costoNeto,
+        gastos,
+        utilidad,
+      };
+    });
+
     const unidades = list.map((vin) => {
-      const facturasVentaSql = ventasRows.filter((r) => matchCrmVinToSerie(vin, r.serie));
+      const facturasVentaSql = ventasCalculadas.filter((r) => matchCrmVinToSerie(vin, r.serie));
       const ordenesServicio = ordenesCalculadas.filter((r) => matchCrmVinToSerie(vin, r.serie));
       return {
         vin,
@@ -1569,7 +1831,8 @@ async function getContactHistory(idContacto, {
       pruebas: pruebasManejo,
       quejasCsi,
     });
-    return {
+    const unidadesSqlAlt = [...(sqlEnrich.unidades || []), ...(sqlAdicional.unidades || [])];
+    return attachClvToHistory({
       idContacto: id,
       encontrado: true,
       nombre: nombreCliente,
@@ -1598,7 +1861,7 @@ async function getContactHistory(idContacto, {
         ultimaActividad: fechasAlt[fechasAlt.length - 1] || null,
       },
       ciclos: [],
-      compras: [],
+      compras: vinsLead.map((vin) => ({ vin })),
       leads,
       solicitudes,
       pruebasManejo,
@@ -1607,12 +1870,22 @@ async function getContactHistory(idContacto, {
       quejasCsi,
       ficha360: cliente360.consolidado,
       timeline360: cliente360.timeline,
-      unidadesSql: [...(sqlEnrich.unidades || []), ...(sqlAdicional.unidades || [])],
+      unidadesSql: unidadesSqlAlt,
       unidadesDistribuidor: unidadesDms.unidades,
       ordenesServicio,
       periodoOrdenes: { fechaInicio, fechaFin },
-      sqlError: sqlEnrich.error || sqlAdicional.error || unidadesDms.error,
-    };
+      sqlError: sqlEnrich.error || sqlAdicional.error || unidadesDms.error || null,
+    }, {
+      contratos: contratosFinanciamiento,
+      ordenes: ordenesServicio,
+      unidadesSql: unidadesSqlAlt,
+      fechaInicio,
+      fechaFin,
+      vinsForPrev: [
+        ...vinsLead,
+        ...unidadesDms.unidades.map((unidad) => unidad.serie),
+      ].filter(Boolean),
+    });
   }
 
   const ciclosMap = new Map();
@@ -1764,7 +2037,7 @@ async function getContactHistory(idContacto, {
     quejasCsi,
   });
 
-  return {
+  return attachClvToHistory({
     idContacto: id,
     encontrado: true,
     nombre: nombreCliente,
@@ -1815,7 +2088,17 @@ async function getContactHistory(idContacto, {
     ordenesServicio,
     periodoOrdenes: { fechaInicio, fechaFin },
     sqlError: sqlEnrich.error || sqlAdicional.error || unidadesDms.error,
-  };
+  }, {
+    contratos: contratosFinanciamiento,
+    ordenes: ordenesServicio,
+    unidadesSql,
+    fechaInicio,
+    fechaFin,
+    vinsForPrev: [
+      ...vins,
+      ...unidadesDms.unidades.map((unidad) => unidad.serie),
+    ].filter(Boolean),
+  });
 }
 
 /**

@@ -329,6 +329,19 @@ router.get('/lista-precios', async (req, res, next) => {
   }
 });
 
+router.get('/lista-precios/images/:modelo', (req, res) => {
+  try {
+    const { getImageFile } = require('../services/listaPreciosImagesService');
+    const file = getImageFile(decodeURIComponent(req.params.modelo || ''));
+    if (!file) return res.status(404).json({ error: 'Imagen no encontrada para ese modelo.' });
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Content-Type', file.mime || 'image/jpeg');
+    return res.sendFile(file.absolutePath);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'No se pudo servir la imagen.' });
+  }
+});
+
 router.get('/inventory', async (req, res, next) => {
   try {
     res.json(await getInventory({ planPisoPeriod: req.query.planPisoPeriod || 'all' }));

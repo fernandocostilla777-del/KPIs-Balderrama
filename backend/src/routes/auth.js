@@ -335,4 +335,71 @@ router.post('/lista-precios/upload', requireUserManager, (req, res) => {
   });
 });
 
+const carImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const name = String(file.originalname || '').toLowerCase();
+    const okMime = ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype);
+    const okName = /\.(jpe?g|png|webp)$/i.test(name);
+    if (!okMime && !okName) {
+      return cb(new Error('Solo se permiten imágenes JPG, PNG o WEBP.'));
+    }
+    cb(null, true);
+  },
+});
+
+router.get('/lista-precios/images', requireUserManager, (_req, res) => {
+  try {
+    const { listImages } = require('../services/listaPreciosImagesService');
+    const { getActivePlansMeta } = require('../services/planesChevroletParser');
+    const meta = getActivePlansMeta();
+    const images = listImages();
+    const byModelo = Object.fromEntries(images.map((img) => [img.modelo, img]));
+    const catalogModelos = Array.isArray(meta.modelos) ? meta.modelos : (meta.catalog?.modelos || []);
+    const modelos = [...new Set([
+      ...catalogModelos.map((m) => (typeof m === 'string' ? m : m?.modelo)).filter(Boolean),
+      ...images.map((i) => i.modelo),
+    ])].sort((a, b) => a.localeCompare(b, 'es')).map((modelo) => ({
+      modelo,
+      imagen: byModelo[modelo] || null,
+    }));
+    res.json({
+      ok: true,
+      totalConImagen: images.length,
+      modelos,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'No se pudieron listar las imágenes.' });
+  }
+});
+
+router.post('/lista-precios/images', requireUserManager, (req, res) => {
+  carImageUpload.single('file')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Error al subir la imagen.' });
+    }
+    try {
+      const { saveImage } = require('../services/listaPreciosImagesService');
+      const modelo = String(req.body?.modelo || '').trim();
+      const saved = saveImage(modelo, req.file, {
+        uploadedBy: req.session?.username || null,
+      });
+      res.json({ ok: true, imagen: saved });
+    } catch (e) {
+      res.status(e.status || 500).json({ error: e.message || 'No se pudo guardar la imagen.' });
+    }
+  });
+});
+
+router.delete('/lista-precios/images/:modelo', requireUserManager, (req, res) => {
+  try {
+    const { deleteImage } = require('../services/listaPreciosImagesService');
+    const result = deleteImage(decodeURIComponent(req.params.modelo || ''));
+    res.json(result);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'No se pudo eliminar la imagen.' });
+  }
+});
+
 module.exports = router;

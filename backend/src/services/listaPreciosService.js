@@ -4,7 +4,90 @@ const { query } = require('../db');
 
 const PLANS_JSON = path.join(__dirname, '../../data/planes-chevrolet-ago-my26.json');
 const FICHAS_JSON = path.join(__dirname, '../../data/fichas-tecnicas-chevrolet.json');
+const BENCHMARK_JSON = path.join(__dirname, '../../data/benchmarking-competidores-2026.json');
 const INVENTORY_SITUATIONS = `('FIS', 'DIS', 'PED', 'PEN', 'SEP', 'DEMO', 'TRAN')`;
+
+let benchmarkCache = null;
+
+function loadBenchmarking() {
+  if (benchmarkCache) return benchmarkCache;
+  try {
+    if (!fs.existsSync(BENCHMARK_JSON)) {
+      benchmarkCache = { meta: null, byModelo: {} };
+      return benchmarkCache;
+    }
+    benchmarkCache = JSON.parse(fs.readFileSync(BENCHMARK_JSON, 'utf8'));
+  } catch {
+    benchmarkCache = { meta: null, byModelo: {} };
+  }
+  return benchmarkCache;
+}
+
+function moneyMxLabel(n) {
+  const v = Math.round(Number(n) || 0);
+  if (!v) return null;
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    maximumFractionDigits: 0,
+  }).format(v);
+}
+
+/**
+ * Comparativo comercial vs rivales directos MX (año en curso).
+ * Precio Chevrolet = MSRP guía; Oferta = precio final desde planes de la versión.
+ */
+function buildBenchmarkingForModelo(modeloNombre, versions = []) {
+  const pack = loadBenchmarking();
+  const entry = pack.byModelo?.[modeloNombre];
+  if (!entry) return null;
+
+  const msrps = versions.map((v) => Number(v.msrp) || 0).filter((n) => n > 0);
+  const preciosFinal = versions
+    .map((v) => Number(v.summary?.precioFinalDesde) || Number(v.msrp) || 0)
+    .filter((n) => n > 0);
+  const msrpMin = msrps.length ? Math.min(...msrps) : null;
+  const ofertaDesde = preciosFinal.length ? Math.min(...preciosFinal) : msrpMin;
+  const descuento = msrpMin != null && ofertaDesde != null ? Math.max(0, msrpMin - ofertaDesde) : 0;
+
+  const nuestro = {
+    marca: 'Chevrolet',
+    modelo: modeloNombre,
+    esNuestro: true,
+    precio: moneyMxLabel(msrpMin) || 'Consultar',
+    precioValor: msrpMin,
+    oferta: descuento > 0
+      ? `Desde ${moneyMxLabel(ofertaDesde)} (−${moneyMxLabel(descuento)} vs lista)`
+      : (moneyMxLabel(ofertaDesde) ? `Desde ${moneyMxLabel(ofertaDesde)}` : 'Según guía vigente'),
+    tecnologia: entry.nuestroResumen?.tecnologia || '—',
+    seguridad: entry.nuestroResumen?.seguridad || '—',
+    rendimiento: entry.nuestroResumen?.rendimiento || '—',
+  };
+
+  const filas = [
+    nuestro,
+    ...(entry.competidores || []).map((c) => ({
+      marca: c.marca,
+      modelo: c.modelo,
+      esNuestro: false,
+      precio: moneyMxLabel(c.precioListaDesde) || 'Consultar',
+      precioValor: c.precioListaDesde || null,
+      oferta: c.ofertaVigente || '—',
+      tecnologia: c.tecnologia || '—',
+      seguridad: c.seguridad || '—',
+      rendimiento: c.rendimiento || '—',
+    })),
+  ];
+
+  return {
+    segmento: entry.segmento || null,
+    criterio: entry.criterio || null,
+    actualizado: pack.meta?.actualizado || null,
+    anio: pack.meta?.anio || 2026,
+    metodologia: pack.meta?.metodologia || null,
+    filas,
+  };
+}
 
 const SITUACION_LABELS = {
   FIS: 'Físico',
@@ -299,7 +382,8 @@ async function getListaPrecios(filters = {}) {
   }
 
   const units = await loadInventoryUnits();
-  const availableSituations = new Set(['DIS', 'FIS', 'SEP']);
+  // Solo unidades realmente disponibles; SEP (apartadas) no cuentan para stock ni colores.
+  const availableSituations = new Set(['DIS', 'FIS']);
 
   // Agrupar planes por versión (mismo modelo/paquete/versión/msrp) con opciones de pago
   const versionGroups = new Map();
@@ -381,12 +465,12 @@ async function getListaPrecios(filters = {}) {
 
   let items = [...versionGroups.values()].map((g) => ({
     ...g,
-    stock: g.inventario.length,
+    stock: g.inventario.filter((u) => availableSituations.has(u.situacion)).length,
     stockDisponible: g.inventario.filter((u) => availableSituations.has(u.situacion)).length,
   }));
 
   if (soloConStock) {
-    items = items.filter((g) => g.stock > 0);
+    items = items.filter((g) => g.stockDisponible > 0);
   }
 
   items.sort((a, b) =>
@@ -470,12 +554,27 @@ function buildVersionSummary(planes, sectionId) {
     .filter(Boolean)
     .map(Number)
     .filter((n) => n > 0);
-  const factores = list
-    .map((p) => p.tasaGmf)
-    .filter((t) => t && /Factor/i.test(t))
-    .map((t) => String(t).match(/([\d.]+%)/))
-    .filter(Boolean)
-    .map((m) => m[1]);
+  const extractFactorPct = (text) => {
+    const s = String(text || '');
+    // "Factor 1.85%" / "Factor de Arrendamiento: 1.85%" / "1.85% Factor"
+    const m = s.match(/Factor[^%\d]*([\d]+(?:\.\d+)?)\s*%/i)
+      || s.match(/([\d]+(?:\.\d+)?)\s*%\s*(?:Factor|Arrend)/i);
+    return m ? `${m[1]}%` : null;
+  };
+
+  const factores = [];
+  for (const p of list) {
+    const fromTasa = extractFactorPct(p.tasaGmf) || extractFactorPct(p.tasaFactor);
+    const fromOtros = extractFactorPct(p.otros) || extractFactorPct(p.raw);
+    if (fromTasa) factores.push(fromTasa);
+    else if (fromOtros) factores.push(fromOtros);
+  }
+
+  const leasingPlanes = list.filter((p) => /LEASING/i.test(p.tipoPago || p.nombre || ''));
+  const leasingPrecios = leasingPlanes
+    .map((p) => Number(p.precioFinal) || 0)
+    .filter((n) => n > 0);
+  const leasingSample = leasingPlanes[0] || null;
 
   return {
     descuentoMaximo: descuentos.length ? Math.max(...descuentos) : 0,
@@ -483,6 +582,12 @@ function buildVersionSummary(planes, sectionId) {
     seguroGratis: seguros[0] || null,
     tasaGmfDesde: tasas.length ? `${Math.min(...tasas).toFixed(2)}%` : null,
     leasingFactor: factores[0] || null,
+    leasingPrecioDesde: leasingPrecios.length ? Math.min(...leasingPrecios) : null,
+    leasingBeneficio: leasingSample
+      ? (leasingSample.beneficio || 'Opción para empresa')
+      : null,
+    leasingEnganche: leasingSample?.enganche || null,
+    leasingCodigoGmf: leasingSample?.codigoGmf || null,
   };
 }
 
@@ -766,10 +871,11 @@ function enrichVersionGroup(g, sectionId) {
   const inventario = g.inventario || [];
   const disp = inventario.filter((u) => u.situacion === 'DIS' || u.situacion === 'FIS').length;
   const apartadas = inventario.filter((u) => u.situacion === 'SEP' || u.isApartada).length;
-  const stockTotal = disp + apartadas;
+  // Existencia visible = solo disponibles (DIS/FIS). Apartadas no cuentan ni en colores.
+  const stockTotal = disp;
 
   const colorMap = new Map();
-  for (const u of inventario.filter((x) => x.situacion === 'DIS' || x.situacion === 'FIS' || x.situacion === 'SEP')) {
+  for (const u of inventario.filter((x) => x.situacion === 'DIS' || x.situacion === 'FIS')) {
     const nombreInventario = String(u.colorExterior || '').trim() || 'Sin color';
     const swatch = colorSwatch(nombreInventario);
     const key = nombreInventario.toUpperCase();
@@ -786,8 +892,7 @@ function enrichVersionGroup(g, sectionId) {
     }
     const row = colorMap.get(key);
     row.unidades += 1;
-    if (u.situacion === 'SEP') row.apartadas += 1;
-    else row.disponibles += 1;
+    row.disponibles += 1;
   }
   const colores = [...colorMap.values()]
     .map((c) => ({
@@ -803,17 +908,32 @@ function enrichVersionGroup(g, sectionId) {
   const descPctMax = g.msrp > 0 && descMax > 0 ? Math.round((descMax / g.msrp) * 10000) / 100 : 0;
   const ficha = buildFichaTecnica(g.modelo, g.version, g.paquete, g.anio, g.msrp);
 
-  // Extraer factor leasing de planes si summary no lo trajo
+  // Extraer factor / datos leasing de planes si summary no los trajo
   let leasingFactor = summaryBase.leasingFactor;
+  let leasingPrecioDesde = summaryBase.leasingPrecioDesde;
+  let leasingBeneficio = summaryBase.leasingBeneficio;
+  let leasingEnganche = summaryBase.leasingEnganche;
+  let leasingCodigoGmf = summaryBase.leasingCodigoGmf;
+
+  const leasePlanes = planes.filter((p) => /LEASING/i.test(p.tipoPago || p.nombre || ''));
   if (!leasingFactor) {
-    const lease = planes.find((p) => /LEASING/i.test(p.tipoPago) && p.tasaFactor && p.tasaFactor.includes('%'));
-    if (lease) leasingFactor = lease.tasaFactor;
+    const leaseWithPct = leasePlanes.find((p) => p.tasaFactor && /[\d.]+\s*%/.test(p.tasaFactor));
+    if (leaseWithPct) leasingFactor = String(leaseWithPct.tasaFactor).match(/([\d.]+%)/)?.[1] || leaseWithPct.tasaFactor;
   }
+  if (!leasingPrecioDesde && leasePlanes.length) {
+    const preciosLease = leasePlanes.map((p) => Number(p.precioFinal) || 0).filter((n) => n > 0);
+    if (preciosLease.length) leasingPrecioDesde = Math.min(...preciosLease);
+  }
+  if (!leasingBeneficio && leasePlanes[0]) {
+    leasingBeneficio = leasePlanes[0].beneficio || 'Opción para empresa';
+  }
+  if (!leasingEnganche && leasePlanes[0]?.enganche) leasingEnganche = leasePlanes[0].enganche;
+  if (!leasingCodigoGmf && leasePlanes[0]?.codigoGmf) leasingCodigoGmf = leasePlanes[0].codigoGmf;
 
   return {
     ...g,
     carroceria: ficha.carroceria || CARROCERIA_BY_MODELO[g.modelo] || null,
-    stock: inventario.length,
+    stock: disp,
     stockTotal,
     stockDisponible: disp,
     stockApartadas: apartadas,
@@ -827,6 +947,10 @@ function enrichVersionGroup(g, sectionId) {
       seguroGratis: summaryBase.seguroGratis,
       tasaGmfDesde: summaryBase.tasaGmfDesde,
       leasingFactor,
+      leasingPrecioDesde,
+      leasingBeneficio,
+      leasingEnganche,
+      leasingCodigoGmf,
       mejorPrecio: true,
     },
     fichaTecnica: ficha,
@@ -901,7 +1025,7 @@ async function getListaPreciosFicha(filters = {}) {
   const byModelo = new Map();
   for (const g of versionGroups.values()) {
     const enriched = enrichVersionGroup(g, sectionId);
-    if (soloConStock && !modeloFilter && enriched.stock === 0) continue;
+    if (soloConStock && !modeloFilter && enriched.stockDisponible === 0) continue;
     if (!byModelo.has(enriched.modelo)) {
       byModelo.set(enriched.modelo, {
         modelo: enriched.modelo,
@@ -914,15 +1038,20 @@ async function getListaPreciosFicha(filters = {}) {
     byModelo.get(enriched.modelo).versions.push(enriched);
   }
 
-  const modelos = [...byModelo.values()]
-    .map((m) => {
-      m.versions.sort((a, b) => a.msrp - b.msrp || String(a.version).localeCompare(String(b.version), 'es'));
-      const seguros = m.versions.map((v) => v.summary?.seguroGratis).filter(Boolean);
-      m.badgeSeguro = seguros[0] || null;
-      m.stockTotal = m.versions.reduce((s, v) => s + (v.stockDisponible || 0), 0);
-      return m;
-    })
-    .sort((a, b) => String(a.modelo).localeCompare(String(b.modelo), 'es'));
+  const { attachImageUrls } = require('./listaPreciosImagesService');
+
+  const modelos = attachImageUrls(
+    [...byModelo.values()]
+      .map((m) => {
+        m.versions.sort((a, b) => a.msrp - b.msrp || String(a.version).localeCompare(String(b.version), 'es'));
+        const seguros = m.versions.map((v) => v.summary?.seguroGratis).filter(Boolean);
+        m.badgeSeguro = seguros[0] || null;
+        m.stockTotal = m.versions.reduce((s, v) => s + (v.stockDisponible || 0), 0);
+        m.benchmarking = buildBenchmarkingForModelo(m.modelo, m.versions);
+        return m;
+      })
+      .sort((a, b) => String(a.modelo).localeCompare(String(b.modelo), 'es')),
+  );
 
   return {
     meta: base.meta,
@@ -937,4 +1066,5 @@ module.exports = {
   getListaPreciosFicha,
   loadPlansCatalog,
   invalidatePlansCache,
+  loadBenchmarking,
 };

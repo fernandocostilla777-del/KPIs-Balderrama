@@ -96,7 +96,9 @@ CLOUD_SYNC_API_KEY=la-misma-clave-del-cloud
 | GET | `/api/auth/me` | Perfil móvil (Bearer token) |
 | GET | `/api/mobile/overview` | Resumen del periodo (Bearer token) |
 | GET | `/api/mobile/ventas` | Métricas de ventas (Bearer token) |
-| GET | `/api/mobile/inventory` | Inventario sincronizado (Bearer token) |
+| GET | `/api/personal` | Lista personal DMS activo (`categoria`, `subtipo`, `q`, `limit`) |
+| GET | `/api/personal/summary` | Conteos por categoría / subtipo |
+| GET | `/api/personal/:categoria` | Filtra por `VENDEDOR`, `PERSONAL_DMS` o `ASESOR_SERVICIO` |
 
 Los endpoints `/api/sync/*` usan `X-API-Key`. Los endpoints `/api/mobile/*` usan el token devuelto por `/api/auth/login`; la clave de sincronización nunca debe incluirse en la app.
 
@@ -141,6 +143,23 @@ Incluye del SQLite local (`crm-ciclos.db`):
 - **actividades** — ciclos Balderrama Ciclos
 
 Cada registro usa `id` con formato `lead|123`, `solicitud|45`, `prueba|67`, `actividad|890`.
+
+### Dominio personal (`personal`)
+
+Tabla dedicada en PostgreSQL: **`dms_personal`** (solo activos).
+
+| categoria | Origen SQL Server |
+|-----------|-------------------|
+| `VENDEDOR` | `PER_ROLES` (`VENU`/`VESE`/`VETA`/`VECA`) + `PER_PERSONAS` |
+| `PERSONAL_DMS` | Otros roles activos (no cliente) |
+| `ASESOR_SERVICIO` | `PNC_PARAMETR` tipo `AS` con `PAR_STATUS='A'` |
+
+Se sincroniza con el scheduler local (`domain: personal`) y se consulta con:
+
+```bash
+curl -H "X-API-Key: $CLOUD_SYNC_API_KEY" \
+  "https://tu-api.up.railway.app/api/personal?categoria=VENDEDOR"
+```
 
 ## Detección de cambios
 

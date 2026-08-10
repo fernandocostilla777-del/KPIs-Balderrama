@@ -9,6 +9,7 @@ const { getGoals } = require('../salesGoals');
 const crmCiclos = require('../crmCiclosService');
 const userStore = require('../../auth/userStore');
 const { getCurrentMonthRange, getMonthRangeForKey, serializeRow } = require('./cloudSyncUtils');
+const { collectPersonal } = require('./collectPersonal');
 
 function resolveRange({ periodKey, fechaInicio, fechaFin } = {}) {
   if (fechaInicio && fechaFin && periodKey) {
@@ -299,6 +300,7 @@ const COLLECTORS = {
   forecast: collectForecast,
   crm: collectCrm,
   auth: collectAuth,
+  personal: collectPersonal,
 };
 
 async function collectDomain(domain, options = {}) {
@@ -316,5 +318,6 @@ module.exports = {
   collectForecast,
   collectCrm,
   collectAuth,
+  collectPersonal,
   collectDomain,
 };

@@ -61,3 +61,28 @@ CREATE INDEX IF NOT EXISTS idx_sync_history_lookup
 
 CREATE INDEX IF NOT EXISTS idx_sync_history_period
   ON sync_entity_history (domain, period_key, valid_from DESC);
+
+-- Personal DMS activo (vendedores, roles internos, asesores de servicio)
+CREATE TABLE IF NOT EXISTS dms_personal (
+  id              BIGSERIAL PRIMARY KEY,
+  categoria       VARCHAR(32)  NOT NULL,
+  subtipo         VARCHAR(32)  NOT NULL DEFAULT '',
+  external_id     VARCHAR(64)  NOT NULL,
+  paterno         VARCHAR(120) NOT NULL DEFAULT '',
+  materno         VARCHAR(120) NOT NULL DEFAULT '',
+  nombre          VARCHAR(255) NOT NULL DEFAULT '',
+  email           VARCHAR(255) NOT NULL DEFAULT '',
+  sucursal        VARCHAR(64)  NOT NULL DEFAULT '',
+  activo          BOOLEAN      NOT NULL DEFAULT TRUE,
+  content_hash    CHAR(64),
+  last_batch_id   BIGINT       REFERENCES sync_batches (id),
+  first_seen_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  last_seen_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (categoria, subtipo, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dms_personal_categoria ON dms_personal (categoria, activo);
+CREATE INDEX IF NOT EXISTS idx_dms_personal_nombre ON dms_personal (nombre);
+CREATE INDEX IF NOT EXISTS idx_dms_personal_subtipo ON dms_personal (subtipo);
+

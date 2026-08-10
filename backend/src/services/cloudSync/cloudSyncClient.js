@@ -51,8 +51,11 @@ async function postJson(url, body, apiKey) {
 
 async function pushPayload(payload) {
   const cfg = assertConfigured();
-  const chunks = chunkArray(payload.records || [], cfg.chunkSize);
-  if (!chunks.length) {
+  // personal: un solo lote (reemplazo completo de activos); no trocear
+  const chunks = payload.domain === 'personal'
+    ? [payload.records || []]
+    : chunkArray(payload.records || [], cfg.chunkSize);
+  if (!chunks.length || (chunks.length === 1 && !(chunks[0] || []).length)) {
     return { ok: true, skipped: true, reason: 'Sin registros para enviar' };
   }
 

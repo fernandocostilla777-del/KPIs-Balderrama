@@ -1,7 +1,18 @@
 const crypto = require('crypto');
 const { withTransaction } = require('../db');
+const { upsertPersonalBatch } = require('./dmsPersonalService');
 
-const VALID_DOMAINS = new Set(['overview', 'ventas', 'forecast', 'inventario', 'contabilidad', 'postventa', 'crm', 'auth']);
+const VALID_DOMAINS = new Set([
+  'overview',
+  'ventas',
+  'forecast',
+  'inventario',
+  'contabilidad',
+  'postventa',
+  'crm',
+  'auth',
+  'personal',
+]);
 const VALID_SYNC_TYPES = new Set(['incremental', 'daily', 'monthly']);
 
 function stableStringify(value) {
@@ -150,6 +161,18 @@ async function ingestSyncPayload(body) {
       }
     }
 
+    let personalMirror = null;
+    if (domain === 'personal') {
+      personalMirror = await upsertPersonalBatch(
+        client,
+        normalized.map((r) => r.payload),
+        {
+          batchId,
+          contentHashes: normalized.map((r) => r.contentHash),
+        }
+      );
+    }
+
     await client.query(
       `UPDATE sync_batches
        SET inserted_count = $1, updated_count = $2, history_count = $3, archived_count = $4, status = 'ok'
@@ -167,6 +190,7 @@ async function ingestSyncPayload(body) {
       updated,
       history,
       archived,
+      personalMirror,
     };
   });
 }

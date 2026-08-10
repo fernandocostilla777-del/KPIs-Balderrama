@@ -2,7 +2,7 @@
  * Scheduler de sincronización local → API en la nube (PostgreSQL).
  *
  * - Cada N min (default 30): TODOS los dominios juntos
- *   (overview, ventas, forecast, inventario, contabilidad, crm, postventa, auth)
+ *   (overview, ventas, forecast, inventario, contabilidad, crm, postventa, auth, personal)
  * - Día 1 del mes (02:00): cierre mensual del mes anterior (mismos dominios)
  */
 const { collectDomain } = require('./cloudSyncCollector');
@@ -19,6 +19,7 @@ const SYNC_DOMAINS = [
   'crm',
   'postventa',
   'auth',
+  'personal',
 ];
 
 const state = {
@@ -121,13 +122,13 @@ async function runFullSync({ reason = 'schedule', syncType = 'incremental' } = {
   const at = new Date().toISOString();
 
   for (const domain of SYNC_DOMAINS) {
-    const domainSyncType = domain === 'auth' ? 'monthly' : syncType;
+    const domainSyncType = domain === 'auth' || domain === 'personal' ? 'monthly' : syncType;
     results[domain] = await syncDomain(domain, {
       ...range,
       fechaInicio: range.fechaInicio,
       fechaFin: range.fechaFin,
       syncType: domainSyncType,
-      periodKey: domain === 'auth' ? undefined : range.periodKey,
+      periodKey: domain === 'auth' || domain === 'personal' ? undefined : range.periodKey,
     });
   }
 
@@ -155,7 +156,7 @@ async function runMonthlySync({ reason = 'monthly' } = {}) {
   const results = {};
   for (const domain of SYNC_DOMAINS) {
     results[domain] = await syncDomain(domain, {
-      periodKey: domain === 'auth' ? undefined : range.periodKey,
+      periodKey: domain === 'auth' || domain === 'personal' ? undefined : range.periodKey,
       fechaInicio: range.fechaInicio,
       fechaFin: range.fechaFin,
       syncType: 'monthly',

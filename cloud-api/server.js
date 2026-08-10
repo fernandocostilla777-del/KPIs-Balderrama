@@ -6,6 +6,8 @@ const express = require('express');
 const syncRoutes = require('./src/routes/sync');
 const authRoutes = require('./src/routes/auth');
 const mobileRoutes = require('./src/routes/mobile');
+const personalRoutes = require('./src/routes/personal');
+const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -47,6 +49,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/mobile', mobileRoutes);
+app.use('/api/personal', personalRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error('[cloud-api]', err.message);
@@ -64,6 +67,7 @@ async function ensureSchema() {
     return;
   }
   await query('ALTER TABLE sync_batches ADD COLUMN IF NOT EXISTS meta JSONB');
+  await ensurePersonalTable();
 }
 
 ensureSchema()
@@ -73,6 +77,7 @@ ensureSchema()
       console.log('  BALDERRAMA — Cloud Sync API');
       console.log(`  → http://localhost:${PORT}/api/health`);
       console.log(`  → POST http://localhost:${PORT}/api/sync/ingest`);
+      console.log(`  → GET  http://localhost:${PORT}/api/personal`);
       console.log('');
     });
   })

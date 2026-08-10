@@ -1,0 +1,80 @@
+appId: com.balderrama.kpis
+productName: KPIs Balderrama
+copyright: Copyright © Balderrama
+
+directories:
+  output: dist
+  buildResources: assets
+
+files:
+  - main.js
+  - preload.js
+  - loading.html
+  - package.json
+  - assets/**
+
+extraResources:
+  - from: ../backend
+    to: backend
+    filter:
+      - "**/*"
+      - "!**/.env"
+      - "!**/data/*.db-wal"
+      - "!**/data/*.db-shm"
+      - "!**/data/_ordenes-*"
+      - "!**/data/ordenes-series.xlsx"
+      - "!**/data/*.pdf"
+      - "!**/data/*.xlsx.tmp"
+      - "!**/node_modules/.cache/**"
+      - "!**/scripts/_*.js"
+  - from: ../frontend
+    to: frontend
+    filter:
+      - "**/*"
+      - "!**/.env"
+      - "!**/node_modules/.cache/**"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  icon: assets/icon.png
+  artifactName: "${productName}-${version}-Windows-${arch}.${ext}"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: KPIs Balderrama
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: assets/icon.png
+  category: public.app-category.business
+  artifactName: "${productName}-${version}-Mac-${arch}.${ext}"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+linux:
+  target:
+    - AppImage
+  icon: assets/icon.png
+  category: Office

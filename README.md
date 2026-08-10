@@ -15,6 +15,10 @@ Dashboard ejecutivo conectado a SQL Server (GMOFARRIL): ventas, contabilidad, in
 │   ├── public/       # Páginas, estilos e imágenes
 │   └── server.js     # Puerto 5173 — sirve UI y proxy /api → backend
 │
+├── desktop/          # App Electron (Windows / Mac)
+│   ├── main.js       # Arranca backend+frontend y abre la ventana
+│   └── README.md
+│
 ├── cloud-api/        # API en la nube (PostgreSQL) — desplegar en Railway
 │   └── DEPLOY_RAILWAY.md  # Guía de despliegue Railway
 │
@@ -43,7 +47,7 @@ Edite `backend/.env` con host, base de datos y credenciales SQL.
 
 Si ya tenía un `.env` en la raíz del proyecto, cópielo a `backend/.env`.
 
-## Ejecución
+## Ejecución (navegador)
 
 ```bash
 npm start
@@ -66,6 +70,25 @@ npm run start:frontend  # solo UI
 ```
 
 Abra **http://localhost:5173** (o la IP LAN que muestre la consola del frontend).
+
+## App de escritorio (Electron)
+
+La carpeta `desktop/` envuelve el mismo backend + frontend en una ventana nativa.
+
+```bash
+npm run install:all
+npm run desktop          # desarrollo (abre la app)
+npm run dist:win         # instalador Windows (.exe NSIS + portable)
+npm run dist:mac         # .dmg — ejecutar en un Mac (no desde Windows)
+```
+
+Requisitos adicionales:
+
+- Mismo `backend/.env` con SQL Server accesible desde la PC
+- En la app empaquetada, la configuración se copia a la carpeta de datos de usuario (menú **Archivo → Abrir carpeta de configuración**)
+- El build de Mac debe hacerse en macOS; `better-sqlite3` es nativo por plataforma
+
+Detalle: [`desktop/README.md`](./desktop/README.md).
 
 ## Documentación
 

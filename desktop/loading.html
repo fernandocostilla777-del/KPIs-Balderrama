@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KPIs Balderrama</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 20% 0%, #1e3a5f 0%, var(--bg) 55%);
+      color: var(--text);
+    }
+    .card {
+      width: min(420px, 92vw);
+      padding: 32px 28px;
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--card) 88%, transparent);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      text-align: center;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+    #status {
+      margin-top: 18px;
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      min-height: 1.4em;
+    }
+    .spinner {
+      width: 42px;
+      height: 42px;
+      margin: 0 auto 18px;
+      border: 3px solid rgba(148, 163, 184, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner" aria-hidden="true"></div>
+    <h1>KPIs Balderrama</h1>
+    <p>Iniciando servicios locales del dashboard…</p>
+    <p id="status">Preparando backend y frontend</p>
+  </div>
+  <script>
+    window.addEventListener('message', (ev) => {
+      if (ev.data && ev.data.type === 'status' && ev.data.text) {
+        document.getElementById('status').textContent = ev.data.text;
+      }
+    });
+  </script>
+</body>
+</html>

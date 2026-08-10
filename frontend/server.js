@@ -1,5 +1,7 @@
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env'), override: true });
+// DESKTOP_MANAGED=1 (Electron): respetar puertos/URL del proceso padre; no pisar con .env
+const desktopManaged = process.env.DESKTOP_MANAGED === '1';
+require('dotenv').config({ path: path.join(__dirname, '.env'), override: !desktopManaged });
 require('dotenv').config({ path: path.join(__dirname, '../.env'), override: false });
 
 const express = require('express');

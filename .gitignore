@@ -3,6 +3,8 @@ backend/node_modules/
 frontend/node_modules/
 cloud-api/node_modules/
 mobile-app/node_modules/
+desktop/node_modules/
+desktop/dist/
 .env
 .env.local
 .env.*.local

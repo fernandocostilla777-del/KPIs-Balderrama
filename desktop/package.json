@@ -1,0 +1,20 @@
+{
+  "name": "kpis-balderrama-desktop",
+  "version": "1.0.0",
+  "description": "KPIs Balderrama — aplicación de escritorio (Electron)",
+  "main": "main.js",
+  "author": "Balderrama",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "desktop": "electron .",
+    "dist": "electron-builder --config electron-builder.yml",
+    "dist:win": "electron-builder --config electron-builder.yml --win",
+    "dist:mac": "electron-builder --config electron-builder.yml --mac"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  }
+}

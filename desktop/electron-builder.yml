@@ -13,26 +13,34 @@ files:
   - package.json
   - assets/**
 
+# node_modules debe ir en entradas aparte: electron-builder a veces
+# omite node_modules al copiar carpetas padre con filter.
 extraResources:
   - from: ../backend
     to: backend
     filter:
       - "**/*"
-      - "!**/.env"
+      - "!**/node_modules/**"
+      # Incluir .env en builds internos (misma máquina / red Balderrama).
+      # Si se distribuye fuera, quitar el .env del paquete y usar solo userData.
       - "!**/data/*.db-wal"
       - "!**/data/*.db-shm"
       - "!**/data/_ordenes-*"
       - "!**/data/ordenes-series.xlsx"
       - "!**/data/*.pdf"
       - "!**/data/*.xlsx.tmp"
-      - "!**/node_modules/.cache/**"
       - "!**/scripts/_*.js"
+  - from: ../backend/node_modules
+    to: backend/node_modules
   - from: ../frontend
     to: frontend
     filter:
       - "**/*"
+      - "!**/node_modules/**"
       - "!**/.env"
       - "!**/node_modules/.cache/**"
+  - from: ../frontend/node_modules
+    to: frontend/node_modules
 
 win:
   target:
@@ -43,7 +51,6 @@ win:
       arch:
         - x64
   icon: assets/icon.png
-  artifactName: "${productName}-${version}-Windows-${arch}.${ext}"
 
 nsis:
   oneClick: false
@@ -51,6 +58,10 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: KPIs Balderrama
+  artifactName: "${productName}-Setup-${version}-Windows-${arch}.${ext}"
+
+portable:
+  artifactName: "${productName}-Portable-${version}-Windows-${arch}.${ext}"
 
 mac:
   target:

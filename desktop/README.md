@@ -46,7 +46,9 @@ Salida en `desktop/dist/`.
 - Se empaquetan `backend/` y `frontend/` como `extraResources`.
 - En producción los servidores se ejecutan con `ELECTRON_RUN_AS_NODE=1` (Electron actúa como Node).
 - `better-sqlite3` es un módulo nativo: compile en la misma plataforma/arquitectura del instalador.
-- El `.env` con secretos **no** se incluye en el instalador. En el primer arranque se crea uno en la carpeta de datos de usuario a partir de `.env.example` (menú **Archivo → Abrir carpeta de configuración**).
+- El `.env` con secretos se incluye en builds internos hechos en esta máquina (para que SQL funcione al abrir).
+  En el primer arranque también se copia a la carpeta de datos de usuario (menú **Archivo → Abrir carpeta de configuración**).
+  Si `DB_HOST` está vacío, la app avisa y no habrá datos.
 - Firma de código / notarización de Apple: no incluida (paso posterior si se distribuye fuera de la red interna).
 
 ## Puertos

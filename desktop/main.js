@@ -6,8 +6,16 @@ const net = require('net');
 const { spawn, execFileSync } = require('child_process');
 
 const isDev = !app.isPackaged;
-let BACKEND_PORT = parseInt(process.env.DESKTOP_BACKEND_PORT || '3000', 10);
-let FRONTEND_PORT = parseInt(process.env.DESKTOP_FRONTEND_PORT || '5173', 10);
+// En app empaquetada ignorar DESKTOP_* heredados del shell (p. ej. pruebas);
+// en desarrollo sí permiten override.
+let BACKEND_PORT = parseInt(
+  (isDev ? process.env.DESKTOP_BACKEND_PORT : null) || '3000',
+  10
+);
+let FRONTEND_PORT = parseInt(
+  (isDev ? process.env.DESKTOP_FRONTEND_PORT : null) || '5173',
+  10
+);
 
 let mainWindow = null;
 let backendProc = null;
@@ -42,6 +50,21 @@ function configEnvPath() {
   return userDataEnvPath();
 }
 
+function readEnvValue(filePath, key) {
+  try {
+    const text = fs.readFileSync(filePath, 'utf8');
+    const re = new RegExp(`^${key}=(.*)$`, 'm');
+    const m = text.match(re);
+    return m ? String(m[1] || '').trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function envLooksConfigured(filePath) {
+  return Boolean(readEnvValue(filePath, 'DB_HOST'));
+}
+
 function ensureUserEnv() {
   // En desarrollo usamos backend/.env del monorepo directamente.
   if (isDev) {
@@ -50,20 +73,41 @@ function ensureUserEnv() {
   }
 
   const dest = userDataEnvPath();
-  if (fs.existsSync(dest)) return dest;
-
   const candidates = [
-    path.join(backendDir(), '.env.example'),
     path.join(backendDir(), '.env'),
-  ];
-  for (const src of candidates) {
-    if (fs.existsSync(src)) {
+    path.join(backendDir(), '.env.example'),
+  ].filter((p) => fs.existsSync(p));
+
+  if (!fs.existsSync(dest)) {
+    const src = candidates.find((p) => envLooksConfigured(p)) || candidates[0];
+    if (src) {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.copyFileSync(src, dest);
-      return dest;
+    }
+  } else if (!envLooksConfigured(dest)) {
+    // Primera instalación copió .env.example vacío: reemplazar si hay .env real empaquetado
+    const better = candidates.find((p) => envLooksConfigured(p));
+    if (better) {
+      fs.copyFileSync(better, dest);
     }
   }
-  return null;
+
+  return fs.existsSync(dest) ? dest : null;
+}
+
+function assertDbConfigured(envFile) {
+  if (!envFile || envLooksConfigured(envFile)) return;
+  const message =
+    `Faltan credenciales SQL (DB_HOST vacío) en:\n${envFile}\n\n` +
+    'Complete DB_HOST, DB_NAME, DB_USER y DB_PASSWORD, guarde el archivo y reinicie.';
+  dialog.showMessageBoxSync({
+    type: 'warning',
+    title: 'Configuración incompleta',
+    message: 'Sin conexión a SQL Server no habrá datos',
+    detail: message,
+    buttons: ['Abrir carpeta de configuración', 'Continuar'],
+    defaultId: 0,
+  }) === 0 && shell.openPath(path.dirname(envFile));
 }
 
 function portFree(port) {
@@ -73,19 +117,31 @@ function portFree(port) {
     server.once('listening', () => {
       server.close(() => resolve(true));
     });
-    server.listen(port, '127.0.0.1');
+    // 0.0.0.0: detecta también listeners en todas las interfaces (Windows)
+    server.listen(port, '0.0.0.0');
   });
 }
 
+async function isPortResponding(port) {
+  const paths = [`http://127.0.0.1:${port}/api/health`, `http://127.0.0.1:${port}/`];
+  for (const url of paths) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await httpOk(url, 600)) return true;
+  }
+  return false;
+}
+
 async function pickPort(preferred, label) {
-  if (await portFree(preferred)) return preferred;
-  for (let offset = 1; offset <= 40; offset += 1) {
+  for (let offset = 0; offset <= 40; offset += 1) {
     const candidate = preferred + offset;
     // eslint-disable-next-line no-await-in-loop
-    if (await portFree(candidate)) {
+    if (await isPortResponding(candidate)) continue;
+    // eslint-disable-next-line no-await-in-loop
+    if (!(await portFree(candidate))) continue;
+    if (offset > 0) {
       console.log(`[desktop] Puerto ${preferred} ocupado; ${label} usará ${candidate}`);
-      return candidate;
     }
+    return candidate;
   }
   throw new Error(`No hay puerto libre cerca de ${preferred} para ${label}`);
 }
@@ -118,11 +174,16 @@ function resolveNodeBinary() {
 }
 
 function nodeCommand() {
-  // Packaged: run JS with Electron binary as Node
-  if (!isDev) {
-    return { cmd: process.execPath, electronAsNode: true };
+  // Preferir Node del sistema: better-sqlite3 y otros nativos están
+  // compilados para Node, no para el ABI de Electron.
+  const nodeBin = resolveNodeBinary();
+  try {
+    execFileSync(nodeBin, ['-v'], { stdio: 'ignore', windowsHide: true });
+    return { cmd: nodeBin, electronAsNode: false };
+  } catch (_) {
+    /* fall through */
   }
-  return { cmd: resolveNodeBinary(), electronAsNode: false };
+  return { cmd: process.execPath, electronAsNode: true };
 }
 
 function spawnServer(label, cwd, scriptRel, envExtra = {}) {
@@ -207,6 +268,7 @@ function setLoadingStatus(text) {
 
 async function startServers() {
   const envFile = ensureUserEnv();
+  assertDbConfigured(envFile);
   const beDir = backendDir();
   const feDir = frontendDir();
 
@@ -265,9 +327,12 @@ async function startServers() {
     intervalMs: 500,
     onTick: (i, total) => setLoadingStatus(`Esperando API… (${i}/${total})`),
   });
-  if (!apiReady) {
+  if (!apiReady || !backendProc || backendProc.exitCode != null) {
+    const exited = backendProc && backendProc.exitCode != null
+      ? ` (proceso salió con código ${backendProc.exitCode})`
+      : '';
     throw new Error(
-      `El backend no respondió en ${healthUrl}.\nVerifique SQL Server y el archivo .env:\n${configEnvPath()}`
+      `El backend no respondió en ${healthUrl}${exited}.\nVerifique SQL Server y el archivo .env:\n${configEnvPath()}`
     );
   }
 
@@ -277,7 +342,7 @@ async function startServers() {
     intervalMs: 400,
     onTick: (i, total) => setLoadingStatus(`Esperando interfaz… (${i}/${total})`),
   });
-  if (!uiReady) {
+  if (!uiReady || !frontendProc || frontendProc.exitCode != null) {
     throw new Error(`El frontend no respondió en ${uiUrl}`);
   }
 

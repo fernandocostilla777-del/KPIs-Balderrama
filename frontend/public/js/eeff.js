@@ -2,6 +2,7 @@ let activeCategoria = 'estadoFinanciero';
 let eeffData = null;
 let activeEeffKpi = null;
 let expandedDrillNodes = new Set();
+let eeffDrillNeedsSeed = false;
 
 const COMPARATIVA_YEAR = 2026;
 
@@ -103,6 +104,40 @@ function flattenDrillTree(rows, kpiKey, depth = 0) {
 
 function getDrillRowId(row, depth, index) {
   return row.id || `${depth}-${index}-${row.label}`;
+}
+
+function seedAutoExpandNodes(rows, kpiKey, depth = 0) {
+  (rows || []).forEach((row, index) => {
+    if (row.type === 'header' || row.type === 'text') return;
+    const children = row.children || [];
+    if (!children.length) return;
+    const rowId = getDrillRowId(row, depth, index);
+    const nodeKey = `${kpiKey}:${rowId}`;
+    if (row.autoExpand) expandedDrillNodes.add(nodeKey);
+    seedAutoExpandNodes(children, kpiKey, depth + 1);
+  });
+}
+
+function closeEeffKpiFloatUi() {
+  const panel = document.getElementById('eeffKpiFloat');
+  const backdrop = document.getElementById('eeffKpiFloatBackdrop');
+  panel?.classList.add('hidden');
+  if (backdrop) {
+    backdrop.classList.add('hidden');
+    backdrop.setAttribute('aria-hidden', 'true');
+  }
+  document.querySelectorAll('[data-eeff-kpi].is-open, [data-eeff-kpi].is-selected')
+    .forEach((el) => {
+      el.classList.remove('is-open', 'is-selected');
+      if (el.hasAttribute('aria-expanded')) el.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function closeEeffKpiFloat() {
+  activeEeffKpi = null;
+  eeffDrillNeedsSeed = false;
+  expandedDrillNodes.clear();
+  closeEeffKpiFloatUi();
 }
 
 function buildVentasTotalesDrill(data) {
@@ -329,56 +364,107 @@ function buildFinancieroDrill(data) {
   ];
 }
 
+function pctOfSales(value, ventas) {
+  const v = Number(value);
+  const s = Number(ventas);
+  if (!Number.isFinite(v) || !Number.isFinite(s) || !s) return null;
+  return Number(((v / s) * 100).toFixed(1));
+}
+
+function eeffStatusBadge(tone, icon, label) {
+  return {
+    tone: tone || 'slate',
+    icon: icon || 'info',
+    label: label || '—',
+  };
+}
+
 function buildEdoFinKpiItems(data) {
   const s = data.estadoFinanciero?.summary || {};
+  const ventas = Number(s.ventasTotales) || 0;
+  const margenBruto = Number(s.margenBrutoPct);
+  const margenOp = Number(s.margenOperacionPct);
+  const margenEbitda = Number(s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct);
+  const crecEbit = Number(s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct);
+  const utilidad = Number(s.utilidad);
+  const utilidadPct = pctOfSales(utilidad, ventas);
+  const costoPct = pctOfSales(s.costoTotal, ventas);
+  const gastosPct = pctOfSales(s.sumaGastos, ventas);
+  const perdida = Number(s.perdidaFinanciera);
+
+  const ubBadge = !Number.isFinite(margenBruto) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : margenBruto >= 12 ? eeffStatusBadge('green', 'trending_up', 'Saludable')
+      : margenBruto >= 8 ? eeffStatusBadge('amber', 'warning', 'Atención')
+        : eeffStatusBadge('rose', 'trending_down', 'Presión');
+
+  const uoBadge = !Number.isFinite(margenOp) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : margenOp >= 5 ? eeffStatusBadge('violet', 'trending_up', 'Eficiente')
+      : margenOp >= 0 ? eeffStatusBadge('amber', 'warning', 'Ajustado')
+        : eeffStatusBadge('rose', 'trending_down', 'Negativo');
+
+  const ebitdaBadge = !Number.isFinite(margenEbitda) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : margenEbitda >= 5 ? eeffStatusBadge('green', 'trending_up', 'Sobre objetivo')
+      : margenEbitda >= 0 ? eeffStatusBadge('amber', 'warning', 'Bajo objetivo')
+        : eeffStatusBadge('rose', 'trending_down', 'Negativo');
+
+  const utilidadBadge = !Number.isFinite(utilidad) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : utilidad >= 0 ? eeffStatusBadge('green', 'trending_up', 'Resultado positivo')
+      : eeffStatusBadge('rose', 'trending_down', 'Resultado negativo');
+
+  const costoBadge = !Number.isFinite(costoPct) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : costoPct >= 80 ? eeffStatusBadge('rose', 'trending_up', 'Alta presión')
+      : costoPct >= 70 ? eeffStatusBadge('amber', 'warning', 'Atención')
+        : eeffStatusBadge('green', 'check_circle', 'Controlado');
+
+  const gastosBadge = !Number.isFinite(gastosPct) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : gastosPct >= 10 ? eeffStatusBadge('rose', 'trending_up', 'Alta presión')
+      : gastosPct >= 6 ? eeffStatusBadge('amber', 'warning', 'Atención')
+        : eeffStatusBadge('green', 'check_circle', 'Controlado');
+
+  const crecBadge = !Number.isFinite(crecEbit) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : crecEbit >= 20 ? eeffStatusBadge('green', 'trending_up', 'Crecimiento sólido')
+      : crecEbit > 0 ? eeffStatusBadge('green', 'trending_up', 'En crecimiento')
+        : crecEbit === 0 ? eeffStatusBadge('slate', 'trending_flat', 'Sin cambio')
+          : eeffStatusBadge('rose', 'trending_down', 'Contracción');
+
+  const perdidaBadge = !Number.isFinite(perdida) ? eeffStatusBadge('slate', 'info', 'Sin dato')
+    : perdida >= 0 ? eeffStatusBadge('green', 'trending_up', 'Resultado positivo')
+      : Math.abs(perdida) >= Math.abs(Number(s.utilidadOperacion) || 0)
+        ? eeffStatusBadge('rose', 'trending_down', 'Impacto significativo')
+        : eeffStatusBadge('amber', 'warning', 'Impacto moderado');
 
   return [
     {
       id: 'ventasTotales',
       label: 'Ventas totales',
       value: s.ventasTotales,
-      icon: 'receipt_long',
-      color: 'blue',
-      drilldown: buildVentasTotalesDrill(data),
-    },
-    {
-      id: 'costosTotales',
-      label: 'Costos totales',
-      value: s.costoTotal,
       icon: 'shopping_cart',
-      color: 'rose',
-      sub: s.ventasTotales
-        ? `${Number(((Number(s.costoTotal || 0) / Number(s.ventasTotales)) * 100).toFixed(1))}% de ventas`
-        : 'Costo de ventas',
-      drilldown: buildCostoDrill(data),
+      color: 'blue',
+      sub: '—',
+      badge: eeffStatusBadge('blue', 'fiber_manual_record', 'Total'),
+      row: 'primary',
+      drilldown: buildVentasTotalesDrill(data),
     },
     {
       id: 'utilidadBruta',
       label: 'Utilidad bruta',
       value: s.utilidadBruta,
-      icon: 'savings',
+      icon: 'monetization_on',
       color: 'green',
-      sub: `${s.margenBrutoPct ?? 0}% margen`,
+      sub: Number.isFinite(margenBruto) ? `${margenBruto}% de ventas` : '—',
+      badge: ubBadge,
+      row: 'primary',
       drilldown: buildUtilidadBrutaDrill(data),
     },
     {
-      id: 'gastosTotales',
-      label: 'Gastos totales',
-      value: s.sumaGastos,
-      icon: 'payments',
-      color: 'amber',
-      sub: s.ventasTotales
-        ? `${Number(((Number(s.sumaGastos || 0) / Number(s.ventasTotales)) * 100).toFixed(1))}% de ventas`
-        : 'Operación + administración',
-      drilldown: buildGastosDrill(data),
-    },
-    {
       id: 'utilidadOperacion',
-      label: 'Utilidad operación',
+      label: 'Utilidad de operación',
       value: s.utilidadOperacion,
-      icon: 'query_stats',
+      icon: 'show_chart',
       color: 'violet',
-      sub: `${s.margenOperacionPct ?? 0}% margen`,
+      sub: Number.isFinite(margenOp) ? `${margenOp}% margen` : '—',
+      badge: uoBadge,
+      row: 'primary',
       drilldown: [
         drillRow('Utilidad bruta', s.utilidadBruta, { id: 'uo-ub', highlight: true }),
         drillNode('gastos', 'Suma gastos', s.sumaGastos, {
@@ -389,29 +475,230 @@ function buildEdoFinKpiItems(data) {
       ],
     },
     {
+      id: 'margenEbitda',
+      label: 'Margen EBITDA',
+      value: s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct,
+      displayOverride: formatPctLabel(s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct),
+      icon: 'trending_up',
+      color: Number(s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct ?? 0) < 0 ? 'rose' : 'green',
+      sub: `EBITDA ${formatEbitMoney(s.ebitda ?? data.ebitMetrics?.ebitda)}`,
+      badge: ebitdaBadge,
+      row: 'primary',
+      drilldown: [
+        drillRow('EBIT (util. operación)', s.ebit ?? data.ebitMetrics?.ebit ?? s.utilidadOperacion, { id: 'ebitda-ebit', highlight: true }),
+        drillRow('(+) Depreciación periodo', s.depreciacionPeriodo ?? data.ebitMetrics?.depreciacionPeriodo, { id: 'ebitda-dep' }),
+        drillRow('EBITDA', s.ebitda ?? data.ebitMetrics?.ebitda, { id: 'ebitda-total', highlight: true }),
+        drillRow('Ventas totales', s.ventasTotales, { id: 'ebitda-vtas' }),
+      ],
+    },
+    {
+      id: 'utilidad',
+      label: 'Utilidad neta',
+      value: s.utilidad,
+      icon: 'flag',
+      color: utilidad < 0 ? 'rose' : 'green',
+      sub: utilidadPct != null ? `${utilidadPct}% de ventas` : '—',
+      badge: utilidadBadge,
+      row: 'primary',
+      drilldown: [
+        drillRow('Utilidad operación', s.utilidadOperacion, { id: 'u-uo', highlight: true }),
+        drillRow('Productos financieros', s.productosFinancieros, { id: 'u-pf' }),
+        drillRow('Gastos financieros', s.gastosFinancieros, { id: 'u-gf' }),
+        drillRow('Utilidad financiera', s.utilidadFinanciera, { id: 'u-uf', highlight: true }),
+        drillRow('Utilidad neta', s.utilidad, { id: 'u-total', highlight: true }),
+      ],
+    },
+    {
+      id: 'costosTotales',
+      label: 'Costos totales',
+      value: s.costoTotal,
+      icon: 'shopping_cart',
+      color: 'rose',
+      sub: costoPct != null ? `${costoPct}% de ventas` : 'Costo de ventas',
+      badge: costoBadge,
+      row: 'secondary',
+      drilldown: buildCostoDrill(data),
+    },
+    {
+      id: 'gastosTotales',
+      label: 'Gastos totales',
+      value: s.sumaGastos,
+      icon: 'work',
+      color: 'amber',
+      sub: gastosPct != null ? `${gastosPct}% de ventas` : 'Operación + administración',
+      badge: gastosBadge,
+      row: 'secondary',
+      drilldown: buildGastosDrill(data),
+    },
+    {
+      id: 'crecimientoEbit',
+      label: 'Crecimiento EBIT',
+      value: s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct,
+      displayOverride: formatPctLabel(s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct),
+      icon: 'trending_up',
+      color: Number(s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct ?? 0) < 0 ? 'rose'
+        : Number(s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct ?? 0) > 0 ? 'green' : 'slate',
+      sub: 'vs mismo periodo año anterior',
+      badge: crecBadge,
+      row: 'secondary',
+      drilldown: [
+        drillRow('EBIT actual', s.ebit ?? data.ebitMetrics?.ebit ?? s.utilidadOperacion, { id: 'crec-ebit-act', highlight: true }),
+        drillRow('EBIT año anterior', data.ebitMetrics?.utilidadOperacionAnterior, { id: 'crec-ebit-ant' }),
+      ],
+    },
+    {
       id: 'perdidaFinanciera',
       label: 'Pérdida financiera',
       value: s.perdidaFinanciera,
       icon: 'account_balance',
       color: Number(s.perdidaFinanciera || 0) < 0 ? 'rose' : 'green',
       sub: 'Productos − gastos e intereses',
+      badge: perdidaBadge,
+      row: 'secondary',
       drilldown: buildPerdidaFinancieraDrill(data),
     },
-    {
-      id: 'utilidad',
-      label: 'Utilidad',
-      value: s.utilidad,
-      icon: 'flag',
-      color: 'amber',
-      drilldown: [
-        drillRow('Utilidad operación', s.utilidadOperacion, { id: 'u-uo', highlight: true }),
-        drillRow('Productos financieros', s.productosFinancieros, { id: 'u-pf' }),
-        drillRow('Gastos financieros', s.gastosFinancieros, { id: 'u-gf' }),
-        drillRow('Utilidad financiera', s.utilidadFinanciera, { id: 'u-uf', highlight: true }),
-        drillRow('Utilidad', s.utilidad, { id: 'u-total', highlight: true }),
-      ],
-    },
   ];
+}
+
+function buildEdoFinPanorama(data) {
+  const s = data.estadoFinanciero?.summary || {};
+  const crecEbit = Number(s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct);
+  const utilidad = Number(s.utilidad);
+  const perdida = Number(s.perdidaFinanciera);
+  const margenBruto = Number(s.margenBrutoPct);
+  const costoPct = pctOfSales(s.costoTotal, s.ventasTotales);
+  const gastosPct = pctOfSales(s.sumaGastos, s.ventasTotales);
+
+  const strengths = [];
+  if (Number(s.ventasTotales) > 0) strengths.push('Ventas');
+  if (Number.isFinite(margenBruto) && margenBruto >= 12) strengths.push('Utilidad bruta');
+  if (Number.isFinite(crecEbit) && crecEbit > 0) strengths.push('crecimiento EBIT');
+
+  const attention = [];
+  if (Number.isFinite(costoPct) && costoPct >= 70) attention.push('Costos');
+  if (Number.isFinite(gastosPct) && gastosPct >= 6) attention.push('gastos');
+
+  const risks = [];
+  if (Number.isFinite(perdida) && perdida < 0) risks.push('Pérdida financiera impacta utilidad neta');
+  else if (Number.isFinite(utilidad) && utilidad < 0) risks.push('Utilidad neta en terreno negativo');
+
+  let summary = 'Sin datos suficientes para interpretar el periodo.';
+  if (Number(s.ventasTotales) > 0) {
+    const parts = [];
+    if (Number.isFinite(margenBruto) && margenBruto >= 12) {
+      parts.push('Las ventas y la utilidad bruta muestran un desempeño sólido');
+    } else {
+      parts.push('Las ventas sostienen la operación, pero el margen bruto es ajustado');
+    }
+    if (Number.isFinite(crecEbit) && crecEbit > 0) {
+      parts.push('con crecimiento de EBIT frente al año anterior');
+    }
+    if (Number.isFinite(perdida) && perdida < 0) {
+      parts.push('sin embargo la pérdida financiera presiona el resultado final');
+      if (utilidad < 0) parts.push('y arrastra la utilidad neta a terreno negativo');
+    } else if (utilidad >= 0) {
+      parts.push('y el resultado neto se mantiene positivo');
+    }
+    summary = `${parts.join(', ')}.`;
+    summary = summary.charAt(0).toUpperCase() + summary.slice(1);
+  }
+
+  return {
+    summary,
+    strengths: strengths.length ? strengths.join(', ') : 'Sin fortalezas destacadas',
+    attention: attention.length ? `${attention.join(' y ')} presionan márgenes` : 'Sin focos de atención relevantes',
+    risk: risks[0] || 'Sin riesgo clave identificado',
+  };
+}
+
+function renderEdoFinStatusBadge(badge) {
+  if (!badge) return '';
+  return `
+    <span class="eeff-edo-kpi__badge eeff-edo-kpi__badge--${badge.tone || 'slate'}">
+      <span class="material-symbols-outlined" aria-hidden="true">${badge.icon || 'info'}</span>
+      ${badge.label}
+    </span>`;
+}
+
+function renderEdoFinKpiCard(k, fmt, gridId, detailPanelId) {
+  const hasDrill = k.drilldown?.length;
+  const kpiKey = `${gridId}:${k.id}`;
+  const isOpen = activeEeffKpi === kpiKey;
+  const display = k.displayOverride ?? fmt.money(k.value);
+  const sub = k.sub != null ? k.sub : '';
+  const tag = hasDrill ? 'button' : 'div';
+  const typeAttr = hasDrill ? ' type="button"' : '';
+  const dataAttrs = hasDrill
+    ? ` data-eeff-kpi="${k.id}" data-eeff-grid="${gridId}" data-eeff-detail="${detailPanelId}" aria-expanded="${isOpen}" title="Clic para ver desglose"`
+    : '';
+
+  return `
+    <${tag}${typeAttr}
+      class="eeff-edo-kpi eeff-edo-kpi--${k.color || 'blue'}${hasDrill ? ' eeff-edo-kpi--interactive' : ''}${isOpen ? ' is-open' : ''}"
+      ${dataAttrs}>
+      <div class="eeff-edo-kpi__head">
+        <span class="material-symbols-outlined eeff-edo-kpi__icon" aria-hidden="true">${k.icon || 'payments'}</span>
+        <span class="eeff-edo-kpi__label">${k.label}</span>
+      </div>
+      <div class="eeff-edo-kpi__value">${display}</div>
+      ${sub ? `<p class="eeff-edo-kpi__sub">${sub}</p>` : ''}
+      ${renderEdoFinStatusBadge(k.badge)}
+    </${tag}>`;
+}
+
+function renderEdoFinOverview(data, fmt) {
+  const items = buildEdoFinKpiItems(data);
+  const primary = items.filter((i) => i.row === 'primary');
+  const secondary = items.filter((i) => i.row === 'secondary');
+  const gridId = 'kpiEdoFin';
+  const detailId = 'eeffKpiDetailEdoFin';
+
+  const primaryEl = document.getElementById('kpiEdoFinPrimary');
+  const secondaryEl = document.getElementById('kpiEdoFinSecondary');
+  if (primaryEl) {
+    primaryEl.innerHTML = primary.map((k) => renderEdoFinKpiCard(k, fmt, gridId, detailId)).join('');
+  }
+  if (secondaryEl) {
+    secondaryEl.innerHTML = secondary.map((k) => renderEdoFinKpiCard(k, fmt, gridId, detailId)).join('');
+  }
+
+  renderEeffKpiDetail(detailId, gridId, items, fmt);
+
+  const panorama = buildEdoFinPanorama(data);
+  const panEl = document.getElementById('eeffEdoFinPanorama');
+  if (panEl) {
+    panEl.innerHTML = `
+      <div class="eeff-panorama__main">
+        <div class="eeff-panorama__title-wrap">
+          <span class="material-symbols-outlined eeff-panorama__icon" aria-hidden="true">track_changes</span>
+          <h3 class="eeff-panorama__title">Panorama general</h3>
+        </div>
+        <p class="eeff-panorama__summary">${panorama.summary}</p>
+      </div>
+      <div class="eeff-panorama__insights">
+        <div class="eeff-panorama__insight eeff-panorama__insight--green">
+          <span class="material-symbols-outlined" aria-hidden="true">trending_up</span>
+          <div>
+            <p class="eeff-panorama__insight-label">Fortalezas</p>
+            <p class="eeff-panorama__insight-text">${panorama.strengths}</p>
+          </div>
+        </div>
+        <div class="eeff-panorama__insight eeff-panorama__insight--amber">
+          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+          <div>
+            <p class="eeff-panorama__insight-label">Atención</p>
+            <p class="eeff-panorama__insight-text">${panorama.attention}</p>
+          </div>
+        </div>
+        <div class="eeff-panorama__insight eeff-panorama__insight--rose">
+          <span class="material-symbols-outlined" aria-hidden="true">bolt</span>
+          <div>
+            <p class="eeff-panorama__insight-label">Riesgo clave</p>
+            <p class="eeff-panorama__insight-text">${panorama.risk}</p>
+          </div>
+        </div>
+      </div>`;
+  }
 }
 
 function buildVentasKpiItems(data) {
@@ -703,9 +990,19 @@ function formatComparativaPeriodLabel(fechaInicio, fechaFin, mesesIncluidos) {
 }
 
 function formatPctLabel(value) {
-  const n = Number(value) || 0;
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return '—';
+  const n = Number(value);
   const sign = n > 0 ? '+' : '';
   return `${sign}${n}%`;
+}
+
+function formatEbitMoney(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  try {
+    return Dashboard.fmt.money(Number(value));
+  } catch {
+    return String(value);
+  }
 }
 
 function downloadComparativaCsv(cmp, filtros) {
@@ -748,7 +1045,7 @@ function downloadComparativaCsv(cmp, filtros) {
 
 function renderDrillRowHtml(row, fmt, hasCompare) {
   if (row.type === 'header') {
-    return `<tr class="eeff-kpi-detail__section"><td colspan="${hasCompare ? 4 : 2}">${row.label}</td></tr>`;
+    return `<tr class="bg-kpi-float__section-row"><td colspan="${hasCompare ? 4 : 2}">${row.label}</td></tr>`;
   }
   if (row.type === 'text') {
     return `<tr class="eeff-kpi-detail__text"><td>${row.label}</td><td colspan="${hasCompare ? 3 : 1}">${row.value}</td></tr>`;
@@ -759,7 +1056,7 @@ function renderDrillRowHtml(row, fmt, hasCompare) {
          <span class="material-symbols-outlined">${row.isExpanded ? 'expand_more' : 'chevron_right'}</span>
        </button>`
     : '<span class="eeff-drill-toggle eeff-drill-toggle--spacer" aria-hidden="true"></span>';
-  const indent = 8 + row.depth * 18;
+  const indent = 4 + row.depth * 16;
   const labelCell = `<div class="eeff-drill-label" style="padding-left:${indent}px">${toggle}<span>${row.label}</span></div>`;
 
   const parentAttrs = row.hasChildren
@@ -782,6 +1079,91 @@ function renderDrillRowHtml(row, fmt, hasCompare) {
       <td>${labelCell}</td>
       <td class="cell-money ${moneyClass(row.value)}"><strong>${fmt.money(row.value)}</strong></td>
     </tr>`;
+}
+
+function renderEeffKpiDetail(detailPanelId, gridId, items, fmt) {
+  const legacy = document.getElementById(detailPanelId);
+  if (legacy) {
+    legacy.classList.add('hidden');
+    legacy.innerHTML = '';
+  }
+
+  if (!activeEeffKpi) {
+    closeEeffKpiFloatUi();
+    return;
+  }
+  if (!activeEeffKpi.startsWith(`${gridId}:`)) return;
+
+  const panel = document.getElementById('eeffKpiFloat');
+  const backdrop = document.getElementById('eeffKpiFloatBackdrop');
+  if (!panel || !backdrop) return;
+
+  const kpiId = activeEeffKpi.slice(gridId.length + 1);
+  const kpi = items.find((i) => i.id === kpiId);
+  if (!kpi?.drilldown?.length) {
+    closeEeffKpiFloat();
+    return;
+  }
+
+  if (eeffDrillNeedsSeed) {
+    seedAutoExpandNodes(kpi.drilldown, activeEeffKpi);
+    eeffDrillNeedsSeed = false;
+  }
+
+  const flatRows = flattenDrillTree(kpi.drilldown, activeEeffKpi);
+  const hasCompare = treeHasCompare(kpi.drilldown);
+  const display = kpi.displayOverride ?? fmt.money(kpi.value);
+  const accent = kpi.color || 'blue';
+  const rowCount = flatRows.filter((r) => r.type !== 'header' && r.type !== 'text').length;
+
+  document.querySelectorAll('[data-eeff-kpi]').forEach((el) => {
+    const open = el.dataset.eeffGrid === gridId && el.dataset.eeffKpi === kpiId;
+    el.classList.toggle('is-open', open);
+    el.classList.toggle('is-selected', open);
+    if (el.hasAttribute('aria-expanded')) el.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  panel.dataset.accent = accent;
+  panel.innerHTML = `
+    <div class="bg-kpi-float__head bg-kpi-float__head--${accent}">
+      <div class="bg-kpi-float__head-main">
+        <div class="bg-kpi-float__icon bg-kpi-float__icon--${accent}" aria-hidden="true">
+          <span class="material-symbols-outlined">${kpi.icon || 'payments'}</span>
+        </div>
+        <div>
+          <p class="bg-kpi-float__eyebrow">EEFF · desglose</p>
+          <h3 class="bg-kpi-float__title" id="eeffKpiFloatTitle">${kpi.label}</h3>
+          <p class="bg-kpi-float__value ${moneyClass(kpi.value)}">${display}</p>
+          <p class="bg-kpi-float__hint">${kpi.sub || 'Clic en una partida para expandir su detalle'}</p>
+          <span class="bg-kpi-float__meta">${rowCount} partida${rowCount === 1 ? '' : 's'} visibles</span>
+        </div>
+      </div>
+      <button type="button" class="bg-kpi-float__close" data-eeff-close-detail aria-label="Cerrar">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="bg-kpi-float__body">
+      <div class="bg-kpi-float__group">
+        <p class="bg-kpi-float__section">Desglose · clic para expandir</p>
+        <table class="bg-kpi-float__table${hasCompare ? ' bg-kpi-float__table--compare' : ''}">
+          <thead>
+            <tr>
+              <th>Concepto</th>
+              <th class="cell-money">${hasCompare ? 'Real' : 'Importe'}</th>
+              ${hasCompare ? '<th class="cell-money">Presupuesto</th><th class="cell-money">Variación</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${flatRows.map((row) => renderDrillRowHtml(row, fmt, hasCompare)).join('')
+              || '<tr><td colspan="2">Sin desglose disponible.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+  panel.classList.remove('hidden');
+  backdrop.classList.remove('hidden');
+  backdrop.setAttribute('aria-hidden', 'false');
 }
 
 function renderInteractiveKpiGrid(gridId, detailPanelId, items, fmt) {
@@ -826,58 +1208,6 @@ function renderInteractiveKpiGrid(gridId, detailPanelId, items, fmt) {
   }).join('');
 
   renderEeffKpiDetail(detailPanelId, gridId, items, fmt);
-}
-
-function renderEeffKpiDetail(detailPanelId, gridId, items, fmt) {
-  const panel = document.getElementById(detailPanelId);
-  if (!panel) return;
-
-  const kpiKey = activeEeffKpi;
-  if (!kpiKey || !kpiKey.startsWith(`${gridId}:`)) {
-    panel.classList.add('hidden');
-    panel.innerHTML = '';
-    return;
-  }
-
-  const kpiId = kpiKey.slice(gridId.length + 1);
-  const kpi = items.find((i) => i.id === kpiId);
-  if (!kpi?.drilldown?.length) {
-    panel.classList.add('hidden');
-    panel.innerHTML = '';
-    return;
-  }
-
-  const flatRows = flattenDrillTree(kpi.drilldown, kpiKey);
-  const hasCompare = treeHasCompare(kpi.drilldown);
-
-  panel.classList.remove('hidden');
-  panel.innerHTML = `
-    <div class="eeff-kpi-detail">
-      <div class="eeff-kpi-detail__head">
-        <div>
-          <p class="eeff-kpi-detail__eyebrow">Desglose</p>
-          <h4 class="eeff-kpi-detail__title">${kpi.label}</h4>
-          <p class="eeff-kpi-detail__hint">Clic en una partida para ver su desglose</p>
-        </div>
-        <button type="button" class="eeff-kpi-detail__close" data-eeff-close-detail aria-label="Cerrar desglose">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-      <div class="table-scroll eeff-kpi-detail__table-wrap">
-        <table class="data-table eeff-kpi-detail__table">
-          <thead>
-            <tr>
-              <th>Concepto</th>
-              <th class="cell-money">${hasCompare ? 'Real' : 'Importe'}</th>
-              ${hasCompare ? '<th class="cell-money">Presupuesto</th><th class="cell-money">Variación</th>' : ''}
-            </tr>
-          </thead>
-          <tbody>
-            ${flatRows.map((row) => renderDrillRowHtml(row, fmt, hasCompare)).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
 }
 
 function renderKpiGrid(containerId, items, fmt) {
@@ -1000,7 +1330,7 @@ function renderPostventaTable(data, fmt) {
 }
 
 function renderEdoFin(data, fmt) {
-  renderKpiGrid('kpiEdoFin', buildEdoFinKpiItems(data), fmt);
+  renderEdoFinOverview(data, fmt);
   renderLinesTable('edoFinTable', data.estadoFinanciero?.lines, fmt);
 }
 
@@ -1182,7 +1512,7 @@ async function loadEeffSummary(fechaInicio, fechaFin) {
   const { api } = Dashboard;
   const data = await api(`/eeff?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`);
   eeffData = data;
-  expandedDrillNodes.clear();
+  closeEeffKpiFloat();
   renderAll(data);
   return data;
 }
@@ -1190,10 +1520,16 @@ async function loadEeffSummary(fechaInicio, fechaFin) {
 document.getElementById('eeffTabs')?.addEventListener('click', (e) => {
   const tab = e.target.closest('.eeff-tab');
   if (!tab) return;
+  closeEeffKpiFloat();
   switchCategoria(tab.dataset.categoria);
 });
 
 document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-eeff-close-detail]') || e.target.closest('#eeffKpiFloatBackdrop')) {
+    closeEeffKpiFloat();
+    return;
+  }
+
   const drillToggle = e.target.closest('[data-eeff-drill-toggle]');
   if (drillToggle) {
     e.stopPropagation();
@@ -1213,17 +1549,14 @@ document.addEventListener('click', (e) => {
     const kpiId = kpiBtn.dataset.eeffKpi;
     const key = `${gridId}:${kpiId}`;
     const opening = activeEeffKpi !== key;
-    activeEeffKpi = opening ? key : null;
-    if (opening) expandedDrillNodes.clear();
-    if (eeffData) renderAll(eeffData);
     if (opening) {
-      document.getElementById(kpiBtn.dataset.eeffDetail)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      activeEeffKpi = key;
+      expandedDrillNodes.clear();
+      eeffDrillNeedsSeed = true;
+    } else {
+      closeEeffKpiFloat();
+      return;
     }
-    return;
-  }
-
-  if (e.target.closest('[data-eeff-close-detail]')) {
-    activeEeffKpi = null;
     if (eeffData) renderAll(eeffData);
     return;
   }
@@ -1245,9 +1578,14 @@ document.addEventListener('click', (e) => {
   document.getElementById('btnConsultar')?.click();
 });
 
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && activeEeffKpi) closeEeffKpiFloat();
+});
+
 window.EeffSummary = {
   load: loadEeffSummary,
   switchCategoria,
+  closeKpiFloat: closeEeffKpiFloat,
   getActiveCategoria: () => activeCategoria,
   isComparativaYearRange,
   getComparativa2026DefaultRange,

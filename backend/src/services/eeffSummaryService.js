@@ -18,7 +18,9 @@ const {
   getDepartmentByGpo,
 } = require('../config/departmentExpenseMapping');
 const { buildEeffComparativa } = require('./eeffComparativaService');
-const { getBalanceGeneral } = require('./balanceGeneralService');
+const { getBalanceGeneral, getDepreciacionPeriodo } = require('./balanceGeneralService');
+const { computeEbitMetrics } = require('./estructuraFinanciera');
+const { getCatalogKpis } = require('./accountingCatalogKpiService');
 
 const ACUM_DET = 'DETA';
 const SEMINUEVOS_EXPENSE_GPO = '720';
@@ -68,6 +70,16 @@ function incomeExpr(rawExpr) {
 
 function expenseExpr(rawExpr) {
   return `CASE WHEN CTA_NATURALEZA = 'DEUD' THEN (${rawExpr}) ELSE -(${rawExpr}) END`;
+}
+
+function shiftYearIso(iso, years) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setFullYear(d.getFullYear() + years);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function yearSegments(fechaInicio, fechaFin) {
@@ -522,17 +534,40 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
   const prorationMeta = getProrationMatrixMeta({ fechaFin });
   const adminTotal = await sumAdminTotal(segments);
 
-  const [ventas, postventa, seminuevos, balanceGeneral, gastosPorDepartamento] = await Promise.all([
+  const priorInicio = shiftYearIso(fechaInicio, -1);
+  const priorFin = shiftYearIso(fechaFin, -1);
+
+  const [ventas, postventa, seminuevos, balanceGeneral, gastosPorDepartamento, depPeriodo, catalogPrior] = await Promise.all([
     buildVentasSection(segments, adminTotal, prorationFactors),
     buildPostventaSection(segments, adminTotal, prorationFactors),
     buildSeminuevosSection(segments, adminTotal, prorationFactors),
     buildBalanceGeneral(fechaFin),
     buildDepartmentExpenseBreakdown(segments),
+    getDepreciacionPeriodo(fechaInicio, fechaFin).catch((err) => {
+      console.error('[eeff] depreciacionPeriodo:', err.message);
+      return { available: false, depreciacionPeriodo: 0 };
+    }),
+    getCatalogKpis({ fechaInicio: priorInicio, fechaFin: priorFin }).catch(() => null),
   ]);
 
   const estadoFinanciero = await buildEstadoFinanciero(
     segments, ventas, postventa, seminuevos, adminTotal, gastosPorDepartamento,
   );
+
+  const ebitMetrics = computeEbitMetrics({
+    ventas: estadoFinanciero.summary.ventasTotales,
+    utilidadOperacion: estadoFinanciero.summary.utilidadOperacion,
+    depreciacionPeriodo: depPeriodo?.depreciacionPeriodo || 0,
+    utilidadOperacionAnterior: catalogPrior?.summary?.utilidadOperacion ?? null,
+  });
+  Object.assign(estadoFinanciero.summary, {
+    ebit: ebitMetrics.ebit,
+    ebitda: ebitMetrics.ebitda,
+    margenEbitPct: ebitMetrics.margenEbitPct,
+    margenEbitdaPct: ebitMetrics.margenEbitdaPct,
+    crecimientoEbitPct: ebitMetrics.crecimientoEbitPct,
+    depreciacionPeriodo: ebitMetrics.depreciacionPeriodo,
+  });
 
   const payload = {
     available,
@@ -545,6 +580,8 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
     ventas,
     postventa,
     seminuevos,
+    ebitMetrics,
+    depreciacionPeriodo: depPeriodo,
     proration: {
       ...prorationMeta,
       factors: prorationFactors,
@@ -555,6 +592,8 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
       postventa: 'Servicio + Refacciones + HYP (prefijos Contpaq)',
       gastos: 'Cuentas Contpaq por departamento (listas) restringidas a CTA_GPOCONT + prorrateo administración (740/750)',
       balance: 'Saldos al cierre · GPOCONT 110–190 + cuentas mayor ACUM',
+      ebitda: 'EBIT (utilidad operación) + Δ depreciación acumulada del periodo',
+      crecimientoEbit: 'Variación % de utilidad de operación vs mismo periodo del año anterior',
     },
   };
 

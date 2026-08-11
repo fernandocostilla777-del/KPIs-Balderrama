@@ -1,6 +1,16 @@
 const { query } = require('../db');
 const { BALANCE_GENERAL_SECTIONS } = require('../config/balanceGeneralAccounts');
 const { computeLiquidezAnalysis } = require('./liquidezAnalysis');
+const { computeEstructuraFinanciera } = require('./estructuraFinanciera');
+
+const DEP_ACUM_CUENTAS = [
+  '0351-0000-0000-0000',
+  '0352-0000-0000-0000',
+  '0353-0000-0000-0000',
+  '0354-0000-0000-0000',
+  '0355-0000-0000-0000',
+  '0357-0000-0000-0000',
+];
 
 const MES_NOMBRE = [
   '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -42,6 +52,111 @@ function resolveMesCierre(fechaFin) {
     asOfCierre,
     labelCierre: `${lastDay} de ${MES_NOMBRE[month]} ${year}`,
     includePeriod13: month === 12,
+  };
+}
+
+/** Último día del mes anterior al cierre de fechaFin. */
+function previousMonthEndIso(fechaFin) {
+  const { year, month } = resolveMesCierre(fechaFin);
+  let y = year;
+  let m = month - 1;
+  if (m < 1) {
+    m = 12;
+    y -= 1;
+  }
+  const lastDay = new Date(y, m, 0).getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
+function pctChange(curr, prev) {
+  const c = Number(curr);
+  const p = Number(prev);
+  if (!Number.isFinite(c)) return null;
+  if (!Number.isFinite(p) || Math.abs(p) < 0.01) {
+    if (Math.abs(c) < 0.01) return 0;
+    return c > 0 ? 100 : -100;
+  }
+  return Math.round(((c - p) / Math.abs(p)) * 1000) / 10;
+}
+
+function shortMonthLabel(year, month) {
+  if (!year || !month) return 'mes ant.';
+  return `${MES_NOMBRE[month].slice(0, 3)} ${year}`;
+}
+
+function sectionVal(bg, key) {
+  return (bg?.sections || []).find((s) => s.key === key)?.value ?? null;
+}
+
+function buildComparativoMetric(actual, anterior, labelVs) {
+  const variacionPct = pctChange(actual, anterior);
+  if (variacionPct == null) {
+    return {
+      actual: actual ?? null,
+      anterior: anterior ?? null,
+      variacionPct: null,
+      labelVs,
+      display: null,
+      tone: 'slate',
+    };
+  }
+  const sign = variacionPct > 0 ? '+' : '';
+  return {
+    actual: actual ?? null,
+    anterior: anterior ?? null,
+    variacionPct,
+    labelVs,
+    display: `${sign}${variacionPct}% vs ${labelVs}`,
+    tone: variacionPct > 0 ? 'up' : variacionPct < 0 ? 'down' : 'flat',
+  };
+}
+
+function buildBalanceComparativo(current, prior) {
+  if (!prior?.available) return null;
+  const labelVs = shortMonthLabel(prior.year, prior.month);
+  return {
+    labelVs,
+    asOfCierre: prior.asOfCierre,
+    labelCierre: prior.labelCierre,
+    totals: {
+      activoTotal: buildComparativoMetric(current.totals?.activoTotal, prior.totals?.activoTotal, labelVs),
+      pasivoTotal: buildComparativoMetric(current.totals?.pasivoTotal, prior.totals?.pasivoTotal, labelVs),
+      capital: buildComparativoMetric(current.totals?.capital, prior.totals?.capital, labelVs),
+      capitalTrabajo: buildComparativoMetric(
+        current.liquidez?.capitalTrabajo,
+        prior.liquidez?.capitalTrabajo,
+        labelVs,
+      ),
+    },
+    sections: {
+      activoCirculante: buildComparativoMetric(
+        sectionVal(current, 'activoCirculante'),
+        sectionVal(prior, 'activoCirculante'),
+        labelVs,
+      ),
+      activoFijo: buildComparativoMetric(
+        sectionVal(current, 'activoFijo'),
+        sectionVal(prior, 'activoFijo'),
+        labelVs,
+      ),
+      activoDiferido: buildComparativoMetric(
+        sectionVal(current, 'activoDiferido'),
+        sectionVal(prior, 'activoDiferido'),
+        labelVs,
+      ),
+      pasivoCortoPlazo: buildComparativoMetric(
+        sectionVal(current, 'pasivoCortoPlazo'),
+        sectionVal(prior, 'pasivoCortoPlazo'),
+        labelVs,
+      ),
+      pasivoLargoPlazo: buildComparativoMetric(
+        sectionVal(current, 'pasivoLargoPlazo'),
+        sectionVal(prior, 'pasivoLargoPlazo'),
+        labelVs,
+      ),
+      pasivoTotal: buildComparativoMetric(current.totals?.pasivoTotal, prior.totals?.pasivoTotal, labelVs),
+      capital: buildComparativoMetric(current.totals?.capital, prior.totals?.capital, labelVs),
+    },
   };
 }
 
@@ -211,7 +326,7 @@ async function loadResultadoEjercicio(cierre) {
   };
 }
 
-async function getBalanceGeneral({ fechaFin }) {
+async function getBalanceGeneral({ fechaFin, includeComparativo = true } = {}) {
   const loaded = await loadAccountBalances(fechaFin);
   const resultadoEjercicio = loaded.available
     ? await loadResultadoEjercicio(loaded)
@@ -292,17 +407,32 @@ async function getBalanceGeneral({ fechaFin }) {
 
   const activoCirculante = sections.find((s) => s.key === 'activoCirculante')?.value || 0;
   const pasivoCirculante = sections.find((s) => s.key === 'pasivoCortoPlazo')?.value || 0;
+  const pasivoLargo = sections.find((s) => s.key === 'pasivoLargoPlazo')?.value || 0;
   const liquidez = computeLiquidezAnalysis({
     activoCirculante,
     pasivoCirculante,
     accounts: accountsBySection.activoCirculante || [],
   });
 
+  const cxpProveedores = round2(
+    (accountsBySection.pasivoCortoPlazo || [])
+      .filter((a) => String(a.cuenta || '').startsWith('0300-'))
+      .reduce((sum, a) => sum + Math.abs(Number(a.value || 0)), 0),
+  );
+
+  const estructura = computeEstructuraFinanciera({
+    activoTotal,
+    pasivoTotal,
+    pasivoCorto: pasivoCirculante,
+    pasivoLargo,
+    capital,
+  });
+
   const mesesIncluidos = loaded.month
     ? `ene–${MES_NOMBRE[loaded.month].slice(0, 3)}`
     : '';
 
-  return {
+  const payload = {
     available: loaded.available,
     source: 'CON_CTAS · Balance General (cuentas mayor)',
     asOf: loaded.asOfCierre || fechaFin,
@@ -323,6 +453,9 @@ async function getBalanceGeneral({ fechaFin }) {
       ecuacionDiferencia: loaded.available ? round2(activoTotal - pasivoMasCapital) : null,
     },
     liquidez,
+    estructura,
+    cxpProveedores,
+    comparativo: null,
     methodology: {
       activo: 'Circulante + fijo (neto de depreciaciones) + diferido',
       pasivo: 'Circulante + largo plazo',
@@ -330,12 +463,78 @@ async function getBalanceGeneral({ fechaFin }) {
       saldos: `Saldo Contpaq al cierre de ${loaded.labelCierre || 'periodo'} (${mesesIncluidos}${loaded.includePeriod13 ? ' + p13' : ''}) · DEUD: Ini+Cargos−Abonos · ACRE: Ini+Abonos−Cargos · mayor ACUM`,
       fuente: 'SQL',
       regla: 'Corte al cierre del mes de la fecha fin. Capital incluye Resultado del ejercicio = Σ saldos firmados de cuentas mayor de resultados (04–09) ene…mes.',
+      endeudamiento: 'Pasivo total ÷ Activo total',
+      apalancamiento: 'Pasivo total ÷ Capital contable',
+      calidadDeuda: 'Participación del pasivo corto plazo sobre el pasivo total',
+      dpo: 'CxP proveedores (0300) ÷ Costo de ventas × días del periodo',
+      comparativo: 'Variación % vs cierre del mes anterior',
     },
+  };
+
+  if (includeComparativo && payload.available) {
+    try {
+      const priorFin = previousMonthEndIso(fechaFin);
+      const prior = await getBalanceGeneral({ fechaFin: priorFin, includeComparativo: false });
+      payload.comparativo = buildBalanceComparativo(payload, prior);
+    } catch (err) {
+      console.error('[balanceGeneral] comparativo:', err.message);
+      payload.comparativo = null;
+    }
+  }
+
+  return payload;
+}
+
+/**
+ * Depreciación del periodo ≈ incremento de depreciación acumulada (035x)
+ * entre el día previo a fechaInicio y el cierre de fechaFin.
+ */
+async function getDepreciacionPeriodo(fechaInicio, fechaFin) {
+  function shiftDay(iso, delta) {
+    const d = new Date(`${iso}T12:00:00`);
+    d.setDate(d.getDate() + delta);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  const beforeStart = shiftDay(fechaInicio, -1);
+  const [endBal, startBal] = await Promise.all([
+    loadAccountBalances(fechaFin),
+    loadAccountBalances(beforeStart),
+  ]);
+
+  if (!endBal.available) {
+    return { available: false, depreciacionPeriodo: 0, detalle: [] };
+  }
+
+  const detalle = [];
+  let total = 0;
+  for (const cuenta of DEP_ACUM_CUENTAS) {
+    const endV = Math.abs(Number(endBal.byCuentaNature.get(cuenta) || 0));
+    const startV = startBal.available
+      ? Math.abs(Number(startBal.byCuentaNature.get(cuenta) || 0))
+      : 0;
+    const delta = round2(Math.max(0, endV - startV));
+    if (delta > 0.005) {
+      detalle.push({ cuenta, inicio: startV, fin: endV, delta });
+      total += delta;
+    }
+  }
+
+  return {
+    available: true,
+    depreciacionPeriodo: round2(total),
+    desde: beforeStart,
+    hasta: endBal.asOfCierre || fechaFin,
+    detalle,
   };
 }
 
 module.exports = {
   getBalanceGeneral,
+  getDepreciacionPeriodo,
   loadAccountBalances,
   loadResultadoEjercicio,
   resolveMesCierre,

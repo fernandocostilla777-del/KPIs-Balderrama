@@ -6,7 +6,7 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=46" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=56" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -214,8 +214,8 @@
 </div>
 </div>
 <div class="section-panel table-panel">
-<h3 class="section-title">Ratios financieros · Liquidez</h3>
-<p class="section-subtitle">Capital de trabajo, razón circulante y prueba ácida (sin inventarios ni anticipados)</p>
+<h3 class="section-title">Ratios financieros</h3>
+<p class="section-subtitle">Márgenes, EBITDA, liquidez y prueba ácida</p>
 <div id="ratiosEeff" class="kpi-summary"></div>
 <div id="liquidezInterpretacion" class="liquidez-note hidden" aria-live="polite"></div>
 </div>
@@ -234,38 +234,67 @@
 
 </div>
 
-<div id="panelContabilidadBalance" class="contabilidad-main-panel hidden">
+<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid hidden">
 
-<section class="section-panel dashboard-section">
+<section class="bg-balance-head dashboard-section">
+<div class="bg-balance-head__row">
+<div class="bg-balance-head__main">
+<span class="material-symbols-outlined bg-balance-head__icon" aria-hidden="true">account_balance</span>
+<div>
 <h3 class="section-title">Balance General</h3>
-<p class="section-subtitle" id="balanceGeneralMethodology">Saldos SQL (CON_CTAS · cuentas mayor ACUM) · Activo (circulante + fijo + diferido) · Pasivo (circulante + largo plazo) · Capital</p>
+<p class="section-subtitle" id="balanceGeneralMethodology">Saldos SQL (CON_CTAS · cuentas mayor ACUM)</p>
+<p class="bg-balance-head__tip"><span class="bg-balance-head__tip-dot" aria-hidden="true"></span> Clic en un KPI para ver el desglose</p>
+</div>
+</div>
+<button type="button" class="bg-balance-date" id="bgBalanceDateChip" aria-controls="drawerPeriod" title="Cambiar periodo">
+<span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+<span id="bgBalanceDateLabel">—</span>
+</button>
+</div>
 </section>
 
-<section id="kpiBalanceGeneral" class="bg-kpi-stack" aria-label="KPIs Balance General">
-<div class="kpi-grid kpi-grid--eeff kpi-grid--bg-activo" id="kpiBalanceActivo" aria-label="Activo"></div>
-<div class="kpi-grid kpi-grid--eeff kpi-grid--bg-pasivo" id="kpiBalancePasivo" aria-label="Pasivo y capital"></div>
-</section>
-<div id="bgKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
-<aside id="bgKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="bgKpiFloatTitle"></aside>
+<section id="bgHeroKpis" class="bg-hero-grid" aria-label="Totales del balance"></section>
 
-<section class="section-panel table-panel dashboard-section">
-<h3 class="section-title">Liquidez (desde Balance General)</h3>
-<p class="section-subtitle">Capital de trabajo, razón circulante y prueba ácida</p>
-<div id="bgLiquidezKpis" class="kpi-summary"></div>
-<div id="bgLiquidezInterpretacion" class="liquidez-note hidden" aria-live="polite"></div>
+<section class="bg-composicion-grid" aria-label="Composición">
+<div class="bg-composicion-panel">
+<h4 class="bg-composicion-title">Composición del Activo</h4>
+<div id="bgCompActivo" class="bg-comp-cards"></div>
+</div>
+<div class="bg-composicion-panel">
+<h4 class="bg-composicion-title">Composición del Pasivo</h4>
+<div id="bgCompPasivo" class="bg-comp-cards"></div>
+</div>
 </section>
 
-<section class="section-panel table-panel dashboard-section">
-<h3 class="section-title">Resumen · Ecuación contable</h3>
+<section class="bg-indicadores-section dashboard-section">
+<h4 class="bg-composicion-title">Indicadores clave de liquidez y endeudamiento</h4>
+<div id="bgIndicadores" class="bg-indicadores-grid" aria-label="Indicadores"></div>
+</section>
+
+<section class="bg-analisis-grid" aria-label="Análisis">
+<article id="bgAnalisisLiquidez" class="bg-analisis-card bg-analisis-card--liquidez hidden" aria-live="polite"></article>
+<article id="bgAnalisisEstructura" class="bg-analisis-card bg-analisis-card--estructura hidden" aria-live="polite"></article>
+</section>
+
+<section class="section-panel table-panel dashboard-section bg-ecuacion-panel">
+<details>
+<summary class="bg-ecuacion-summary">Resumen · Ecuación contable</summary>
 <div class="table-scroll">
 <table class="data-table">
 <thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
 <tbody id="bgResumenTable"></tbody>
 </table>
 </div>
+</details>
 </section>
 
 </div>
+
+<div id="bgKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
+<aside id="bgKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="bgKpiFloatTitle"></aside>
+
+<div id="eeffKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
+<aside id="eeffKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="eeffKpiFloatTitle"></aside>
 
 <div id="panelContabilidadEeff" class="contabilidad-main-panel hidden">
 
@@ -277,8 +306,16 @@
 </nav>
 
 <section id="panelEdoFin" class="eeff-panel" data-panel="estadoFinanciero">
-<section class="kpi-grid kpi-grid--eeff" id="kpiEdoFin"></section>
+<section id="eeffEdoFinOverview" class="eeff-edo-overview" aria-label="Resumen estado financiero">
+<div class="eeff-edo-kpi-row eeff-edo-kpi-row--5" id="kpiEdoFinPrimary"></div>
+<div class="eeff-edo-kpi-row eeff-edo-kpi-row--4" id="kpiEdoFinSecondary"></div>
 <div id="eeffKpiDetailEdoFin" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+<article id="eeffEdoFinPanorama" class="eeff-panorama" aria-live="polite"></article>
+<p class="eeff-edo-footnote">
+<span class="material-symbols-outlined" aria-hidden="true">info</span>
+Cifras en MXN · Porcentajes calculados sobre ventas totales
+</p>
+</section>
 
 <section class="section-panel dashboard-section" id="panelPuntoEquilibrio">
 <div class="section-head-row">
@@ -535,7 +572,7 @@ Exportar CSV
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=4"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/eeff.js?v=26"></script>
-<script src="/js/contabilidad.js?v=44"></script>
+<script src="/js/eeff.js?v=29"></script>
+<script src="/js/contabilidad.js?v=50"></script>
 </body>
 </html>

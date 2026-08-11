@@ -12,6 +12,8 @@ function getMainTabFromUrl() {
 
 function switchMainTab(tab) {
   activeMainTab = tab;
+  if (tab !== 'balance') closeBgKpiFloat();
+  if (tab !== 'eeff') window.EeffSummary?.closeKpiFloat?.();
   document.querySelectorAll('.contabilidad-tab').forEach((el) => {
     el.classList.toggle('active', el.dataset.tab === tab);
   });
@@ -393,6 +395,92 @@ function buildBgKpiItems(bg) {
     );
   }
 
+  const E = bg.estructura || {};
+  const D = bg.dpo || {};
+  if (E.disponible) {
+    const estFacts = [
+      { label: 'Activo total', value: E.activoTotal },
+      { label: 'Pasivo total', value: E.pasivoTotal },
+      { label: 'Pasivo corto plazo', value: E.pasivoCorto },
+      { label: 'Pasivo largo plazo', value: E.pasivoLargo },
+      { label: 'Capital contable', value: E.capital },
+    ];
+    items.push(
+      {
+        id: 'endeudamiento',
+        label: 'Endeudamiento',
+        value: E.endeudamientoPct,
+        display: E.endeudamientoPct != null ? `${E.endeudamientoPct}%` : '—',
+        icon: 'percent',
+        color: E.endeudamientoPct != null && E.endeudamientoPct > 70 ? 'rose'
+          : E.endeudamientoPct != null && E.endeudamientoPct > 50 ? 'amber' : 'green',
+        sub: 'Pasivo ÷ Activo · clic',
+        hint: E.formula?.endeudamiento || 'Pasivo total ÷ Activo total × 100',
+        facts: estFacts,
+        groups: [
+          { title: 'Pasivo circulante', rows: pasivoCp, total: E.pasivoCorto },
+          { title: 'Pasivo largo plazo', rows: pasivoLp, total: E.pasivoLargo },
+          { title: 'Capital contable', rows: capital, total: E.capital },
+        ],
+      },
+      {
+        id: 'apalancamiento',
+        label: 'Apalancamiento',
+        value: E.apalancamiento,
+        display: E.apalancamiento != null ? `${formatRatio(E.apalancamiento)}×` : '—',
+        icon: 'balance',
+        color: E.apalancamiento != null && E.apalancamiento > 3 ? 'rose'
+          : E.apalancamiento != null && E.apalancamiento > 2 ? 'amber' : 'blue',
+        sub: 'Pasivo ÷ Capital · clic',
+        hint: E.formula?.apalancamiento || 'Pasivo total ÷ Capital contable',
+        facts: estFacts,
+        groups: [
+          { title: 'Pasivo total', rows: [...pasivoCp, ...pasivoLp], total: E.pasivoTotal },
+          { title: 'Capital contable', rows: capital, total: E.capital },
+        ],
+      },
+      {
+        id: 'calidadDeuda',
+        label: 'Calidad de la deuda',
+        value: E.calidadDeuda?.cortoPct,
+        display: E.calidadDeuda?.cortoPct != null ? `${E.calidadDeuda.cortoPct}%` : '—',
+        icon: 'schedule',
+        color: liquidezToneClass(E.calidadDeuda?.tone),
+        sub: `${E.calidadDeuda?.label || '% pasivo corto'} · clic`,
+        hint: E.calidadDeuda?.summary || E.formula?.calidadDeuda || 'Pasivo corto ÷ Pasivo total',
+        facts: estFacts,
+        groups: [
+          { title: 'Pasivo corto plazo', rows: pasivoCp, total: E.pasivoCorto },
+          { title: 'Pasivo largo plazo', rows: pasivoLp, total: E.pasivoLargo },
+        ],
+      },
+    );
+  }
+
+  if (D.disponible || D.dpoDias != null) {
+    items.push({
+      id: 'dpo',
+      label: 'DPO (días CxP)',
+      value: D.dpoDias,
+      display: D.dpoDias != null ? `${D.dpoDias} d` : '—',
+      icon: 'timelapse',
+      color: liquidezToneClass(D.tone),
+      sub: `${D.label || 'Proveedores 0300'} · clic`,
+      hint: D.summary || D.formula || 'CxP ÷ Costo ventas × días',
+      facts: [
+        { label: 'CxP proveedores (0300)', value: D.cxpProveedores },
+        { label: 'Costo de ventas', value: D.costoVentas },
+      ],
+      groups: [{
+        title: 'Acreedores comerciales (0300)',
+        rows: (by.pasivoCortoPlazo || [])
+          .filter((a) => String(a.cuenta || '').startsWith('0300-'))
+          .map((a) => ({ cuenta: a.cuenta, label: a.label, value: Math.abs(Number(a.value || 0)) })),
+        total: D.cxpProveedores,
+      }],
+    });
+  }
+
   return items;
 }
 
@@ -404,7 +492,7 @@ function closeBgKpiFloat() {
     backdrop.classList.add('hidden');
     backdrop.setAttribute('aria-hidden', 'true');
   }
-  document.querySelectorAll('#kpiBalanceGeneral .kpi-card--interactive.is-open, #bgLiquidezKpis .kpi-card--interactive.is-open')
+  document.querySelectorAll('#panelContabilidadBalance [data-bg-kpi].is-open')
     .forEach((el) => el.classList.remove('is-open'));
 }
 
@@ -416,7 +504,7 @@ function openBgKpiFloat(kpiId) {
   if (!kpi || !panel || !backdrop) return;
 
   bgKpiState.activeId = kpiId;
-  document.querySelectorAll('#kpiBalanceGeneral .kpi-card--interactive, #bgLiquidezKpis .kpi-card--interactive')
+  document.querySelectorAll('#panelContabilidadBalance [data-bg-kpi]')
     .forEach((el) => el.classList.toggle('is-open', el.dataset.bgKpi === kpiId));
 
   const display = kpi.display != null ? kpi.display : formatFullMoney(kpi.value);
@@ -486,42 +574,153 @@ function openBgKpiFloat(kpiId) {
   backdrop.setAttribute('aria-hidden', 'false');
 }
 
-function renderBgInteractiveKpis(containerId, itemIds, fmt) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  const items = bgKpiState.items.filter((i) => itemIds.includes(i.id));
-  if (!items.length) {
-    el.innerHTML = containerId === 'bgLiquidezKpis' ? '' : '<p class="section-subtitle">Sin KPIs para el periodo.</p>';
-    return;
-  }
+function pctOf(part, total) {
+  const p = Number(part);
+  const t = Number(total);
+  if (!Number.isFinite(p) || !Number.isFinite(t) || Math.abs(t) < 0.005) return null;
+  return Math.round((p / t) * 1000) / 10;
+}
 
-  el.innerHTML = items.map((k) => {
-    const isOpen = bgKpiState.activeId === k.id;
-    const display = k.display != null ? k.display : formatFullMoney(k.value);
-    const idAttr = k.hostId ? ` id="${k.hostId}"` : '';
-    return `
-    <button type="button"${idAttr}
-      class="kpi-card kpi-card--eeff kpi-card--interactive kpi-card--${k.color || 'blue'}${isOpen ? ' is-open' : ''}"
-      data-bg-kpi="${k.id}"
-      aria-expanded="${isOpen}"
-      title="Clic para ver desglose relacionado">
-      <div class="kpi-card-head">
-        <span class="kpi-title">${escHtml(k.label)}</span>
-        <span class="material-symbols-outlined kpi-icon">${k.icon || 'payments'}</span>
+function formatCompactMoney(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return '—';
+  const sign = v < 0 ? '-' : '';
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}k`;
+  return formatFullMoney(v);
+}
+
+function renderBgTrend(cmp, accentClass = '') {
+  if (!cmp?.display) return '';
+  const tone = cmp.tone === 'up' ? 'up' : cmp.tone === 'down' ? 'down' : 'flat';
+  const icon = tone === 'up' ? 'trending_up' : tone === 'down' ? 'trending_down' : 'trending_flat';
+  return `
+    <p class="bg-kpi-trend bg-kpi-trend--${tone}${accentClass ? ` ${accentClass}` : ''}">
+      <span class="material-symbols-outlined" aria-hidden="true">${icon}</span>
+      <span>${escHtml(cmp.display)}</span>
+    </p>`;
+}
+
+function renderBgHeroCard(item) {
+  if (!item) return '';
+  const isOpen = bgKpiState.activeId === item.id;
+  const display = item.display != null ? item.display : formatFullMoney(item.value);
+  return `
+    <button type="button"
+      class="bg-hero-card bg-hero-card--${item.color || 'blue'}${isOpen ? ' is-open' : ''}"
+      data-bg-kpi="${item.id}"
+      aria-expanded="${isOpen}">
+      <div class="bg-hero-card__top">
+        <span class="bg-hero-card__label">
+          ${escHtml(item.label)}
+          <span class="material-symbols-outlined bg-hero-card__info" aria-hidden="true">info</span>
+        </span>
+        <span class="material-symbols-outlined bg-hero-card__icon">${escHtml(item.icon || 'payments')}</span>
       </div>
-      <div class="kpi-value money ${moneyClass(k.value)}">${display}</div>
-      ${k.sub ? `<p class="kpi-subtitle">${escHtml(k.sub)}</p>` : ''}
-      <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">open_in_new</span>
+      <div class="bg-hero-card__value">${display}</div>
+      ${item.sub ? `<p class="bg-hero-card__sub">${escHtml(item.sub)}</p>` : ''}
+      ${renderBgTrend(item.comparativo)}
     </button>`;
-  }).join('');
+}
+
+function renderBgCompCard(item, pct, pctScope = 'total') {
+  if (!item) return '';
+  const isOpen = bgKpiState.activeId === item.id;
+  const display = formatFullMoney(item.value);
+  const meta = pct != null ? `${pct}% del total ${pctScope}` : (item.sub || '');
+  return `
+    <button type="button"
+      class="bg-comp-card bg-comp-card--${item.color || 'blue'}${isOpen ? ' is-open' : ''}"
+      data-bg-kpi="${item.id}"
+      aria-expanded="${isOpen}">
+      <div class="bg-comp-card__head">
+        <span class="material-symbols-outlined">${escHtml(item.icon || 'payments')}</span>
+        <span>${escHtml(item.label)}</span>
+      </div>
+      <div class="bg-comp-card__value">${display}</div>
+      <p class="bg-comp-card__meta">${escHtml(meta)}</p>
+      ${renderBgTrend(item.comparativo)}
+    </button>`;
+}
+
+function bgStatusBadge(tone, label) {
+  const t = liquidezToneClass(tone);
+  const icon = t === 'green' ? 'check_circle'
+    : t === 'rose' ? 'warning'
+      : t === 'amber' ? 'warning'
+        : 'info';
+  return `<span class="bg-status-footer bg-status-footer--${t}">
+    <span class="material-symbols-outlined" aria-hidden="true">${icon}</span>
+    ${escHtml(label || '—')}
+  </span>`;
+}
+
+function renderBgIndicadorCard(cfg) {
+  const isOpen = cfg.id && bgKpiState.activeId === cfg.id;
+  const interactive = cfg.id
+    ? `button type="button" data-bg-kpi="${cfg.id}" aria-expanded="${isOpen}"`
+    : 'div';
+  const close = cfg.id ? 'button' : 'div';
+  return `
+    <${interactive} class="bg-indicador-card bg-indicador-card--${cfg.tone || 'slate'}${isOpen ? ' is-open' : ''}">
+      <div class="bg-indicador-card__body">
+        <div class="bg-indicador-card__head">
+          <span class="material-symbols-outlined bg-indicador-card__icon">${escHtml(cfg.icon || 'analytics')}</span>
+          <span>${escHtml(cfg.label)}</span>
+        </div>
+        <div class="bg-indicador-card__value">${escHtml(cfg.display)}</div>
+        ${cfg.ref ? `<p class="bg-indicador-card__ref">${escHtml(cfg.ref)}</p>` : ''}
+      </div>
+      ${bgStatusBadge(cfg.tone, cfg.badge)}
+    </${close}>`;
+}
+
+function evalRazonStatus(razon) {
+  const n = Number(razon);
+  if (!Number.isFinite(n)) return { tone: 'slate', badge: 'Sin dato', ref: 'Meta: 1.20 – 1.50' };
+  if (n >= 1.2 && n <= 1.5) return { tone: 'green', badge: 'En rango', ref: 'Meta: 1.20 – 1.50' };
+  if (n >= 1.0 && n < 1.2) return { tone: 'amber', badge: 'Bajo el rango', ref: 'Meta: 1.20 – 1.50' };
+  if (n > 1.5) return { tone: 'amber', badge: 'Sobre el rango', ref: 'Meta: 1.20 – 1.50' };
+  return { tone: 'rose', badge: 'Fuera de rango', ref: 'Meta: 1.20 – 1.50' };
+}
+
+function evalAcidaStatus(acida) {
+  const n = Number(acida);
+  if (!Number.isFinite(n)) return { tone: 'slate', badge: 'Sin dato', ref: 'Meta: ≥ 1.00' };
+  if (n >= 1) return { tone: 'green', badge: 'En rango', ref: 'Meta: ≥ 1.00' };
+  if (n >= 0.7) return { tone: 'amber', badge: 'Atención', ref: 'Meta: ≥ 1.00' };
+  return { tone: 'rose', badge: 'Fuera de rango', ref: 'Meta: ≥ 1.00' };
+}
+
+function evalEndeudamientoStatus(pct) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return { tone: 'slate', badge: 'Sin dato', ref: 'Referencia: ≤ 60%' };
+  if (n <= 60) return { tone: 'green', badge: 'En rango', ref: 'Referencia: ≤ 60%' };
+  const diff = Math.round((n - 60) * 10) / 10;
+  return { tone: n > 75 ? 'rose' : 'amber', badge: `+${diff} pp vs referencia`, ref: 'Referencia: ≤ 60%' };
+}
+
+function evalApalancamientoStatus(ap) {
+  const n = Number(ap);
+  if (!Number.isFinite(n)) return { tone: 'slate', badge: 'Sin dato', ref: 'Referencia: ≤ 2.00×' };
+  if (n <= 2) return { tone: 'green', badge: 'En rango', ref: 'Referencia: ≤ 2.00×' };
+  if (n <= 3) return { tone: 'amber', badge: 'Atención', ref: 'Referencia: ≤ 2.00×' };
+  return { tone: 'rose', badge: 'Fuera de rango', ref: 'Referencia: ≤ 2.00×' };
 }
 
 function renderBalanceGeneralPanel(bg, fmt) {
   const meth = document.getElementById('balanceGeneralMethodology');
   if (meth) {
     meth.textContent = bg?.available
-      ? `Saldo final al cierre de ${bg.labelCierre || bg.asOfCierre || bg.asOf || 'periodo'} · SQL CON_CTAS · Clic en un KPI para ver el desglose`
+      ? `Saldo final al cierre de ${bg.labelCierre || bg.asOfCierre || bg.asOf || 'periodo'} · Fuente: SQL_CON_CTAS`
       : 'Sin datos de CON_CTAS (SQL) para el periodo seleccionado';
+  }
+  const dateLabel = document.getElementById('bgBalanceDateLabel');
+  if (dateLabel) {
+    dateLabel.textContent = bg?.labelCierre || bg?.asOfCierre || bg?.asOf
+      || document.getElementById('filterPeriodLabel')?.textContent
+      || '—';
   }
 
   bgKpiState.fmt = fmt;
@@ -530,12 +729,159 @@ function renderBalanceGeneralPanel(bg, fmt) {
     closeBgKpiFloat();
   }
 
-  renderBgInteractiveKpis('kpiBalanceActivo', [
-    'activoCirculante', 'activoFijo', 'activoDiferido', 'activoTotal',
-  ], fmt);
-  renderBgInteractiveKpis('kpiBalancePasivo', [
-    'pasivoCirculante', 'pasivoLargo', 'pasivoTotal', 'capital',
-  ], fmt);
+  const byId = (id) => bgKpiState.items.find((i) => i.id === id);
+  const L = bg?.liquidez || {};
+  const E = bg?.estructura || {};
+  const D = bg?.dpo || {};
+  const totals = bg?.totals || {};
+  const cmp = bg?.comparativo || null;
+  const activoTotal = totals.activoTotal;
+  const pasivoTotal = totals.pasivoTotal;
+
+  function withCmp(item, cmpKey, fromSections = false) {
+    if (!item) return item;
+    const source = fromSections ? cmp?.sections : cmp?.totals;
+    item.comparativo = source?.[cmpKey] || null;
+    return item;
+  }
+
+  const capitalTrabajo = byId('capitalTrabajo') || (L.disponible ? {
+    id: 'capitalTrabajo',
+    label: 'Capital de trabajo',
+    value: L.capitalTrabajo,
+    icon: 'account_balance_wallet',
+    color: Number(L.capitalTrabajo) < 0 ? 'rose' : 'green',
+    sub: L.margenSobreAcPct != null
+      ? `${L.margenSobreAcPct}% del Activo Circulante`
+      : 'Activo circ. − pasivo CP',
+  } : null);
+  if (capitalTrabajo) {
+    capitalTrabajo.color = Number(capitalTrabajo.value) < 0 ? 'rose' : 'green';
+    if (L.margenSobreAcPct != null) {
+      capitalTrabajo.sub = `${L.margenSobreAcPct}% del Activo Circulante`;
+    }
+    withCmp(capitalTrabajo, 'capitalTrabajo', false);
+  }
+
+  const heroEl = document.getElementById('bgHeroKpis');
+  if (heroEl) {
+    if (!bg?.available) {
+      heroEl.innerHTML = '<p class="section-subtitle">Sin datos de balance para el periodo.</p>';
+    } else {
+      const activoTotalItem = withCmp(byId('activoTotal'), 'activoTotal');
+      if (activoTotalItem) activoTotalItem.sub = 'Circulante + Fijo + Diferido';
+      const pasivoTotalItem = withCmp(byId('pasivoTotal'), 'pasivoTotal');
+      if (pasivoTotalItem) {
+        pasivoTotalItem.sub = 'Circulante + Largo plazo';
+        pasivoTotalItem.color = 'violet';
+      }
+      const capitalItem = withCmp(byId('capital'), 'capital');
+      if (capitalItem) capitalItem.color = 'green';
+      heroEl.innerHTML = [
+        renderBgHeroCard(activoTotalItem),
+        renderBgHeroCard(pasivoTotalItem),
+        renderBgHeroCard(capitalItem),
+        renderBgHeroCard(capitalTrabajo),
+      ].join('');
+    }
+  }
+
+  const compActivo = document.getElementById('bgCompActivo');
+  if (compActivo) {
+    const ac = withCmp(byId('activoCirculante'), 'activoCirculante', true);
+    if (ac) ac.color = 'blue';
+    const af = withCmp(byId('activoFijo'), 'activoFijo', true);
+    if (af) af.color = 'slate';
+    const ad = withCmp(byId('activoDiferido'), 'activoDiferido', true);
+    if (ad) ad.color = 'violet';
+    compActivo.innerHTML = bg?.available ? [
+      renderBgCompCard(ac, pctOf(sectionValue(bg, 'activoCirculante'), activoTotal), 'activo'),
+      renderBgCompCard(af, pctOf(sectionValue(bg, 'activoFijo'), activoTotal), 'activo'),
+      renderBgCompCard(ad, pctOf(sectionValue(bg, 'activoDiferido'), activoTotal), 'activo'),
+    ].join('') : '';
+  }
+
+  const compPasivo = document.getElementById('bgCompPasivo');
+  if (compPasivo) {
+    const pasivoTotalItem = withCmp(byId('pasivoTotal'), 'pasivoTotal', true);
+    if (pasivoTotalItem) pasivoTotalItem.color = 'slate';
+    const pasivoCirc = withCmp(byId('pasivoCirculante'), 'pasivoCortoPlazo', true);
+    if (pasivoCirc) pasivoCirc.color = 'amber';
+    const pasivoLargo = withCmp(byId('pasivoLargo'), 'pasivoLargoPlazo', true);
+    if (pasivoLargo) pasivoLargo.color = 'amber';
+    compPasivo.innerHTML = bg?.available ? [
+      renderBgCompCard(pasivoCirc, pctOf(sectionValue(bg, 'pasivoCortoPlazo'), pasivoTotal), 'pasivo'),
+      renderBgCompCard(pasivoLargo, pctOf(sectionValue(bg, 'pasivoLargoPlazo'), pasivoTotal), 'pasivo'),
+      renderBgCompCard(pasivoTotalItem, 100, 'pasivo'),
+    ].join('') : '';
+  }
+
+  const indEl = document.getElementById('bgIndicadores');
+  if (indEl) {
+    const razon = L.razonCirculante;
+    const acida = L.pruebaAcida;
+    const stRazon = evalRazonStatus(razon);
+    const stAcida = evalAcidaStatus(acida);
+    const stEnd = evalEndeudamientoStatus(E.endeudamientoPct);
+    const stApa = evalApalancamientoStatus(E.apalancamiento);
+    const stCal = {
+      tone: E.calidadDeuda?.tone || 'slate',
+      badge: E.calidadDeuda?.label || 'Sin dato',
+      ref: 'Referencia: ≤ 50% corto plazo',
+    };
+    const stDpo = {
+      tone: D.tone || 'slate',
+      badge: D.label || 'Sin dato',
+      ref: D.diasPeriodo != null ? `Referencia: periodo ${D.diasPeriodo} d` : 'Referencia: CxP proveedores',
+    };
+
+    indEl.innerHTML = [
+      renderBgIndicadorCard({
+        id: 'razonCirculante',
+        label: 'Razón Circulante',
+        icon: 'water_drop',
+        display: formatRatio(razon) === '—' ? '—' : `${formatRatio(razon)}×`,
+        ...stRazon,
+      }),
+      renderBgIndicadorCard({
+        id: 'pruebaAcida',
+        label: 'Prueba Ácida',
+        icon: 'science',
+        display: formatRatio(acida) === '—' ? '—' : `${formatRatio(acida)}×`,
+        ...stAcida,
+      }),
+      renderBgIndicadorCard({
+        id: 'endeudamiento',
+        label: 'Endeudamiento',
+        icon: 'percent',
+        display: E.endeudamientoPct != null ? `${E.endeudamientoPct}%` : '—',
+        ...stEnd,
+      }),
+      renderBgIndicadorCard({
+        id: 'apalancamiento',
+        label: 'Apalancamiento',
+        icon: 'balance',
+        display: E.apalancamiento != null ? `${formatRatio(E.apalancamiento)}×` : '—',
+        ...stApa,
+      }),
+      renderBgIndicadorCard({
+        id: 'calidadDeuda',
+        label: 'Calidad de la Deuda',
+        icon: 'schedule',
+        display: E.calidadDeuda?.cortoPct != null ? `${E.calidadDeuda.cortoPct}%` : '—',
+        ...stCal,
+      }),
+      renderBgIndicadorCard({
+        id: 'dpo',
+        label: 'DPO (Días CxP)',
+        icon: 'timelapse',
+        display: D.dpoDias != null ? `${D.dpoDias} días` : '—',
+        ...stDpo,
+      }),
+    ].join('');
+  }
+
+  renderBgAnalisisPanels(bg, fmt);
 
   const resumenBody = document.getElementById('bgResumenTable');
   if (resumenBody) {
@@ -558,10 +904,92 @@ function renderBalanceGeneralPanel(bg, fmt) {
     }
   }
 
-  renderBgInteractiveKpis('bgLiquidezKpis', ['capitalTrabajo', 'razonCirculante', 'pruebaAcida'], fmt);
-  renderLiquidezNote(bg?.liquidez, bg?.liquidez, fmt, 'bgLiquidezInterpretacion');
-
   if (bgKpiState.activeId) openBgKpiFloat(bgKpiState.activeId);
+}
+
+function renderBgAnalisisPanels(bg, fmt) {
+  const liqEl = document.getElementById('bgAnalisisLiquidez');
+  const estEl = document.getElementById('bgAnalisisEstructura');
+  if (!liqEl || !estEl) return;
+
+  const L = bg?.liquidez || null;
+  const E = bg?.estructura || null;
+  const D = bg?.dpo || null;
+
+  if (!L?.disponible) {
+    liqEl.classList.add('hidden');
+    liqEl.innerHTML = '';
+  } else {
+    const tone = liquidezToneClass(L.interpretacion?.tone || L.acidTone);
+    const title = (L.interpretacion?.label || 'Liquidez').toUpperCase();
+    // Mockup: panel azul suave; el punto refleja el estado (p. ej. ámbar = moderada)
+    liqEl.className = 'bg-analisis-card bg-analisis-card--liquidez bg-analisis-card--blue';
+    liqEl.classList.remove('hidden');
+    liqEl.innerHTML = `
+      <div class="bg-analisis-card__head">
+        <div class="bg-analisis-card__title-wrap">
+          <span class="material-symbols-outlined">water_drop</span>
+          <h4>LIQUIDEZ - ${escHtml(title)}</h4>
+        </div>
+        <span class="bg-analisis-dot bg-analisis-dot--${tone}" aria-hidden="true"></span>
+      </div>
+      <p class="bg-analisis-card__summary">${escHtml(L.interpretacion?.summary || L.lectura?.razon || '')}</p>
+      <ul class="bg-analisis-facts">
+        <li><span class="material-symbols-outlined">check_circle</span>
+          Capital de trabajo ${Number(L.capitalTrabajo) >= 0 ? 'positivo' : 'negativo'}</li>
+        <li><span class="material-symbols-outlined">speed</span>
+          Razón ${formatRatio(L.razonCirculante)}× ${evalRazonStatus(L.razonCirculante).badge.toLowerCase()}</li>
+        <li><span class="material-symbols-outlined">science</span>
+          Prueba ácida ${formatRatio(L.pruebaAcida)}×</li>
+        <li><span class="material-symbols-outlined">inventory_2</span>
+          Liquidez sensible a inventarios</li>
+      </ul>
+      <button type="button" class="bg-analisis-link" data-bg-kpi="razonCirculante">
+        Ver análisis de liquidez completo
+        <span class="material-symbols-outlined">chevron_right</span>
+      </button>`;
+  }
+
+  if (!E?.disponible && D?.dpoDias == null) {
+    estEl.classList.add('hidden');
+    estEl.innerHTML = '';
+  } else {
+    const tone = liquidezToneClass(E?.calidadDeuda?.tone || D?.tone);
+    const riskLabel = tone === 'rose' ? 'RIESGO ALTO'
+      : tone === 'amber' ? 'ATENCIÓN'
+        : tone === 'green' ? 'EQUILIBRADA'
+          : 'ESTRUCTURA';
+    const panelTone = tone === 'green' ? 'green' : tone === 'amber' ? 'amber' : 'rose';
+    estEl.className = `bg-analisis-card bg-analisis-card--estructura bg-analisis-card--${panelTone}`;
+    estEl.classList.remove('hidden');
+    estEl.innerHTML = `
+      <div class="bg-analisis-card__head">
+        <div class="bg-analisis-card__title-wrap">
+          <span class="material-symbols-outlined">shield</span>
+          <h4>ESTRUCTURA FINANCIERA - ${riskLabel}</h4>
+        </div>
+        <span class="bg-analisis-dot bg-analisis-dot--${tone}" aria-hidden="true"></span>
+      </div>
+      <p class="bg-analisis-card__summary">${escHtml(E?.calidadDeuda?.summary || D?.summary || '')}</p>
+      <ul class="bg-analisis-facts">
+        <li><span class="material-symbols-outlined">schedule</span>
+          Pasivo de corto plazo ${E?.calidadDeuda?.cortoPct != null ? `${E.calidadDeuda.cortoPct}%` : '—'}</li>
+        <li><span class="material-symbols-outlined">percent</span>
+          Endeudamiento ${E?.endeudamientoPct != null ? `${E.endeudamientoPct}%` : '—'}</li>
+        <li><span class="material-symbols-outlined">timelapse</span>
+          DPO ${D?.dpoDias != null ? `${D.dpoDias} días` : '—'}</li>
+        <li><span class="material-symbols-outlined">storefront</span>
+          CxP proveedores</li>
+      </ul>
+      <button type="button" class="bg-analisis-link" data-bg-kpi="calidadDeuda">
+        Ver análisis financiero completo
+        <span class="material-symbols-outlined">chevron_right</span>
+      </button>`;
+  }
+}
+
+function renderEstructuraNote() {
+  /* Reemplazado por renderBgAnalisisPanels en el layout Balance */
 }
 
 function liquidezToneClass(tone) {
@@ -624,10 +1052,18 @@ function renderRatios(ratios, summary, fmt) {
   const capital = L.capitalTrabajo ?? ratios?.capitalTrabajo;
   const razonTone = liquidezToneClass(L.interpretacion?.tone);
   const acidTone = liquidezToneClass(L.acidTone);
+  const margenEbitda = summary?.margenEbitdaPct;
+  const crecEbit = summary?.crecimientoEbitPct;
 
   el.innerHTML = [
     ratioCard('Margen bruto', summary.margenBrutoPct, 'Utilidad bruta / ventas'),
     ratioCard('Margen operación', summary.margenOperacionPct, 'Utilidad operación / ventas'),
+    ratioCard('Margen EBITDA', margenEbitda, 'EBITDA / ventas · EBIT + depreciación'),
+    ratioCard(
+      'Crecimiento EBIT',
+      crecEbit,
+      crecEbit != null ? 'vs mismo periodo año anterior' : 'Sin base año anterior',
+    ),
     kpiCard('Capital de trabajo', capital != null ? fmt.money(capital) : '—', 'Activo circ. − pasivo CP', capital != null && capital < 0 ? 'rose' : 'green'),
     kpiCard('Razón circulante', formatRatio(razon), 'AC ÷ PC · margen de corto plazo', razonTone),
     kpiCard('Prueba ácida', formatRatio(acida), 'Sin inventarios ni anticipados', acidTone),
@@ -964,7 +1400,12 @@ async function loadContabilidad(fechaInicio, fechaFin) {
   renderCatalogLines('costosCatalogTable', catalog.costLines, fmt);
   renderCatalogLines('gastosCatalogTable', catalog.expenseLines, fmt);
   renderBalanceTable(eeff.balance, fmt);
-  renderRatios(eeff.ratios, { ...s, liquidez: s.liquidez || eeff.liquidez || data.balanceGeneral?.liquidez }, fmt);
+  renderRatios(eeff.ratios, {
+    ...s,
+    liquidez: s.liquidez || eeff.liquidez || data.balanceGeneral?.liquidez,
+    margenEbitdaPct: data.summary?.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct ?? s.margenEbitdaPct,
+    crecimientoEbitPct: data.summary?.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct ?? s.crecimientoEbitPct,
+  }, fmt);
   renderBalanceGeneralPanel(data.balanceGeneral, fmt);
   renderVtasmenTable(data.ventasAutosNuevosEeff, fmt);
   renderDailySalesTable(data.dailyBreakdown || [], fmt);
@@ -988,14 +1429,23 @@ async function loadContabilidad(fechaInicio, fechaFin) {
       liquidez: data.balanceGeneral?.liquidez || s.liquidez || eeff.liquidez || null,
     });
   }
+
+  return data;
 }
 
 async function onConsultContabilidad(fechaInicio, fechaFin) {
   const { setText } = Dashboard;
-  await Promise.all([
+  const results = await Promise.allSettled([
     loadContabilidad(fechaInicio, fechaFin),
     window.EeffSummary?.load(fechaInicio, fechaFin) ?? Promise.resolve(),
   ]);
+  const failed = results.filter((r) => r.status === 'rejected');
+  if (failed.length === results.length) {
+    throw failed[0].reason || new Error('No se pudieron cargar los datos');
+  }
+  if (failed.length) {
+    console.warn('[contabilidad] carga parcial:', failed.map((f) => f.reason?.message || f.reason));
+  }
   setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
 }
 
@@ -1008,6 +1458,12 @@ document.getElementById('contabilidadMainTabs')?.addEventListener('click', (e) =
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-bg-kpi-close]') || e.target.closest('#bgKpiFloatBackdrop')) {
     closeBgKpiFloat();
+    return;
+  }
+  const dateChip = e.target.closest('#bgBalanceDateChip');
+  if (dateChip) {
+    e.preventDefault();
+    document.getElementById('pillPeriod')?.click();
     return;
   }
   const kpiBtn = e.target.closest('[data-bg-kpi]');

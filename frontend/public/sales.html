@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=62" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=61" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -223,18 +223,7 @@ Comisiones
 </div>
 </section>
 
-<section class="goal-charts-section" aria-label="Avance de facturas y entregas">
-<div class="goal-charts-toolbar">
-<div>
-<h3 class="section-title" style="margin-bottom:4px">Objetivos del periodo</h3>
-<p class="section-subtitle" style="margin:0">Avance de facturas GMMX y entregas SOFIA · descargue el reporte para junta o archivo</p>
-</div>
-<button type="button" id="btnObjetivosPdf" class="btn-glass btn-glass--sm" disabled title="Consulte un periodo para generar el PDF">
-<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">picture_as_pdf</span>
-Descargar PDF
-</button>
-</div>
-<div class="chart-grid">
+<section class="chart-grid goal-charts-section" aria-label="Avance de facturas y entregas">
 <div id="goalRetailPanel" class="section-panel goal-chart-panel goal-chart-panel--retail">
 <div class="goal-chart-header">
 <h3 class="section-title goal-chart-title">AVANCE DE FACTURAS GMMX</h3>
@@ -303,9 +292,7 @@ Descargar PDF
 </div>
 </div>
 </div>
-</div>
 </section>
-<div id="objetivosPdfMount" class="objetivos-pdf-mount" hidden aria-hidden="true"></div>
 
 <section id="kpisMensuales" class="hidden kpi-grid">
 <div class="kpi-card kpi-card--blue">
@@ -1026,8 +1013,6 @@ Exportar CSV
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/canales.js?v=2"></script>
@@ -1040,6 +1025,6 @@ Exportar CSV
 <script src="/js/leads.js?v=13"></script>
 <script src="/js/afluencia.js?v=10"></script>
 <script src="/js/comisiones.js?v=2"></script>
-<script src="/js/sales.js?v=94"></script>
+<script src="/js/sales.js?v=93"></script>
 </body>
 </html>

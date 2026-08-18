@@ -2801,6 +2801,199 @@
     );
   }
 
+  function escPdf(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  function goalGapLabel(actual, goal, unit) {
+    if (!goal || goal <= 0) return 'Sin objetivo definido';
+    const diff = goal - actual;
+    if (diff > 0) return `Faltan ${diff} ${unit}`;
+    if (diff < 0) return `Excedente de ${Math.abs(diff)} ${unit}`;
+    return 'Objetivo cumplido';
+  }
+
+  function chartDataUrl(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof canvas.toDataURL !== 'function') return '';
+    try {
+      return canvas.toDataURL('image/png');
+    } catch {
+      return '';
+    }
+  }
+
+  function buildObjetivosReportHtml() {
+    const resumen = resumenActual;
+    const fechaInicio = els.fechaInicio?.value || '';
+    const fechaFin = els.fechaFin?.value || '';
+    const goalRetail = getGoalValue('retail');
+    const goalSofia = getGoalValue('sofia');
+    const actualRetail = Number(resumen?.totalRetail ?? goalActualRetail ?? 0);
+    const actualSofia = Number(resumen?.totalNotificacionesEntrega ?? goalActualSofia ?? 0);
+    const { apartadas, sofia, sinTimbrar, numeradorActual, numeradorSim } = getCarryOverParts();
+    const coberturaPct = goalSofia > 0 ? formatGoalPct(numeradorActual, goalSofia) : String(numeradorActual);
+    const simPct = goalSofia > 0 ? formatGoalPct(numeradorSim, goalSofia) : '—';
+    const generado = new Date().toLocaleString('es-MX', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const retailImg = chartDataUrl('chartGoalRetail');
+    const sofiaImg = chartDataUrl('chartGoalSofia');
+
+    return `
+      <article class="objetivos-pdf-sheet">
+        <header class="objetivos-pdf-head">
+          <div>
+            <div class="objetivos-pdf-brand">Balderrama</div>
+            <h1 class="objetivos-pdf-title">Reporte de objetivos</h1>
+            <p class="objetivos-pdf-period">Periodo ${escPdf(fechaInicio)} a ${escPdf(fechaFin)}</p>
+          </div>
+          <div class="objetivos-pdf-meta">
+            Dashboard web de ventas<br>
+            Generado ${escPdf(generado)}
+          </div>
+        </header>
+        <section class="objetivos-pdf-grid">
+          <div class="objetivos-pdf-card objetivos-pdf-card--gmmx">
+            <h4>Avance de facturas GMMX</h4>
+            <div class="objetivos-pdf-card-body">
+              ${retailImg ? `<img src="${retailImg}" alt="Avance GMMX">` : ''}
+              <div>
+                <div class="objetivos-pdf-pct">${escPdf(formatGoalPct(actualRetail, goalRetail))}</div>
+                <div class="objetivos-pdf-counts">${actualRetail} de ${goalRetail || '—'} unidades</div>
+                <div class="objetivos-pdf-gap">${escPdf(goalGapLabel(actualRetail, goalRetail, 'unidades'))}</div>
+              </div>
+            </div>
+          </div>
+          <div class="objetivos-pdf-card objetivos-pdf-card--sofia">
+            <h4>Avance de entregas SOFIA</h4>
+            <div class="objetivos-pdf-card-body">
+              ${sofiaImg ? `<img src="${sofiaImg}" alt="Avance SOFIA">` : ''}
+              <div>
+                <div class="objetivos-pdf-pct">${escPdf(formatGoalPct(actualSofia, goalSofia))}</div>
+                <div class="objetivos-pdf-counts">${actualSofia} de ${goalSofia || '—'} notificaciones</div>
+                <div class="objetivos-pdf-gap">${escPdf(goalGapLabel(actualSofia, goalSofia, 'notificaciones'))}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="objetivos-pdf-kpis">
+          <div class="objetivos-pdf-kpi"><span>Total ventas</span><strong>${Number(resumen?.totalVentas ?? 0)}</strong></div>
+          <div class="objetivos-pdf-kpi"><span>Retail</span><strong>${actualRetail}</strong></div>
+          <div class="objetivos-pdf-kpi"><span>Flotillas</span><strong>${Number(resumen?.totalFlotillas ?? 0)}</strong></div>
+          <div class="objetivos-pdf-kpi"><span>Cobertura</span><strong>${escPdf(coberturaPct)}</strong></div>
+          <div class="objetivos-pdf-kpi"><span>Sin timbrar</span><strong>${sinTimbrar}</strong></div>
+          <div class="objetivos-pdf-kpi"><span>Carry over</span><strong>${apartadas}</strong></div>
+        </section>
+        <p class="objetivos-pdf-note">
+          Cobertura = (SOFIA ${sofia} + sin timbrar ${sinTimbrar}) / objetivo ${goalSofia || '—'} = ${escPdf(coberturaPct)}.
+          Simulación con apartadas SEP: (${sofia} + ${sinTimbrar} + ${apartadas}) / ${goalSofia || '—'} = ${escPdf(simPct)}.
+          Se excluyen FLOT y FLOTGMF con contrato flotilla.
+        </p>
+        <footer class="objetivos-pdf-foot">KPIs Balderrama · uso interno · no altera los objetivos del periodo</footer>
+      </article>
+    `;
+  }
+
+  function printObjetivosReportFallback(filename) {
+    const w = window.open('', '_blank', 'noopener,noreferrer,width=920,height=1200');
+    if (!w) {
+      window.alert('Permita ventanas emergentes para guardar el PDF, o recargue la página.');
+      return;
+    }
+    w.document.open();
+    w.document.write(`<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="utf-8"/>
+<title>${filename.replace(/\.pdf$/i, '')}</title>
+<link href="/css/dashboard.css?v=62" rel="stylesheet"/>
+<style>
+  body { margin: 0; background: #fff; }
+  .objetivos-pdf-sheet { box-shadow: none; }
+  @media print { @page { size: A4; margin: 12mm; } }
+</style>
+</head><body>${buildObjetivosReportHtml()}
+<script>
+  window.onload = function () {
+    setTimeout(function () { window.focus(); window.print(); }, 280);
+  };
+<\/script>
+</body></html>`);
+    w.document.close();
+  }
+
+  async function downloadObjetivosPdf() {
+    if (!resumenActual) {
+      window.alert('Consulte un periodo antes de descargar el reporte.');
+      return;
+    }
+    const fechaInicio = els.fechaInicio?.value || 'inicio';
+    const fechaFin = els.fechaFin?.value || 'fin';
+    const filename = `objetivos_${fechaInicio}_${fechaFin}.pdf`;
+    const btn = els.btnObjetivosPdf;
+    const originalLabel = btn?.innerHTML;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">hourglass_top</span>Generando…';
+    }
+
+    const mount = document.getElementById('objetivosPdfMount');
+    try {
+      if (!mount || typeof html2canvas !== 'function' || !window.jspdf?.jsPDF) {
+        printObjetivosReportFallback(filename);
+        return;
+      }
+      mount.hidden = false;
+      mount.innerHTML = buildObjetivosReportHtml();
+      const sheet = mount.querySelector('.objetivos-pdf-sheet');
+      const images = [...mount.querySelectorAll('img')];
+      await Promise.all(images.map((img) => (
+        img.complete
+          ? Promise.resolve()
+          : new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+          })
+      )));
+      const canvas = await html2canvas(sheet, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+      });
+      const img = canvas.toDataURL('image/png');
+      const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgH = (canvas.height * pageW) / canvas.width;
+      let y = 0;
+      let remaining = imgH;
+      pdf.addImage(img, 'PNG', 0, 0, pageW, imgH);
+      remaining -= pageH;
+      while (remaining > 1) {
+        y -= pageH;
+        pdf.addPage();
+        pdf.addImage(img, 'PNG', 0, y, pageW, imgH);
+        remaining -= pageH;
+      }
+      pdf.save(filename);
+    } catch (err) {
+      console.error('[Objetivos PDF]', err);
+      printObjetivosReportFallback(filename);
+    } finally {
+      if (mount) {
+        mount.innerHTML = '';
+        mount.hidden = true;
+      }
+      if (btn) {
+        btn.disabled = false;
+        if (originalLabel) btn.innerHTML = originalLabel;
+      }
+    }
+  }
+
   function downloadCsv(headers, keys, rows, filename) {
     const lines = [headers.join(',')];
     for (const row of rows) {
@@ -2925,6 +3118,10 @@
 
       els.btnExportar.disabled = registrosActuales.length === 0;
       els.btnExportarEntregas.disabled = entregasActuales.length === 0;
+      if (els.btnObjetivosPdf) {
+        els.btnObjetivosPdf.disabled = false;
+        els.btnObjetivosPdf.title = 'Descargar reporte PDF de objetivos';
+      }
 
       const modo = resumen.mostrarComparativoMensual ? ' · comparativo mensual' : '';
       if (!quiet) {
@@ -3170,6 +3367,7 @@
       btnConsultar: document.getElementById('btnConsultar'),
       btnExportar: document.getElementById('btnExportar'),
       btnExportarEntregas: document.getElementById('btnExportarEntregas'),
+      btnObjetivosPdf: document.getElementById('btnObjetivosPdf'),
       statusBadge: document.getElementById('statusBadge'),
       lastUpdated: document.getElementById('lastUpdated'),
       topBarSummary: document.getElementById('topBarSummary'),
@@ -3494,6 +3692,12 @@
       getSofiaExportRows(),
       `entregas_sofia_${els.fechaInicio.value}_${els.fechaFin.value}.csv`
     ));
+    els.btnObjetivosPdf?.addEventListener('click', () => {
+      downloadObjetivosPdf().catch((err) => {
+        console.error('[Objetivos PDF]', err);
+        window.alert(err?.message || 'No se pudo generar el PDF.');
+      });
+    });
     els.buscarVentasPreview?.addEventListener('input', () => applyVentasPreviewSearch());
     els.buscarSofiaPreview?.addEventListener('input', () => applySofiaPreviewSearch());
     els.buscarCarryOverPreview?.addEventListener('input', () => applyCarryOverPreviewSearch());

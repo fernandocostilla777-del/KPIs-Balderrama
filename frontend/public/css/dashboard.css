@@ -6965,6 +6965,181 @@ body[data-page="contabilidad"] #scopeLabel {
   margin-bottom: 28px;
 }
 
+.goal-charts-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.goal-charts-toolbar .btn-glass {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.objetivos-pdf-mount {
+  position: fixed;
+  left: -12000px;
+  top: 0;
+  width: 794px;
+  background: #fff;
+  z-index: -1;
+}
+
+.objetivos-pdf-sheet {
+  width: 794px;
+  padding: 36px 40px 32px;
+  background: #fff;
+  color: #1e293b;
+  font-family: Inter, 'Segoe UI', sans-serif;
+  box-sizing: border-box;
+}
+
+.objetivos-pdf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 22px;
+}
+
+.objetivos-pdf-brand {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #2D5BFF;
+}
+
+.objetivos-pdf-title {
+  margin: 6px 0 4px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.objetivos-pdf-period {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.objetivos-pdf-meta {
+  text-align: right;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.objetivos-pdf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.objetivos-pdf-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px 16px 14px;
+  background: #f8fafc;
+}
+
+.objetivos-pdf-card--gmmx { border-top: 4px solid #27AE60; }
+.objetivos-pdf-card--sofia { border-top: 4px solid #E056FD; }
+
+.objetivos-pdf-card h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.objetivos-pdf-card-body {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.objetivos-pdf-card img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+}
+
+.objetivos-pdf-pct {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.objetivos-pdf-counts {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.objetivos-pdf-gap {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.objetivos-pdf-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.objetivos-pdf-kpi {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.objetivos-pdf-kpi span {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.objetivos-pdf-kpi strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+  color: #0f172a;
+}
+
+.objetivos-pdf-note {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  background: #f1f5f9;
+  border-radius: 12px;
+}
+
+.objetivos-pdf-foot {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
 .kpi-track .goal-chart-panel {
   margin: 0;
 }
@@ -9012,6 +9187,15 @@ body.dashboard-body.nav-open:not(.nav-rail-mode) {
   .chart-grid-2-1 {
     grid-template-columns: 1fr;
     gap: 14px;
+  }
+
+  .goal-charts-toolbar {
+    align-items: stretch;
+  }
+
+  .goal-charts-toolbar .btn-glass {
+    width: 100%;
+    justify-content: center;
   }
 
   .chart-wrap {

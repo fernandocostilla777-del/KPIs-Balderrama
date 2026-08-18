@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Objetivos | BALDERRAMA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #f4f7fc;
+    --text: #2c3e50;
+    --muted: #64748b;
+    --blue: #2d5bff;
+    --green: #27ae60;
+    --magenta: #e056fd;
+    --card: #fff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: Inter, Segoe UI, sans-serif;
+    background: linear-gradient(180deg, #f4f7fc 0%, #fff 100%);
+    color: var(--text);
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 28px 20px 48px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+  .brand { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--blue); }
+  h1 { margin: 6px 0 0; font-size: 26px; }
+  .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, .btn {
+    border: 0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font: 700 13px Inter, sans-serif;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+  .btn-ghost { background: #fff; color: var(--text); box-shadow: 0 4px 16px rgba(44,62,80,.08); }
+  .card {
+    background: var(--card);
+    border-radius: 20px;
+    padding: 20px;
+    box-shadow: 0 4px 24px rgba(44,62,80,.06);
+  }
+  .login { max-width: 380px; margin: 12vh auto 0; }
+  label { display: block; font-size: 12px; font-weight: 700; margin: 12px 0 6px; }
+  input, select {
+    width: 100%;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font: 500 14px Inter, sans-serif;
+  }
+  .error { color: #b91c1c; font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .goal { border-top: 4px solid #e2e8f0; }
+  .goal.gmmx { border-top-color: var(--green); }
+  .goal.sofia { border-top-color: var(--magenta); }
+  .goal h2 { margin: 0 0 14px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .goal-body { display: flex; align-items: center; gap: 16px; }
+  .ring {
+    width: 108px; height: 108px; border-radius: 50%;
+    display: grid; place-items: center; flex: 0 0 108px;
+  }
+  .ring-inner {
+    width: 78px; height: 78px; border-radius: 50%; background: #fff;
+    display: grid; place-items: center; font-weight: 800; font-size: 18px;
+  }
+  .pct { font-size: 28px; font-weight: 800; line-height: 1; }
+  .counts { margin-top: 6px; font-size: 13px; color: #334155; }
+  .gap { margin-top: 4px; font-size: 12px; font-weight: 700; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+  .kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px; }
+  .kpi span { display: block; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #94a3b8; }
+  .kpi strong { display: block; margin-top: 4px; font-size: 20px; }
+  .note { margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.5; background: #f1f5f9; border-radius: 12px; padding: 12px 14px; }
+  .hidden { display: none !important; }
+  #pdfSheet { position: fixed; left: -12000px; top: 0; width: 794px; background: #fff; }
+  @media (max-width: 720px) {
+    .grid, .kpis { grid-template-columns: 1fr 1fr; }
+    .kpis { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="viewLogin" class="wrap">
+  <form class="card login" id="loginForm">
+    <div class="brand">Balderrama</div>
+    <h1>Objetivos</h1>
+    <p class="sub">Dashboard de producción · facturas GMMX y entregas SOFIA</p>
+    <label for="username">Usuario</label>
+    <input id="username" autocomplete="username" required/>
+    <label for="password">Contraseña</label>
+    <input id="password" type="password" autocomplete="current-password" required/>
+    <button class="btn-primary" type="submit" style="width:100%;margin-top:16px" id="btnLogin">Entrar</button>
+    <p class="error" id="loginError"></p>
+  </form>
+</div>
+
+<div id="viewDash" class="wrap hidden">
+  <div class="top">
+    <div>
+      <div class="brand">Balderrama</div>
+      <h1>Objetivos del periodo</h1>
+      <p class="sub" id="periodLabel">—</p>
+    </div>
+    <div class="actions">
+      <select id="periodSelect" class="btn-ghost" style="padding:10px 12px"></select>
+      <button type="button" class="btn-primary" id="btnPdf" disabled>Descargar PDF</button>
+      <button type="button" class="btn-ghost" id="btnLogout">Salir</button>
+    </div>
+  </div>
+  <div class="grid">
+    <section class="card goal gmmx">
+      <h2>Avance de facturas GMMX</h2>
+      <div class="goal-body">
+        <div class="ring" id="ringRetail"><div class="ring-inner" id="ringRetailPct">—</div></div>
+        <div>
+          <div class="pct" id="retailPct">—</div>
+          <div class="counts" id="retailCounts">Consulte el periodo</div>
+          <div class="gap" id="retailGap"></div>
+        </div>
+      </div>
+    </section>
+    <section class="card goal sofia">
+      <h2>Avance de entregas SOFIA</h2>
+      <div class="goal-body">
+        <div class="ring" id="ringSofia"><div class="ring-inner" id="ringSofiaPct">—</div></div>
+        <div>
+          <div class="pct" id="sofiaPct">—</div>
+          <div class="counts" id="sofiaCounts">Consulte el periodo</div>
+          <div class="gap" id="sofiaGap"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><span>Total ventas</span><strong id="kpiTotal">0</strong></div>
+    <div class="kpi"><span>Retail</span><strong id="kpiRetail">0</strong></div>
+    <div class="kpi"><span>Flotillas</span><strong id="kpiFlotillas">0</strong></div>
+    <div class="kpi"><span>Cobertura</span><strong id="kpiCobertura">—</strong></div>
+    <div class="kpi"><span>Sin timbrar</span><strong id="kpiSinTimbrar">0</strong></div>
+    <div class="kpi"><span>Carry over</span><strong id="kpiCarry">0</strong></div>
+  </div>
+  <p class="note" id="formulaNote">La cobertura usa notificaciones SOFIA + unidades sin timbrar sobre el objetivo SOFIA.</p>
+</div>
+<div id="pdfSheet" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script>
+const TOKEN_KEY = 'objetivos_web_token';
+let snapshot = null;
+
+function $(id) { return document.getElementById(id); }
+function monthKey(offset = 0) {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function monthLabel(key) {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+}
+function pctText(actual, goal) {
+  if (!goal) return '—';
+  const pct = (actual / goal) * 100;
+  return pct > 999 ? '+999%' : `${pct.toFixed(1)}%`;
+}
+function gapText(actual, goal, unit) {
+  if (!goal) return 'Sin objetivo definido';
+  const diff = goal - actual;
+  if (diff > 0) return `Faltan ${diff} ${unit}`;
+  if (diff < 0) return `Excedente de ${Math.abs(diff)} ${unit}`;
+  return 'Objetivo cumplido';
+}
+function ringStyle(pct, color) {
+  const p = Math.min(100, Math.max(0, pct || 0));
+  return `conic-gradient(${color} 0 ${p}%, #e8eef5 ${p}% 100%)`;
+}
+function authHeaders() {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function fillPeriodSelect() {
+  const sel = $('periodSelect');
+  sel.innerHTML = '';
+  for (let i = 0; i < 8; i += 1) {
+    const key = monthKey(-i);
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = monthLabel(key);
+    sel.appendChild(opt);
+  }
+}
+
+function render(data) {
+  snapshot = data;
+  const resumen = data.resumen || {};
+  const goals = data.goals || {};
+  const sofia = data.sofia || {};
+  const retailActual = Number(resumen.totalRetail || 0);
+  const retailGoal = Number(goals.retail || 0);
+  const sofiaActual = Number(sofia.notificaciones || resumen.totalNotificacionesEntrega || 0);
+  const sofiaGoal = Number(sofia.objetivo || goals.sofia || 0);
+  const cobertura = Number(sofia.coberturaPct || 0);
+  const sinTimbrar = Number(sofia.sinTimbrar || 0);
+  const apartadas = Number(resumen.unidadesApartadas || 0);
+  const retailPct = retailGoal ? (retailActual / retailGoal) * 100 : 0;
+  const sofiaPct = sofiaGoal ? (sofiaActual / sofiaGoal) * 100 : Number(sofia.avancePct || 0);
+
+  $('periodLabel').textContent = monthLabel(data.periodKey) + (data.cloud?.syncedAt
+    ? ` · sync ${new Date(data.cloud.syncedAt).toLocaleString('es-MX')}`
+    : '');
+  $('retailPct').textContent = pctText(retailActual, retailGoal);
+  $('retailCounts').textContent = `${retailActual} de ${retailGoal || '—'} unidades`;
+  $('retailGap').textContent = gapText(retailActual, retailGoal, 'unidades');
+  $('sofiaPct').textContent = pctText(sofiaActual, sofiaGoal);
+  $('sofiaCounts').textContent = `${sofiaActual} de ${sofiaGoal || '—'} notificaciones`;
+  $('sofiaGap').textContent = gapText(sofiaActual, sofiaGoal, 'notificaciones');
+  $('ringRetail').style.background = ringStyle(retailPct, '#27ae60');
+  $('ringSofia').style.background = ringStyle(sofiaPct, '#e056fd');
+  $('ringRetailPct').textContent = pctText(retailActual, retailGoal);
+  $('ringSofiaPct').textContent = pctText(sofiaActual, sofiaGoal);
+  $('kpiTotal').textContent = Number(resumen.totalVentas || 0);
+  $('kpiRetail').textContent = retailActual;
+  $('kpiFlotillas').textContent = Number(resumen.totalFlotillas || 0);
+  $('kpiCobertura').textContent = sofiaGoal ? `${cobertura.toFixed(1)}%` : String(sofia.numeradorCobertura || 0);
+  $('kpiSinTimbrar').textContent = sinTimbrar;
+  $('kpiCarry').textContent = apartadas;
+  $('formulaNote').textContent =
+    `Cobertura = (SOFIA ${sofiaActual} + sin timbrar ${sinTimbrar}) / objetivo ${sofiaGoal || '—'} = ${sofiaGoal ? cobertura.toFixed(1) + '%' : '—'}.`;
+  $('btnPdf').disabled = false;
+}
+
+async function loadDash() {
+  const periodKey = $('periodSelect').value || monthKey(0);
+  $('btnPdf').disabled = true;
+  const res = await fetch(`/api/mobile/ventas?periodKey=${encodeURIComponent(periodKey)}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    showLogin();
+    throw new Error('Sesión expirada');
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los objetivos');
+  render({ ...data, periodKey: data.cloud?.periodKey || periodKey });
+}
+
+function showLogin() {
+  $('viewLogin').classList.remove('hidden');
+  $('viewDash').classList.add('hidden');
+}
+function showDash() {
+  $('viewLogin').classList.add('hidden');
+  $('viewDash').classList.remove('hidden');
+}
+
+function buildPdfHtml(data) {
+  const resumen = data.resumen || {};
+  const goals = data.goals || {};
+  const sofia = data.sofia || {};
+  const retailActual = Number(resumen.totalRetail || 0);
+  const retailGoal = Number(goals.retail || 0);
+  const sofiaActual = Number(sofia.notificaciones || 0);
+  const sofiaGoal = Number(sofia.objetivo || goals.sofia || 0);
+  const cobertura = Number(sofia.coberturaPct || 0);
+  const generado = new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+  return `
+    <article style="width:794px;padding:36px 40px;background:#fff;color:#1e293b;font-family:Inter,sans-serif">
+      <header style="display:flex;justify-content:space-between;border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:22px">
+        <div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:#2d5bff">BALDERRAMA</div>
+          <h1 style="margin:6px 0 4px;font-size:24px">Reporte de objetivos</h1>
+          <p style="margin:0;color:#64748b;font-size:13px">${monthLabel(data.periodKey)}</p>
+        </div>
+        <div style="text-align:right;font-size:11px;color:#64748b">Objetivos web · producción<br>Generado ${generado}</div>
+      </header>
+      <section style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+        <div style="border:1px solid #e2e8f0;border-top:4px solid #27ae60;border-radius:16px;padding:16px">
+          <h4 style="margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b">Facturas GMMX</h4>
+          <div style="font-size:28px;font-weight:800">${pctText(retailActual, retailGoal)}</div>
+          <div>${retailActual} de ${retailGoal || '—'} unidades</div>
+          <div style="font-weight:700;margin-top:4px">${gapText(retailActual, retailGoal, 'unidades')}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-top:4px solid #e056fd;border-radius:16px;padding:16px">
+          <h4 style="margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b">Entregas SOFIA</h4>
+          <div style="font-size:28px;font-weight:800">${pctText(sofiaActual, sofiaGoal)}</div>
+          <div>${sofiaActual} de ${sofiaGoal || '—'} notificaciones</div>
+          <div style="font-weight:700;margin-top:4px">${gapText(sofiaActual, sofiaGoal, 'notificaciones')}</div>
+        </div>
+      </section>
+      <section style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px"><span style="font-size:10px;font-weight:800;color:#94a3b8">TOTAL</span><strong style="display:block;font-size:20px">${Number(resumen.totalVentas || 0)}</strong></div>
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px"><span style="font-size:10px;font-weight:800;color:#94a3b8">COBERTURA</span><strong style="display:block;font-size:20px">${sofiaGoal ? cobertura.toFixed(1) + '%' : '—'}</strong></div>
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px"><span style="font-size:10px;font-weight:800;color:#94a3b8">SIN TIMBRAR</span><strong style="display:block;font-size:20px">${Number(sofia.sinTimbrar || 0)}</strong></div>
+      </section>
+      <p style="font-size:11px;color:#64748b">Cobertura = (SOFIA ${sofiaActual} + sin timbrar ${Number(sofia.sinTimbrar || 0)}) / objetivo ${sofiaGoal || '—'}.</p>
+      <footer style="border-top:1px solid #e2e8f0;margin-top:16px;padding-top:12px;font-size:10px;color:#94a3b8">KPIs Balderrama · objetivos-web · uso interno</footer>
+    </article>`;
+}
+
+async function downloadPdf() {
+  if (!snapshot) return;
+  const filename = `objetivos_${snapshot.periodKey}.pdf`;
+  const mount = $('pdfSheet');
+  const btn = $('btnPdf');
+  btn.disabled = true;
+  btn.textContent = 'Generando…';
+  try {
+    if (typeof html2canvas !== 'function' || !window.jspdf?.jsPDF) {
+      window.print();
+      return;
+    }
+    mount.hidden = false;
+    mount.innerHTML = buildPdfHtml(snapshot);
+    const sheet = mount.firstElementChild;
+    const canvas = await html2canvas(sheet, { scale: 2, backgroundColor: '#ffffff' });
+    const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const imgH = (canvas.height * pageW) / canvas.width;
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pageW, imgH);
+    pdf.save(filename);
+  } catch (err) {
+    console.error(err);
+    window.alert(err.message || 'No se pudo generar el PDF');
+  } finally {
+    mount.innerHTML = '';
+    mount.hidden = true;
+    btn.disabled = false;
+    btn.textContent = 'Descargar PDF';
+  }
+}
+
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginError').textContent = '';
+  $('btnLogin').disabled = true;
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('username').value, password: $('password').value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo iniciar sesión');
+    localStorage.setItem(TOKEN_KEY, data.token);
+    showDash();
+    await loadDash();
+  } catch (err) {
+    $('loginError').textContent = err.message;
+  } finally {
+    $('btnLogin').disabled = false;
+  }
+});
+$('btnLogout').addEventListener('click', () => {
+  localStorage.removeItem(TOKEN_KEY);
+  snapshot = null;
+  showLogin();
+});
+$('periodSelect').addEventListener('change', () => loadDash().catch((err) => window.alert(err.message)));
+$('btnPdf').addEventListener('click', () => downloadPdf());
+
+fillPeriodSelect();
+if (localStorage.getItem(TOKEN_KEY)) {
+  showDash();
+  loadDash().catch(() => showLogin());
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Railway — Root Directory debe ser: objetivos-web
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

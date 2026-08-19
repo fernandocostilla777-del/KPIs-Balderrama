@@ -161,6 +161,30 @@ curl -H "X-API-Key: $CLOUD_SYNC_API_KEY" \
   "https://tu-api.up.railway.app/api/personal?categoria=VENDEDOR"
 ```
 
+### Ciclos CRM (`crm_ciclos`)
+
+Tabla dedicada con el export de Balderrama Ciclos (un renglón = actividad). Se crea sola al arrancar cloud-api.
+
+Campos: `ID_CONTACTO` (también `D_CONTACTO`), `NOMBRE_CONTACTO`, `ID_CICLO`, fechas de ciclo/actividad, `ESTATUS`, `TIPO_ACTIVIDAD`, resultado, medio de contacto, factura, VIN, vendedor.
+
+Carga remota desde el servidor de oficina (`X-API-Key`):
+
+```bash
+curl -X POST https://tu-api.up.railway.app/api/crm/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $CLOUD_SYNC_API_KEY" \
+  -d '{"replaceAll":false,"records":[{"ID_CONTACTO":"123","NOMBRE_CONTACTO":"Juan Pérez","ID_CICLO":"C1","VENDEDOR":"Ana"}]}'
+```
+
+| Método | Ruta | Uso |
+|--------|------|-----|
+| `POST` | `/api/crm/ingest` | Upsert. `replaceAll: true` vacía la tabla y recarga |
+| `GET` | `/api/crm/summary` | Totales por contacto, ciclo, VIN, estatus, vendedor |
+| `GET` | `/api/crm` | Filtros: `q`, `vendedor`, `estatus`, `idContacto`, `vin`, `idCiclo`, `limit`, `offset` |
+| `GET` | `/api/crm/:idContacto` | Actividades de un contacto |
+
+Máximo 25 000 filas por llamada. También se llena si el sync local envía `domain: crm` con actividades.
+
 ## Detección de cambios
 
 Cada registro se identifica por `domain + external_id + period_key`. Se calcula un hash SHA-256 del JSON; si cambia respecto al valor almacenado, la versión anterior pasa a `sync_entity_history`.

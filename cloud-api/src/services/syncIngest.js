@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { withTransaction } = require('../db');
 const { upsertPersonalBatch } = require('./dmsPersonalService');
+const { upsertCrmBatch, normalizeRow } = require('./crmCiclosCloudService');
 
 const VALID_DOMAINS = new Set([
   'overview',
@@ -173,6 +174,29 @@ async function ingestSyncPayload(body) {
       );
     }
 
+    let crmMirror = null;
+    if (domain === 'crm') {
+      const actividades = normalized
+        .map((r) => r.payload)
+        .filter((payload) => {
+          const entity = String(payload?.entity || '').toLowerCase();
+          if (entity && entity !== 'actividad') return false;
+          try {
+            normalizeRow(payload);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+      if (actividades.length) {
+        crmMirror = await upsertCrmBatch(actividades, {
+          source: 'sync',
+          batchId,
+          client,
+        });
+      }
+    }
+
     await client.query(
       `UPDATE sync_batches
        SET inserted_count = $1, updated_count = $2, history_count = $3, archived_count = $4, status = 'ok'
@@ -191,6 +215,7 @@ async function ingestSyncPayload(body) {
       history,
       archived,
       personalMirror,
+      crmMirror,
     };
   });
 }

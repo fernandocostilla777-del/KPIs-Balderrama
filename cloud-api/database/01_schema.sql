@@ -86,3 +86,43 @@ CREATE INDEX IF NOT EXISTS idx_dms_personal_categoria ON dms_personal (categoria
 CREATE INDEX IF NOT EXISTS idx_dms_personal_nombre ON dms_personal (nombre);
 CREATE INDEX IF NOT EXISTS idx_dms_personal_subtipo ON dms_personal (subtipo);
 
+-- Ciclos CRM (export Balderrama Ciclos / actividades)
+CREATE TABLE IF NOT EXISTS crm_ciclos (
+  id                      BIGSERIAL PRIMARY KEY,
+  row_key                 CHAR(64)     NOT NULL UNIQUE,
+  id_contacto             VARCHAR(64)  NOT NULL,
+  nombre_contacto         VARCHAR(255) NOT NULL DEFAULT '',
+  id_ciclo                VARCHAR(64)  NOT NULL DEFAULT '',
+  fecha_inicio_ciclo      VARCHAR(40)  NOT NULL DEFAULT '',
+  fecha_esperada_cierre   VARCHAR(40)  NOT NULL DEFAULT '',
+  estatus                 VARCHAR(80)  NOT NULL DEFAULT '',
+  fecha_estatus           VARCHAR(40)  NOT NULL DEFAULT '',
+  tipo_actividad          VARCHAR(120) NOT NULL DEFAULT '',
+  fecha_crea_actividad    VARCHAR(40)  NOT NULL DEFAULT '',
+  fecha_prog_actividad    VARCHAR(40)  NOT NULL DEFAULT '',
+  fecha_resp_actividad    VARCHAR(40)  NOT NULL DEFAULT '',
+  resultado_actividad     VARCHAR(255) NOT NULL DEFAULT '',
+  forma_contacto          VARCHAR(80)  NOT NULL DEFAULT '',
+  medio_contacto          VARCHAR(80)  NOT NULL DEFAULT '',
+  submedio_contacto       VARCHAR(120) NOT NULL DEFAULT '',
+  num_factura             VARCHAR(64)  NOT NULL DEFAULT '',
+  facturado_a             VARCHAR(255) NOT NULL DEFAULT '',
+  producto_vendido        VARCHAR(255) NOT NULL DEFAULT '',
+  fecha_factura           VARCHAR(40)  NOT NULL DEFAULT '',
+  vin                     VARCHAR(32)  NOT NULL DEFAULT '',
+  fecha_entrega           VARCHAR(40)  NOT NULL DEFAULT '',
+  vendedor                VARCHAR(160) NOT NULL DEFAULT '',
+  content_hash            CHAR(64),
+  source                  VARCHAR(32)  NOT NULL DEFAULT 'api',
+  last_batch_id           BIGINT,
+  created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_crm_ciclos_contacto ON crm_ciclos (id_contacto);
+CREATE INDEX IF NOT EXISTS idx_crm_ciclos_ciclo ON crm_ciclos (id_ciclo);
+CREATE INDEX IF NOT EXISTS idx_crm_ciclos_vin ON crm_ciclos (vin);
+CREATE INDEX IF NOT EXISTS idx_crm_ciclos_vendedor ON crm_ciclos (vendedor);
+CREATE INDEX IF NOT EXISTS idx_crm_ciclos_estatus ON crm_ciclos (estatus);
+CREATE INDEX IF NOT EXISTS idx_crm_ciclos_factura ON crm_ciclos (num_factura);
+

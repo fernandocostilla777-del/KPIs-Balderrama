@@ -7,11 +7,18 @@ const syncRoutes = require('./src/routes/sync');
 const authRoutes = require('./src/routes/auth');
 const mobileRoutes = require('./src/routes/mobile');
 const personalRoutes = require('./src/routes/personal');
+const crmRoutes = require('./src/routes/crm');
 const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
+const { ensureCrmCiclosTable } = require('./src/services/crmCiclosCloudService');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
+const isProd = process.env.NODE_ENV === 'production';
+
+if (isProd) {
+  app.set('trust proxy', 1);
+}
 
 app.use(express.json({ limit: '25mb' }));
 
@@ -50,11 +57,17 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/mobile', mobileRoutes);
 app.use('/api/personal', personalRoutes);
+app.use('/api/crm', crmRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error('[cloud-api]', err.message);
-  const status = /inválid|debe incluir|sin id/i.test(err.message) ? 400 : 500;
-  res.status(status).json({ ok: false, error: err.message });
+  const status = err.status || (/inválid|debe incluir|sin id/i.test(err.message) ? 400 : 500);
+  const publicMessage = !isProd
+    ? err.message
+    : status >= 500
+      ? 'Error interno del servidor'
+      : 'Solicitud inválida';
+  res.status(status).json({ ok: false, error: publicMessage });
 });
 
 async function ensureSchema() {
@@ -68,6 +81,7 @@ async function ensureSchema() {
   }
   await query('ALTER TABLE sync_batches ADD COLUMN IF NOT EXISTS meta JSONB');
   await ensurePersonalTable();
+  await ensureCrmCiclosTable();
 }
 
 ensureSchema()
@@ -78,6 +92,7 @@ ensureSchema()
       console.log(`  → http://localhost:${PORT}/api/health`);
       console.log(`  → POST http://localhost:${PORT}/api/sync/ingest`);
       console.log(`  → GET  http://localhost:${PORT}/api/personal`);
+      console.log(`  → POST http://localhost:${PORT}/api/crm/ingest`);
       console.log('');
     });
   })

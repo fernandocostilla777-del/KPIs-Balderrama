@@ -59,8 +59,34 @@ const ROLE_SCOPES = {
   },
 };
 
+const METRIC_SECTION_ALIASES = {
+  ventas: 'ventas',
+  sales: 'ventas',
+  forecast: 'forecast',
+  pronostico: 'forecast',
+  inventory: 'inventory',
+  inventario: 'inventory',
+  contabilidad: 'contabilidad',
+  'post-sales': 'post-sales',
+  postventa: 'post-sales',
+  seguimiento: 'seguimiento',
+  crm: 'seguimiento',
+};
+
+const ALLOWED_METRIC_SECTIONS = new Set(Object.keys(METRIC_SECTION_ALIASES));
+
+function normalizeMetricSection(section) {
+  const key = String(section || '').toLowerCase().trim();
+  return METRIC_SECTION_ALIASES[key] || null;
+}
+
 function getRoleScope(roleId) {
-  return ROLE_SCOPES[roleId] || ROLE_SCOPES.direccion;
+  return ROLE_SCOPES[roleId] || {
+    pages: ['profile'],
+    metricSections: [],
+    tools: [],
+    label: 'Sin rol',
+  };
 }
 
 function rolePages(roleId) {
@@ -84,16 +110,15 @@ function canAccessPage(roleId, pageId) {
 }
 
 function canAccessMetricSection(roleId, section) {
-  const key = String(section || '').toLowerCase();
-  const normalized = key === 'pronostico' ? 'forecast'
-    : key === 'inventario' ? 'inventory'
-    : key === 'postventa' || key === 'post-sales' ? 'post-sales'
-    : key;
+  const normalized = normalizeMetricSection(section);
+  if (!normalized) return false;
   return roleMetricSections(roleId).includes(normalized);
 }
 
 module.exports = {
   ROLE_SCOPES,
+  ALLOWED_METRIC_SECTIONS,
+  normalizeMetricSection,
   getRoleScope,
   rolePages,
   roleTools,

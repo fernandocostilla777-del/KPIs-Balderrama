@@ -1,10 +1,19 @@
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const { requireMobileAuth } = require('../middleware/mobileAuth');
 const { authenticate, signToken } = require('../services/mobileAuth');
 
 const router = express.Router();
 
-router.post('/login', async (req, res, next) => {
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: 'Demasiados intentos. Intente más tarde.' },
+});
+
+router.post('/login', loginLimiter, async (req, res, next) => {
   try {
     const { username, password } = req.body || {};
     const user = await authenticate(username, password);

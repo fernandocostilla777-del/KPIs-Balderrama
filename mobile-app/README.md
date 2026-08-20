@@ -53,21 +53,39 @@ npm start
 
 Abre http://localhost:8100 e inicia sesión con un usuario de `MOBILE_AUTH_USERS`.
 
-## Build Android / iOS (Capacitor)
+## Icono App Store / Play Store
+
+Fuente: `../app-icon-store.png` (o `../screen.png`) — **1024×1024**.
 
 ```bash
 cd mobile-app
+cp ../app-icon-store.png resources/icon.png
+cp ../app-icon-store.png resources/splash.png
+npx capacitor-assets generate
+```
+
+Eso regenera:
+- Android: `android/app/src/main/res/mipmap-*/ic_launcher*.png`
+- iOS: `ios/App/App/Assets.xcassets/AppIcon.appiconset/`
+
+Para subir a las stores, usa directamente `app-icon-store.png` (1024×1024).
+
+## Build Android / iOS (Capacitor)
+
+Requiere **Java 21** para Android (Capacitor 8):
+
+```bash
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+cd mobile-app
+npm install
 npm run build
-npx cap add android    # solo la primera vez
 npx cap sync
-npx cap open android
+npx cap open android   # o: cd android && ./gradlew assembleDebug
 ```
 
 Para iOS (Mac):
 
 ```bash
-npx cap add ios
-npx cap sync
 npx cap open ios
 ```
 

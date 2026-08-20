@@ -7,7 +7,13 @@ const {
 } = require('../services/mobileData');
 const { requireMobileAuth } = require('../middleware/mobileAuth');
 const { isConfigured, runMobileChat, DEFAULT_MODEL } = require('../services/mobileAi');
-const { canAccessMetricSection, canAccessPage, roleMetricSections, roleTools } = require('../services/mobileRoles');
+const {
+  canAccessMetricSection,
+  canAccessPage,
+  roleMetricSections,
+  roleTools,
+  normalizeMetricSection,
+} = require('../services/mobileRoles');
 
 const router = express.Router();
 
@@ -79,10 +85,18 @@ router.get('/inventory', async (req, res, next) => {
 
 router.get('/metrics/:section', async (req, res, next) => {
   try {
-    if (!canAccessMetricSection(req.mobileUser.role, req.params.section)) {
+    const section = normalizeMetricSection(req.params.section);
+    if (!section) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Sección no válida',
+        sections: roleMetricSections(req.mobileUser.role),
+      });
+    }
+    if (!canAccessMetricSection(req.mobileUser.role, section)) {
       return res.status(403).json({
         ok: false,
-        error: `Sin acceso a ${req.params.section}`,
+        error: 'Sin acceso a esta sección',
         sections: roleMetricSections(req.mobileUser.role),
       });
     }
@@ -90,7 +104,7 @@ router.get('/metrics/:section', async (req, res, next) => {
     const options = {};
     if (req.query.area) options.area = String(req.query.area);
     if (req.query.estatus) options.estatus = String(req.query.estatus);
-    res.json(await getMetricsSection(req.params.section, period, options));
+    res.json(await getMetricsSection(section, period, options));
   } catch (err) {
     next(err);
   }

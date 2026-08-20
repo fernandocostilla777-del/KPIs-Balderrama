@@ -170,7 +170,7 @@ Campos: `ID_CONTACTO` (también `D_CONTACTO`), `NOMBRE_CONTACTO`, `ID_CICLO`, fe
 Carga remota desde el servidor de oficina (`X-API-Key`):
 
 ```bash
-curl -X POST https://tu-api.up.railway.app/api/crm/ingest \
+curl -X POST https://kpis-balderrama-production.up.railway.app/api/crm/ingest \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $CLOUD_SYNC_API_KEY" \
   -d '{"replaceAll":false,"records":[{"ID_CONTACTO":"123","NOMBRE_CONTACTO":"Juan Pérez","ID_CICLO":"C1","VENDEDOR":"Ana"}]}'

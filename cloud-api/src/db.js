@@ -8,9 +8,15 @@ function getPool() {
   if (!url) {
     throw new Error('DATABASE_URL no configurada en cloud-api/.env');
   }
+  const isProd = process.env.NODE_ENV === 'production';
+  const sslDisabled = process.env.PG_SSL === 'false';
+  const rejectUnauthorized = isProd
+    ? process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false'
+    : process.env.PG_SSL_REJECT_UNAUTHORIZED === 'true';
+
   pool = new Pool({
     connectionString: url,
-    ssl: process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: false },
+    ssl: sslDisabled ? false : { rejectUnauthorized },
     max: 10,
   });
   pool.on('error', (err) => {

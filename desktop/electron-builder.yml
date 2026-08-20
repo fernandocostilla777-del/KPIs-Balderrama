@@ -67,15 +67,20 @@ mac:
   target:
     - target: dmg
       arch:
-        - x64
         - arm64
-  icon: assets/icon.png
+    - target: zip
+      arch:
+        - arm64
+  icon: assets/icon.icns
   category: public.app-category.business
   artifactName: "${productName}-${version}-Mac-${arch}.${ext}"
   hardenedRuntime: false
   gatekeeperAssess: false
+  identity: null
 
 dmg:
+  title: KPIs Balderrama
+  icon: assets/icon.icns
   contents:
     - x: 130
       y: 220

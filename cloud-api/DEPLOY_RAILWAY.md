@@ -98,6 +98,8 @@ En el servicio **cloud-api** → **Variables**:
 |----------|-------------|-------------|
 | `DATABASE_URL` | Sí | Referencia al PostgreSQL del proyecto (ver abajo) |
 | `CLOUD_SYNC_API_KEY` | Sí | Clave secreta larga; misma en backend local |
+| `NODE_ENV` | Recomendada | `production` (errores genéricos, SSL estricto, trust proxy) |
+| `CLOUD_SYNC_ALLOWED_IPS` | Recomendada | IPs del backend local autorizadas a hacer ingest (coma-separadas) |
 | `CLOUD_AUTO_INIT_DB` | Primera vez | `true` para crear tablas al arrancar |
 | `HOST` | No | `0.0.0.0` (opcional, ya es el default) |
 | `PORT` | No | Railway la asigna automáticamente |

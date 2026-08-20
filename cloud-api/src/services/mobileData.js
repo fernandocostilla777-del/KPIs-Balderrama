@@ -847,7 +847,8 @@ async function getSeguimientoSummary(period) {
 }
 
 async function getMetricsSection(section, period, options = {}) {
-  switch (String(section || 'ventas').toLowerCase()) {
+  const key = String(section || '').toLowerCase();
+  switch (key) {
     case 'forecast':
     case 'pronostico':
       return getForecastSummary(period);
@@ -864,8 +865,12 @@ async function getMetricsSection(section, period, options = {}) {
       return getSeguimientoSummary(period);
     case 'ventas':
     case 'sales':
-    default:
       return getVentasSummary(period);
+    default: {
+      const err = new Error('Sección no válida');
+      err.status = 400;
+      throw err;
+    }
   }
 }
 

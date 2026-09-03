@@ -29,7 +29,9 @@ const {
   updatePrefs,
   getAlertsForRole,
 } = require('../services/alertsService');
+const summaryKpiPrefs = require('../services/summaryKpiPrefsService');
 const messagesService = require('../services/messagesService');
+const { requestPasswordReset, confirmPasswordReset } = require('../auth/passwordReset');
 
 const router = express.Router();
 
@@ -81,6 +83,31 @@ router.post('/login', (req, res) => {
 router.post('/logout', (_req, res) => {
   clearSessionCookie(res);
   res.json({ ok: true });
+});
+
+router.post('/password-reset/request', (req, res) => {
+  try {
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
+    const result = requestPasswordReset(req.body?.username, ip);
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+router.post('/password-reset/confirm', async (req, res) => {
+  try {
+    const result = confirmPasswordReset(req.body?.username, req.body?.code, req.body?.password);
+    try {
+      const { syncAuthUsers } = require('../services/cloudSync/cloudSyncScheduler');
+      await syncAuthUsers({ reason: 'password-reset' });
+    } catch (syncErr) {
+      console.warn('[auth] sync usuarios a cloud:', syncErr.message);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
 });
 
 router.get('/users', requireUserManager, (_req, res) => {
@@ -164,6 +191,48 @@ router.get('/alerts', requireSession, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message || 'No se pudieron cargar las alertas.' });
   }
+});
+
+router.get('/summary-kpi-prefs', requireSession, (req, res) => {
+  const role = getRole(req.session.role);
+  const pages = role?.pages || [];
+  const prefs = summaryKpiPrefs.getUserPrefs(req.session.username, pages, req.session.role);
+  const grouped = summaryKpiPrefs.getCatalogGrouped(pages, { full: true });
+  res.json({
+    ok: true,
+    ...grouped,
+    ...prefs,
+    role: req.session.role,
+    roleLabel: role.label,
+    profile: summaryKpiPrefs.getProfileIndicators(req.session.role),
+  });
+});
+
+router.put('/summary-kpi-prefs', requireSession, (req, res) => {
+  try {
+    const role = getRole(req.session.role);
+    const pages = role?.pages || [];
+    const prefs = summaryKpiPrefs.setUserPrefs(
+      req.session.username,
+      req.body?.slots ?? req.body?.kpiIds,
+      pages,
+      req.body?.sizes,
+      req.body?.heights,
+      req.body?.views,
+      req.session.role,
+    );
+    res.json({ ok: true, ...prefs });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/summary-kpi-prefs', requireSession, (req, res) => {
+  summaryKpiPrefs.resetUserPrefs(req.session.username);
+  const role = getRole(req.session.role);
+  const pages = role?.pages || [];
+  const prefs = summaryKpiPrefs.getUserPrefs(req.session.username, pages, req.session.role);
+  res.json({ ok: true, ...prefs });
 });
 
 router.get('/directory', requireSession, (req, res) => {

@@ -78,6 +78,16 @@
   // Render inmediato para que #statusBadge / #lastUpdated existan antes de las consultas
   renderSidebar(null);
 
+  el.addEventListener('pointerenter', (event) => {
+    const link = event.target.closest('.sidebar-link');
+    if (!link || link.classList.contains('active') || link.dataset.prefetched === '1') return;
+    link.dataset.prefetched = '1';
+    const prefetch = document.createElement('link');
+    prefetch.rel = 'prefetch';
+    prefetch.href = link.href;
+    document.head.appendChild(prefetch);
+  }, true);
+
   if (window.DashboardAuth) {
     window.DashboardAuth.getSession(true).then(renderSidebar).catch(() => renderSidebar(null));
   }

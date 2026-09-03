@@ -34,10 +34,34 @@ function pct(num, den) {
 
 function inPeriod(fecha, fi, ff) {
   if (!fecha) return !fi && !ff;
-  const f = String(fecha).slice(0, 10);
-  if (fi && f < String(fi)) return false;
-  if (ff && f > String(ff)) return false;
+  const f = toIsoDate(fecha);
+  if (!f) return false;
+  if (fi && f < String(fi).slice(0, 10)) return false;
+  if (ff && f > String(ff).slice(0, 10)) return false;
   return true;
+}
+
+function toIsoDate(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear();
+    const mo = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${d}`;
+  }
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const dmy = text.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
+  if (dmy) {
+    let y = dmy[3];
+    if (y.length === 2) y = `20${y}`;
+    return `${y}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 20000 && n < 60000) {
+    return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
+  }
+  return null;
 }
 
 function rowDate(row) {
@@ -397,6 +421,56 @@ function buildOnstarFromPeriodContracts(contracts = [], fechaInicio, fechaFin) {
   };
 }
 
+/**
+ * Essentials (PDF): OnStar del Histórico de contratos.
+ * Anual = plazo 12 meses · Multianual = plazo > 12 meses.
+ */
+function parsePlazoOnstarMeses(plazo) {
+  if (plazo == null || plazo === '') return null;
+  if (Number.isFinite(Number(plazo))) return Number(plazo);
+  const m = String(plazo).match(/(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+function buildEssentialsFromContracts(contracts = []) {
+  const onstar = (contracts || []).filter((c) => c.hasOnstarContrato);
+  let anual = 0;
+  let multianual = 0;
+  let sinPlazo = 0;
+  const porPlazo = new Map();
+
+  for (const c of onstar) {
+    const meses = parsePlazoOnstarMeses(c.plazoOnstar);
+    const label = meses != null ? `${meses} MESES` : '(sin plazo)';
+    porPlazo.set(label, (porPlazo.get(label) || 0) + 1);
+    if (meses == null) {
+      sinPlazo += 1;
+    } else if (meses === 12) {
+      anual += 1;
+    } else if (meses > 12) {
+      multianual += 1;
+    } else {
+      // plazos < 12 no entran en Anual ni Multianual del PDF
+      sinPlazo += 1;
+    }
+  }
+
+  const base = anual + multianual;
+  return {
+    fuente: 'crm_financiamiento.plazo_onstar',
+    totalOnstar: onstar.length,
+    anual,
+    multianual,
+    sinPlazoOMenor12: sinPlazo,
+    baseClasificada: base,
+    anualPct: pct(anual, base),
+    multianualPct: pct(multianual, base),
+    porPlazo: [...porPlazo.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+  };
+}
+
 async function loadOnstarTechMesActual(refDate = new Date()) {
   return loadOnstarTechForPeriod(currentMonthBounds(refDate));
 }
@@ -510,25 +584,71 @@ function loadCrmContracts(fechaInicio, fechaFin) {
   }
 }
 
-function loadSolicitudes(fechaInicio, fechaFin) {
-  if (!crm.isAvailable()) {
-    return { total: 0, aprobadas: 0, conCompra: 0, tasaAprobacionPct: null, porEstatus: [], porFinanciera: [] };
+/**
+ * Carline desde columna M del sheet (UNIDAD Y PAQUETE), p.ej. "AVEO E 2026" → AVEO NB.
+ * Aveo HB = A/B/C/G · Aveo NB = D/E/F
+ * S10 Chassis = A · Crew = B · Regular = C/F
+ */
+function carlineFromUnidadPaquete(unidadPaquete) {
+  const raw = String(unidadPaquete || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (!raw) return '(sin carline)';
+  const parts = raw.split(' ').filter(Boolean);
+  let token = parts[0];
+  if (!token || /^\d+$/.test(token)) return '(sin carline)';
+
+  // Tipografías frecuentes en la hoja CRM
+  if (token === 'CHEYENNE') token = 'SILVERADO';
+  if (token === 'CAPTICA' || token === 'CCAPTIVA') token = 'CAPTIVA';
+  if (token === 'BLAZERE') token = 'BLAZER';
+  if (token === 'ONX' || token === 'OIX' || token === 'ONIXD') token = 'ONIX';
+  if (token === 'GOOVE') token = 'GROOVE';
+  if (token === 'AVEI') token = 'AVEO';
+
+  const paquete = parts.find((p) => /^[A-Z]$/.test(p)) || null;
+  const isCaptivaPhev = /PHEV|PHEB|HIBRIDA|HÍBRIDA/.test(raw);
+
+  if (token === 'AVEO') {
+    if (paquete && /[ABCG]/.test(paquete)) return 'AVEO HB';
+    if (paquete && /[DEF]/.test(paquete)) return 'AVEO NB';
+    return 'AVEO';
   }
+
+  if (token === 'CAPTIVA') {
+    return isCaptivaPhev ? 'CAPTIVA PHEV' : 'CAPTIVA';
+  }
+
+  if (token === 'S10') {
+    if (paquete === 'A') return 'S10 MAX Chassis Cab';
+    if (paquete === 'B') return 'S10 MAX Crew Cab';
+    if (paquete && /[CF]/.test(paquete)) return 'S10 MAX Regular Cab';
+    return 'S10';
+  }
+
+  return token;
+}
+
+function loadSolicitudes(fechaInicio, fechaFin) {
+  const empty = {
+    total: 0,
+    aprobadas: 0,
+    conCompra: 0,
+    tasaAprobacionPct: null,
+    porEstatus: [],
+    porFinanciera: [],
+    porCarline: [],
+  };
+  if (!crm.isAvailable()) return empty;
 
   const Database = require('better-sqlite3');
   const fs = require('fs');
   const path = require('path');
   const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
-  if (!fs.existsSync(DB_PATH)) {
-    return { total: 0, aprobadas: 0, conCompra: 0, tasaAprobacionPct: null, porEstatus: [], porFinanciera: [] };
-  }
+  if (!fs.existsSync(DB_PATH)) return empty;
 
   const d = new Database(DB_PATH, { readonly: true, fileMustExist: true });
   try {
     const hasSol = !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_solicitudes'`).get();
-    if (!hasSol) {
-      return { total: 0, aprobadas: 0, conCompra: 0, tasaAprobacionPct: null, porEstatus: [], porFinanciera: [] };
-    }
+    if (!hasSol) return empty;
 
     const rows = d.prepare(`
       SELECT id_crm, no_solicitud, estatus, financiera, fecha_solicitud, fecha_compra,
@@ -542,6 +662,34 @@ function loadSolicitudes(fechaInicio, fechaFin) {
       r.fecha_compra || String(r.estatus || '').toUpperCase().includes('FACT')
     ).length;
 
+    const byCarline = new Map();
+    for (const r of rows) {
+      const carline = carlineFromUnidadPaquete(r.unidad_paquete);
+      if (!byCarline.has(carline)) {
+        byCarline.set(carline, {
+          carline,
+          total: 0,
+          aprobadas: 0,
+          conCompra: 0,
+          muestraUnidad: null,
+        });
+      }
+      const bucket = byCarline.get(carline);
+      bucket.total += 1;
+      if (String(r.estatus || '').toUpperCase().includes('APROBADA')) bucket.aprobadas += 1;
+      if (r.fecha_compra || String(r.estatus || '').toUpperCase().includes('FACT')) bucket.conCompra += 1;
+      if (!bucket.muestraUnidad && r.unidad_paquete) {
+        bucket.muestraUnidad = String(r.unidad_paquete).trim();
+      }
+    }
+
+    const porCarline = [...byCarline.values()]
+      .map((b) => ({
+        ...b,
+        pct: pct(b.total, rows.length),
+      }))
+      .sort((a, b) => b.total - a.total || a.carline.localeCompare(b.carline));
+
     const sorted = rows
       .slice()
       .sort((a, b) => String(b.fecha_solicitud || '').localeCompare(String(a.fecha_solicitud || '')));
@@ -553,8 +701,9 @@ function loadSolicitudes(fechaInicio, fechaFin) {
       tasaAprobacionPct: pct(aprobadas, rows.length),
       porEstatus: countMap(rows, (r) => r.estatus || '(sin estatus)'),
       porFinanciera: countMap(rows, (r) => r.financiera || '(sin financiera)').slice(0, 10),
+      porCarline,
       muestra: sorted.map((r) => ({
-        fecha: r.fecha_solicitud || null,
+        fecha: toIsoDate(r.fecha_solicitud) || r.fecha_solicitud || null,
         cliente: r.nombre_cliente || null,
         vin: null,
         idCrm: r.id_crm != null ? String(r.id_crm) : null,
@@ -569,6 +718,7 @@ function loadSolicitudes(fechaInicio, fechaFin) {
         afi: r.afi || null,
         asesor: r.asesor || null,
         unidad: r.unidad_paquete || null,
+        carline: carlineFromUnidadPaquete(r.unidad_paquete),
       })),
     };
   } finally {
@@ -600,6 +750,7 @@ function buildSummary(contracts, solicitudes) {
   const contratosNuevos = contracts.filter(isNuevoContract);
   const contratosSeminuevos = contracts.filter(isSeminuevoContract);
   const contratosFlotilla = contracts.filter(isFlotillaContract);
+  const contratosDemo = contracts.filter((c) => String(c?.tipoCompra || '').trim().toUpperCase() === 'DEMO');
 
   const conPva = contracts.filter((c) => c.cantidadPvas > 0);
   const montoTotalPvas = contracts.reduce((s, c) => s + Number(c.montoPvas || 0), 0);
@@ -626,6 +777,7 @@ function buildSummary(contracts, solicitudes) {
     unidadesNuevos: contratosNuevos.length,
     unidadesSeminuevos: contratosSeminuevos.length,
     unidadesFlotilla: contratosFlotilla.length,
+    unidadesDemo: contratosDemo.length,
     montoFinanciarTotal: roundMoney(montos.reduce((s, n) => s + n, 0)) || 0,
     montoFinanciarPromedio: roundMoney(avg(montos)),
     enganchePromedio: roundMoney(avg(enganches)),
@@ -973,6 +1125,7 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
 
   // OnStar rápido desde contratos CRM del periodo (sin reconsultar SOFIA).
   const onstarTech = buildOnstarFromPeriodContracts(contracts, fechaInicio, fechaFin);
+  const essentials = buildEssentialsFromContracts(contracts);
 
   // PVA: serie del trimestre (por defecto el en curso; independiente del periodo del dashboard)
   const pva = getPvaTrimestreYtd({ anio: pvaAnio, trimestre: pvaTrimestre });
@@ -988,6 +1141,7 @@ async function getFinanciamientoDashboard({ fechaInicio, fechaFin, porTipoVentaR
     summary,
     retailMix: mixBundle.sofiaGmfMix || retailMix,
     onstarTech,
+    essentials,
     pvaTrimestreYtd: pva.pvaTrimestreYtd,
     pvaTrimestresOpciones: pva.pvaTrimestresOpciones,
     contratos: contracts,
@@ -1007,11 +1161,14 @@ module.exports = {
   buildRetailMix,
   buildSofiaGmfMixPayload,
   buildOnstarTechPenetracion,
+  buildEssentialsFromContracts,
+  parsePlazoOnstarMeses,
   buildPvaTrimestreYtd,
   listPvaTrimestreOpciones,
   quarterBounds,
   loadOnstarTechMesActual,
   loadOnstarTechForPeriod,
+  loadSolicitudes,
   isOnstarTechUnidad,
   isFlotillaContract,
   isSeminuevoContract,

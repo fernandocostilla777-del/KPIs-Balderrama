@@ -2,21 +2,25 @@ const express = require('express');
 const { getOverview } = require('../services/overviewService');
 const { loadSalesExecutiveAnalytics } = require('../services/salesExecutiveAnalytics');
 const { getVentas } = require('../services/ventas');
-const { getInventory, getIntercambiosHistorico } = require('../services/inventoryService');
+const { getInventory, getIntercambiosHistorico, getVendidosAnalisis } = require('../services/inventoryService');
+const { computeIemcF2 } = require('../services/iemcF2Service');
 const { getInventoryPostventa } = require('../services/inventoryPostventaService');
 const { getInventorySeminuevos } = require('../services/inventorySeminuevosService');
 const { getListaPrecios, getListaPreciosFicha } = require('../services/listaPreciosService');
 const { getPostSales, getPostSalesOrderDetail } = require('../services/postSalesService');
 const { getHypAseguradorasCobranza, getHypGarantiasCobranza } = require('../services/hypAseguradorasCobranza');
+const { consultarCuadreOrdenesHyp } = require('../services/cuadreOrdenesHyp');
 const { getRefaccionesPedidos, getRefaccionesDashboard } = require('../services/refaccionesPedidosService');
 const { getForecast } = require('../services/forecastService');
 const { getGoals, setGoals, getHistoricCatalog } = require('../services/salesGoals');
 const { getFinanciamientoDashboard, getPvaTrimestreYtd } = require('../services/financiamientoService');
+const { getPagosGmf } = require('../services/pagosGmfService');
 const { getComisionesFi, listComisionTypes } = require('../services/comisionesFiService');
 const { getAfluenciaDashboard } = require('../services/afluenciaService');
 const financiamientoNotes = require('../services/financiamientoNotesStore');
 const gerentesFi = require('../services/gerentesFinanciamientoStore');
 const { getFacturaMovimientos } = require('../services/facturaMovimientosService');
+const { getAnalisisFinanciero } = require('../services/analisisFinancieroService');
 const { getContabilidad } = require('../services/contabilidadService');
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
@@ -24,12 +28,16 @@ const { isConfigured, runChat, DEFAULT_MODEL } = require('../services/aiAgent');
 const { canManageUsers } = require('../auth/roles');
 const { isAuthEnabled } = require('../auth/session');
 const { requireSession } = require('../auth/middleware');
+const objetivosResultadosRoutes = require('./objetivosResultados');
 
 const router = express.Router();
 
 router.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'dashboard-ventas-abp', database: process.env.DB_NAME, timestamp: new Date().toISOString() });
 });
+
+/** Resultados en formato de objetivos comerciales (PDF scorecard). */
+router.use('/objetivos-resultados', objetivosResultadosRoutes);
 
 router.get('/ventas/objetivos/historico', (_req, res) => {
   try {
@@ -175,6 +183,20 @@ router.get('/ventas/financiamiento/pva-trimestre', (req, res, next) => {
       anio: anio || pvaAnio,
       trimestre: trimestre || pvaTrimestre,
     }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/financiamiento/pagos-gmf', (req, res, next) => {
+  try {
+    const vin = req.query.vin || req.query.serie || null;
+    const contrato = req.query.contrato || req.query.noContrato || null;
+    if (!vin && !contrato) {
+      return res.status(400).json({ error: 'Indique vin o contrato.' });
+    }
+    res.json(getPagosGmf({ vin, contrato }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -350,6 +372,25 @@ router.get('/inventory', async (req, res, next) => {
   }
 });
 
+router.get('/inventory/vendidos', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    const vendidos = await getVendidosAnalisis({ fechaInicio, fechaFin });
+    const iemc = await computeIemcF2({
+      fechaInicio,
+      fechaFin,
+      vendidosTable: vendidos.vendidosTable,
+    });
+    res.json({
+      ...vendidos,
+      iemc,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.get('/inventory/intercambios', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
@@ -365,8 +406,22 @@ router.get('/inventory/intercambios', async (req, res, next) => {
 
 router.get('/inventory/postventa', async (req, res, next) => {
   try {
-    res.json(await getInventoryPostventa());
+    const { fechaInicio, fechaFin } = req.query;
+    res.json(await getInventoryPostventa({ fechaInicio, fechaFin }));
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+/** Traspasos de refacciones entre almacenes (DE…A…) */
+router.get('/inventory/postventa/traspasos', async (req, res, next) => {
+  try {
+    const { getTraspasosEntreAlmacenes } = require('../services/inventoryPostventaService');
+    const { fechaInicio, fechaFin } = req.query;
+    res.json(await getTraspasosEntreAlmacenes({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
@@ -411,6 +466,28 @@ router.get('/post-sales/hyp/garantias-cobranza', async (req, res, next) => {
     next(err);
   }
 });
+
+/** Cuadre de Órdenes HyP · 0470/0476/0477/0479 · Contpaq MOVDET ↔ DMS */
+async function handleCuadreOrdenesHyp(req, res, next) {
+  try {
+    const { fechaInicio, fechaFin, sql } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    const incluirSql = sql === '1' || sql === 'true';
+    const data = await consultarCuadreOrdenesHyp({ fechaInicio, fechaFin, incluirSql });
+    // No enviar `texto` al UI (duplica la matriz y alarga la respuesta).
+    const { texto, ...rest } = data || {};
+    res.json({ ...rest, modulo: 'cuadreOrdenesHyp' });
+  } catch (err) {
+    console.error('[cuadreOrdenesHyp]', err.message || err);
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+}
+
+router.get('/post-sales/hyp/cuadre-ordenes', handleCuadreOrdenesHyp);
+router.get('/post-sales/hyp/cuadre', handleCuadreOrdenesHyp);
 
 router.get('/post-sales/refacciones-pedidos', async (req, res, next) => {
   try {
@@ -531,6 +608,19 @@ router.get('/contabilidad/punto-equilibrio', async (req, res, next) => {
       refined: refined === 'true' || refined === '1',
     }));
   } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/contabilidad/analisis-financiero', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(await getAnalisisFinanciero({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
@@ -725,16 +815,32 @@ router.post('/ai/insights', (req, res) => {
   try {
     const { buildInsights } = require('../services/intelligentInsightsService');
     const body = req.body || {};
-    const insights = buildInsights(body);
+    const roleId = req.session?.role || body.roleId || null;
+    const insights = buildInsights({ ...body, roleId });
     res.json({
       ok: true,
       module: body.module || null,
       count: insights.length,
       insights,
+      catalogAware: true,
     });
   } catch (err) {
     console.error('[AI Insights]', err.message);
     res.status(500).json({ error: err.message || 'No se pudieron generar insights' });
+  }
+});
+
+router.get('/ai/kpi-catalog', (req, res) => {
+  try {
+    const { listCatalog } = require('../services/kpiCatalogSemaforo');
+    const roleId = req.session?.role || req.query.roleId || null;
+    const items = listCatalog({
+      perspectiva: req.query.perspectiva,
+      roleId,
+    });
+    res.json({ ok: true, count: items.length, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

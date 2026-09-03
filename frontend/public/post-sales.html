@@ -6,7 +6,7 @@
 <title>PostVenta | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=58" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=88" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="post-sales">
@@ -166,6 +166,61 @@ HyP
 </div>
 </section>
 
+<section id="panelCuadreOrdenesHyp" class="dashboard-section hidden" data-hyp-cuadre>
+<section class="section-panel dashboard-section">
+<h3 class="section-title">Cuadre de Órdenes HyP</h3>
+<p class="section-subtitle">Contpaq MOVDET (0470 / 0476 / 0477 / 0479) ↔ DMS · sub sin IVA · por orden y factura</p>
+<div id="kpiCuadreOrdenesHyp" class="kpi-grid kpi-grid--eeff"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Resumen por cuenta</h3>
+<span id="cuadreOrdenesHypMeta" class="top-bar-meta">—</span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Cuenta</th>
+<th>Concepto</th>
+<th class="cell-num">Contpaq</th>
+<th class="cell-num">DMS</th>
+<th class="cell-num">Diferencia</th>
+<th class="cell-num">Líneas</th>
+</tr>
+</thead>
+<tbody id="tblCuadreOrdenesHypCuentas"></tbody>
+</table>
+</div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Matriz orden / factura</h3>
+<span class="top-bar-meta">0477 RE · 0470 MO · 0479 pintura · 0476 TOT</span>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Orden</th>
+<th>Factura</th>
+<th>VIN</th>
+<th>Cierre</th>
+<th>Letra</th>
+<th>Status</th>
+<th class="cell-num">0477</th>
+<th class="cell-num">0470</th>
+<th class="cell-num">0479</th>
+<th class="cell-num">0476</th>
+<th class="cell-num">Neto</th>
+</tr>
+</thead>
+<tbody id="tblCuadreOrdenesHypMatriz"></tbody>
+</table>
+</div>
+</section>
+</section>
+
 <section class="chart-grid">
 <div class="section-panel table-panel"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada · clic en una fila para ver el resumen</p><div class="table-scroll"><table class="data-table data-table--selectable"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
 <div class="section-panel table-panel"><h3 class="section-title">Control de órdenes</h3><p class="section-subtitle">Sin aseguradora · tipo por letra del folio</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Tipo de orden</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody></table></div></div>
@@ -203,7 +258,7 @@ HyP
 <div class="chart-card"><div class="chart-wrap"><canvas id="cWeekly"></canvas></div></div>
 </section>
 
-<section class="section-panel dashboard-section">
+<section class="section-panel dashboard-section" data-hyp-hide>
 <h3 class="section-title">Estatus por semana de ingreso</h3>
 <div class="chart-card"><div class="chart-wrap"><canvas id="cStatusWeek"></canvas></div></div>
 </section>
@@ -308,6 +363,48 @@ Pendientes
 <h3 class="section-title">Existencias actuales</h3>
 <p class="section-subtitle">PAR_ALMACEN + PAR_PARTES · stock con existencia &gt; 0</p>
 <div id="kpiRefaccionesInventario" class="kpi-summary"></div>
+</section>
+<section class="section-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Traspasos entre almacenes</h3>
+<span id="refaccionesTraspasosMeta" class="top-bar-meta">Periodo consultado</span>
+</div>
+<p class="section-subtitle">Piezas que salen de un almacén hacia otro (obs. DE…A…)</p>
+<div id="kpiRefaccionesTraspasos" class="kpi-summary"></div>
+</section>
+<section class="section-panel table-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Rutas y detalle de traspasos</h3>
+</div>
+<div class="chart-grid" style="margin-bottom:12px">
+<div class="table-scroll" style="max-height:220px">
+<table class="data-table">
+<thead><tr><th>Ruta</th><th class="cell-num">Piezas</th><th class="cell-money">Costo</th></tr></thead>
+<tbody id="tblRefaccionesTraspasosRutas"></tbody>
+</table>
+</div>
+<div class="table-scroll" style="max-height:220px">
+<table class="data-table">
+<thead><tr><th>Parte</th><th>Descripción</th><th class="cell-num">Piezas</th></tr></thead>
+<tbody id="tblRefaccionesTraspasosTop"></tbody>
+</table>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Fecha</th>
+<th>Parte</th>
+<th>Origen</th>
+<th>Destino</th>
+<th class="cell-num">Piezas</th>
+<th class="cell-money">Costo</th>
+</tr>
+</thead>
+<tbody id="tblRefaccionesTraspasosDetalle"></tbody>
+</table>
+</div>
 </section>
 <section class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
@@ -475,11 +572,11 @@ Pendientes
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/postSalesOrderTypes.js?v=9"></script>
 <script src="/js/postSalesAnalytics.js?v=24"></script>
-<script src="/js/sidebar.js?v=10"></script>
-<script src="/js/topbar.js?v=17"></script>
+<script src="/js/sidebar.js?v=11"></script>
+<script src="/js/topbar.js?v=18"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=4"></script>
+<script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/post-sales.js?v=87"></script>
+<script src="/js/post-sales.js?v=90"></script>
 </body>
 </html>

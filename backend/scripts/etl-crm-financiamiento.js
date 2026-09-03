@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 const Database = require('better-sqlite3');
+const { contractStorageValue } = require('./lib/crmContratoNorm');
 
 const DEFAULT_XLSX = path.join(__dirname, '../data/leads-source.xlsx');
 const DB_PATH = path.join(__dirname, '../data/crm-ciclos.db');
@@ -201,7 +202,7 @@ function run() {
       clean(row[COL.unidad]),
       vin,
       serialToIso(row[COL.fechaCompra]),
-      clean(row[COL.contrato]),
+      contractStorageValue(row[COL.contrato]),
       clean(row[COL.plan]),
       Math.round(numberValue(row[COL.plazo]) || 0) || null,
       percentValue(row[COL.enganchePct]),
@@ -217,7 +218,7 @@ function run() {
       clean(row[COL.plazoOnstar]),
       numberValue(row[COL.mantenimientoIntegrado]),
       numberValue(row[COL.comision]),
-      clean(row[COL.noContrato]),
+      contractStorageValue(row[COL.noContrato]),
       clean(row[COL.factura]),
       clean(row[COL.mantenimientosIncluidos]),
       numberValue(row[COL.pagoFlexible]),
@@ -242,6 +243,8 @@ function run() {
     CREATE INDEX idx_fin_vin ON crm_financiamiento (vin);
     CREATE INDEX idx_fin_fecha_compra ON crm_financiamiento (fecha_compra);
     CREATE INDEX idx_fin_cliente ON crm_financiamiento (cliente);
+    CREATE INDEX idx_fin_contrato ON crm_financiamiento (contrato);
+    CREATE INDEX idx_fin_no_contrato ON crm_financiamiento (no_contrato);
   `);
 
   const pva = db.prepare(`

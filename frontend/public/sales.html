@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=61" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=89" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -131,6 +131,7 @@ Comisiones
 <div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="cobertura"></span></div>
 </div>
 </section>
+<p id="ventasDemosNota" class="liquidez-note ventas-demos-nota hidden" aria-live="polite"></p>
 
 <section id="panelVentasDetalle" class="section-panel dashboard-section kpi-detail-panel kpi-detail-panel--ventas hidden" aria-labelledby="kpiCardRetail">
 <div class="kpi-detail-header">
@@ -347,20 +348,19 @@ Analizar mix
 <span id="mixOtrosMeta" class="section-subtitle" style="margin:0"></span>
 </div>
 <div id="mixOtrosDetalle" class="mix-otros-detalle hidden" hidden style="margin-top:10px">
-<p class="section-subtitle" style="margin:0 0 8px">Asignación por fuerza de ventas · clic en una fila para ver modelos</p>
+<p class="section-subtitle" style="margin:0 0 8px">Modelos dentro de Otros · clic en una fila para ver las unidades</p>
 <div class="table-scroll">
 <table class="data-table">
 <thead>
 <tr>
-<th>Fuerza / asignación</th>
+<th>Modelo / carline</th>
 <th class="cell-num">Unidades</th>
 <th class="cell-num">% del mix</th>
 <th class="cell-num">% de Otros</th>
-<th class="cell-num">Modelos</th>
 </tr>
 </thead>
 <tbody id="mixOtrosBody">
-<tr class="empty-row"><td colspan="5">Sin unidades en Otros.</td></tr>
+<tr class="empty-row"><td colspan="4">Sin unidades en Otros.</td></tr>
 </tbody>
 </table>
 </div>
@@ -1013,18 +1013,19 @@ Exportar CSV
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js?v=5"></script>
-<script src="/js/canales.js?v=2"></script>
-<script src="/js/sidebar.js?v=10"></script>
-<script src="/js/topbar.js?v=17"></script>
+<script src="/js/shared.js?v=7"></script>
+<script src="/js/canales.js?v=3"></script>
+<script src="/js/sidebar.js?v=11"></script>
+<script src="/js/topbar.js?v=18"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=7"></script>
+<script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/financiamiento.js?v=47"></script>
 <script src="/js/leads.js?v=13"></script>
 <script src="/js/afluencia.js?v=10"></script>
 <script src="/js/comisiones.js?v=2"></script>
-<script src="/js/sales.js?v=93"></script>
+<script src="/js/sales.js?v=99"></script>
 </body>
 </html>

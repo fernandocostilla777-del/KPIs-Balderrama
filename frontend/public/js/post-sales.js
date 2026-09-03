@@ -19,6 +19,8 @@
   let hypGarantiasData = null;
   let hypGarantiasLoadedKey = '';
   let openHypGarantiasKey = null;
+  let cuadreOrdenesHypData = null;
+  let cuadreOrdenesHypLoadedKey = '';
   /** Segmentación HyP: grupos Externas / Internas (filtro por letra de orden). */
   const HYP_OPS_CHIP_GROUPS = [
     {
@@ -2344,38 +2346,44 @@
     });
   }
 
-  function renderCharts(c, opts) {
+  function renderCharts(c) {
     const { chartOptions, chartColors, chartPalette } = Dashboard;
+    const weeklyEl = document.getElementById('cWeekly');
+    const statusWeekEl = document.getElementById('cStatusWeek');
 
     destroyChart('cWeekly');
-    charts.cWeekly = new Chart(document.getElementById('cWeekly'), {
-      type: 'line',
-      data: {
-        labels: c.weeklyFlow.map((x) => x.label),
-        datasets: [
-          { label: 'Ingresadas', data: c.weeklyFlow.map((x) => x.ingresadas), borderColor: chartColors.primary, tension: 0.3 },
-          { label: 'Facturadas', data: c.weeklyFlow.map((x) => x.facturadas), borderColor: chartColors.rose, tension: 0.3 },
-        ],
-      },
-      options: chartOptions({ plugins: { legend: { position: 'bottom' } } }),
-    });
+    if (weeklyEl && c.weeklyFlow) {
+      charts.cWeekly = new Chart(weeklyEl, {
+        type: 'line',
+        data: {
+          labels: c.weeklyFlow.map((x) => x.label),
+          datasets: [
+            { label: 'Ingresadas', data: c.weeklyFlow.map((x) => x.ingresadas), borderColor: chartColors.primary, tension: 0.3 },
+            { label: 'Facturadas', data: c.weeklyFlow.map((x) => x.facturadas), borderColor: chartColors.rose, tension: 0.3 },
+          ],
+        },
+        options: chartOptions({ plugins: { legend: { position: 'bottom' } } }),
+      });
+    }
 
-    const weekLabels = c.statusByWeek.map((x) => x.label);
-    const weekGroups = [...new Set(c.statusByWeek.flatMap((x) => Object.keys(x.groups)))];
     destroyChart('cStatusWeek');
-    charts.cStatusWeek = new Chart(document.getElementById('cStatusWeek'), {
-      type: 'bar',
-      data: {
-        labels: weekLabels,
-        datasets: weekGroups.map((g, i) => ({
-          label: g,
-          data: c.statusByWeek.map((w) => w.groups[g] || 0),
-          backgroundColor: chartPalette[i % chartPalette.length],
-          borderRadius: 4,
-        })),
-      },
-      options: chartOptions({ scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }),
-    });
+    if (statusWeekEl && c.statusByWeek) {
+      const weekLabels = c.statusByWeek.map((x) => x.label);
+      const weekGroups = [...new Set(c.statusByWeek.flatMap((x) => Object.keys(x.groups)))];
+      charts.cStatusWeek = new Chart(statusWeekEl, {
+        type: 'bar',
+        data: {
+          labels: weekLabels,
+          datasets: weekGroups.map((g, i) => ({
+            label: g,
+            data: c.statusByWeek.map((w) => w.groups[g] || 0),
+            backgroundColor: chartPalette[i % chartPalette.length],
+            borderRadius: 4,
+          })),
+        },
+        options: chartOptions({ scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }),
+      });
+    }
   }
 
   function countActiveFilters() {
@@ -2472,6 +2480,7 @@
     document.getElementById('panelPostVentaRefacciones')?.classList.toggle('hidden', !isRef);
     document.getElementById('panelMesCursoNomenclatura')?.classList.toggle('hidden', !isServicio);
     document.getElementById('panelHypCobranza')?.classList.toggle('hidden', !isHyp);
+    document.getElementById('panelCuadreOrdenesHyp')?.classList.toggle('hidden', !isHyp);
     document.querySelectorAll('#panelPostVentaOrdenes [data-hyp-hide]').forEach((el) => {
       el.classList.toggle('hidden', isHyp);
     });
@@ -2649,6 +2658,69 @@
           </div>
         </div>`;
     }
+
+    const tr = data?.traspasos || {};
+    const trS = tr.summary || {};
+    const trMeta = document.getElementById('refaccionesTraspasosMeta');
+    const trKpi = document.getElementById('kpiRefaccionesTraspasos');
+    if (trMeta) {
+      const f = data?.filtros || {};
+      trMeta.textContent = f.fechaInicio && f.fechaFin
+        ? `${f.fechaInicio} — ${f.fechaFin} · ${fmt.number(trS.piezas || 0)} pzas`
+        : `${fmt.number(trS.piezas || 0)} pzas`;
+    }
+    if (trKpi) {
+      trKpi.innerHTML = `
+        <div class="kpi-group">
+          <h4 class="kpi-group-title">Traspasos</h4>
+          <div class="kpi-grid">
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Piezas movidas</span><div class="kpi-value">${fmt.number(trS.piezas || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Partes</span><div class="kpi-value">${fmt.number(trS.partes || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Documentos</span><div class="kpi-value">${fmt.number(trS.documentos || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Costo</span><div class="kpi-value">${fmt.money(trS.costo || 0)}</div><div class="kpi-accent"></div></div>
+          </div>
+        </div>`;
+    }
+    const trRutas = document.getElementById('tblRefaccionesTraspasosRutas');
+    if (trRutas) {
+      const rows = tr.rutas || [];
+      trRutas.innerHTML = rows.length
+        ? rows.slice(0, 20).map((r) => `
+          <tr>
+            <td>${escHtml(r.ruta || `${r.origen} → ${r.destino}`)}</td>
+            <td class="cell-num">${fmt.number(r.piezas || 0)}</td>
+            <td class="cell-num">${fmt.money(r.costo || 0)}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="3">Sin traspasos en el periodo.</td></tr>';
+    }
+    const trTop = document.getElementById('tblRefaccionesTraspasosTop');
+    if (trTop) {
+      const rows = tr.topPartes || [];
+      trTop.innerHTML = rows.length
+        ? rows.slice(0, 20).map((r) => `
+          <tr>
+            <td class="mono">${escHtml(r.parte || '')}</td>
+            <td>${escHtml(r.descripcion || '—')}</td>
+            <td class="cell-num">${fmt.number(r.piezas || 0)}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="3">Sin partes.</td></tr>';
+    }
+    const trDet = document.getElementById('tblRefaccionesTraspasosDetalle');
+    if (trDet) {
+      const rows = tr.detalle || [];
+      trDet.innerHTML = rows.length
+        ? rows.slice(0, 80).map((r) => `
+          <tr>
+            <td>${escHtml(r.fecha || '—')}</td>
+            <td class="mono">${escHtml(r.parte || '')}</td>
+            <td>${escHtml(r.origen || '—')}</td>
+            <td>${escHtml(r.destino || '—')}</td>
+            <td class="cell-num">${fmt.number(r.piezas || 0)}</td>
+            <td class="cell-num">${fmt.money(r.costo || 0)}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="6">Sin detalle.</td></tr>';
+    }
+
     if (invBody) {
       const rows = inv.detalle || [];
       invBody.innerHTML = rows.length
@@ -2970,6 +3042,112 @@
     return { aseguradoras: hypCobranzaData, garantias: hypGarantiasData };
   }
 
+  function renderCuadreOrdenesHyp(data) {
+    const { fmt } = Dashboard;
+    const kpiRoot = document.getElementById('kpiCuadreOrdenesHyp');
+    const metaEl = document.getElementById('cuadreOrdenesHypMeta');
+    const tblCuentas = document.getElementById('tblCuadreOrdenesHypCuentas');
+    const tblMatriz = document.getElementById('tblCuadreOrdenesHypMatriz');
+
+    if (!data) {
+      if (kpiRoot) kpiRoot.innerHTML = '';
+      if (metaEl) metaEl.textContent = 'Sin datos';
+      if (tblCuentas) tblCuentas.innerHTML = '<tr><td colspan="6">No se pudo cargar el cuadre.</td></tr>';
+      if (tblMatriz) tblMatriz.innerHTML = '<tr><td colspan="11">—</td></tr>';
+      return;
+    }
+
+    const r = data.resumen || {};
+    const dif = Number(r.diferencia || 0);
+    const difCls = Math.abs(dif) < 0.02 ? 'green' : 'rose';
+
+    if (kpiRoot) {
+      kpiRoot.innerHTML = [
+        executiveCard('Total Contpaq', fmt.currency(r.totalContpaq || 0), 'MOVDET VS/DVS', 'blue', 'account_balance', null),
+        executiveCard('Total DMS', fmt.currency(r.totalDms || 0), 'facturas SRV/S000', 'violet', 'receipt_long', null),
+        executiveCard('Diferencia', fmt.currency(dif), Math.abs(dif) < 0.02 ? 'cuadrado' : 'revisar', difCls, 'compare_arrows', null),
+        executiveCard('VINs únicos', fmt.number(r.vinsUnicos || 0), `${fmt.number(r.facturas || 0)} facturas · ${fmt.number(r.ordenes || 0)} órdenes`, 'amber', 'directions_car', null),
+      ].join('');
+    }
+
+    if (metaEl) {
+      const p = data.periodo || {};
+      metaEl.textContent = `${p.fechaInicio || '—'} a ${p.fechaFin || '—'} · ${fmt.number(r.facturas || 0)} facturas`;
+    }
+
+    if (tblCuentas) {
+      const cuentas = r.cuentas || [];
+      tblCuentas.innerHTML = cuentas.length
+        ? cuentas.map((c) => {
+          const d = Number(c.diferencia || 0);
+          return `<tr>
+            <td>${escHtml(c.cuenta)}</td>
+            <td>${escHtml(c.label || '')}</td>
+            <td class="cell-num">${fmt.currency(c.contpaq)}</td>
+            <td class="cell-num">${fmt.currency(c.dms)}</td>
+            <td class="cell-num">${fmt.currency(d)}</td>
+            <td class="cell-num">${fmt.number(c.lineas || 0)}</td>
+          </tr>`;
+        }).join('')
+        : '<tr><td colspan="6">Sin cuentas</td></tr>';
+    }
+
+    if (tblMatriz) {
+      const rows = (data.facturas || []).slice().sort((a, b) => {
+        const va = String(a.vin || '');
+        const vb = String(b.vin || '');
+        return va.localeCompare(vb) || String(a.orden || '').localeCompare(String(b.orden || ''));
+      });
+      tblMatriz.innerHTML = rows.length
+        ? rows.map((f) => {
+          const pc = f.porCuenta || {};
+          return `<tr>
+            <td>${escHtml(f.orden || '')}</td>
+            <td>${escHtml(f.docto || '')}</td>
+            <td>${escHtml(f.vin || '—')}</td>
+            <td>${escHtml(f.cierre || '—')}</td>
+            <td>${escHtml(f.letra || '')}</td>
+            <td>${escHtml(f.st || '')}</td>
+            <td class="cell-num">${fmt.currency(pc['0477'] || 0)}</td>
+            <td class="cell-num">${fmt.currency(pc['0470'] || 0)}</td>
+            <td class="cell-num">${fmt.currency(pc['0479'] || 0)}</td>
+            <td class="cell-num">${fmt.currency(pc['0476'] || 0)}</td>
+            <td class="cell-num">${fmt.currency(f.neto || 0)}</td>
+          </tr>`;
+        }).join('')
+        : '<tr><td colspan="11">Sin facturas en el periodo</td></tr>';
+    }
+  }
+
+  function setCuadreOrdenesHypLoading(periodoLabel) {
+    const kpiRoot = document.getElementById('kpiCuadreOrdenesHyp');
+    const metaEl = document.getElementById('cuadreOrdenesHypMeta');
+    const tblCuentas = document.getElementById('tblCuadreOrdenesHypCuentas');
+    const tblMatriz = document.getElementById('tblCuadreOrdenesHypMatriz');
+    if (kpiRoot) {
+      kpiRoot.innerHTML = `<p class="section-subtitle" style="margin:0">Cargando cuadre Contpaq ↔ DMS${periodoLabel ? ` · ${periodoLabel}` : ''}…</p>`;
+    }
+    if (metaEl) metaEl.textContent = 'Consultando…';
+    if (tblCuentas) tblCuentas.innerHTML = '<tr><td colspan="6">Consultando cuentas 0470 / 0476 / 0477 / 0479…</td></tr>';
+    if (tblMatriz) tblMatriz.innerHTML = '<tr><td colspan="11">Armando matriz orden / factura…</td></tr>';
+  }
+
+  async function loadCuadreOrdenesHyp(fechaInicio, fechaFin, force = false) {
+    const key = `${fechaInicio}|${fechaFin}`;
+    if (!force && cuadreOrdenesHypData && cuadreOrdenesHypLoadedKey === key) {
+      renderCuadreOrdenesHyp(cuadreOrdenesHypData);
+      return cuadreOrdenesHypData;
+    }
+    setCuadreOrdenesHypLoading(`${fechaInicio} — ${fechaFin}`);
+    const data = await Dashboard.api(
+      `/post-sales/hyp/cuadre-ordenes?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
+    );
+    cuadreOrdenesHypData = data;
+    cuadreOrdenesHypLoadedKey = key;
+    renderCuadreOrdenesHyp(data);
+    return data;
+  }
+
   function mapHypGarantiasRow(r) {
     return {
       ...r,
@@ -3166,18 +3344,40 @@
       return;
     }
 
-    refreshDashboard();
+    try {
+      refreshDashboard();
+    } catch (err) {
+      console.warn('[PostVenta refresh]', err?.message || err);
+    }
 
     if (currentArea === 'hyp') {
       const fi = document.getElementById('fechaInicio')?.value;
       const ff = document.getElementById('fechaFin')?.value;
       if (fi && ff) {
+        const loading = window.showLoading || Dashboard.showLoading;
         try {
-          await loadHypCobranza(fi, ff);
-        } catch (err) {
-          console.warn('[HyP cobranza]', err.message);
-          renderHypCobranza(null);
-          renderHypGarantias(null);
+          loading?.(true);
+          document.getElementById('panelCuadreOrdenesHyp')?.classList.remove('hidden');
+          setCuadreOrdenesHypLoading(`${fi} — ${ff}`);
+          try {
+            await loadHypCobranza(fi, ff);
+          } catch (err) {
+            console.warn('[HyP cobranza]', err.message);
+            renderHypCobranza(null);
+            renderHypGarantias(null);
+          }
+          try {
+            await loadCuadreOrdenesHyp(fi, ff, true);
+            document.getElementById('panelCuadreOrdenesHyp')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } catch (err) {
+            console.error('[Cuadre órdenes HyP]', err);
+            renderCuadreOrdenesHyp(null);
+            const metaEl = document.getElementById('cuadreOrdenesHypMeta');
+            if (metaEl) metaEl.textContent = err.message || 'Error al cargar';
+            window.alert(err.message || 'No se pudo cargar el Cuadre de Órdenes HyP. Reinicia el backend si la ruta no existe.');
+          }
+        } finally {
+          loading?.(false);
         }
       }
     }
@@ -3196,7 +3396,9 @@
     const dash = PostSalesAnalytics.computeDashboard(allRecords, getFilters(), openSnapshot, ytdRecords);
     lastDash = dash;
     renderKpis(dash);
-    renderCharts(dash.charts);
+    if (currentArea !== 'hyp') {
+      renderCharts(dash.charts);
+    }
     renderTables(dash);
     Dashboard.setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')} · ${dash.filtered.length} órdenes`);
     updateFilterUI(dash.filtered.length);
@@ -3232,6 +3434,8 @@
     hypGarantiasData = null;
     hypGarantiasLoadedKey = '';
     openHypGarantiasKey = null;
+    cuadreOrdenesHypData = null;
+    cuadreOrdenesHypLoadedKey = '';
     populateFilterOptions(PostSalesAnalytics.buildFilterOptions(allRecords, openSnapshot));
     await setPostVentaArea(currentArea || getSectionFromUrl() || 'posventa');
     return allRecords.length;

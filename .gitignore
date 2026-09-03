@@ -16,6 +16,7 @@ cloud-api/.env
 backend/data/ai-exports/
 backend/data/ai-user-memory.json
 backend/data/users.json
+backend/data/passwordResets.json
 backend/data/sales-goals.json
 backend/data/financiamiento-notes.json
 backend/data/rolePermissions.json

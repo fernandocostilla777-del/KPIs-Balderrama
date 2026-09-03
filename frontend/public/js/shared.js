@@ -31,8 +31,17 @@ const fmt = {
   },
 };
 
-async function api(path) {
-  const res = await fetch(`/api${path}`, { credentials: 'same-origin' });
+async function api(path, options = {}) {
+  const opts = {
+    credentials: 'same-origin',
+    ...options,
+  };
+  if (opts.body && !opts.headers) {
+    opts.headers = { 'Content-Type': 'application/json' };
+  } else if (opts.body && opts.headers && !opts.headers['Content-Type'] && !opts.headers['content-type']) {
+    opts.headers = { ...opts.headers, 'Content-Type': 'application/json' };
+  }
+  const res = await fetch(`/api${path}`, opts);
   if (res.status === 401) {
     window.location.href = `/login.html?returnUrl=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     throw new Error('Sesión expirada');
@@ -41,6 +50,7 @@ async function api(path) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || err.error || res.statusText);
   }
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -438,6 +448,9 @@ function chartOptions(extra = {}) {
         },
       },
       tooltip: { ...base.plugins.tooltip, ...(extra.plugins.tooltip || {}) },
+      ...(extra.plugins.datalabels
+        ? { datalabels: { ...(base.plugins.datalabels || {}), ...extra.plugins.datalabels } }
+        : {}),
     };
   }
   if (extra.scales) {
@@ -449,16 +462,127 @@ function chartOptions(extra = {}) {
   return merged;
 }
 
+/** Etiquetas de valor sobre barras/líneas (requiere chartjs-plugin-datalabels). */
+function chartDataLabels(kind = 'bar') {
+  const formatValue = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n === 0) return '';
+    if (Number.isInteger(n)) return String(n);
+    return String(Math.round(n * 10) / 10);
+  };
+  const base = {
+    display: true,
+    color: '#1e293b',
+    font: { family: 'Inter, Segoe UI, sans-serif', weight: '700', size: 11 },
+    clamp: true,
+    formatter: formatValue,
+  };
+  if (kind === 'barStacked') {
+    return {
+      ...base,
+      anchor: 'center',
+      align: 'center',
+      color: '#ffffff',
+      textStrokeColor: 'rgba(15,23,42,0.25)',
+      textStrokeWidth: 2,
+      font: { family: 'Inter, Segoe UI, sans-serif', weight: '700', size: 10 },
+      formatter: (value) => {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 1) return '';
+        return String(Math.round(n));
+      },
+    };
+  }
+  if (kind === 'barHorizontal') {
+    return {
+      ...base,
+      anchor: 'end',
+      align: 'right',
+      offset: 6,
+      color: '#334155',
+    };
+  }
+  if (kind === 'line') {
+    return {
+      ...base,
+      anchor: 'end',
+      align: 'top',
+      offset: 4,
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      borderRadius: 4,
+      padding: { top: 1, bottom: 1, left: 4, right: 4 },
+      color: '#334155',
+    };
+  }
+  return {
+    ...base,
+    anchor: 'end',
+    align: 'top',
+    offset: 2,
+  };
+}
+
 if (typeof Chart !== 'undefined') {
   Chart.defaults.color = '#64748b';
   Chart.defaults.borderColor = 'rgba(148,163,184,0.12)';
   Chart.defaults.font.family = 'Inter, Segoe UI, sans-serif';
+  if (typeof ChartDataLabels !== 'undefined') {
+    Chart.register(ChartDataLabels);
+    Chart.defaults.plugins.datalabels = { display: false };
+  }
+}
+
+const TABLE_SCROLL_UNLOCK_SELECTOR = [
+  '.table-scroll',
+  '.plan-piso-table-wrap',
+  '.ageing-slow-table-wrap',
+  '.inv-piso-scenario__table-wrap',
+  '#alertsList',
+].join(', ');
+
+function unlockTableScroll(wrap) {
+  document.querySelectorAll(`${TABLE_SCROLL_UNLOCK_SELECTOR}.is-scroll-unlocked`).forEach((el) => {
+    if (el !== wrap) el.classList.remove('is-scroll-unlocked');
+  });
+  if (wrap) wrap.classList.add('is-scroll-unlocked');
+}
+
+function initTableScrollUnlock() {
+  if (document.documentElement.dataset.tableScrollUnlock === '1') return;
+  document.documentElement.dataset.tableScrollUnlock = '1';
+
+  document.addEventListener('pointerdown', (e) => {
+    const wrap = e.target.closest(TABLE_SCROLL_UNLOCK_SELECTOR);
+    unlockTableScroll(wrap || null);
+  }, true);
+
+  document.addEventListener('pointerout', (e) => {
+    const wrap = e.target.closest(TABLE_SCROLL_UNLOCK_SELECTOR);
+    if (!wrap || !wrap.classList.contains('is-scroll-unlocked')) return;
+    const next = e.relatedTarget;
+    if (next && wrap.contains(next)) return;
+    wrap.classList.remove('is-scroll-unlocked');
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll(`${TABLE_SCROLL_UNLOCK_SELECTOR}.is-scroll-unlocked`).forEach((el) => {
+      el.classList.remove('is-scroll-unlocked');
+    });
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initTableScrollUnlock);
+} else {
+  initTableScrollUnlock();
 }
 
 window.Dashboard = {
   fmt, api, showLoading, setText, getYearParam, populateYearFilter,
-  statusBadge, dotColor, chartColors, chartPalette, chartOptions, MONTHS,
+  statusBadge, dotColor, chartColors, chartPalette, chartOptions, chartDataLabels, MONTHS,
   formatDateInput, getDatePresetRange, getDefaultDateRange, getDateParamsFromUrl,
   syncDateParamsToUrl, initDateFilter, initCompactFilters, updateCompactFilterLabels,
   updateCompactScopeLabel, formatPeriodLabel, setActivePresetChip,
+  initTableScrollUnlock,
 };

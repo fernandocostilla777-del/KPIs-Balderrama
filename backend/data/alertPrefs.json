@@ -21,10 +21,13 @@
       "sistema"
     ],
     "gerencia_comercial": [
+      "inventario_sin_previas",
       "entregas_sin_previa",
       "sin_timbrar",
       "margen_asesores",
-      "inventario_sin_previas",
+      "sistema"
+    ],
+    "vendedor": [
       "sistema"
     ],
     "contabilidad": [

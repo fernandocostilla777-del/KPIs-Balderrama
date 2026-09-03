@@ -6,7 +6,6 @@ const { getBalanceGeneral } = require('./balanceGeneralService');
 const { BALANCE_GENERAL_SECTIONS } = require('../config/balanceGeneralAccounts');
 
 const ACUM_DET = 'DETA';
-const DISCOUNT_GROUPS = ['431', '432', '433', '435', '436', '437', '438'];
 
 const BALANCE_SECTIONS = [
   { key: 'activoCirculante', label: 'Activo circulante', pertenece: 'ACTIVO', grupos: ['110'] },
@@ -21,8 +20,17 @@ const OPERATING_EXPENSE_PREFIX = '0700-%';
 
 const EXPENSE_GROUPS = {
   gastosAdministracion: { label: 'Gastos de administración', groups: ['740', '750'] },
-  productosFinancieros: { label: 'Productos / gastos financieros y otros', groups: ['800', '900', '903', '906', '908', '909', '910', '912', '931', '938', '940', '941', '942'] },
+  productosFinancieros: {
+    label: 'Productos / gastos financieros y otros',
+    groups: ['800', '900', '903', '906', '908', '909', '910', '912', '931', '938', '940', '941', '942'],
+    // Las cuentas 0800 se reportan como ingreso F&I, aunque su grupo contable sea financiero.
+    excludePrefixes: ['0800-%'],
+  },
 };
+
+// Las cuentas de administración viven dentro del prefijo 0700, por lo que hay que
+// excluirlas de gastos de operación para no restarlas dos veces en el resultado.
+const ADMIN_GROUPS_INSIDE_0700 = EXPENSE_GROUPS.gastosAdministracion.groups;
 
 function parseDate(value) {
   const d = new Date(`${value}T12:00:00`);
@@ -99,31 +107,44 @@ function yearSegments(fechaInicio, fechaFin) {
   return segments;
 }
 
-async function sumByLikePatterns(table, startMonth, endMonth, { prefixes = [], exact = [] }, asIncome) {
+async function sumByLikePatterns(table, startMonth, endMonth, { prefixes = [], exact = [], excludeGroups = [] }, asIncome) {
   if (!prefixes.length && !exact.length) return 0;
   const mov = movementExpr(startMonth, endMonth);
   const sign = asIncome ? incomeExpr(mov) : expenseExpr(mov);
   const where = buildLikeWhere(prefixes, exact);
   const params = likeParams(prefixes, exact);
+  let excludeSql = '';
+  if (excludeGroups.length) {
+    const inList = excludeGroups.map((g, i) => `@xg${i}`).join(', ');
+    excludeGroups.forEach((g, i) => { params[`xg${i}`] = g; });
+    excludeSql = ` AND ISNULL(CTA_GPOCONT, '') NOT IN (${inList})`;
+  }
   const rows = await query(`
     SELECT SUM(${sign}) AS total
     FROM [${table}]
-    WHERE CTA_ACUMDET = '${ACUM_DET}' AND (${where})
+    WHERE CTA_ACUMDET = '${ACUM_DET}' AND (${where})${excludeSql}
   `, params);
   return Number(rows[0]?.total || 0);
 }
 
-async function sumByGroups(table, startMonth, endMonth, groups, asIncome) {
+async function sumByGroups(table, startMonth, endMonth, groups, asIncome, excludePrefixes = []) {
   if (!groups.length) return 0;
   const mov = movementExpr(startMonth, endMonth);
   const sign = asIncome ? incomeExpr(mov) : expenseExpr(mov);
   const inList = groups.map((g, i) => `@g${i}`).join(', ');
   const params = {};
   groups.forEach((g, i) => { params[`g${i}`] = g; });
+  let excludeSql = '';
+  if (excludePrefixes.length) {
+    excludeSql = excludePrefixes.map((p, i) => {
+      params[`xp${i}`] = p.includes('%') ? p : `${p}%`;
+      return ` AND CTA_NUMCTA NOT LIKE @xp${i}`;
+    }).join('');
+  }
   const rows = await query(`
     SELECT SUM(${sign}) AS total
     FROM [${table}]
-    WHERE CTA_ACUMDET = '${ACUM_DET}' AND CTA_GPOCONT IN (${inList})
+    WHERE CTA_ACUMDET = '${ACUM_DET}' AND CTA_GPOCONT IN (${inList})${excludeSql}
   `, params);
   return Number(rows[0]?.total || 0);
 }
@@ -211,7 +232,7 @@ async function sumOperatingExpenses(segments, scope) {
     ? scope.expenseDef.prefixes
     : [OPERATING_EXPENSE_PREFIX];
   return sumAcrossSegments(segments, (table, ms, me) =>
-    sumByLikePatterns(table, ms, me, { prefixes }, false));
+    sumByLikePatterns(table, ms, me, { prefixes, excludeGroups: ADMIN_GROUPS_INSIDE_0700 }, false));
 }
 
 async function getIncomeStatement(fechaInicio, fechaFin, scope) {
@@ -226,20 +247,10 @@ async function getIncomeStatement(fechaInicio, fechaFin, scope) {
     ventasBrutas += value;
   }
 
-  let descuentos = 0;
-  if (scope.applyDiscounts) {
-    descuentos = await sumAcrossSegments(segments, (table, ms, me) =>
-      sumByGroups(table, ms, me, DISCOUNT_GROUPS, true));
-    if (descuentos) {
-      revenueLines.push({
-        key: 'descuentos',
-        label: 'Descuentos sobre ventas',
-        value: -Math.abs(descuentos),
-        group: 'ingreso',
-      });
-    }
-  }
-  const ventasNetas = ventasBrutas - Math.abs(descuentos);
+  // Los descuentos sobre ventas ya vienen netados dentro de cada línea de ingreso
+  // (cuentas 0460-0004/0005/0006, 0466-0002, 0467-0004, 0470-0004), por lo que no
+  // se restan de nuevo aquí.
+  const ventasNetas = ventasBrutas;
 
   const costLines = [];
   let costoVentas = 0;
@@ -275,7 +286,7 @@ async function getIncomeStatement(fechaInicio, fechaFin, scope) {
   });
 
   productosFinancieros = await sumAcrossSegments(segments, (table, ms, me) =>
-    sumByGroups(table, ms, me, EXPENSE_GROUPS.productosFinancieros.groups, false));
+    sumByGroups(table, ms, me, EXPENSE_GROUPS.productosFinancieros.groups, false, EXPENSE_GROUPS.productosFinancieros.excludePrefixes));
   expenseLines.push({
     key: 'productosFinancieros',
     label: EXPENSE_GROUPS.productosFinancieros.label,
@@ -284,8 +295,8 @@ async function getIncomeStatement(fechaInicio, fechaFin, scope) {
   });
 
   const utilidadBruta = ventasNetas - costoVentas;
-  const utilidadOperacion = utilidadBruta - gastosOperacion;
-  const utilidadPeriodo = utilidadOperacion - gastosAdministracion - productosFinancieros;
+  const utilidadOperacion = utilidadBruta - gastosOperacion - gastosAdministracion;
+  const utilidadPeriodo = utilidadOperacion - productosFinancieros;
 
   const margenBrutoPct = ventasNetas ? Number(((utilidadBruta / ventasNetas) * 100).toFixed(1)) : 0;
   const margenOperacionPct = ventasNetas ? Number(((utilidadOperacion / ventasNetas) * 100).toFixed(1)) : 0;

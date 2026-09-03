@@ -1,7 +1,7 @@
-# Railway — Root Directory debe ser: objetivos-web
+# Railway — desplegar con: railway up ./objetivos-web --path-as-root
 [build]
-builder = "nixpacks"
-buildCommand = "npm install"
+builder = "RAILPACK"
+buildCommand = "npm ci && npm run build"
 
 [deploy]
 startCommand = "npm start"

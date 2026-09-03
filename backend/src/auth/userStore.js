@@ -13,6 +13,7 @@ const SEED_USERS = [
   { username: 'comercial', password: 'Comercial2026!', role: 'gerencia_comercial' },
   { username: 'contabilidad', password: 'Conta2026!', role: 'contabilidad' },
   { username: 'contraloria', password: 'Contraloria2026!', role: 'contabilidad' },
+  { username: 'mtk', password: 'MtkBalderrama2026!', role: 'marketing' },
 ];
 
 function nowIso() {

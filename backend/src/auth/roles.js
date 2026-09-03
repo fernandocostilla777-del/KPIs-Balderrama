@@ -28,23 +28,30 @@ const ROLE_DEFAULTS = {
   gerencia_comercial: {
     id: 'gerencia_comercial',
     label: 'Gerencia Comercial',
-    pages: ['sales', 'forecast', 'lista-precios', 'seguimiento'],
-    homePath: '/sales.html',
-    apiPrefixes: ['/ventas', '/forecast', '/lista-precios', '/crm', '/ai', '/health'],
+    pages: ['overview', 'sales', 'forecast', 'inventory', 'lista-precios', 'seguimiento'],
+    homePath: '/',
+    apiPrefixes: ['/overview', '/ventas', '/forecast', '/inventory', '/lista-precios', '/crm', '/objetivos-resultados', '/ai', '/health'],
   },
   vendedor: {
     id: 'vendedor',
     label: 'Vendedor',
     pages: ['sales', 'lista-precios', 'seguimiento'],
     homePath: '/seguimiento.html',
-    apiPrefixes: ['/ventas', '/lista-precios', '/crm', '/ai', '/health'],
+    apiPrefixes: ['/ventas', '/lista-precios', '/crm', '/objetivos-resultados', '/ai', '/health'],
   },
   contabilidad: {
     id: 'contabilidad',
     label: 'Contabilidad',
-    pages: ['contabilidad'],
+    pages: ['overview', 'inventory', 'contabilidad'],
     homePath: '/contabilidad.html',
-    apiPrefixes: ['/contabilidad', '/eeff', '/ai', '/health'],
+    apiPrefixes: ['/overview', '/inventory', '/contabilidad', '/eeff', '/ai', '/health'],
+  },
+  marketing: {
+    id: 'marketing',
+    label: 'Mercadotecnia (MTK)',
+    pages: ['overview', 'sales', 'seguimiento'],
+    homePath: '/',
+    apiPrefixes: ['/overview', '/ventas', '/crm', '/objetivos-resultados', '/ai', '/health'],
   },
 };
 
@@ -62,6 +69,9 @@ const USERNAME_TO_ROLE = {
   ventas: 'vendedor',
   contabilidad: 'contabilidad',
   contraloria: 'contabilidad',
+  mtk: 'marketing',
+  marketing: 'marketing',
+  mercadotecnia: 'marketing',
 };
 
 const ALWAYS_API_PREFIXES = [
@@ -69,6 +79,8 @@ const ALWAYS_API_PREFIXES = [
   '/auth/logout',
   '/auth/alerts',
   '/auth/config',
+  '/auth/summary-kpi-prefs',
+  '/auth/password-reset',
   '/health',
   '/ai',
 ];

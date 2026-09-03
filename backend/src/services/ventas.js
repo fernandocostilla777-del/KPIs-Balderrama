@@ -52,6 +52,103 @@ const TIPO_VENTA_CASE = `
   END
 `;
 
+function isDemoVentaRow(row = {}) {
+  const hay = [
+    row.VEH_OBSERVACION,
+    row.VEH_OBSERVS,
+    row.observacion,
+    row.observs,
+    row.VEH_UBICACION,
+    row.ubicacion,
+    row.VEH_TIPOAUTO,
+  ].map((v) => String(v || '').toUpperCase()).join(' ');
+  return /\bDEMO\b|\bDVIN\b/.test(hay);
+}
+
+function markDemoVentasRows(rows = []) {
+  return (rows || []).map((row) => {
+    const isDemo = Boolean(row.IS_DEMO) || isDemoVentaRow(row);
+    const hint = String(row.VEH_OBSERVACION || row.VEH_OBSERVS || row.VEH_UBICACION || '')
+      .trim() || (isDemo ? 'Marcada como demo' : null);
+    return {
+      ...row,
+      IS_DEMO: isDemo,
+      DEMO_HINT: isDemo ? hint : null,
+    };
+  });
+}
+
+/**
+ * Unidades que pasaron por inventario demo (SOF_DEMO), aunque ya estén VEN.
+ * Adjunta DEMO_TIMBRADO_SALIDA = última fecha FIS con EXITO/OK (timbrado de salida).
+ */
+async function annotateDemosFromSofDemo(rows = []) {
+  const list = rows || [];
+  const vins = [...new Set(list.map((r) => normalizeVinKey(r.VTE_SERIE)).filter(Boolean))];
+  if (!vins.length) return list;
+
+  const pool = await getPool();
+  const req = pool.request();
+  const params = vins.map((vin, i) => {
+    const name = `vin${i}`;
+    req.input(name, sql.VarChar(32), vin);
+    return `@${name}`;
+  });
+  const result = await req.query(`
+    SELECT
+      UPPER(REPLACE(LTRIM(RTRIM(DEMO_VIN)), ' ', '')) AS vin,
+      DEMO_Estatus AS estatus,
+      DEMO_Resultado AS resultado,
+      DEMO_ResDescrip AS descripcion,
+      DEMO_FechAct AS fecha
+    FROM SOF_DEMO
+    WHERE UPPER(REPLACE(LTRIM(RTRIM(DEMO_VIN)), ' ', '')) IN (${params.join(',')})
+  `);
+
+  /** vin → fecha dd/mm/yyyy del último FIS EXITO/OK (timbrado de salida demo). */
+  const timbradoSalidaByVin = new Map();
+  for (const row of result.recordset || []) {
+    const vin = normalizeVinKey(row.vin);
+    if (!vin) continue;
+    const estatus = String(row.estatus || '').trim().toUpperCase();
+    const resultado = String(row.resultado || '').trim().toUpperCase();
+    const descripcion = String(row.descripcion || '').trim().toUpperCase();
+    const esSalida = estatus === 'FIS' && (resultado === 'OK' || descripcion === 'EXITO' || descripcion.includes('EXITO'));
+    if (!esSalida) continue;
+    const fecha = String(row.fecha || '').trim();
+    if (!fecha) continue;
+    const prev = timbradoSalidaByVin.get(vin);
+    const currParts = parseFechaDoc(fecha);
+    const prevParts = prev ? parseFechaDoc(prev) : null;
+    if (!currParts) continue;
+    if (!prevParts) {
+      timbradoSalidaByVin.set(vin, fecha);
+      continue;
+    }
+    const currT = new Date(currParts.year, currParts.month - 1, currParts.day).getTime();
+    const prevT = new Date(prevParts.year, prevParts.month - 1, prevParts.day).getTime();
+    if (currT >= prevT) timbradoSalidaByVin.set(vin, fecha);
+  }
+
+  if (!timbradoSalidaByVin.size && !(result.recordset || []).length) return list;
+
+  const demoSet = new Set(
+    (result.recordset || []).map((r) => normalizeVinKey(r.vin)).filter(Boolean),
+  );
+
+  return list.map((row) => {
+    const vin = normalizeVinKey(row.VTE_SERIE);
+    if (!vin || !demoSet.has(vin)) return row;
+    const timbradoSalida = timbradoSalidaByVin.get(vin) || null;
+    return {
+      ...row,
+      IS_DEMO: true,
+      DEMO_HINT: row.DEMO_HINT || 'Registrada en SOF_DEMO',
+      DEMO_TIMBRADO_SALIDA: timbradoSalida,
+    };
+  });
+}
+
 function buildVentasQuery() {
   return `
     SELECT
@@ -64,6 +161,9 @@ function buildVentasQuery() {
       ADE_VTAFI.VTE_SERIE,
       SER_VEHICULO.VEH_TIPOAUTO,
       SER_VEHICULO.VEH_REPUVE,
+      LTRIM(RTRIM(ISNULL(SER_VEHICULO.VEH_OBSERVACION, ''))) AS VEH_OBSERVACION,
+      LTRIM(RTRIM(ISNULL(SER_VEHICULO.veh_observs, ''))) AS VEH_OBSERVS,
+      LTRIM(RTRIM(ISNULL(SER_VEHICULO.VEH_UBICACION, ''))) AS VEH_UBICACION,
       ADE_VTAFI.VTE_IDCLIENTE,
       A.PER_NOMRAZON + ' ' + A.PER_PATERNO + ' ' + A.PER_MATERNO AS CLIENTE,
       A.PER_SEXO,
@@ -121,6 +221,9 @@ function buildVentasQuery() {
       C.PAR_DESCRIP1,
       UNI_CATACOLOR.COL_DESCRIPCION,
       SER_VEHICULO.VEH_REPUVE,
+      LTRIM(RTRIM(ISNULL(SER_VEHICULO.VEH_OBSERVACION, ''))),
+      LTRIM(RTRIM(ISNULL(SER_VEHICULO.veh_observs, ''))),
+      LTRIM(RTRIM(ISNULL(SER_VEHICULO.VEH_UBICACION, ''))),
       ADE_VTAFI.VTE_FORMAPAGO,
       ISNULL(prev.PREVIAS, 0)
     ORDER BY
@@ -148,10 +251,135 @@ function isFlotilla(row) {
   return row.TIPOVENTA === FLOTILLA_LABEL;
 }
 
+function isDemoRow(row) {
+  return Boolean(row.IS_DEMO) || isDemoVentaRow(row);
+}
+
 function splitFlotilla(rows) {
   const flotillas = rows.filter(isFlotilla);
   const retail = rows.filter((row) => !isFlotilla(row));
   return { flotillas, retail };
+}
+
+function splitDemos(rows) {
+  const demos = [];
+  const sinDemo = [];
+  for (const row of rows || []) {
+    if (isDemoRow(row)) demos.push(row);
+    else sinDemo.push(row);
+  }
+  return { demos, sinDemo };
+}
+
+function normalizeVinKey(value) {
+  const vin = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  return vin.length >= 5 ? vin : '';
+}
+
+function fechaEnPeriodo(value, inicio, fin) {
+  const fecha = parseFechaDoc(value);
+  if (!fecha) return false;
+  const day = new Date(fecha.year, fecha.month - 1, fecha.day, 12, 0, 0);
+  const from = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate(), 0, 0, 0);
+  const to = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate(), 23, 59, 59, 999);
+  return day >= from && day <= to;
+}
+
+/**
+ * SOFIA volumen: ENTREGA del periodo + demos con timbrado de salida (SOF_DEMO · FIS EXITO)
+ * en ESTE periodo. Si el timbrado fue en otro mes, ese demo NO suma a SOFIA.
+ *
+ * Factura: independiente. Si se facturó en el periodo DMS, cuenta en factura
+ * aunque la entrega / timbrado de salida sea de otro mes.
+ */
+function mergeDemosTimbradoSalidaEnSofia({ demos = [], entregasRows = [], inicio, fin } = {}) {
+  const demosTimbradosPeriodo = (demos || []).filter((d) => (
+    fechaEnPeriodo(d.DEMO_TIMBRADO_SALIDA, inicio, fin)
+  ));
+  // Facturados este mes, pero sin timbrado de salida en este periodo → solo factura.
+  const demosFacturaSinSofiaMes = (demos || []).filter((d) => (
+    !fechaEnPeriodo(d.DEMO_TIMBRADO_SALIDA, inicio, fin)
+  ));
+
+  const vinSet = new Set();
+  const factSet = new Set();
+  for (const e of entregasRows || []) {
+    const vin = normalizeVinKey(e.SOF_VIN || e.VTE_SERIE || e.vin || e.SERIE);
+    if (vin) vinSet.add(vin);
+    const fact = String(e.SOF_Factura || e.VTE_DOCTO || '').trim();
+    if (fact) factSet.add(fact);
+  }
+
+  const demosYaEnSofia = [];
+  for (const e of entregasRows || []) {
+    const vin = normalizeVinKey(e.SOF_VIN || e.VTE_SERIE);
+    const match = (demos || []).find((d) => normalizeVinKey(d.VTE_SERIE) === vin);
+    if (match) demosYaEnSofia.push(match);
+  }
+
+  const demosAgregar = [];
+  for (const d of demosTimbradosPeriodo) {
+    const vin = normalizeVinKey(d.VTE_SERIE);
+    const fact = String(d.VTE_DOCTO || '').trim();
+    const ya = (vin && vinSet.has(vin)) || (fact && factSet.has(fact));
+    if (!ya) demosAgregar.push(d);
+  }
+
+  const sinteticas = demosAgregar.map((d) => ({
+    SOF_FechAct: d.DEMO_TIMBRADO_SALIDA || null,
+    SOF_HoraAct: null,
+    SOF_Factura: d.VTE_DOCTO || null,
+    SOF_VIN: d.VTE_SERIE || null,
+    SOF_Pedido: null,
+    SOF_NoTransaccion: null,
+    SOF_Estatus: 'DEMO',
+    SOF_OrigenOpe: 'DEMO',
+    SOF_Resultado: 'EXITO',
+    SOF_CveUSu: null,
+    CLIENTE: d.CLIENTE || null,
+    VEH_TIPOAUTO: d.VEH_TIPOAUTO || null,
+    FORMAPAGO_ORIGINAL: d.FORMAPAGO_ORIGINAL || d.VTE_FORMAPAGO || null,
+    TIPOVENTA: d.TIPOVENTA || null,
+    PREVIAS: Number(d.PREVIAS || 0) || 0,
+    FECHA_PERIODO: d.DEMO_TIMBRADO_SALIDA || null,
+    IS_DEMO: true,
+    DEMO_HINT: d.DEMO_HINT || 'Demo · timbrado de salida SOF_DEMO',
+    DEMO_TIMBRADO_SALIDA: d.DEMO_TIMBRADO_SALIDA || null,
+    FUENTE_CONTEO: 'demo_timbrado_salida',
+  }));
+
+  const entregas = [...(entregasRows || []), ...sinteticas];
+  const demosEnSofiaVins = new Set([
+    ...demosYaEnSofia.map((d) => normalizeVinKey(d.VTE_SERIE)),
+    ...demosAgregar.map((d) => normalizeVinKey(d.VTE_SERIE)),
+  ].filter(Boolean));
+  const demosEnSofia = demosEnSofiaVins.size;
+  const totalSofia = entregas.length;
+  const notaParts = [];
+  if (demosEnSofia > 0) {
+    notaParts.push(
+      `Del total SOFIA (${totalSofia}), ${demosEnSofia} demo${demosEnSofia === 1 ? '' : 's'}`
+      + (demosAgregar.length ? ' con timbrado de salida en el periodo' : '')
+    );
+  }
+  if (demosFacturaSinSofiaMes.length > 0) {
+    notaParts.push(
+      `${demosFacturaSinSofiaMes.length} demo${demosFacturaSinSofiaMes.length === 1 ? '' : 's'}`
+      + ' facturado(s) este mes sin timbrado de salida del periodo (no SOFIA)'
+    );
+  }
+  const nota = notaParts.length ? `${notaParts.join(' · ')}.` : null;
+
+  return {
+    entregas,
+    demosAgregados: sinteticas,
+    demosEnSofia,
+    demosTimbradosPeriodo: demosTimbradosPeriodo.length,
+    demosFacturaSinSofiaMes: demosFacturaSinSofiaMes.length,
+    demosOtrosMeses: demosFacturaSinSofiaMes.length,
+    totalSofia,
+    nota,
+  };
 }
 
 function parseFechaDoc(value) {
@@ -372,45 +600,84 @@ function buildRetailDrilldown(retailRows) {
 }
 
 function summarizeVentas(rows, inicio, fin, sofiaEntregas = {}) {
-  const { flotillas, retail } = splitFlotilla(rows);
-  const vendedores = new Set(rows.map((r) => r.VENDEDOR));
-  const clientes = new Set(rows.map((r) => r.VTE_IDCLIENTE));
-  const modelos = new Set(rows.map((r) => r.VEH_TIPOAUTO));
+  const marked = markDemoVentasRows(rows);
+  const { demos, sinDemo } = splitDemos(marked);
+  const { flotillas, retail } = splitFlotilla(sinDemo);
+  const vendedores = new Set(sinDemo.map((r) => r.VENDEDOR));
+  const clientes = new Set(sinDemo.map((r) => r.VTE_IDCLIENTE));
+  const modelos = new Set(sinDemo.map((r) => r.VEH_TIPOAUTO));
   const entregasRows = sofiaEntregas.registrosEntrega ?? [];
-  const cobertura = computeCoberturaSofia(rows, entregasRows);
+  // Factura: si se facturó en el periodo DMS, cuenta (da igual entrega/timbrado de otro mes).
+  // SOFIA: solo suma demos con timbrado de salida en ESTE periodo.
+  const demosSofia = mergeDemosTimbradoSalidaEnSofia({
+    demos,
+    entregasRows,
+    inicio,
+    fin,
+  });
+  const entregasEfectivas = demosSofia.entregas;
+  const ventasCobertura = [...sinDemo, ...demos];
+  const cobertura = computeCoberturaSofia(ventasCobertura, entregasEfectivas);
   const comparativoMensual = isAcumuladoAnual(inicio, fin)
-    ? buildComparativoMensual(rows, inicio, fin, sofiaEntregas.entregasPorMes)
+    ? buildComparativoMensual(sinDemo, inicio, fin, sofiaEntregas.entregasPorMes)
     : null;
+  const demosRetail = demos.filter((r) => !isFlotilla(r)).length;
+  const demosFlotilla = demos.filter((r) => isFlotilla(r)).length;
+  const demosNotaSofia = demosSofia.nota;
+  const demosNotaFactura = demos.length
+    ? `${demos.length} demo${demos.length === 1 ? '' : 's'} en factura (por fecha de facturación)`
+      + (demosSofia.demosTimbradosPeriodo
+        ? ` · ${demosSofia.demosTimbradosPeriodo} con timbrado SOFIA este mes`
+        : '')
+      + (demosSofia.demosFacturaSinSofiaMes
+        ? ` · ${demosSofia.demosFacturaSinSofiaMes} sin timbrado de este mes (igual cuentan en factura)`
+        : '')
+      + '.'
+    : null;
+  const totalFacturadas = cobertura.totalUnidadesFacturadas;
+  const totalRetailConDemos = retail.length + demosRetail;
+  const totalFlotillasConDemos = flotillas.length + demosFlotilla;
 
   return {
-    totalVentas: rows.length,
-    totalFlotillas: flotillas.length,
-    totalRetail: retail.length,
+    totalVentas: totalFacturadas,
+    totalVentasBrutas: marked.length,
+    totalDemos: demos.length,
+    totalDemosRetail: demosRetail,
+    totalDemosFlotilla: demosFlotilla,
+    totalDemosSofia: demosSofia.demosEnSofia,
+    demosFacturaSinSofiaMes: demosSofia.demosFacturaSinSofiaMes,
+    demosOtrosMeses: demosSofia.demosFacturaSinSofiaMes,
+    demosSofiaIncluidosMesCurso: demosSofia.demosTimbradosPeriodo > 0,
+    demosNota: demosNotaFactura || demosNotaSofia,
+    sofiaDemosNota: demosNotaSofia,
+    totalFlotillas: totalFlotillasConDemos,
+    totalRetail: totalRetailConDemos,
     totalVendedores: vendedores.size,
     totalClientes: clientes.size,
     totalModelos: modelos.size,
     totalNotificacionesEntrega: cobertura.totalNotificacionesEntrega,
     totalEntregasSinPrevias: sofiaEntregas.totalEntregasSinPrevias
-      ?? entregasRows.filter((r) => Number(r.PREVIAS || 0) === 0).length,
+      ?? entregasEfectivas.filter((r) => Number(r.PREVIAS || 0) === 0).length,
     totalEntregasConPrevias: sofiaEntregas.totalEntregasConPrevias
-      ?? entregasRows.filter((r) => Number(r.PREVIAS || 0) > 0).length,
-    totalFacturadoSinPrevias: rows.filter((r) => Number(r.PREVIAS || 0) === 0).length,
-    totalFacturadoConPrevias: rows.filter((r) => Number(r.PREVIAS || 0) > 0).length,
+      ?? entregasEfectivas.filter((r) => Number(r.PREVIAS || 0) > 0).length,
+    totalFacturadoSinPrevias: ventasCobertura.filter((r) => Number(r.PREVIAS || 0) === 0).length,
+    totalFacturadoConPrevias: ventasCobertura.filter((r) => Number(r.PREVIAS || 0) > 0).length,
     totalUnidadesFacturadas: cobertura.totalUnidadesFacturadas,
     totalUnidadesFacturadasNoTimbradas: cobertura.totalUnidadesFacturadasNoTimbradas,
     numeradorCobertura: cobertura.numeradorCobertura,
-    porTipoVenta: countBy(rows, 'TIPOVENTA'),
+    entregasSofiaEfectivas: entregasEfectivas,
+    porTipoVenta: countBy(sinDemo, 'TIPOVENTA'),
     porTipoVentaRetail: countBy(retail, 'TIPOVENTA'),
-    porVendedor: countBy(rows, 'VENDEDOR'),
+    porVendedor: countBy(sinDemo, 'VENDEDOR'),
     porVendedorRetail: countBy(retail, 'VENDEDOR'),
     porVendedorFlotilla: countBy(flotillas, 'VENDEDOR'),
-    porCanal: countByCanal(rows),
-    porSucursal: countByCanal(rows).filter((c) => c.canal !== 'PERDIDA'),
+    porCanal: countByCanal(sinDemo),
+    porSucursal: countByCanal(sinDemo).filter((c) => c.canal !== 'PERDIDA'),
     porSucursalRetail: countByCanal(retail).filter((c) => !['FLOTILLAS', 'PERDIDA'].includes(c.canal)),
     porSucursalFlotilla: countByCanal(flotillas),
     retailDrilldown: buildRetailDrilldown(retail),
-    porModelo: countBy(rows, 'VEH_TIPOAUTO').slice(0, 10),
-    porDia: countBy(rows, 'VTE_FECHDOCTO').sort((a, b) => {
+    porModelo: countBy(sinDemo, 'VEH_TIPOAUTO').slice(0, 10),
+    porDia: countBy(sinDemo, 'VTE_FECHDOCTO').sort((a, b) => {
       const [da, ma, ya] = a.label.split('/').map(Number);
       const [db, mb, yb] = b.label.split('/').map(Number);
       return new Date(ya, ma - 1, da) - new Date(yb, mb - 1, db);
@@ -664,7 +931,9 @@ async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false
     ]);
 
     const data = {
-      registros: enrichVentasRows(result.recordset),
+      registros: await annotateDemosFromSofDemo(
+        markDemoVentasRows(enrichVentasRows(result.recordset)),
+      ),
       sofiaEntregas,
       entregasSofia: sofiaEntregas.registrosEntrega ?? [],
     };
@@ -746,7 +1015,7 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
     comparativoYtd,
     utilidadCarline,
     registros: rows,
-    entregasSofia: sofiaEntregas.registrosEntrega ?? [],
+    entregasSofia: resumen.entregasSofiaEfectivas || sofiaEntregas.registrosEntrega || [],
     tomasACuenta: tomasACuenta.registros || [],
     tomasMensual: {
       anio: ytdRanges.anioActual,

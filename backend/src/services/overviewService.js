@@ -2,7 +2,8 @@ const { query } = require('../db');
 const { loadVentasNuevosFinancial } = require('./ventasNuevosFinanciero');
 const { loadSalesExecutiveAnalytics } = require('./salesExecutiveAnalytics');
 const { getVentas } = require('./ventas');
-const { getInventory } = require('./inventoryService');
+const { getInventory, getVendidosAnalisis } = require('./inventoryService');
+const { computeIemcF2 } = require('./iemcF2Service');
 const { getPuntoEquilibrio } = require('./breakEvenService');
 
 function buildSerDateClause(fechaInicio, fechaFin) {
@@ -152,6 +153,10 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     availableUnits: Number(inv.available ?? invBi.availableUnits ?? 0),
     availableLibres: Number(inv.availableLibres ?? 0),
     availableApartadas: Number(inv.availableApartadas ?? 0),
+    demos: Number(inv.demos ?? 0),
+    avgDaysDemo: Number(inv.avgDaysDemo ?? 0),
+    demosConPruebas: Number(inv.demosConPruebas ?? 0),
+    demosPruebasTotal: Number(inv.demosPruebasTotal ?? 0),
     sinPrevias: Number(inv.sinPrevias ?? 0),
     conPrevias: Number(inv.conPrevias ?? 0),
     planPisoTotal: Number(inv.planPisoTotal ?? 0),
@@ -173,6 +178,46 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     entregasSinPrevias: Number(vr.totalEntregasSinPrevias ?? 0),
   };
 
+  let cierre = {
+    unidades: 0,
+    utilidadBruta: 0,
+    utilidadNeta: 0,
+    ingresoFi: 0,
+    conIngresoFi: 0,
+    planPiso: 0,
+    comisionEv: 0,
+    extras: 0,
+    iemcPct: null,
+    brecha: null,
+    margenRealPct: null,
+    margenObjPct: null,
+  };
+  try {
+    const vendidos = await getVendidosAnalisis({ fechaInicio, fechaFin });
+    const iemc = await computeIemcF2({
+      fechaInicio,
+      fechaFin,
+      vendidosTable: vendidos?.vendidosTable || [],
+    });
+    const vs = vendidos?.summary || {};
+    cierre = {
+      unidades: Number(vs.unidades || 0),
+      utilidadBruta: Number(vs.utilidad || 0),
+      utilidadNeta: Number(vs.utilidadNeta || 0),
+      ingresoFi: Number(vs.ingresoFinanciamiento || 0),
+      conIngresoFi: Number(vs.conIngresoFinanciamiento || 0),
+      planPiso: Number(vs.planPiso || 0),
+      comisionEv: Number(vs.comisionEv || 0),
+      extras: Number(vs.extras || 0),
+      iemcPct: iemc?.iemcPct == null ? null : Number(iemc.iemcPct),
+      brecha: iemc?.brecha == null ? null : Number(iemc.brecha),
+      margenRealPct: iemc?.real?.margenBrutoPct == null ? null : Number(iemc.real.margenBrutoPct),
+      margenObjPct: iemc?.objetivo?.margenBrutoPct == null ? null : Number(iemc.objetivo.margenBrutoPct),
+    };
+  } catch (err) {
+    console.warn('[overview] cierre/iemc:', err.message);
+  }
+
   const consolidated = {
     ingresoTotal: sales.revenue + service.importeFacturado,
     utilidadVentas: sales.utility,
@@ -184,6 +229,7 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
     filtros: { fechaInicio, fechaFin },
     financial: { sales, inventory, service, consolidated },
     operaciones,
+    cierre,
     salesAnalytics,
     puntoEquilibrio,
     kpis: {
@@ -194,14 +240,18 @@ async function getOverview({ fechaInicio, fechaFin } = {}) {
       avgDaysInventory: inventory.avgDaysInventory,
       availableUnits: inventory.availableUnits,
       totalInventory: inventory.totalUnits,
+      demos: inventory.demos,
       sinPrevias: inventory.sinPrevias,
       planPisoTotal: inventory.planPisoTotal,
       ageingAlertsCount: inventory.ageingAlertsCount,
       serviceRevenue: service.importeFacturado,
       serviceOrders: service.facturadas,
       entregasSofia: operaciones.entregasSofia,
+      entregasSinPrevias: operaciones.entregasSinPrevias,
       retailUnits: operaciones.retail,
       flotillaUnits: operaciones.flotillas,
+      utilidadNetaCierre: cierre.utilidadNeta,
+      iemcPct: cierre.iemcPct,
       fleetEfficiency: inventory.totalUnits
         ? Math.round((1 - inventory.availableUnits / inventory.totalUnits) * 1000) / 10
         : 0,

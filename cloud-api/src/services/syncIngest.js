@@ -13,6 +13,7 @@ const VALID_DOMAINS = new Set([
   'crm',
   'auth',
   'personal',
+  'objetivos',
 ]);
 const VALID_SYNC_TYPES = new Set(['incremental', 'daily', 'monthly']);
 

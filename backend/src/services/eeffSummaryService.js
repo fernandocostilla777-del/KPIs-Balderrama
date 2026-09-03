@@ -563,10 +563,14 @@ async function getEeffSummary({ fechaInicio, fechaFin }) {
   Object.assign(estadoFinanciero.summary, {
     ebit: ebitMetrics.ebit,
     ebitda: ebitMetrics.ebitda,
+    uafida: ebitMetrics.uafida,
     margenEbitPct: ebitMetrics.margenEbitPct,
     margenEbitdaPct: ebitMetrics.margenEbitdaPct,
     crecimientoEbitPct: ebitMetrics.crecimientoEbitPct,
     depreciacionPeriodo: ebitMetrics.depreciacionPeriodo,
+    ebitdaTone: ebitMetrics.ebitdaTone,
+    ebitdaLabel: ebitMetrics.ebitdaLabel,
+    ebitdaSummary: ebitMetrics.ebitdaSummary,
   });
 
   const payload = {

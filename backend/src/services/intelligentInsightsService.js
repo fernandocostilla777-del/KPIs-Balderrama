@@ -194,23 +194,39 @@ function buildVentasInsights(payload = {}) {
   }
 
   const ytdVar = Number(ytd.variacion);
-  if (Number.isFinite(ytdVar) && ytdVar <= -5) {
+  if (Number.isFinite(ytdVar)) {
+    const severity = ytdVar <= -15 ? 'critical' : ytdVar <= -5 ? 'warning' : 'info';
+    const title = ytdVar < 0
+      ? 'Acumulado anual por debajo del año anterior'
+      : 'Acumulado anual en seguimiento';
+    const direction = ytdVar < 0 ? 'debajo' : 'por encima';
+    const absVar = Math.abs(ytdVar);
+    const recommendations = ytdVar < 0
+      ? [
+          'Comparar gap por canal y modelo.',
+          'Revisar generación de leads vs mismo periodo año previo.',
+          'Ajustar forecast y objetivos restantes con gerencia.',
+        ]
+      : [
+          'Sostener el ritmo en los modelos y canales que explican la mejora.',
+          'Evitar descuentos que erosionen utilidad solo por perseguir volumen.',
+          'Comparar qué parte de la mejora viene de retail, flotilla y mix.',
+        ];
     push(insights, {
       id: 'ventas-ytd',
       kpiId: 'ytdVariacion',
       module: 'ventas',
-      severity: ytdVar <= -15 ? 'critical' : 'warning',
-      title: 'Acumulado anual por debajo del año anterior',
+      severity,
+      title,
       summary: `Variación YTD ${ytdVar}% vs año previo.`,
       analysis:
-        `YTD (${ytd.totalActual ?? '—'}) está ${Math.abs(ytdVar)}% debajo del año anterior (${ytd.totalAnterior ?? '—'}). Señal estructural, no solo un mal mes.`,
-      recommendations: [
-        'Comparar gap por canal y modelo.',
-        'Revisar generación de leads vs mismo periodo año previo.',
-        'Ajustar forecast y objetivos restantes con gerencia.',
-      ],
+        `YTD (${ytd.totalActual ?? '—'}) está ${absVar}% ${direction} del año anterior (${ytd.totalAnterior ?? '—'}). `
+        + (ytdVar < 0
+          ? 'Señal estructural, no solo un mal mes.'
+          : 'Conviene validar si la mejora es sostenible y rentable.'),
+      recommendations,
       metrics: { variacion: ytdVar, totalActual: ytd.totalActual, totalAnterior: ytd.totalAnterior },
-      chatPrompt: chatPrompt('Ventas', 'YTD negativo', [
+      chatPrompt: chatPrompt('Ventas', ytdVar < 0 ? 'YTD negativo' : 'YTD en seguimiento', [
         `Variación: ${ytdVar}%`, `YTD actual: ${ytd.totalActual}`, `YTD anterior: ${ytd.totalAnterior}`,
       ]),
     });
@@ -249,7 +265,7 @@ function buildVentasInsights(payload = {}) {
   const modelosDificiles = Array.isArray(tomas.modelosDificiles) ? tomas.modelosDificiles : [];
   const unidadesDificiles = Array.isArray(tomas.unidadesDificiles) ? tomas.unidadesDificiles : [];
 
-  if (tomasTotal >= 3 && (pendientes >= 3 || tomasPct < 50)) {
+  if (tomasTotal > 0) {
     const topModelos = modelosDificiles
       .slice(0, 5)
       .map((m) => {
@@ -269,29 +285,46 @@ function buildVentasInsights(payload = {}) {
         return [vin, modelo, fecha ? `toma ${fecha}` : null].filter(Boolean).join(' · ');
       });
 
-    const severity = (pendientes >= 10 || (tomasTotal >= 8 && tomasPct < 30))
-      ? 'critical'
-      : 'warning';
+    let severity = 'info';
+    if (pendientes >= 10 || (tomasTotal >= 8 && tomasPct < 30)) severity = 'critical';
+    else if (pendientes >= 3 || tomasPct < 50) severity = 'warning';
+
+    const title = severity === 'info'
+      ? 'Tomas a cuenta en seguimiento'
+      : 'Tomas difíciles de revender';
+    const summary = severity === 'info'
+      ? `${tomasVendidos} de ${tomasTotal} tomas del periodo ya se revendieron el mismo mes (${tomasPct}%); ${pendientes} siguen pendientes.`
+      : `${pendientes} de ${tomasTotal} tomas del periodo siguen sin venta el mismo mes (${tomasPct}% revendidas).`;
+    const analysisBase = severity === 'info'
+      ? 'La toma a cuenta está activa en el periodo y conviene monitorear velocidad de reventa para que no se convierta en inventario usado lento. '
+      : 'Las unidades tomadas que no se revenden en el mismo mes elevan inventario usado, capital inmovilizado y riesgo de envejecimiento. ';
+    const recommendations = severity === 'info'
+      ? [
+          'Mantener seguimiento semanal a las tomas pendientes por VIN y días desde adquisición.',
+          'Ajustar precio de salida temprano en modelos con menor velocidad de reventa.',
+          'Usar el botón Detalle de Tomas a cuenta para revisar responsables y antigüedad.',
+        ]
+      : [
+          'Revisar precio/valuación de las tomas pendientes y alinear con mercado.',
+          'Priorizar exposición comercial (piso, digital, paquetes) en modelos con peor % de reventa.',
+          'Asignar seguimiento a seminuevos con más días desde la toma.',
+          'Usar el botón Detalle de Tomas a cuenta para bajar a VIN y responsable.',
+        ];
 
     push(insights, {
       id: 'ventas-tomas-dificiles',
       kpiId: 'tomasInsightAnchor',
       module: 'ventas',
       severity,
-      title: 'Tomas difíciles de revender',
-      summary: `${pendientes} de ${tomasTotal} tomas del periodo siguen sin venta el mismo mes (${tomasPct}% revendidas).`,
+      title,
+      summary,
       analysis:
-        'Las unidades tomadas que no se revenden en el mismo mes elevan inventario usado, capital inmovilizado y riesgo de envejecimiento. '
+        analysisBase
         + (topModelos.length
           ? `Modelos con más fricción: ${topModelos.join('; ')}.`
           : 'Prioriza valuación, precio de lista y rotación de seminuevos.')
         + (topUnidades.length ? ` Unidades a vigilar: ${topUnidades.join(' | ')}.` : ''),
-      recommendations: [
-        'Revisar precio/valuación de las tomas pendientes y alinear con mercado.',
-        'Priorizar exposición comercial (piso, digital, paquetes) en modelos con peor % de reventa.',
-        'Asignar seguimiento a seminuevos con más días desde la toma.',
-        'Usar el botón Detalle de Tomas a cuenta para bajar a VIN y responsable.',
-      ],
+      recommendations,
       metrics: {
         tomasTotal,
         tomasVendidos,
@@ -626,8 +659,8 @@ function buildLiquidezInsights(payload = {}) {
   const ct = Number(L.capitalTrabajo || 0);
   const razon = L.razonCirculante != null ? Number(L.razonCirculante) : null;
   const acida = L.pruebaAcida != null ? Number(L.pruebaAcida) : null;
-  const inv = Number(L.inventariosYProceso || 0);
-  const ant = Number(L.pagosAnticipados || 0);
+  const efectivo = Number(L.efectivoYEquivalentes || 0);
+  const cxc = Number(L.cuentasPorCobrar || 0);
   const rapidos = Number(L.activosRapidos || 0);
   const deficit = Number(L.deficitAcido || 0);
   const margenPct = L.margenSobreAcPct != null ? Number(L.margenSobreAcPct) : null;
@@ -747,31 +780,31 @@ function buildLiquidezInsights(payload = {}) {
       module: 'contabilidad',
       severity: 'critical',
       title: 'Prueba ácida en déficit',
-      summary: `Ácida ${acida.toFixed(2)}: faltan ${moneyMx(Math.abs(deficit))} sin inventarios ni anticipados.`,
+      summary: `Ácida ${acida.toFixed(2)}: faltan ${moneyMx(Math.abs(deficit))} con caja/bancos/equiv. + CxC.`,
       analysis:
-        `Activos rápidos ${moneyMx(rapidos)} (AC − inventarios ${moneyMx(inv)} − anticipados ${moneyMx(ant)}) `
-        + `no cubren el pasivo circulante ${moneyMx(pc)}. `
-        + 'La liquidez “de libro” puede estar inflada por inventarios o pagos anticipados no disponibles como efectivo.',
+        `Numerador ${moneyMx(rapidos)} (caja/bancos/equiv. ${moneyMx(efectivo)} + CxC ${moneyMx(cxc)}) `
+        + `no cubre el pasivo a corto plazo ${moneyMx(pc)}. `
+        + 'Inventarios y anticipados no se cuentan como liquidez inmediata en esta prueba.',
       recommendations: [
-        'Separar qué parte del inventario es realizable en < 30 días.',
-        'Acelerar CxC y no contar anticipados como liquidez inmediata.',
+        'Acelerar cobranza de CxC y vigilar cartera vencida.',
+        'Revisar posición de caja/bancos y equivalentes antes de compromisos de corto plazo.',
         'Preparar fondeo o renegociación si el déficit ácido persiste.',
       ],
       metrics: {
         pruebaAcida: acida,
         deficitAcido: deficit,
         activosRapidos: rapidos,
-        inventariosYProceso: inv,
-        pagosAnticipados: ant,
+        efectivoYEquivalentes: efectivo,
+        cuentasPorCobrar: cxc,
         pasivoCirculante: pc,
       },
       chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Prueba ácida < 1', [
         `Periodo / corte: ${periodo}`,
         `Prueba ácida: ${acida.toFixed(2)}`,
-        `Activos rápidos: ${moneyMx(rapidos)}`,
-        `Inventarios/WIP: ${moneyMx(inv)}`,
-        `Pagos anticipados: ${moneyMx(ant)}`,
-        `Pasivo circulante: ${moneyMx(pc)}`,
+        `Caja+Bancos+Equiv.: ${moneyMx(efectivo)}`,
+        `CxC: ${moneyMx(cxc)}`,
+        `Numerador: ${moneyMx(rapidos)}`,
+        `Pasivo a corto plazo: ${moneyMx(pc)}`,
         `Déficit ácido: ${moneyMx(deficit)}`,
         `Razón circulante: ${razon ?? '—'}`,
       ]),
@@ -783,24 +816,24 @@ function buildLiquidezInsights(payload = {}) {
       module: 'contabilidad',
       severity: 'warning',
       title: 'Prueba ácida apenas suficiente',
-      summary: `Ácida ${acida.toFixed(2)}: cubre PC con poco margen sin inventarios.`,
+      summary: `Ácida ${acida.toFixed(2)}: cubre PC con poco margen (caja/bancos/equiv. + CxC).`,
       analysis:
-        'Sin inventarios ni anticipados la cobertura es mínima. Un atraso de cobranza puede abrir déficit inmediato.',
+        'Con solo efectivo y CxC la cobertura es mínima. Un atraso de cobranza puede abrir déficit inmediato.',
       recommendations: [
         'Vigilar CxC vencidas y calidad de cartera.',
-        'No depender de liquidar inventario para pagar pasivo CP.',
+        'No depender de liquidar inventario para pagar pasivo a corto plazo.',
       ],
       metrics: {
         pruebaAcida: acida,
         activosRapidos: rapidos,
-        inventariosYProceso: inv,
-        pagosAnticipados: ant,
+        efectivoYEquivalentes: efectivo,
+        cuentasPorCobrar: cxc,
         pasivoCirculante: pc,
       },
       chatPrompt: chatPrompt('Contabilidad · Liquidez', 'Prueba ácida ajustada', [
         `Periodo / corte: ${periodo}`,
         `Prueba ácida: ${acida.toFixed(2)}`,
-        `Activos rápidos: ${moneyMx(rapidos)}`,
+        `Numerador (efectivo+CxC): ${moneyMx(rapidos)}`,
         `PC: ${moneyMx(pc)}`,
       ]),
     });
@@ -905,16 +938,16 @@ function buildOverviewInsights(payload = {}) {
       kpiId: 'ovAging',
       module: 'overview',
       severity: ageing >= 15 ? 'critical' : 'warning',
-      title: 'Inventario envejecido (60+ días)',
-      summary: `${ageing} unidades con alerta de aging; plan piso ${round1(planPiso)}.`,
+      title: 'Antigüedad alta (60+ días)',
+      summary: `${ageing} unidades con alerta de antigüedad; plan piso ${round1(planPiso)}.`,
       analysis:
         'Falla de rotación: unidades físicas +60 días generan interés de plan piso y presionan a vender con descuento.',
       recommendations: [
-        'Activar plan de liquidación de aging (precio/bono/transferencia).',
+        'Activar plan de liquidación por antigüedad (precio/bono/transferencia).',
         'Revisar pedido a planta vs sell-through real.',
       ],
       metrics: { ageing, planPiso, avgDays, available },
-      chatPrompt: chatPrompt('Tablero ejecutivo', 'Aging 60+', [
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Antigüedad 60+', [
         `Envejecidas: ${ageing}`, `Plan piso: ${planPiso}`, `Días prom.: ${avgDays}`, `Disponibles: ${available}`,
       ]),
     });
@@ -968,10 +1001,10 @@ function buildOverviewInsights(payload = {}) {
       severity: bonifPct >= 40 ? 'critical' : 'warning',
       title: 'Descuentos/bonificaciones erosionan utilidad',
       summary: `Bonificaciones = ${bonifPct}% de la utilidad bruta.`,
-      analysis: 'Falla de disciplina comercial: el descuento se come la ganancia. Suele correlacionar con aging o metas de volumen.',
+      analysis: 'Falla de disciplina comercial: el descuento se come la ganancia. Suele correlacionar con antigüedad alta o metas de volumen.',
       recommendations: [
         'Tope de descuento por modelo/asesor.',
-        'Cruzar aging al facturar vs bonificación promedio.',
+        'Cruzar antigüedad al facturar vs bonificación promedio.',
       ],
       metrics: { bonifPct },
       chatPrompt: chatPrompt('Tablero ejecutivo', 'Bonificaciones altas', [
@@ -1008,13 +1041,13 @@ function buildOverviewInsights(payload = {}) {
       severity: 'info',
       title: 'Estancados salen con más descuento',
       summary: 'Unidades +60 días al facturar muestran bonificaciones mayores.',
-      analysis: 'Confirmado en analytics: el inventario parado se liquida regalando margen. Costo oculto del aging.',
+      analysis: 'Confirmado en analytics: el inventario parado se liquida regalando margen. Costo oculto de la antigüedad.',
       recommendations: [
-        'Prevenir aging (rotación) en lugar de “quemar” precio al final.',
+        'Prevenir antigüedad alta (rotación) en lugar de “quemar” precio al final.',
         'Definir política de descuento máximo por días de stock.',
       ],
       metrics: { estancadosMayorDescuento: true },
-      chatPrompt: chatPrompt('Tablero ejecutivo', 'Aging + descuento', [
+      chatPrompt: chatPrompt('Tablero ejecutivo', 'Antigüedad + descuento', [
         'Estancados con mayor descuento: sí', `Periodo: ${fi} — ${ff}`,
       ]),
     });
@@ -1059,9 +1092,11 @@ function buildInventoryInsights(payload = {}) {
       analysis:
         'Falla de preparación de inventario: VIN físicos/disponibles sin previa de taller no deberían entrar a flujo de entrega.',
       recommendations: [
-        'Generar órdenes de previa masivas por prioridad de aging.',
+        'Generar órdenes de previa masivas por prioridad de antigüedad.',
         'No apartar/entregar sin previas completadas.',
       ],
+      responsable: 'Gerente Comercial Ventas',
+      audiencia: ['Gerencia Comercial', 'Gerencia Ventas', 'CRM'],
       metrics: { sinPrevias, available, pct },
       chatPrompt: chatPrompt('Inventario', 'Sin previas en stock', [
         `Sin previas: ${sinPrevias}`, `Disponibles: ${available}`, `Total: ${total}`,
@@ -1086,6 +1121,8 @@ function buildInventoryInsights(payload = {}) {
         'Revisar el listado de entregas sin previa del mes.',
         'No programar entrega sin checklist de previas.',
       ],
+      responsable: 'Gerente Comercial Ventas',
+      audiencia: ['Gerencia Comercial', 'Gerencia Ventas', 'CRM'],
       metrics: { entregasSinPrevias, entregasSofia, pct },
       chatPrompt: chatPrompt('Inventario', 'Entregas SOFIA sin previa', [
         `Sin previa: ${entregasSinPrevias}`, `SOFIA mes: ${entregasSofia}`, `Proporción: ${pct}%`,
@@ -1099,7 +1136,7 @@ function buildInventoryInsights(payload = {}) {
       kpiId: 'kpiAgeingAlerts',
       module: 'inventory',
       severity: ageing >= 12 ? 'critical' : 'warning',
-      title: 'Unidades envejecidas 60+',
+      title: 'Antigüedad 60+',
       summary: `${ageing} unidades físicas con 60+ días; intereses asociados al plan piso.`,
       analysis: 'Falla de rotación de stock: cada día adicional eleva costo financiero (plan piso) y presión de descuento.',
       recommendations: [
@@ -1107,7 +1144,7 @@ function buildInventoryInsights(payload = {}) {
         'Revisar pedido a planta vs días promedio de stock.',
       ],
       metrics: { ageing, planPiso, avgDays },
-      chatPrompt: chatPrompt('Inventario', 'Aging 60+', [
+      chatPrompt: chatPrompt('Inventario', 'Antigüedad 60+', [
         `Envejecidas: ${ageing}`, `Plan piso: ${planPiso}`, `Días prom.: ${avgDays}`,
       ]),
     });
@@ -1139,7 +1176,7 @@ function buildInventoryInsights(payload = {}) {
       severity: 'info',
       title: 'Carga de plan piso activa',
       summary: `${planPisoUnits} VIN con intereses acumulados ${round1(planPiso)}.`,
-      analysis: 'Intereses de plan piso (dato Físico) son costo real por no rotar. Revisar si el periodo y VINs coinciden con aging.',
+      analysis: 'Intereses de plan piso (dato Físico) son costo real por no rotar. Revisar si el periodo y VINs coinciden con la antigüedad.',
       recommendations: [
         'Atacar primero VINs con mayor interés acumulado.',
         'Validar que no haya unidades “olvidadas” en FIS.',
@@ -1164,6 +1201,165 @@ function buildInventoryInsights(payload = {}) {
       recommendations: ['Validar sincronización de áreas servicio / refacciones / HYP.'],
       metrics: { pvTotal },
       chatPrompt: chatPrompt('Inventario postventa', 'Desbalance áreas', [`Costo total: ${pvTotal}`]),
+    });
+  }
+
+  const pvRef = pv.refacciones || {};
+  const pvTras = pv.traspasos || {};
+  const pvTrasPiezas = Number(pvTras.piezas ?? 0);
+  const pvTrasPartes = Number(pvTras.partes ?? 0);
+  if (pvTrasPiezas > 0) {
+    push(list, {
+      id: 'inv-pv-traspasos',
+      kpiId: 'pvKpiTraspasosPiezas',
+      module: 'inventory',
+      severity: pvTrasPiezas >= 5000 ? 'warning' : 'info',
+      title: 'Refacciones: traspasos entre almacenes',
+      summary: `${pvTrasPiezas.toLocaleString('es-MX')} pzas movidas · ${pvTrasPartes} partes · ${Number(pvTras.documentos || 0)} docs`,
+      analysis:
+        'Hay flujo interno DE almacén A almacén (Body 31, Zacatelco, Cholula, GEN). '
+        + 'Si crece sin ventas asociadas, puede indicar reposición reactiva o stock duplicado.',
+      recommendations: [
+        'Revisar rutas top de traspaso en Inventario → Postventa → Refacciones.',
+        'Cruzar partes más traspasadas vs stock trabado y ventas del periodo.',
+      ],
+      metrics: { piezas: pvTrasPiezas, partes: pvTrasPartes, documentos: Number(pvTras.documentos || 0), costo: Number(pvTras.costo || 0) },
+      chatPrompt: chatPrompt('Inventario refacciones', 'Traspasos entre almacenes', [
+        `Piezas: ${pvTrasPiezas}`, `Partes: ${pvTrasPartes}`, `Costo: ${pvTras.costo || 0}`,
+      ]),
+    });
+  }
+
+  const pvRefCosto = Number(pvRef.costo ?? 0);
+  const pvRefLineas = Number(pvRef.lineas ?? 0);
+  if (pvRefCosto >= 1_000_000) {
+    push(list, {
+      id: 'inv-pv-refacciones-valor',
+      kpiId: 'pvKpiRefacciones',
+      module: 'inventory',
+      severity: 'info',
+      title: 'Inventario de refacciones con valuación alta',
+      summary: `${pvRefLineas.toLocaleString('es-MX')} líneas · $${pvRefCosto.toLocaleString('es-MX')}`,
+      analysis: 'El capital en refacciones es material; conviene vigilar rotación, min/max y traspasos.',
+      recommendations: [
+        'Priorizar alertas de stock trabado y bajo mínimo.',
+        'Usar traspasos para equilibrar GEN vs sucursales antes de recomprar.',
+      ],
+      metrics: { lineas: pvRefLineas, costo: pvRefCosto, existencia: Number(pvRef.existencia || 0) },
+      chatPrompt: chatPrompt('Inventario refacciones', 'Valuación stock', [
+        `Líneas: ${pvRefLineas}`, `Costo: ${pvRefCosto}`,
+      ]),
+    });
+  }
+
+  // Unidades vendidas (análisis DMS del mes en Gestión de Inventario).
+  const vend = payload.vendidos || {};
+  const vendUnidades = Number(vend.unidades ?? 0);
+  const vendNeta = Number(vend.utilidadNetaTotal ?? 0);
+  const vendNetaProm = vend.utilidadNetaPromedio != null ? Number(vend.utilidadNetaPromedio) : null;
+  const vendBruta = Number(vend.utilidadBrutaTotal ?? 0);
+  const vendFi = Number(vend.ingresoFiTotal ?? 0);
+  const vendSinFi = Number(vend.sinIngresoFi ?? 0);
+  const vendNetaNeg = Number(vend.conNetaNegativa ?? 0);
+  const vendMenudeo = Number(vend.menudeo ?? 0);
+  const vendFlotilla = Number(vend.flotilla ?? 0);
+  const vendPeriodo = vend.periodoLabel || `${vend.fechaInicio || '—'} — ${vend.fechaFin || '—'}`;
+  const peores = Array.isArray(vend.peoresNeta) ? vend.peoresNeta.slice(0, 5) : [];
+  const nowDay = new Date().getDate();
+
+  if (vend.available !== false && vendUnidades === 0 && nowDay >= 5) {
+    push(list, {
+      id: 'inv-vendidos-cero',
+      kpiId: 'autosVendidosInsightsCard',
+      module: 'inventory',
+      severity: nowDay >= 12 ? 'critical' : 'warning',
+      title: 'Sin unidades vendidas en el mes',
+      summary: `0 ventas registradas en ${vendPeriodo}.`,
+      analysis:
+        'El análisis de autos vendidos del DMS no muestra facturas en el periodo. '
+        + 'Revisa ritmo comercial, facturación pendiente o el mes seleccionado.',
+      recommendations: [
+        'Confirmar el mes en Análisis de autos vendidos.',
+        'Cruzar con Ventas (retail/flotilla) y entregas SOFIA.',
+        'Revisar pipeline de cierres y unidades apartadas (SEP).',
+      ],
+      metrics: { unidades: 0, periodo: vendPeriodo },
+      chatPrompt: chatPrompt('Inventario', 'Sin unidades vendidas', [
+        `Periodo: ${vendPeriodo}`,
+        `Día del mes: ${nowDay}`,
+      ]),
+    });
+  } else if (vendUnidades > 0) {
+    const pctSinFi = round1((vendSinFi / vendUnidades) * 100);
+    const pctNetaNeg = round1((vendNetaNeg / vendUnidades) * 100);
+    let severity = 'info';
+    let title = 'Unidades vendidas del periodo';
+    if (vendNetaNeg >= 3 || pctNetaNeg >= 25) {
+      severity = vendNetaNeg >= 5 || pctNetaNeg >= 40 ? 'critical' : 'warning';
+      title = 'Ventas con utilidad neta en riesgo';
+    } else if (pctSinFi >= 50 && vendUnidades >= 3) {
+      severity = 'warning';
+      title = 'Muchas ventas sin ingreso F&I';
+    }
+
+    push(list, {
+      id: 'inv-vendidos-resumen',
+      kpiId: 'autosVendidosInsightsCard',
+      module: 'inventory',
+      severity,
+      title,
+      summary:
+        `${vendUnidades} unidad(es) · utilidad neta ${round1(vendNeta)}`
+        + (vendFi > 0 ? ` · F&I ${round1(vendFi)}` : ' · sin F&I en PAGOS GMF')
+        + '.',
+      analysis:
+        `En ${vendPeriodo}: menudeo ${vendMenudeo}, flotilla ${vendFlotilla}. `
+        + `Utilidad bruta ${round1(vendBruta)}`
+        + (vendNetaProm != null ? `; neta promedio ${round1(vendNetaProm)}/ud` : '')
+        + '. '
+        + (vendNetaNeg > 0
+          ? `${vendNetaNeg} unidad(es) (${pctNetaNeg}%) con utilidad neta negativa`
+            + (peores.length
+              ? ` — revisar: ${peores.map((p) => `${p.vin || '—'} (${round1(p.utilidadNeta)})`).join('; ')}.`
+              : '.')
+          : 'Ninguna unidad con neta negativa. ')
+        + (vendSinFi > 0
+          ? ` ${vendSinFi} (${pctSinFi}%) sin pagos GMF asociados al VIN/contrato.`
+          : ' Todas con ingreso F&I en PAGOS GMF.'),
+      recommendations: [
+        'Abrir Análisis de autos vendidos y filtrar carlines con peor retención.',
+        vendNetaNeg > 0
+          ? 'Revisar extras, plan piso y comisión E.V. en VINs con neta negativa.'
+          : 'Mantener control de gastos extra y plan piso en el mes.',
+        vendSinFi > 0
+          ? 'Cruzar VINs sin F&I con PAGOS GMF y contratos del histórico.'
+          : 'Cuadrar ingreso F&I con comisiones del periodo.',
+      ],
+      metrics: {
+        unidades: vendUnidades,
+        utilidadNetaTotal: vendNeta,
+        utilidadNetaPromedio: vendNetaProm,
+        utilidadBrutaTotal: vendBruta,
+        ingresoFiTotal: vendFi,
+        sinIngresoFi: vendSinFi,
+        conNetaNegativa: vendNetaNeg,
+        menudeo: vendMenudeo,
+        flotilla: vendFlotilla,
+        peores,
+      },
+      chatPrompt: chatPrompt('Inventario', 'Unidades vendidas', [
+        `Periodo: ${vendPeriodo}`,
+        `Unidades: ${vendUnidades}`,
+        `Menudeo: ${vendMenudeo}`,
+        `Flotilla: ${vendFlotilla}`,
+        `Utilidad bruta: ${vendBruta}`,
+        `Utilidad neta: ${vendNeta}`,
+        `Neta promedio: ${vendNetaProm ?? '—'}`,
+        `Ingreso F&I: ${vendFi}`,
+        `Sin F&I: ${vendSinFi} (${pctSinFi}%)`,
+        `Neta negativa: ${vendNetaNeg} (${pctNetaNeg}%)`,
+        ...peores.map((p) => `VIN ${p.vin}: neta ${p.utilidadNeta} · ${p.carline || ''}`),
+      ]),
     });
   }
 
@@ -1473,7 +1669,7 @@ function buildPostSalesInsights(payload = {}) {
       severity: 'info',
       title: 'Calidad de datos de órdenes deficiente',
       summary: `${sinImporte} sin importe · ${sinFecha} sin fecha ingreso.`,
-      analysis: 'Falla de captura en DMS/SQL: métricas y aging se distorsionan si faltan importe o fecha.',
+      analysis: 'Falla de captura en DMS/SQL: métricas y antigüedad se distorsionan si faltan importe o fecha.',
       recommendations: [
         'Corregir órdenes sin fecha/importe en el taller.',
         'Capacitar captura obligatoria al ingreso.',
@@ -2080,27 +2276,31 @@ function buildMarketingInsights(payload = {}) {
 
 /* ───────────────── Router ───────────────── */
 
-function buildInsights({ module, ...rest } = {}) {
+function buildInsights({ module, roleId, ...rest } = {}) {
   const mod = String(module || '').toLowerCase();
-  if (mod === 'ventas' || mod === 'sales') return buildVentasInsights(rest);
-  if (mod === 'contabilidad' || mod === 'eeff' || mod === 'accounting') {
-    return buildContabilidadInsights(rest);
+  let insights = [];
+  if (mod === 'ventas' || mod === 'sales') insights = buildVentasInsights(rest);
+  else if (mod === 'contabilidad' || mod === 'eeff' || mod === 'accounting') {
+    insights = buildContabilidadInsights(rest);
+  } else if (mod === 'overview' || mod === 'tablero' || mod === 'index') {
+    insights = buildOverviewInsights(rest);
+  } else if (mod === 'inventory' || mod === 'inventario') insights = buildInventoryInsights(rest);
+  else if (mod === 'forecast' || mod === 'pronostico') insights = buildForecastInsights(rest);
+  else if (mod === 'post-sales' || mod === 'postventa' || mod === 'postsales') {
+    insights = buildPostSalesInsights(rest);
+  } else if (mod === 'seguimiento' || mod === 'crm' || mod === 'crm360') {
+    insights = buildSeguimientoInsights(rest);
+  } else if (mod === 'marketing' || mod === 'mtk' || mod === 'afluencia') {
+    insights = buildMarketingInsights(rest);
   }
-  if (mod === 'overview' || mod === 'tablero' || mod === 'index') {
-    return buildOverviewInsights(rest);
+
+  try {
+    const { enrichInsights } = require('./kpiCatalogSemaforo');
+    return enrichInsights(insights, { roleId });
+  } catch (err) {
+    console.warn('[insights] semáforo ABP no disponible:', err.message);
+    return insights;
   }
-  if (mod === 'inventory' || mod === 'inventario') return buildInventoryInsights(rest);
-  if (mod === 'forecast' || mod === 'pronostico') return buildForecastInsights(rest);
-  if (mod === 'post-sales' || mod === 'postventa' || mod === 'postsales') {
-    return buildPostSalesInsights(rest);
-  }
-  if (mod === 'seguimiento' || mod === 'crm' || mod === 'crm360') {
-    return buildSeguimientoInsights(rest);
-  }
-  if (mod === 'marketing' || mod === 'mtk' || mod === 'afluencia') {
-    return buildMarketingInsights(rest);
-  }
-  return [];
 }
 
 module.exports = {

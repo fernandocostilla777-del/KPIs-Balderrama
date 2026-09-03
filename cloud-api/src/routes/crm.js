@@ -1,8 +1,21 @@
 const express = require('express');
 const { requireApiKey } = require('../middleware/apiKey');
 const { upsertCrmBatch, listCrm, getCrmSummary } = require('../services/crmCiclosCloudService');
+const { getBdcEmbudo } = require('../services/objetivosResultadosService');
 
 const router = express.Router();
+
+router.get('/bdc', requireApiKey, async (req, res, next) => {
+  try {
+    const bdc = await getBdcEmbudo({
+      fechaInicio: req.query.fechaInicio,
+      fechaFin: req.query.fechaFin,
+    });
+    res.json(bdc);
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/summary', requireApiKey, async (_req, res, next) => {
   try {

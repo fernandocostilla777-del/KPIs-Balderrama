@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=49" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=112" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -20,8 +20,51 @@
 </header>
 <div class="main-content custom-scrollbar">
 
+<section class="section-panel dashboard-section filters-compact">
+<div class="filters-compact-bar">
+<button type="button" class="filter-pill" id="pillPeriod" aria-expanded="false" aria-controls="drawerPeriod">
+<span class="material-symbols-outlined filter-pill__icon">calendar_month</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Periodo</span>
+<span class="filter-pill__value" id="filterPeriodLabel">—</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" class="filter-pill" id="pillPresets" aria-expanded="false" aria-controls="drawerPresets">
+<span class="material-symbols-outlined filter-pill__icon">bolt</span>
+<span class="filter-pill__text">
+<span class="filter-pill__label">Rango rápido</span>
+<span class="filter-pill__value" id="filterPresetLabel">Mes actual</span>
+</span>
+<span class="material-symbols-outlined filter-pill__chevron">expand_more</span>
+</button>
+<button type="button" id="btnConsultar" class="btn-glass btn-primary filters-compact__action">Consultar</button>
+</div>
+<div id="drawerPeriod" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner">
+<div class="filter-row filter-row--compact">
+<label class="filter-date-wrap"><span class="filter-label">Fecha inicio</span><span class="filter-date-field"><input type="date" id="fechaInicio" class="filter-input"/><span class="material-symbols-outlined filter-date-icon" aria-hidden="true">calendar_month</span></span></label>
+<label class="filter-date-wrap"><span class="filter-label">Fecha fin</span><span class="filter-date-field"><input type="date" id="fechaFin" class="filter-input"/><span class="material-symbols-outlined filter-date-icon" aria-hidden="true">calendar_month</span></span></label>
+</div>
+</div>
+</div>
+<div id="drawerPresets" class="filter-drawer hidden" role="region">
+<div class="filter-drawer__inner filter-chips filter-chips--drawer">
+<button type="button" class="chip active" data-preset="mes-actual">Mes actual</button>
+<button type="button" class="chip" data-preset="mes-anterior">Mes anterior</button>
+<button type="button" class="chip" data-preset="ultimos-30">Últimos 30 días</button>
+<button type="button" class="chip" data-preset="trimestre-actual">Trimestre actual</button>
+<button type="button" class="chip" data-preset="ultimo-trimestre">Último trimestre</button>
+<button type="button" class="chip" data-preset="acumulado-anio">Acumulado del año</button>
+<button type="button" class="chip" data-preset="anio-actual">Año actual</button>
+<button type="button" class="chip" data-preset="anio-anterior">Año anterior</button>
+</div>
+</div>
+</section>
+
 <nav class="eeff-tabs inventory-main-tabs" id="inventoryMainTabs" aria-label="Tipo de inventario">
 <button type="button" class="eeff-tab active" data-inventory-scope="autos">Autos nuevos</button>
+<button type="button" class="eeff-tab" data-inventory-scope="cierre">Cierre de unidades vendidas</button>
 <button type="button" class="eeff-tab" data-inventory-scope="seminuevos">Autos seminuevos</button>
 <button type="button" class="eeff-tab" data-inventory-scope="postventa">Postventa</button>
 </nav>
@@ -70,8 +113,8 @@
 <p class="kpi-subtitle">Desde fecha de remisión</p>
 <div class="kpi-accent"></div>
 </div>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiAgeingAlerts" data-autos-kpi="ageing" aria-expanded="false" title="Clic para ver unidades envejecidas">
-<div class="kpi-card-head"><span class="kpi-title">Unidades envejecidas</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiAgeingAlerts" data-autos-kpi="ageing" aria-expanded="false" title="Clic para ver antigüedad 60+">
+<div class="kpi-card-head"><span class="kpi-title">Antigüedad</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
 <div id="sAlerts" class="kpi-value">—</div>
 <p id="sAlertsSub" class="kpi-subtitle">Físico · 60+ días</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
@@ -89,10 +132,108 @@
 </div>
 </section>
 
-<section class="chart-grid-2-1">
+<section class="section-panel dashboard-section" id="secAnalisisInventario" aria-label="Análisis de inventario">
+<div class="table-header-row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Análisis de inventario</h3>
+<p class="section-subtitle" style="margin:0">Carline · versión · VIN · subtotal → costo neto → nota s/IVA → bruta → extras → plan piso → neta → % retención</p>
+</div>
+</div>
+<div class="kpi-detail-toolbar" style="margin-top:8px;flex-wrap:wrap;gap:10px;align-items:center">
+<nav class="ageing-carline-tabs" id="ageingCarlineFilterTabs" aria-label="Filtrar análisis por carline">
+<button type="button" class="ageing-carline-chip is-active" data-ageing-filter="all" aria-pressed="true">
+<span class="ageing-carline-chip__name">Todos</span>
+<span class="ageing-carline-chip__count">—</span>
+</button>
+</nav>
+<label class="kpi-detail-search" for="buscarAgeingInv">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarAgeingInv" type="search" placeholder="Buscar VIN, carline, versión…" class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+<span id="ageingSearchMeta" class="kpi-detail-search-meta hidden"></span>
+</div>
+<div class="table-scroll ageing-slow-table-wrap">
+<table class="data-table ageing-slow-table">
+<colgroup>
+<col class="col-carline"/>
+<col class="col-version"/>
+<col class="col-vin"/>
+<col class="col-precio"/>
+<col class="col-costo"/>
+<col class="col-nota"/>
+<col class="col-utilidad"/>
+<col class="col-extras"/>
+<col class="col-piso"/>
+<col class="col-neta"/>
+<col class="col-retencion"/>
+</colgroup>
+<thead>
+<tr>
+<th>Carline</th>
+<th>Versión / Paquete</th>
+<th>VIN</th>
+<th class="cell-num">Subtotal</th>
+<th class="cell-num">Costo neto (con bonif.)</th>
+<th class="cell-num">Nota crédito (s/IVA)</th>
+<th class="cell-num">Utilidad bruta</th>
+<th class="cell-num">Gastos extra</th>
+<th class="cell-num">Plan piso</th>
+<th class="cell-num">Utilidad neta</th>
+<th class="cell-num">% retención</th>
+</tr>
+</thead>
+<tbody id="ageingSlowBody">
+<tr><td colspan="11" class="empty-row">Cargando análisis…</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section" id="secPlanPisoAnalisis" aria-label="Análisis de plan piso">
+<div class="table-header-row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Análisis de plan piso</h3>
+<p class="section-subtitle" style="margin:0">Intereses acumulados por VIN, antigüedad en piso y escenario comercial para sacar unidades de alto costo.</p>
+</div>
+</div>
+
+<div class="inv-piso-scenario" id="invPisoScenario" aria-label="Escenario comercial plan piso">
+<div class="inv-piso-scenario__head">
+<div>
+<h3 class="inv-piso-scenario__title">Escenario comercial · salida de unidades con plan piso alto</h3>
+<p class="inv-piso-scenario__lead" id="invPisoScenarioLead">Simulación semi-realista para el gerente comercial: priorizar VINs, presupuesto de incentivo y qué pasa si no salen en 15 días.</p>
+</div>
+<span class="inv-piso-scenario__badge" id="invPisoScenarioBadge">Gerencia comercial</span>
+</div>
+<div id="invPisoScenarioBanner" class="int-acq-banner int-acq-banner--warning" hidden></div>
+<div id="invPisoScenarioCards" class="inv-piso-scenario__cards"></div>
+<div class="table-scroll inv-piso-scenario__table-wrap">
+<table class="data-table inv-piso-scenario__table">
+<thead>
+<tr>
+<th>#</th>
+<th>Prioridad</th>
+<th>VIN / unidad</th>
+<th class="cell-num">Días</th>
+<th class="cell-num">Plan piso</th>
+<th class="cell-num">Burn / día</th>
+<th class="cell-num">+15 días</th>
+<th class="cell-num">Incentivo máx.</th>
+<th>Estrategia sugerida</th>
+</tr>
+</thead>
+<tbody id="invPisoScenarioBody">
+<tr><td colspan="9" class="empty-row">Cargando escenario…</td></tr>
+</tbody>
+</table>
+</div>
+<p class="inv-piso-scenario__note" id="invPisoScenarioNote">El incentivo máximo es una guía: equivale a ~1.1× el costo de 15 días más de piso (o 50% del piso acumulado), para no regalar margen de más frente al interés financiero.</p>
+</div>
+
+<div class="chart-grid-2-1 plan-piso-analisis__grid">
 <div class="section-panel table-panel plan-piso-section">
 <div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Plan Piso</h3>
+<h3 class="section-title" style="margin-bottom:0">Plan piso · intereses</h3>
 <div class="plan-piso-toolbar">
 <label class="filter-label" for="planPisoPeriod">Periodo</label>
 <select id="planPisoPeriod" class="filter-select plan-piso-toolbar__select">
@@ -127,45 +268,12 @@
 </div>
 <div class="section-panel">
 <div class="table-header-row" style="margin-bottom:12px">
-<h3 class="section-title" style="margin-bottom:0">Unidades envejecidas</h3>
+<h3 class="section-title" style="margin-bottom:0">Antigüedad</h3>
 <span id="urgentBadge" class="badge-tipo badge-alert"></span>
 </div>
 <p id="ageingPlanPisoTotal" class="section-subtitle">Plan Piso acumulado: —</p>
 <div id="alertsList" class="custom-scrollbar" style="max-height:360px;overflow-y:auto"></div>
 </div>
-</section>
-
-<section class="section-panel dashboard-section">
-<div class="table-header-row" style="margin-bottom:12px">
-<div>
-<h3 class="section-title" style="margin-bottom:4px">Antigüedad por carline</h3>
-<p class="section-subtitle" style="margin:0">Promedio de días en stock · combinaciones que más tardan en salir (versión + color)</p>
-</div>
-</div>
-<div class="table-scroll ageing-slow-table-wrap">
-<table class="data-table ageing-slow-table">
-<colgroup>
-<col class="col-carline"/>
-<col class="col-version"/>
-<col class="col-color"/>
-<col class="col-uds"/>
-<col class="col-avg"/>
-<col class="col-max"/>
-</colgroup>
-<thead>
-<tr>
-<th>Carline</th>
-<th>Versión</th>
-<th>Color</th>
-<th class="cell-num">Uds</th>
-<th class="cell-num">Prom. días</th>
-<th class="cell-num">Máx. días</th>
-</tr>
-</thead>
-<tbody id="ageingSlowBody">
-<tr><td colspan="6" class="empty-row">Cargando antigüedad…</td></tr>
-</tbody>
-</table>
 </div>
 </section>
 
@@ -173,7 +281,7 @@
 <div class="table-header-row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
 <div>
 <h3 class="section-title" style="margin-bottom:4px">Intercambios de planta</h3>
-<p id="intHistSubtitle" class="section-subtitle" style="margin:0">Autos traídos de inventario de planta: CONCESIONARIO distinto de GENERAL MOTORS DE MEXICO.</p>
+<p id="intHistSubtitle" class="section-subtitle" style="margin:0">Autos traídos de inventario de planta: CONCESIONARIO distinto de GENERAL MOTORS DE MEXICO. Usa su propio periodo (por defecto: año anterior → hoy).</p>
 </div>
 <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
 <label class="filter-field" style="margin:0">
@@ -272,15 +380,144 @@
 </div>
 </section>
 
-<section class="chart-grid">
-<div class="section-panel">
-<h3 class="section-title">Por situación</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="situacionChart"></canvas></div></div>
 </div>
-<div class="section-panel">
-<h3 class="section-title">Por familia</h3>
-<div class="chart-card"><div class="chart-wrap"><canvas id="familiaChart"></canvas></div></div>
+
+<div id="panelInventarioCierre" class="hidden">
+
+<article class="autos-vendidos-insights kpi-insight-anchor section-panel" id="autosVendidosInsightsCard" aria-label="Insights de unidades vendidas">
+<div class="autos-vendidos-insights__head">
+<div>
+<h3 class="autos-vendidos-insights__title">Insights · cierre de unidades vendidas</h3>
+<p id="autosVendidosInsightsLead" class="autos-vendidos-insights__lead">Lectura del periodo (utilidad, F&amp;I y riesgos)</p>
 </div>
+</div>
+<div id="autosVendidosInsights" class="autos-vendidos-insights__list custom-scrollbar" aria-live="polite">
+<div class="int-acq-alert int-acq-alert--ok">
+<span class="material-symbols-outlined int-acq-alert__icon">hourglass_empty</span>
+<div>
+<p class="int-acq-alert__title">Cargando insights…</p>
+<p class="int-acq-alert__meta">Se calculan con el cierre de unidades vendidas del periodo.</p>
+</div>
+</div>
+</div>
+</article>
+
+<section class="section-panel dashboard-section" id="secVendidosAnalisis" aria-label="Cierre de unidades vendidas">
+<div class="table-header-row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Cierre de unidades vendidas</h3>
+<p class="section-subtitle" style="margin:0">Detalle de margen por VIN · subtotal → costo neto (con bonif.) → nota crédito s/IVA → utilidad bruta → comisión E.V. → gastos extra → plan piso → ingresos F&I → utilidad neta → % retención</p>
+</div>
+<label class="filter-field" style="margin:0">
+<span class="filter-label">Mes de venta</span>
+<input id="vendidosPeriod" type="month" class="filter-input" style="min-width:160px"/>
+</label>
+</div>
+<div class="kpi-detail-toolbar" style="margin-top:8px;flex-wrap:wrap;gap:10px;align-items:center">
+<nav class="ageing-carline-tabs" id="vendidosCarlineFilterTabs" aria-label="Filtrar vendidos por carline">
+<button type="button" class="ageing-carline-chip is-active" data-vendidos-filter="all" aria-pressed="true">
+<span class="ageing-carline-chip__name">Todos</span>
+<span class="ageing-carline-chip__count">—</span>
+</button>
+</nav>
+<label class="kpi-detail-search" for="buscarVendidosInv">
+<span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
+<input id="buscarVendidosInv" type="search" placeholder="Buscar VIN, factura, vendedor, cliente…" class="filter-input kpi-detail-search-input" autocomplete="off"/>
+</label>
+<span id="vendidosSearchMeta" class="kpi-detail-search-meta hidden"></span>
+</div>
+<div class="table-scroll ageing-slow-table-wrap">
+<table class="data-table ageing-slow-table vendidos-analisis-table">
+<colgroup>
+<col class="col-carline"/>
+<col class="col-version"/>
+<col class="col-vin"/>
+<col class="col-precio"/>
+<col class="col-costo"/>
+<col class="col-nota"/>
+<col class="col-utilidad"/>
+<col class="col-comision"/>
+<col class="col-extras"/>
+<col class="col-piso"/>
+<col class="col-fi"/>
+<col class="col-neta"/>
+<col class="col-retencion"/>
+</colgroup>
+<thead>
+<tr>
+<th>Carline</th>
+<th>Versión / Paquete</th>
+<th>VIN</th>
+<th class="cell-num">Subtotal</th>
+<th class="cell-num">Costo neto (con bonif.)</th>
+<th class="cell-num">Nota crédito (s/IVA)</th>
+<th class="cell-num">Utilidad bruta</th>
+<th class="cell-num">Comisión E.V.</th>
+<th class="cell-num">Gastos extra</th>
+<th class="cell-num">Plan piso</th>
+<th class="cell-num">Ingresos F&amp;I</th>
+<th class="cell-num">Utilidad neta</th>
+<th class="cell-num">% retención</th>
+</tr>
+</thead>
+<tbody id="vendidosSlowBody">
+<tr><td colspan="13" class="empty-row">Cargando vendidos…</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section" id="secIemcF2" aria-label="IEMC F-2 eficiencia de margen vs mix objetivo">
+<div class="table-header-row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">IEMC (F-2) · Eficiencia de margen vs mix objetivo</h3>
+<p class="section-subtitle" style="margin:0">UO del PDF de objetivos. PL y CF = promedios del DMS (catálogo y remisión en piso). Comisión, extras y plan piso no entran.</p>
+</div>
+</div>
+<div class="iemc-f2-kpis" id="iemcF2Kpis" aria-live="polite">
+<article class="iemc-f2-card">
+<span class="iemc-f2-card__label">Margen bruto real</span>
+<strong class="iemc-f2-card__value" id="iemcF2MargenReal">—</strong>
+<span class="iemc-f2-card__hint" id="iemcF2MargenRealHint">UBA real ÷ venta neta real</span>
+</article>
+<article class="iemc-f2-card">
+<span class="iemc-f2-card__label">Margen bruto objetivo mix</span>
+<strong class="iemc-f2-card__value" id="iemcF2MargenObj">—</strong>
+<span class="iemc-f2-card__hint" id="iemcF2MargenObjHint">UBA mix ÷ venta neta objetivo</span>
+</article>
+<article class="iemc-f2-card iemc-f2-card--hero">
+<span class="iemc-f2-card__label">IEMC (F-2)</span>
+<strong class="iemc-f2-card__value" id="iemcF2Iemc">—</strong>
+<span class="iemc-f2-card__hint">Real ÷ objetivo mix × 100</span>
+</article>
+<article class="iemc-f2-card">
+<span class="iemc-f2-card__label">Brecha (F-2.1)</span>
+<strong class="iemc-f2-card__value" id="iemcF2Brecha">—</strong>
+<span class="iemc-f2-card__hint">UBA real − UBA objetivo mix</span>
+</article>
+</div>
+<p class="iemc-f2-status" id="iemcF2Status"></p>
+<div class="table-scroll ageing-slow-table-wrap">
+<table class="data-table ageing-slow-table iemc-f2-table">
+<thead>
+<tr>
+<th>Línea mix</th>
+<th class="cell-num">UO</th>
+<th class="cell-num">PL s/IVA</th>
+<th class="cell-num">CF s/IVA</th>
+<th class="cell-num">Venta obj.</th>
+<th class="cell-num">UBA obj.</th>
+<th class="cell-num">Uds real</th>
+<th class="cell-num">Venta real</th>
+<th class="cell-num">UBA real</th>
+</tr>
+</thead>
+<tbody id="iemcF2MixBody">
+<tr><td colspan="9" class="empty-row">Cargando mix objetivo…</td></tr>
+</tbody>
+</table>
+</div>
+<p class="section-subtitle iemc-f2-footnote" id="iemcF2Footnote"></p>
 </section>
 
 </div>
@@ -309,8 +546,8 @@
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
 </button>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" data-semi-kpi="ageing" aria-expanded="false" title="Clic para ver envejecidas">
-<div class="kpi-card-head"><span class="kpi-title">Envejecidas</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" data-semi-kpi="ageing" aria-expanded="false" title="Clic para ver antigüedad 60+">
+<div class="kpi-card-head"><span class="kpi-title">Antigüedad</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
 <div id="semiAgeing" class="kpi-value">—</div>
 <p id="semiAgeingSub" class="kpi-subtitle">60+ días en inventario</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
@@ -466,6 +703,77 @@
 </div>
 </section>
 
+<section id="panelPvInsights" class="section-panel dashboard-section">
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Insights · Refacciones</h3>
+<span id="pvInsightsMeta" class="top-bar-meta">Stock · traspasos · rotación</span>
+</div>
+<div id="pvInsightsCards" class="ref-alertas" aria-live="polite"></div>
+</section>
+
+<section id="panelPvTraspasos" class="section-panel dashboard-section">
+<div class="table-header-row">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Traspasos entre almacenes</h3>
+<p class="section-subtitle" style="margin:0" id="pvTraspasosSubtitle">Piezas movidas DE un almacén A otro (PAR_MOVTOS)</p>
+</div>
+<span id="pvTraspasosMeta" class="top-bar-meta">—</span>
+</div>
+<div class="kpi-grid kpi-grid--eeff" style="margin:14px 0" id="kpiPvTraspasos">
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Piezas movidas</span></div>
+<div id="pvKpiTraspasosPiezas" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Partes</span></div>
+<div id="pvKpiTraspasosPartes" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title">Documentos</span></div>
+<div id="pvKpiTraspasosDocs" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--amber">
+<div class="kpi-card-head"><span class="kpi-title">Costo movido</span></div>
+<div id="pvKpiTraspasosCosto" class="kpi-value money">—</div>
+</div>
+</div>
+<div class="chart-grid" style="margin-bottom:14px">
+<div class="section-panel table-panel">
+<h3 class="section-title">Rutas origen → destino</h3>
+<div class="table-scroll" style="max-height:240px">
+<table class="data-table">
+<thead><tr><th>Ruta</th><th class="cell-num">Líneas</th><th class="cell-num">Piezas</th><th class="cell-money">Costo</th></tr></thead>
+<tbody id="pvTraspasosRutas"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Partes más traspasadas</h3>
+<div class="table-scroll" style="max-height:240px">
+<table class="data-table">
+<thead><tr><th>Parte</th><th>Descripción</th><th class="cell-num">Movs</th><th class="cell-num">Piezas</th><th class="cell-money">Costo</th></tr></thead>
+<tbody id="pvTraspasosTopPartes"></tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="table-scroll" style="max-height:320px">
+<table class="data-table">
+<thead><tr>
+<th>Fecha</th>
+<th>Parte</th>
+<th>Descripción</th>
+<th>Origen</th>
+<th>Destino</th>
+<th class="cell-num">Piezas</th>
+<th class="cell-money">Costo</th>
+<th>Observación</th>
+</tr></thead>
+<tbody id="pvTraspasosDetalle"></tbody>
+</table>
+</div>
+</section>
+
 <nav class="eeff-tabs inventory-pv-tabs" id="inventoryPvTabs" aria-label="Áreas Postventa">
 <button type="button" class="eeff-tab active" data-pv-area="servicio">Servicio</button>
 <button type="button" class="eeff-tab" data-pv-area="refacciones">Refacciones</button>
@@ -542,12 +850,12 @@
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js?v=5"></script>
-<script src="/js/sidebar.js?v=10"></script>
-<script src="/js/topbar.js?v=17"></script>
+<script src="/js/shared.js?v=8"></script>
+<script src="/js/sidebar.js?v=11"></script>
+<script src="/js/topbar.js?v=18"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=4"></script>
+<script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/inventory.js?v=42"></script>
+<script src="/js/inventory.js?v=85"></script>
 </body>
 </html>

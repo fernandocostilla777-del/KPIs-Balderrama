@@ -113,6 +113,77 @@ function buildOpenApiSpec({ port = 3000, lanIp = null } = {}) {
           responses: { 200: { description: 'Backend disponible' } },
         },
       },
+      '/api/objetivos-resultados/catalogo': {
+        get: {
+          tags: ['Objetivos resultados'],
+          summary: 'Catálogo de objetivos del formato PDF y cobertura disponible',
+          responses: { 200: { description: 'Catálogo y plantilla de metas' } },
+        },
+      },
+      '/api/objetivos-resultados/metas': {
+        get: {
+          tags: ['Objetivos resultados'],
+          summary: 'Plantilla de metas (PDF Agosto 2026)',
+          parameters: [dateParam('fechaInicio', false), dateParam('fechaFin', false)],
+          responses: { 200: { description: 'Metas de referencia' } },
+        },
+      },
+      '/api/objetivos-resultados': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Resultados completos en formato de objetivos comerciales',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/volumen': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Volumen, facturación, carry-over y fuerza de ventas',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/lineas': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Desglose por línea / modelo vs plantilla PDF',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/financiamiento': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'GMF, OnStar, Essentials (12 / +12 meses), accesorios y PVAs',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/afluencia': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Afluencia, leads y proxy BDC',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/solicitudes': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Solicitudes de crédito desde Google Sheets (crm_solicitudes), con desglose por Carline (columna M)',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/diario': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Serie diaria de facturas DMS',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
+      '/api/objetivos-resultados/seminuevos': {
+        get: secured({
+          tags: ['Objetivos resultados'],
+          summary: 'Seminuevos · Tomas a cuenta',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
+        }),
+      },
       '/api/openapi.json': {
         get: {
           tags: ['Sistema'],
@@ -138,6 +209,29 @@ function buildOpenApiSpec({ port = 3000, lanIp = null } = {}) {
           responses: {
             200: { description: 'Sesión iniciada; devuelve cookie de sesión' },
             401: { description: 'Credenciales incorrectas' },
+          },
+        },
+      },
+      '/api/auth/password-reset/request': {
+        post: {
+          tags: ['Autenticación'],
+          summary: 'Solicitar código para restablecer contraseña',
+          requestBody: jsonBody({ username: { type: 'string' } }, ['username']),
+          responses: { 200: { description: 'Solicitud aceptada (respuesta genérica)' } },
+        },
+      },
+      '/api/auth/password-reset/confirm': {
+        post: {
+          tags: ['Autenticación'],
+          summary: 'Confirmar código y guardar nueva contraseña',
+          requestBody: jsonBody({
+            username: { type: 'string' },
+            code: { type: 'string' },
+            password: { type: 'string', format: 'password' },
+          }, ['username', 'code', 'password']),
+          responses: {
+            200: { description: 'Contraseña actualizada' },
+            400: { description: 'Código inválido o contraseña no válida' },
           },
         },
       },
@@ -237,6 +331,13 @@ function buildOpenApiSpec({ port = 3000, lanIp = null } = {}) {
           parameters: [
             queryParam('planPisoPeriod', 'Periodo de plan piso', { type: 'string', default: 'all' }),
           ],
+        }),
+      },
+      '/api/inventory/vendidos': {
+        get: secured({
+          tags: ['Inventario'],
+          summary: 'Análisis de autos vendidos + IEMC F-2 / brecha F-2.1',
+          parameters: [dateParam('fechaInicio'), dateParam('fechaFin')],
         }),
       },
       '/api/inventory/postventa': {
@@ -347,7 +448,7 @@ function buildOpenApiSpec({ port = 3000, lanIp = null } = {}) {
       '/api/crm/sheets-sync/status': {
         get: secured({
           tags: ['Google Sheets CRM'],
-          summary: 'Consultar estado de sincronización cada 5 horas',
+          summary: 'Consultar estado de sincronización (9:00, 12:00 y 18:00, hora de México)',
         }),
       },
       '/api/crm/sheets-sync/run': {

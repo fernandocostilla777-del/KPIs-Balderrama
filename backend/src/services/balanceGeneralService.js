@@ -420,12 +420,20 @@ async function getBalanceGeneral({ fechaFin, includeComparativo = true } = {}) {
       .reduce((sum, a) => sum + Math.abs(Number(a.value || 0)), 0),
   );
 
+  // Plan piso: documentos por pagar de unidades nuevas (0310) y seminuevas (0311).
+  const planPisoPasivo = round2(
+    (accountsBySection.pasivoCortoPlazo || [])
+      .filter((a) => /^03(10|11)-/.test(String(a.cuenta || '')))
+      .reduce((sum, a) => sum + Math.abs(Number(a.value || 0)), 0),
+  );
+
   const estructura = computeEstructuraFinanciera({
     activoTotal,
     pasivoTotal,
     pasivoCorto: pasivoCirculante,
     pasivoLargo,
     capital,
+    efectivoYEquivalentes: liquidez?.efectivoYEquivalentes || 0,
   });
 
   const mesesIncluidos = loaded.month
@@ -455,6 +463,7 @@ async function getBalanceGeneral({ fechaFin, includeComparativo = true } = {}) {
     liquidez,
     estructura,
     cxpProveedores,
+    planPisoPasivo,
     comparativo: null,
     methodology: {
       activo: 'Circulante + fijo (neto de depreciaciones) + diferido',
@@ -464,9 +473,12 @@ async function getBalanceGeneral({ fechaFin, includeComparativo = true } = {}) {
       fuente: 'SQL',
       regla: 'Corte al cierre del mes de la fecha fin. Capital incluye Resultado del ejercicio = Σ saldos firmados de cuentas mayor de resultados (04–09) ene…mes.',
       endeudamiento: 'Pasivo total ÷ Activo total',
-      apalancamiento: 'Pasivo total ÷ Capital contable',
+      apalancamiento: 'Deuda neta ÷ EBITDA UDM · Deuda neta = Pasivo total − (Caja + Bancos + Equivalentes)',
       calidadDeuda: 'Participación del pasivo corto plazo sobre el pasivo total',
-      dpo: 'CxP proveedores (0300) ÷ Costo de ventas × días del periodo',
+      dso: '(CxC sin IVA ÷ Ventas del periodo) × días · CxC sin IVA = CxC ÷ 1.16',
+      dri: '(Inventario ÷ Costo de ventas) × días del periodo',
+      dpo: '(CxP proveedores 0300 ÷ Costo de ventas) × días del periodo',
+      cicloEfectivo: 'DRI + DRC − DRP',
       comparativo: 'Variación % vs cierre del mes anterior',
     },
   };

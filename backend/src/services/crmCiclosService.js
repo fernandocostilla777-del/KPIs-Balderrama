@@ -496,7 +496,7 @@ function getFinanciamientoByVins(d, vins) {
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-  return rows
+  const mapped = rows
     .filter((row) => {
       if (!normalized.some((vin) => matchCrmVinToSerie(vin, row.vin))) return false;
       if (seen.has(row.id)) return false;
@@ -525,6 +525,19 @@ function getFinanciamientoByVins(d, vins) {
         pvas,
       };
     });
+
+  try {
+    const { getPagosGmfByVins } = require('./pagosGmfService');
+    const pagosByVin = getPagosGmfByVins(mapped.map((r) => r.vin));
+    for (const row of mapped) {
+      const vinKey = normalizeVin(row.vin);
+      row.pagos_gmf = vinKey ? (pagosByVin.get(vinKey) || []) : [];
+    }
+  } catch {
+    for (const row of mapped) row.pagos_gmf = [];
+  }
+
+  return mapped;
 }
 
 function toIsoDate(value) {
@@ -4312,6 +4325,81 @@ async function getVendedorResumen({
   };
 }
 
+function pctBdc(part, total) {
+  const p = Number(part);
+  const t = Number(total);
+  if (!Number.isFinite(p) || !Number.isFinite(t) || t <= 0) return null;
+  return Math.round((p / t) * 1000) / 10;
+}
+
+/**
+ * Embudo BDC sobre crm_actividades (histórico local Balderrama Ciclos).
+ * Respaldo cuando Railway no responde; la fuente operativa es crm_ciclos en la nube.
+ */
+function getBdcEmbudo({ fechaInicio, fechaFin } = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaInicio || '')
+    || !/^\d{4}-\d{2}-\d{2}$/.test(fechaFin || '')) {
+    return { disponible: false, status: 'sin-periodo', real: null };
+  }
+  if (!isAvailable()) {
+    return { disponible: false, status: 'sin-crm', real: null };
+  }
+
+  const d = getDb();
+  const row = d.prepare(`
+    WITH ciclos_periodo AS (
+      SELECT *
+      FROM crm_actividades
+      WHERE substr(COALESCE(fecha_inicio_ciclo, ''), 1, 10) BETWEEN ? AND ?
+        AND substr(COALESCE(fecha_inicio_ciclo, ''), 1, 10) GLOB '????-??-??'
+    ),
+    contactos AS (
+      SELECT COUNT(DISTINCT id_contacto) AS total FROM ciclos_periodo
+    ),
+    citas AS (
+      SELECT * FROM ciclos_periodo WHERE UPPER(TRIM(tipo_actividad)) = 'CITA'
+    )
+    SELECT
+      (SELECT total FROM contactos) AS contactos,
+      (SELECT COUNT(*) FROM citas) AS citas_agendadas,
+      (SELECT COUNT(*) FROM citas WHERE TRIM(COALESCE(fecha_resp_actividad, '')) <> '') AS citas_confirmadas,
+      (SELECT COUNT(*) FROM citas WHERE
+         UPPER(COALESCE(resultado_actividad, '')) = 'PM OK'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CONFIRMA%ASISTENCIA%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CITA%CUMPLIDA%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CLIENTE%ASISTE%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CLIENTE%ACUDE%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CONTACTO EN PISO%'
+      ) AS citas_cumplidas,
+      (SELECT COUNT(DISTINCT id_contacto) FROM ciclos_periodo
+         WHERE TRIM(COALESCE(fecha_entrega, '')) <> ''
+           AND substr(fecha_entrega, 1, 10) BETWEEN ? AND ?
+      ) AS entregas_bdc
+  `).get(fechaInicio, fechaFin, fechaInicio, fechaFin);
+
+  const real = {
+    contactos: Number(row?.contactos || 0),
+    citasAgendadas: Number(row?.citas_agendadas || 0),
+    citasConfirmadas: Number(row?.citas_confirmadas || 0),
+    citasCumplidas: Number(row?.citas_cumplidas || 0),
+    entregasBdc: Number(row?.entregas_bdc || 0),
+  };
+
+  return {
+    disponible: real.contactos > 0,
+    status: real.contactos > 0 ? 'completo' : 'sin-periodo',
+    real,
+    fuente: 'crm_actividades (local)',
+    conversion: {
+      citasSobreContactosPct: pctBdc(real.citasAgendadas, real.contactos),
+      confirmadasSobreAgendadasPct: pctBdc(real.citasConfirmadas, real.citasAgendadas),
+      cumplidasSobreConfirmadasPct: pctBdc(real.citasCumplidas, real.citasConfirmadas),
+      entregasSobreCumplidasPct: pctBdc(real.entregasBdc, real.citasCumplidas),
+    },
+    nota: 'Contactos únicos con ciclo iniciado en el periodo; las etapas posteriores se calculan con sus actividades CRM.',
+  };
+}
+
 module.exports = {
   isAvailable,
   releaseDb,
@@ -4320,6 +4408,7 @@ module.exports = {
   getContactHistory,
   getLeadsSummary,
   getLeadsDashboard,
+  getBdcEmbudo,
   getSeguimiento360Summary,
   resolveCrmPeriod,
   getLeadNotDuplicateSql,

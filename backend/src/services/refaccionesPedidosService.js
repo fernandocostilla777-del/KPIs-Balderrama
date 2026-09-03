@@ -656,13 +656,15 @@ async function getInventarioAlertas({ fechaInicio, fechaFin, limit = 8 } = {}) {
 async function getRefaccionesDashboard({ fechaInicio, fechaFin } = {}) {
   const fi = parseDateInput(fechaInicio);
   const ff = parseDateInput(fechaFin);
+  const { getTraspasosEntreAlmacenes } = require('./inventoryPostventaService');
 
-  const [pedidosRows, inventario, ventasFinancieras, ventasMostrador, alertas] = await Promise.all([
+  const [pedidosRows, inventario, ventasFinancieras, ventasMostrador, alertas, traspasos] = await Promise.all([
     loadPedidosRows(fi, ff),
     getRefaccionesInventario({ limit: 400 }),
     getVentasFinancieras({ fechaInicio: fi, fechaFin: ff }),
     getVentasMostrador({ fechaInicio: fi, fechaFin: ff, limit: 300 }),
     getInventarioAlertas({ fechaInicio: fi, fechaFin: ff, limit: 8 }),
+    getTraspasosEntreAlmacenes({ fechaInicio: fi, fechaFin: ff, limit: 60 }),
   ]);
 
   const pedidos = buildPedidosPayload(pedidosRows);
@@ -676,10 +678,12 @@ async function getRefaccionesDashboard({ fechaInicio, fechaFin } = {}) {
       ventasFinancieras: 'CON_CTAS 0481–0484',
       ventasMostrador: 'PAR_PEDMOST',
       alertas: 'PAR_ALMACEN + PAR_MOVTOS/PAR_MOVDET',
+      traspasos: 'PAR_MOVTOS/PAR_MOVDET · observación DE…A…',
       entradas: 'PAR_PEDENT / PAR_PEDENTDET (próximo)',
       sugeridos: 'PAR_PEDSUGERIDO (próximo)',
     },
     inventario,
+    traspasos,
     ventas: {
       financieras: ventasFinancieras,
       mostrador: ventasMostrador,

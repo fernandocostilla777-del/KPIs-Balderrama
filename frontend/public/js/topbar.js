@@ -382,10 +382,51 @@
       return directoryCache;
     }
 
+    async function desktopUpdateAlert() {
+      const api = window.desktopApp;
+      if (!api?.getUpdateStatus) return null;
+      try {
+        const st = await api.getUpdateStatus();
+        if (!st?.available || !st.latest) return null;
+        const ready = st.state === 'ready';
+        const downloading = st.state === 'downloading';
+        return {
+          id: `desktop-update-${st.latest}`,
+          type: 'app_update',
+          typeLabel: 'App escritorio',
+          category: 'Sistema',
+          title: ready
+            ? `Actualización ${st.latest} lista`
+            : `Nueva versión ${st.latest}`,
+          message: ready
+            ? 'Ya se descargó. Reinicie la app para instalarla.'
+            : downloading
+              ? `Descargando la versión ${st.latest}…`
+              : `Está usando ${st.current}. Hay una actualización disponible.`,
+          severity: 'medium',
+          href: null,
+          action: ready ? 'desktop-install' : 'desktop-download',
+          actionLabel: ready
+            ? 'Reiniciar e instalar'
+            : (st.packaged ? 'Descargar ahora' : 'Ver canal de actualización'),
+          createdAt: new Date().toISOString(),
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    async function withDesktopUpdate(alerts) {
+      const extra = await desktopUpdateAlert();
+      const rest = (alerts || []).filter((a) => a.type !== 'app_update');
+      return extra ? [extra, ...rest] : rest;
+    }
+
     async function fetchAlerts() {
       const res = await fetch('/api/auth/alerts', { credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || res.statusText);
+      data.alerts = await withDesktopUpdate(data.alerts || []);
       return data;
     }
 
@@ -400,6 +441,18 @@
       const seenIds = getSeenIds();
       return alerts.map((a) => {
         const isNew = a.type !== 'sistema' && a.id && !seenIds.has(a.id);
+        const actionBtn = a.action
+          ? `<button type="button" class="alerts-drawer__link" data-alert-action="${esc(a.action)}">
+                  <span class="material-symbols-outlined">system_update</span>
+                  ${esc(a.actionLabel || 'Actualizar')}
+                </button>`
+          : '';
+        const hrefLink = !a.action && a.href
+          ? `<a href="${esc(a.href)}" class="alerts-drawer__link">
+                  <span class="material-symbols-outlined">arrow_forward</span>
+                  Ver detalle
+                </a>`
+          : '';
         return `
           <article class="alerts-drawer__item ${severityClass(a.severity)}${isNew && !markSeen ? ' is-new' : ''}">
             <div class="alerts-drawer__item-head">
@@ -407,12 +460,7 @@
               <span class="alerts-drawer__tag">${esc(a.typeLabel || a.category || '')}</span>
             </div>
             <p class="alerts-drawer__msg">${esc(a.message)}</p>
-            ${a.href
-              ? `<a href="${esc(a.href)}" class="alerts-drawer__link">
-                  <span class="material-symbols-outlined">arrow_forward</span>
-                  Ver detalle
-                </a>`
-              : ''}
+            ${actionBtn}${hrefLink}
           </article>`;
       }).join('');
     }
@@ -931,6 +979,28 @@
     });
 
     bodyEl.addEventListener('click', async (e) => {
+      const updateBtn = e.target.closest('[data-alert-action]');
+      if (updateBtn) {
+        e.preventDefault();
+        const action = updateBtn.getAttribute('data-alert-action');
+        const api = window.desktopApp;
+        if (!api) return;
+        updateBtn.disabled = true;
+        try {
+          const result = action === 'desktop-install'
+            ? await api.installUpdate()
+            : await api.downloadUpdate();
+          if (result?.error && !result.opened) {
+            window.alert(result.error);
+          }
+          await load({ markSeen: false });
+        } catch (err) {
+          window.alert(err.message || 'No se pudo actualizar.');
+        } finally {
+          updateBtn.disabled = false;
+        }
+        return;
+      }
       const openChatBtn = e.target.closest('[data-open-chat]');
       if (openChatBtn) {
         e.preventDefault();
@@ -1065,6 +1135,17 @@
     trailing.appendChild(wrap);
     msgBtn = mailBtn;
     notifBtn = btn;
+
+    if (window.desktopApp?.onUpdateStatus) {
+      window.desktopApp.onUpdateStatus(() => {
+        pollNotifications();
+      });
+    }
+    if (window.desktopApp?.onOpenNotifications) {
+      window.desktopApp.onOpenNotifications(() => {
+        ensureAlertsPanel().open({ mode: 'operativas', anchor: notifBtn });
+      });
+    }
 
     mailBtn.addEventListener('click', (e) => {
       e.stopPropagation();

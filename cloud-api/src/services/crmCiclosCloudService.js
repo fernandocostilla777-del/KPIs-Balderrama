@@ -67,11 +67,36 @@ function asText(value, max = 255) {
   return text.slice(0, max);
 }
 
+const FIELD_LIMITS = {
+  id_contacto: 64,
+  nombre_contacto: 255,
+  id_ciclo: 64,
+  fecha_inicio_ciclo: 40,
+  fecha_esperada_cierre: 40,
+  estatus: 80,
+  fecha_estatus: 40,
+  tipo_actividad: 120,
+  fecha_crea_actividad: 40,
+  fecha_prog_actividad: 40,
+  fecha_resp_actividad: 40,
+  resultado_actividad: 8000,
+  forma_contacto: 80,
+  medio_contacto: 80,
+  submedio_contacto: 120,
+  num_factura: 64,
+  facturado_a: 255,
+  producto_vendido: 255,
+  fecha_factura: 40,
+  vin: 32,
+  fecha_entrega: 40,
+  vendedor: 160,
+};
+
 function normalizeRow(payload = {}) {
   const source = payload.data && typeof payload.data === 'object' ? { ...payload, ...payload.data } : payload;
   const row = {};
   for (const field of FIELDS) {
-    row[field] = asText(pick(source, ALIASES[field]), field === 'vin' ? 32 : 255);
+    row[field] = asText(pick(source, ALIASES[field]), FIELD_LIMITS[field] || 255);
   }
   if (!row.id_contacto) {
     const err = new Error('Cada fila requiere ID_CONTACTO (o D_CONTACTO)');
@@ -114,7 +139,7 @@ function ensureCrmCiclosTableSql() {
       fecha_crea_actividad    VARCHAR(40)  NOT NULL DEFAULT '',
       fecha_prog_actividad    VARCHAR(40)  NOT NULL DEFAULT '',
       fecha_resp_actividad    VARCHAR(40)  NOT NULL DEFAULT '',
-      resultado_actividad     VARCHAR(255) NOT NULL DEFAULT '',
+      resultado_actividad     TEXT         NOT NULL DEFAULT '',
       forma_contacto          VARCHAR(80)  NOT NULL DEFAULT '',
       medio_contacto          VARCHAR(80)  NOT NULL DEFAULT '',
       submedio_contacto       VARCHAR(120) NOT NULL DEFAULT '',
@@ -148,6 +173,11 @@ async function ensureCrmCiclosTable() {
   for (const statement of statements) {
     await query(`${statement};`);
   }
+  await query(`
+    ALTER TABLE crm_ciclos
+    ALTER COLUMN resultado_actividad TYPE TEXT
+    USING LEFT(resultado_actividad, 8000)
+  `).catch(() => {});
 }
 
 const UPSERT_SQL = `

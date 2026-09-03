@@ -9,9 +9,14 @@ directories:
 files:
   - main.js
   - preload.js
+  - updater.js
   - loading.html
   - package.json
   - assets/**
+
+publish:
+  provider: generic
+  url: https://kpis-balderrama-production.up.railway.app/desktop-updates
 
 # node_modules debe ir en entradas aparte: electron-builder a veces
 # omite node_modules al copiar carpetas padre con filter.
@@ -58,7 +63,7 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: KPIs Balderrama
-  artifactName: "${productName}-Setup-${version}-Windows-${arch}.${ext}"
+  artifactName: "kpis-balderrama-setup-${version}-win-${arch}.${ext}"
 
 portable:
   artifactName: "${productName}-Portable-${version}-Windows-${arch}.${ext}"

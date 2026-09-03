@@ -1,6 +1,7 @@
 let ageingChart;
-let situacionChart;
-let familiaChart;
+let ageingCarlineChart;
+let ageingDaysChart;
+let ageingPisoChart;
 let intHistChart;
 let intHistMesChart;
 let intHistConcChart;
@@ -8,6 +9,15 @@ let intHistRows = [];
 let intHistSearch = '';
 let intHistFilter = 'all';
 let intHistData = null;
+let ageingSlowRows = [];
+let ageingCarlineFilters = [];
+let ageingCarlineFilter = 'all';
+let ageingSearch = '';
+let vendidosRows = [];
+let vendidosCarlineFilters = [];
+let vendidosCarlineFilter = 'all';
+let vendidosSearch = '';
+let vendidosLoading = false;
 let intHistLoading = false;
 let entregasSinPreviasLoading = false;
 let inventoryQuietRefreshing = false;
@@ -32,6 +42,8 @@ let activeAutosKpi = null;
 let autosKpiFilter = null;
 let autosDrawerUi = null;
 let stockAlertsRows = [];
+let lastInventorySummary = null;
+let lastInventoryPlanPisoPeriod = 'all';
 
 const PLAN_PISO_MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -338,9 +350,9 @@ function autosKpiMeta(kpiId) {
   }
   if (kpiId === 'ageing') {
     return {
-      title: 'Unidades envejecidas',
+      title: 'Antigüedad',
       hint: 'Unidades en Físico (FIS) con 60 o más días desde remisión',
-      scopeLabel: 'envejecidas',
+      scopeLabel: 'antigüedad',
       icon: 'warning',
       card: () => document.getElementById('kpiAgeingAlerts'),
     };
@@ -1147,72 +1159,1493 @@ function renderTable(rows, { searchTerm = '' } = {}) {
   }).join('');
 }
 
-function renderAgeingSlowTable(rows) {
+function filteredAgeingSlowRows() {
+  let rows = ageingSlowRows;
+  if (ageingCarlineFilter && ageingCarlineFilter !== 'all') {
+    rows = rows.filter((r) => String(r.carline || '') === ageingCarlineFilter);
+  }
+  const q = String(ageingSearch || '').trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) => [
+    r.vin, r.carline, r.version, r.catalogo, r.paquete,
+  ].some((v) => String(v || '').toLowerCase().includes(q)));
+}
+
+function ageingDaysOf(row) {
+  if (row.daysInStock == null) return Number(row.avgDays || 0);
+  return Number(row.daysInStock || 0);
+}
+
+function renderAgeingAnalysisSummary(rows = ageingSlowRows) {
+  const { fmt, chartOptions, chartColors } = Dashboard;
+  const list = Array.isArray(rows) ? rows : [];
+  const units = list.length;
+  const daysVals = list.map(ageingDaysOf).filter((d) => Number.isFinite(d));
+  const avgDays = daysVals.length
+    ? Math.round(daysVals.reduce((s, d) => s + d, 0) / daysVals.length)
+    : 0;
+  const over30 = list.filter((r) => ageingDaysOf(r) > 30).length;
+  const over90 = list.filter((r) => ageingDaysOf(r) >= 90).length;
+  const planPiso = list.reduce((s, r) => s + Number(r.planPisoAcumulado || 0), 0);
+  const utilRows = list.filter((r) => r.utilidadPromedio != null && Number(r.unidadesVendidas || 0) > 0);
+  const utilidad = utilRows.length
+    ? utilRows.reduce((s, r) => s + Number(r.utilidadPromedio || 0) * Number(r.unidadesVendidas || 0), 0)
+      / utilRows.reduce((s, r) => s + Number(r.unidadesVendidas || 0), 0)
+    : null;
+  const byCarline = new Map();
+  const pisoByCarline = new Map();
+  for (const r of list) {
+    const key = r.carline || 'Sin familia';
+    byCarline.set(key, (byCarline.get(key) || 0) + 1);
+    pisoByCarline.set(key, (pisoByCarline.get(key) || 0) + Number(r.planPisoAcumulado || 0));
+  }
+  const topCarline = [...byCarline.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topPiso = list.slice().sort((a, b) => Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0))[0];
+  const oldest = list.slice().sort((a, b) => ageingDaysOf(b) - ageingDaysOf(a))[0];
+
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  set('ageingKpiUnidades', fmt.number(units));
+  set('ageingKpiUnidadesSub', `${fmt.number(byCarline.size)} carline${byCarline.size === 1 ? '' : 's'}`);
+  set('ageingKpiDias', `${fmt.number(avgDays)} días`);
+  set('ageingKpiDiasSub', `${fmt.number(over30)} unidad(es) +30 días`);
+  set('ageingKpiPiso', fmt.money(planPiso));
+  set('ageingKpiPisoSub', `${fmt.number(over90)} críticas 90+`);
+  set('ageingKpiUtilidad', utilidad == null ? '—' : fmt.money(utilidad));
+  set('ageingKpiUtilidadSub', utilidad == null ? 'Sin histórico' : 'Promedio ponderado vendido');
+  set('ageingAnalysisCount', `${fmt.number(units)} unidad(es) · ${fmt.number(byCarline.size)} carline(s)`);
+
+  const banner = document.getElementById('ageingAnalysisBanner');
+  if (banner) {
+    banner.hidden = false;
+    if (!units) {
+      banner.className = 'int-acq-banner int-acq-banner--ok';
+      banner.textContent = 'Sin unidades de piso real para analizar.';
+    } else if (over90 > 0 || planPiso > 0) {
+      banner.className = 'int-acq-banner int-acq-banner--warning';
+      banner.textContent = `${over30} unidad(es) ya generan plan piso. Acumulado ${fmt.money(planPiso)}${topCarline ? ` · Más stock: ${topCarline[0]} (${topCarline[1]})` : ''}.`;
+    } else {
+      banner.className = 'int-acq-banner int-acq-banner--ok';
+      banner.textContent = `${units} unidad(es) en piso · ninguna supera 30 días de plan piso.`;
+    }
+  }
+
+  const box = document.getElementById('ageingAnalysisInsights');
+  if (box) {
+    const insights = [];
+    if (oldest && ageingDaysOf(oldest) > 0) {
+      insights.push({
+        ok: ageingDaysOf(oldest) < 60,
+        title: `Unidad más antigua: ${oldest.carline || '—'}`,
+        detail: `${oldest.vin || '—'} · ${ageingDaysOf(oldest)} días · ${oldest.version || ''}`,
+        action: ageingDaysOf(oldest) >= 90 ? 'Priorizar salida o intercambio de esta unidad' : 'Monitorear rotación',
+      });
+    }
+    if (topPiso && Number(topPiso.planPisoAcumulado || 0) > 0) {
+      insights.push({
+        ok: false,
+        title: `Mayor plan piso: ${fmt.money(topPiso.planPisoAcumulado)}`,
+        detail: `${topPiso.carline || '—'} · ${topPiso.vin || '—'} · ${ageingDaysOf(topPiso)} días`,
+        action: 'Revisar costo financiero vs utilidad esperada',
+      });
+    }
+    if (topCarline) {
+      insights.push({
+        ok: true,
+        title: `Carline con más piso: ${topCarline[0]}`,
+        detail: `${topCarline[1]} unidad(es) · ${((topCarline[1] / Math.max(units, 1)) * 100).toFixed(0)}% del inventario`,
+        action: 'Usar el filtro de fichas para ver el detalle',
+      });
+    }
+    if (!insights.length) {
+      box.innerHTML = `<div class="int-acq-alert int-acq-alert--ok">
+        <span class="material-symbols-outlined int-acq-alert__icon">info</span>
+        <div>
+          <p class="int-acq-alert__title">Sin insights</p>
+          <p class="int-acq-alert__meta">No hay unidades de piso real para analizar.</p>
+        </div>
+      </div>`;
+    } else {
+      box.innerHTML = insights.map((a) => `
+        <article class="int-acq-alert int-acq-alert--${a.ok ? 'ok' : 'warning'}">
+          <span class="material-symbols-outlined int-acq-alert__icon">${a.ok ? 'verified' : 'analytics'}</span>
+          <div>
+            <p class="int-acq-alert__title">${escapeHtml(a.title)}</p>
+            <p class="int-acq-alert__meta">${escapeHtml(a.detail)}</p>
+            <p class="int-acq-alert__action">${escapeHtml(a.action)}</p>
+          </div>
+        </article>
+      `).join('');
+    }
+  }
+
+  const buckets = [
+    { label: '0-30', color: '#27AE60', n: list.filter((r) => ageingDaysOf(r) <= 30).length },
+    { label: '31-60', color: '#f59e0b', n: list.filter((r) => { const d = ageingDaysOf(r); return d > 30 && d <= 60; }).length },
+    { label: '61-90', color: '#f97316', n: list.filter((r) => { const d = ageingDaysOf(r); return d > 60 && d < 90; }).length },
+    { label: '90+', color: '#be123c', n: list.filter((r) => ageingDaysOf(r) >= 90).length },
+  ];
+  const carlineRank = [...byCarline.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const pisoRank = [...pisoByCarline.entries()]
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+
+  destroyChart(ageingCarlineChart);
+  destroyChart(ageingDaysChart);
+  destroyChart(ageingPisoChart);
+  ageingCarlineChart = null;
+  ageingDaysChart = null;
+  ageingPisoChart = null;
+
+  try {
+    const carlineCanvas = document.getElementById('ageingCarlineChart');
+    if (carlineCanvas && typeof Chart !== 'undefined') {
+      ageingCarlineChart = new Chart(carlineCanvas, {
+        type: 'bar',
+        data: {
+          labels: carlineRank.map(([label]) => label),
+          datasets: [{
+            label: 'Unidades',
+            data: carlineRank.map(([, n]) => n),
+            backgroundColor: chartColors?.secondary || 'rgba(45, 91, 255, 0.7)',
+            borderRadius: 8,
+          }],
+        },
+        options: chartOptions({
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true, ticks: { precision: 0 } },
+            y: { grid: { display: false } },
+          },
+        }),
+      });
+    }
+
+    const daysCanvas = document.getElementById('ageingDaysChart');
+    if (daysCanvas && typeof Chart !== 'undefined') {
+      ageingDaysChart = new Chart(daysCanvas, {
+        type: 'doughnut',
+        data: {
+          labels: buckets.map((b) => b.label),
+          datasets: [{
+            data: buckets.map((b) => b.n),
+            backgroundColor: buckets.map((b) => b.color),
+            borderWidth: 0,
+          }],
+        },
+        options: chartOptions({
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+          cutout: '62%',
+        }),
+      });
+    }
+
+    const pisoCanvas = document.getElementById('ageingPisoChart');
+    if (pisoCanvas && typeof Chart !== 'undefined') {
+      ageingPisoChart = new Chart(pisoCanvas, {
+        type: 'bar',
+        data: {
+          labels: pisoRank.map(([label]) => label),
+          datasets: [{
+            label: 'Plan piso',
+            data: pisoRank.map(([, n]) => Math.round(n)),
+            backgroundColor: 'rgba(190, 18, 60, 0.72)',
+            borderRadius: 8,
+          }],
+        },
+        options: chartOptions({
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { beginAtZero: true },
+            y: { grid: { display: false } },
+          },
+        }),
+      });
+    }
+  } catch (err) {
+    console.warn('[Analisis inventario] charts:', err);
+  }
+}
+
+function renderAgeingCarlineFilterTabs(filters = ageingCarlineFilters) {
+  const nav = document.getElementById('ageingCarlineFilterTabs');
+  if (!nav) return;
+  const list = Array.isArray(filters) ? filters : [];
+  if (ageingCarlineFilter !== 'all' && !list.some((m) => m.label === ageingCarlineFilter)) {
+    ageingCarlineFilter = 'all';
+  }
+  const total = list.reduce((s, m) => s + Number(m.count || 0), 0);
+  nav.innerHTML = [
+    `<button type="button" class="ageing-carline-chip${ageingCarlineFilter === 'all' ? ' is-active' : ''}" data-ageing-filter="all" aria-pressed="${ageingCarlineFilter === 'all'}">
+      <span class="ageing-carline-chip__name">Todos</span>
+      <span class="ageing-carline-chip__count">${total}</span>
+    </button>`,
+    ...list.map((m) => {
+      const on = ageingCarlineFilter === m.label;
+      return `<button type="button" class="ageing-carline-chip${on ? ' is-active' : ''}" data-ageing-filter="${escapeHtml(m.label)}" aria-pressed="${on}">
+        <span class="ageing-carline-chip__name">${escapeHtml(m.label)}</span>
+        <span class="ageing-carline-chip__count">${Number(m.count || 0)}</span>
+      </button>`;
+    }),
+  ].join('');
+}
+
+function currentVendidosRange() {
+  const fi = String(document.getElementById('fechaInicio')?.value || '').trim();
+  const ff = String(document.getElementById('fechaFin')?.value || '').trim();
+  if (fi && ff) return { fechaInicio: fi, fechaFin: ff };
+
+  const input = document.getElementById('vendidosPeriod');
+  const raw = String(input?.value || '').trim();
+  const now = new Date();
+  const year = raw ? Number(raw.slice(0, 4)) : now.getFullYear();
+  const month = raw ? Number(raw.slice(5, 7)) : now.getMonth() + 1;
+  const last = new Date(year, month, 0).getDate();
+  const mm = String(month).padStart(2, '0');
+  return {
+    fechaInicio: `${year}-${mm}-01`,
+    fechaFin: `${year}-${mm}-${String(last).padStart(2, '0')}`,
+  };
+}
+
+function initVendidosPeriod() {
+  const input = document.getElementById('vendidosPeriod');
+  if (!input || input.value) return;
+  const fi = String(document.getElementById('fechaInicio')?.value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fi)) {
+    input.value = fi.slice(0, 7);
+    return;
+  }
+  const now = new Date();
+  input.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatVendidosDate(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = String(iso).split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+function roundMoneyUi(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.round(x * 100) / 100;
+}
+
+function costoNetoConBonif(r) {
+  const costo = Number(r.costo || 0);
+  const bonif = Number(r.bonificacion || 0);
+  if (!costo && !bonif) return null;
+  return roundMoneyUi(costo - bonif);
+}
+
+function notaCreditoSinIva(r) {
+  const nota = Number(r.notaCargo || 0);
+  return nota > 0 ? roundMoneyUi(nota / 1.16) : 0;
+}
+
+function pctRetencion(bruta, neta) {
+  if (bruta == null || !Number(bruta)) return null;
+  if (neta == null) return null;
+  return Math.round((Number(neta) / Number(bruta)) * 1000) / 10;
+}
+
+function renderRetencionCell(pct) {
+  if (pct == null) return '<span class="ageing-slow-hint">—</span>';
+  const tone = pct < 0 ? 'is-neg' : (pct < 50 ? 'is-warn' : 'is-ok');
+  return `<strong class="ageing-retencion ${tone}">${pct.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%</strong>`;
+}
+
+function renderComisionEvCell(r, fmt) {
+  const importe = Number(r.comisionEv || 0);
+  const pct = Number(r.comisionEvPct || 0);
+  const uds = Number(r.comisionEvUnidadesPrev || 0);
+  const mes = String(r.comisionEvMesPrev || 'mes ant.').trim();
+  const udsLabel = uds >= 10 ? '10+' : String(uds);
+  const arrend = r.comisionEvArrendamiento
+    ? ` · +${Number(r.comisionEvPctLeasing || 1)}% arrend.`
+    : '';
+  const hint = `${pct}% · ${udsLabel} uds menudeo ${mes}${arrend}`;
+  if (!importe) {
+    return `<span class="ageing-slow-hint">${escapeHtml(hint)}</span>`;
+  }
+  return `<strong>${fmt.money(importe)}</strong><span class="ageing-slow-hint">${escapeHtml(hint)}</span>`;
+}
+
+function extrasBreakdownFromRow(r, fmt) {
+  const previa = Number(r.costoPrevia || 0);
+  const publicidad = Number(r.costoPublicidad || r.costoMercadotecnia || 0);
+  const entrega = Number(r.costoEntrega || 0);
+  const gasolina = Number(r.costoGasolina || 0);
+  const litros = Number(r.gasolinaLitros || 0);
+  const gastosLibro = Number(r.gastos || 0);
+  const extras = Number(r.gastosAdicionales || (previa + publicidad + entrega + gasolina + gastosLibro));
+  const items = [
+    { label: 'Gastos', value: gastosLibro, hint: 'Línea GASTOS de remisión / libro' },
+    { label: 'Previa', value: previa, hint: 'Costo fijo' },
+    { label: 'Publicidad', value: publicidad, hint: 'Costo fijo' },
+    { label: 'Entrega', value: entrega, hint: entrega === 240 ? 'Aveo, Onix, Tornado, Groove' : 'Resto de modelos' },
+    { label: 'Gasolina', value: gasolina, hint: litros ? `${litros} L × $23.39` : 'Sin litros en tabla' },
+  ];
+  return { previa, publicidad, entrega, gasolina, litros, gastosLibro, extras, items };
+}
+
+function renderExtrasCell(r, fmt) {
+  const det = extrasBreakdownFromRow(r, fmt);
+  if (!det.extras) return '<span class="ageing-slow-hint">Sin extra</span>';
+  const payload = encodeURIComponent(JSON.stringify({
+    vin: r.vin || '',
+    carline: r.carline || '',
+    version: r.version || '',
+    extras: det.extras,
+    items: det.items,
+  }));
+  return `<button type="button" class="ageing-extras-trigger" data-extras-payload="${payload}" aria-haspopup="dialog" aria-expanded="false">
+    <strong>${fmt.money(det.extras)}</strong>
+    <span class="ageing-slow-hint">Ver detalle</span>
+  </button>`;
+}
+
+function renderIngresoFiCell(r, fmt) {
+  const monto = r.ingresoFinanciamiento == null ? null : Number(r.ingresoFinanciamiento);
+  if (monto == null || !(monto > 0)) {
+    return '<span class="ageing-slow-hint">Sin F&amp;I</span>';
+  }
+  const detalle = Array.isArray(r.ingresoFinanciamientoDetalle) ? r.ingresoFinanciamientoDetalle : [];
+  const items = detalle.map((d) => ({
+    label: d.concepto || 'PAGO GMF',
+    value: Number(d.monto || 0) || 0,
+    hint: Number(d.count || 0) > 1 ? `${d.count} pagos` : '',
+  }));
+  const count = Number(r.ingresoFinanciamientoCount || 0) || items.length;
+  const fuente = 'PAGOS GMF';
+  const payload = encodeURIComponent(JSON.stringify({
+    kicker: 'Ingresos F&I',
+    totalLabel: 'Total financiamiento',
+    vin: r.vin || '',
+    carline: r.carline || '',
+    version: r.version || '',
+    extras: monto,
+    items,
+    hint: fuente,
+  }));
+  return `<button type="button" class="ageing-extras-trigger" data-extras-payload="${payload}" aria-haspopup="dialog" aria-expanded="false">
+    <strong>${fmt.money(monto)}</strong>
+    <span class="ageing-slow-hint">${count ? `${count} pago${count === 1 ? '' : 's'}` : 'Ver detalle'}</span>
+  </button>`;
+}
+
+let extrasPopoverEl = null;
+let extrasPopoverAnchor = null;
+
+function ensureExtrasPopover() {
+  if (extrasPopoverEl) return extrasPopoverEl;
+  const pop = document.createElement('div');
+  pop.id = 'extrasDetailPopover';
+  pop.className = 'extras-popover hidden';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Detalle de gastos extra');
+  document.body.appendChild(pop);
+  extrasPopoverEl = pop;
+  document.addEventListener('click', (e) => {
+    if (!extrasPopoverEl || extrasPopoverEl.classList.contains('hidden')) return;
+    if (extrasPopoverEl.contains(e.target) || e.target.closest?.('.ageing-extras-trigger')) return;
+    closeExtrasPopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeExtrasPopover();
+  });
+  window.addEventListener('resize', () => {
+    if (extrasPopoverAnchor) placeExtrasPopover(extrasPopoverAnchor);
+  });
+  document.addEventListener('scroll', () => {
+    if (extrasPopoverAnchor) placeExtrasPopover(extrasPopoverAnchor);
+  }, true);
+  return pop;
+}
+
+function placeExtrasPopover(anchor) {
+  const pop = extrasPopoverEl;
+  if (!pop || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth || 280;
+  const ph = pop.offsetHeight || 220;
+  let left = rect.right + 10;
+  let top = rect.top;
+  if (left + pw > window.innerWidth - 12) left = rect.left - pw - 10;
+  if (left < 12) left = Math.max(12, (window.innerWidth - pw) / 2);
+  if (top + ph > window.innerHeight - 12) top = window.innerHeight - ph - 12;
+  if (top < 12) top = 12;
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+}
+
+function closeExtrasPopover() {
+  if (!extrasPopoverEl) return;
+  extrasPopoverEl.classList.add('hidden');
+  extrasPopoverEl.innerHTML = '';
+  extrasPopoverAnchor?.setAttribute('aria-expanded', 'false');
+  extrasPopoverAnchor = null;
+}
+
+let fichaPopoverEl = null;
+let fichaPopoverAnchor = null;
+
+function closeFichaPopover() {
+  if (!fichaPopoverEl) return;
+  fichaPopoverEl.classList.add('hidden');
+  fichaPopoverEl.innerHTML = '';
+  fichaPopoverAnchor?.setAttribute('aria-expanded', 'false');
+  fichaPopoverAnchor = null;
+}
+
+function closeVendidosPopovers() {
+  closeExtrasPopover();
+  closeFichaPopover();
+}
+
+function ensureFichaPopover() {
+  if (fichaPopoverEl) return fichaPopoverEl;
+  const pop = document.createElement('div');
+  pop.id = 'vendidosFichaPopover';
+  pop.className = 'extras-popover extras-popover--ficha hidden';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Detalle de la unidad vendida');
+  document.body.appendChild(pop);
+  fichaPopoverEl = pop;
+  document.addEventListener('click', (e) => {
+    if (!fichaPopoverEl || fichaPopoverEl.classList.contains('hidden')) return;
+    if (fichaPopoverEl.contains(e.target) || e.target.closest?.('.ageing-ficha-trigger')) return;
+    closeFichaPopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeFichaPopover();
+  });
+  window.addEventListener('resize', () => {
+    if (fichaPopoverAnchor) placeFichaPopover(fichaPopoverAnchor);
+  });
+  document.addEventListener('scroll', () => {
+    if (fichaPopoverAnchor) placeFichaPopover(fichaPopoverAnchor);
+  }, true);
+  return pop;
+}
+
+function placeFichaPopover(anchor) {
+  const pop = fichaPopoverEl;
+  if (!pop || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth || 340;
+  const ph = pop.offsetHeight || 320;
+  let left = rect.right + 10;
+  let top = rect.top;
+  if (left + pw > window.innerWidth - 12) left = rect.left - pw - 10;
+  if (left < 12) left = Math.max(12, (window.innerWidth - pw) / 2);
+  if (top + ph > window.innerHeight - 12) top = window.innerHeight - ph - 12;
+  if (top < 12) top = 12;
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+}
+
+function fichaRow(label, value, hint) {
+  const text = value == null || value === '' ? '—' : String(value);
+  return `<li>
+    <span>
+      <strong>${escapeHtml(label)}</strong>
+      ${hint ? `<small>${escapeHtml(hint)}</small>` : ''}
+    </span>
+    <em>${escapeHtml(text)}</em>
+  </li>`;
+}
+
+function renderVendidosFichaCell(r) {
+  const vin = r.vin || '—';
+  const payload = encodeURIComponent(JSON.stringify({
+    vin,
+    carline: r.carline || '',
+    version: r.version || '',
+    factura: r.factura || '',
+    fechaVenta: r.fechaVenta || '',
+    fechaRemision: r.fechaRemision || '',
+    daysInStock: r.daysInStock,
+    vendedor: r.vendedor || '',
+    cliente: r.cliente || '',
+    tipoVenta: r.tipoVenta || '',
+    formaPago: r.formaPago || '',
+    isDemo: Boolean(r.isDemo),
+    demoHint: r.demoHint || '',
+    isFlotilla: Boolean(r.isFlotilla),
+    arrendamiento: Boolean(r.comisionEvArrendamiento),
+    comisionPct: r.comisionEvPct,
+    unidadesPrev: r.comisionEvUnidadesPrev,
+    mesPrev: r.comisionEvMesPrev || '',
+    notaFolio: r.notaCargoFolio || '',
+  }));
+  return `<button type="button" class="ageing-ficha-trigger" data-ficha-payload="${payload}" aria-haspopup="dialog" aria-expanded="false" title="${escapeHtml(vin)}">
+    <strong class="ageing-slow-vin-text">${escapeHtml(vin)}</strong>
+    <span class="ageing-slow-hint">Ver detalle</span>
+  </button>`;
+}
+
+function openFichaPopover(anchor) {
+  let data = null;
+  try {
+    data = JSON.parse(decodeURIComponent(anchor.getAttribute('data-ficha-payload') || ''));
+  } catch {
+    data = null;
+  }
+  if (!data) return;
+  closeExtrasPopover();
+  const pop = ensureFichaPopover();
+  const modelo = [data.carline, data.version].filter(Boolean).join(' · ') || 'Unidad';
+  const demoLabel = data.isDemo ? 'Sí, fue demo' : 'No';
+  const fmtDate = (iso) => {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso || '—';
+    const [y, m, d] = iso.slice(0, 10).split('-');
+    return `${d}/${m}/${y}`;
+  };
+  const uds = Number(data.unidadesPrev || 0);
+  const udsLabel = uds >= 10 ? '10+' : String(uds);
+  pop.innerHTML = `
+    <div class="extras-popover__head">
+      <div>
+        <p class="extras-popover__kicker">Detalle de venta</p>
+        <h4 class="extras-popover__title">${escapeHtml(modelo)}</h4>
+        <p class="extras-popover__vin">${escapeHtml(data.vin || '—')}</p>
+      </div>
+      <button type="button" class="extras-popover__close" aria-label="Cerrar">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </div>
+    <ul class="extras-popover__list">
+      ${fichaRow('Vendedor', data.vendedor || '—')}
+      ${fichaRow('Demo', demoLabel, data.isDemo ? (data.demoHint || 'Detectada en observación / ubicación') : 'Sin marca de demo')}
+      ${fichaRow('Cliente', data.cliente || '—')}
+      ${fichaRow('Factura', data.factura || '—')}
+      ${fichaRow('Fecha venta', fmtDate(data.fechaVenta))}
+      ${fichaRow('Tipo de venta', data.tipoVenta || '—', data.formaPago ? `Clave ${data.formaPago}` : '')}
+      ${fichaRow('Canal', data.isFlotilla ? 'Flotilla' : 'Menudeo')}
+      ${fichaRow('Arrendamiento', data.arrendamiento ? 'Sí' : 'No')}
+      ${fichaRow('Días en inventario', data.daysInStock == null ? '—' : `${data.daysInStock} días`, data.fechaRemision ? `Remisión ${fmtDate(data.fechaRemision)}` : '')}
+      ${fichaRow('Comisión E.V.', data.comisionPct == null ? '—' : `${data.comisionPct}%`, `${udsLabel} uds menudeo ${data.mesPrev || 'mes ant.'}`)}
+      ${fichaRow('Nota de crédito', data.notaFolio || 'Sin nota')}
+    </ul>
+    <div class="extras-popover__total ${data.isDemo ? 'is-demo' : ''}">
+      <span>${data.isDemo ? 'Unidad demo' : 'Unidad de piso'}</span>
+      <strong>${escapeHtml(data.vendedor || 'Sin asesor')}</strong>
+    </div>
+  `;
+  pop.querySelector('.extras-popover__close')?.addEventListener('click', closeFichaPopover);
+  fichaPopoverAnchor?.setAttribute('aria-expanded', 'false');
+  fichaPopoverAnchor = anchor;
+  anchor.setAttribute('aria-expanded', 'true');
+  pop.classList.remove('hidden');
+  placeFichaPopover(anchor);
+}
+
+function bindFichaPopover(root) {
+  if (!root || root.dataset.fichaBound === '1') return;
+  root.dataset.fichaBound = '1';
+  root.addEventListener('click', (e) => {
+    const trigger = e.target.closest('.ageing-ficha-trigger');
+    if (!trigger) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (fichaPopoverAnchor === trigger) {
+      closeFichaPopover();
+      return;
+    }
+    openFichaPopover(trigger);
+  });
+}
+
+function openExtrasPopover(anchor) {
+  const { fmt } = Dashboard;
+  let data = null;
+  try {
+    data = JSON.parse(decodeURIComponent(anchor.getAttribute('data-extras-payload') || ''));
+  } catch {
+    data = null;
+  }
+  if (!data) return;
+  const pop = ensureExtrasPopover();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const vin = data.vin || '—';
+  const modelo = [data.carline, data.version].filter(Boolean).join(' · ') || 'Unidad';
+  const kicker = data.kicker || 'Gastos extra';
+  const totalLabel = data.totalLabel || 'Total extras';
+  pop.innerHTML = `
+    <div class="extras-popover__head">
+      <div>
+        <p class="extras-popover__kicker">${escapeHtml(kicker)}</p>
+        <h4 class="extras-popover__title">${escapeHtml(modelo)}</h4>
+        <p class="extras-popover__vin">${escapeHtml(vin)}</p>
+      </div>
+      <button type="button" class="extras-popover__close" aria-label="Cerrar">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </div>
+    <ul class="extras-popover__list">
+      ${items.map((item) => `
+        <li class="${Number(item.value || 0) ? '' : 'is-zero'}">
+          <span>
+            <strong>${escapeHtml(item.label)}</strong>
+            ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
+          </span>
+          <em>${fmt.money(Number(item.value || 0))}</em>
+        </li>
+      `).join('')}
+    </ul>
+    <div class="extras-popover__total">
+      <span>${escapeHtml(totalLabel)}${data.hint ? ` · ${escapeHtml(data.hint)}` : ''}</span>
+      <strong>${fmt.money(Number(data.extras || 0))}</strong>
+    </div>
+  `;
+  pop.querySelector('.extras-popover__close')?.addEventListener('click', closeExtrasPopover);
+  extrasPopoverAnchor?.setAttribute('aria-expanded', 'false');
+  extrasPopoverAnchor = anchor;
+  anchor.setAttribute('aria-expanded', 'true');
+  pop.classList.remove('hidden');
+  placeExtrasPopover(anchor);
+}
+
+function bindExtrasPopover(root) {
+  if (!root || root.dataset.extrasBound === '1') return;
+  root.dataset.extrasBound = '1';
+  root.addEventListener('click', (e) => {
+    const trigger = e.target.closest('.ageing-extras-trigger');
+    if (!trigger) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (extrasPopoverAnchor === trigger) {
+      closeExtrasPopover();
+      return;
+    }
+    closeFichaPopover();
+    openExtrasPopover(trigger);
+  });
+}
+
+function filteredVendidosRows() {
+  let rows = vendidosRows;
+  if (vendidosCarlineFilter && vendidosCarlineFilter !== 'all') {
+    rows = rows.filter((r) => String(r.carline || '') === vendidosCarlineFilter);
+  }
+  const q = String(vendidosSearch || '').trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) => [
+    r.vin, r.carline, r.version, r.catalogo, r.paquete, r.factura, r.notaCargoFolio,
+    r.vendedor, r.cliente, r.tipoVenta, r.formaPago,
+  ].some((v) => String(v || '').toLowerCase().includes(q)));
+}
+
+function renderVendidosCarlineFilterTabs(filters = vendidosCarlineFilters) {
+  const nav = document.getElementById('vendidosCarlineFilterTabs');
+  if (!nav) return;
+  const list = Array.isArray(filters) ? filters : [];
+  if (vendidosCarlineFilter !== 'all' && !list.some((m) => m.label === vendidosCarlineFilter)) {
+    vendidosCarlineFilter = 'all';
+  }
+  const total = list.reduce((s, m) => s + Number(m.count || 0), 0);
+  nav.innerHTML = [
+    `<button type="button" class="ageing-carline-chip${vendidosCarlineFilter === 'all' ? ' is-active' : ''}" data-vendidos-filter="all" aria-pressed="${vendidosCarlineFilter === 'all'}">
+      <span class="ageing-carline-chip__name">Todos</span>
+      <span class="ageing-carline-chip__count">${total}</span>
+    </button>`,
+    ...list.map((m) => {
+      const on = vendidosCarlineFilter === m.label;
+      return `<button type="button" class="ageing-carline-chip${on ? ' is-active' : ''}" data-vendidos-filter="${escapeHtml(m.label)}" aria-pressed="${on}">
+        <span class="ageing-carline-chip__name">${escapeHtml(m.label)}</span>
+        <span class="ageing-carline-chip__count">${Number(m.count || 0)}</span>
+      </button>`;
+    }),
+  ].join('');
+}
+
+function renderVendidosTable(rows = filteredVendidosRows()) {
+  closeVendidosPopovers();
+  const body = document.getElementById('vendidosSlowBody');
+  if (!body) return;
+  const { fmt } = Dashboard;
+  const list = Array.isArray(rows) ? rows : [];
+  const meta = document.getElementById('vendidosSearchMeta');
+  if (meta) {
+    const filtered = vendidosSearch.trim() || vendidosCarlineFilter !== 'all';
+    meta.classList.toggle('hidden', !filtered);
+    if (filtered) meta.textContent = `${list.length} de ${vendidosRows.length}`;
+  }
+  if (!list.length) {
+    const empty = vendidosLoading
+      ? 'Cargando vendidos…'
+      : (vendidosRows.length ? 'Sin coincidencias para el filtro.' : 'Sin ventas en el mes seleccionado.');
+    body.innerHTML = `<tr><td colspan="13" class="empty-row">${empty}</td></tr>`;
+    return;
+  }
+  body.innerHTML = list.map((r) => {
+    const carline = r.carline || '—';
+    const version = r.version || '—';
+    const vin = r.vin || '—';
+    const utilidad = r.utilidadPromedio == null ? null : Number(r.utilidadPromedio);
+    const utilidadNeta = r.utilidadNeta == null ? null : Number(r.utilidadNeta);
+    const planPiso = Number(r.planPisoAcumulado || 0);
+    const extrasComenUtilidad = utilidadNeta != null && utilidadNeta < 0;
+    const rowClass = extrasComenUtilidad ? 'ageing-slow-row--piso-over' : '';
+    const costoNeto = costoNetoConBonif(r);
+    const bonif = Number(r.bonificacion || 0);
+    const notaSinIva = notaCreditoSinIva(r);
+    const notaFolio = String(r.notaCargoFolio || '').trim();
+    const pisoCell = planPiso > 0
+      ? `<strong>${fmt.money(planPiso)}</strong><span class="ageing-slow-hint">${Number(r.daysChargeable || 0)} días cargo</span>`
+      : '<span class="ageing-slow-hint">Sin cargo</span>';
+    const notaCell = notaSinIva > 0
+      ? `<strong>${fmt.money(notaSinIva)}</strong><span class="ageing-slow-hint">${notaFolio ? escapeHtml(notaFolio) : 'A favor del cliente'}</span>`
+      : '<span class="ageing-slow-hint">Sin nota</span>';
+    const costoCell = costoNeto == null
+      ? '—'
+      : `<strong>${fmt.money(costoNeto)}</strong>${bonif > 0 ? `<span class="ageing-slow-hint">− Bonif. ${fmt.money(bonif)}</span>` : ''}`;
+    return `<tr class="${rowClass}">
+      <td class="ageing-slow-carline"><strong>${escapeHtml(carline)}</strong></td>
+      <td class="ageing-slow-version" title="${escapeHtml(version)}"><span>${escapeHtml(version)}</span></td>
+      <td class="ageing-slow-vin">${renderVendidosFichaCell(r)}</td>
+      <td class="cell-num">${r.precio ? fmt.money(r.precio) : '—'}${Number(r.isan || 0) > 0 ? `<span class="ageing-slow-hint">− ISAN ${fmt.money(r.isan)}</span>` : ''}</td>
+      <td class="cell-num">${costoCell}</td>
+      <td class="cell-num ageing-slow-nota">${notaCell}</td>
+      <td class="cell-num ageing-slow-utilidad"><strong>${utilidad == null ? '—' : fmt.money(utilidad)}</strong></td>
+      <td class="cell-num ageing-slow-comision">${renderComisionEvCell(r, fmt)}</td>
+      <td class="cell-num ageing-slow-extras">${renderExtrasCell(r, fmt)}</td>
+      <td class="cell-num ageing-slow-piso">${pisoCell}</td>
+      <td class="cell-num ageing-slow-fi">${renderIngresoFiCell(r, fmt)}</td>
+      <td class="cell-num ageing-slow-neta"><strong>${utilidadNeta == null ? '—' : fmt.money(utilidadNeta)}</strong></td>
+      <td class="cell-num">${renderRetencionCell(pctRetencion(utilidad, utilidadNeta))}</td>
+    </tr>`;
+  }).join('');
+  bindExtrasPopover(body);
+  bindFichaPopover(body);
+}
+
+function buildVendidosInsightPayload() {
+  const rows = Array.isArray(vendidosRows) ? vendidosRows : [];
+  const range = currentVendidosRange();
+  const netaRows = rows.filter((r) => r.utilidadNeta != null);
+  const brutaRows = rows.filter((r) => r.utilidadPromedio != null);
+  const utilidadNetaTotal = netaRows.reduce((s, r) => s + Number(r.utilidadNeta || 0), 0);
+  const utilidadBrutaTotal = brutaRows.reduce((s, r) => s + Number(r.utilidadPromedio || 0), 0);
+  const ingresoFiTotal = rows.reduce((s, r) => s + Number(r.ingresoFinanciamiento || 0), 0);
+  const conNetaNegativa = rows.filter((r) => r.utilidadNeta != null && Number(r.utilidadNeta) < 0);
+  const sinIngresoFi = rows.filter((r) => !(Number(r.ingresoFinanciamiento) > 0)).length;
+  const menudeo = rows.filter((r) => !r.isFlotilla).length;
+  const flotilla = rows.filter((r) => r.isFlotilla).length;
+  const peoresNeta = conNetaNegativa
+    .slice()
+    .sort((a, b) => Number(a.utilidadNeta || 0) - Number(b.utilidadNeta || 0))
+    .slice(0, 5)
+    .map((r) => ({
+      vin: r.vin,
+      carline: r.carline,
+      utilidadNeta: Number(r.utilidadNeta || 0),
+    }));
+  const monthLabel = (() => {
+    const input = document.getElementById('vendidosPeriod');
+    const val = input?.value || '';
+    if (/^\d{4}-\d{2}$/.test(val)) {
+      const [y, m] = val.split('-').map(Number);
+      return `${PLAN_PISO_MONTH_NAMES[m - 1] || m} ${y}`;
+    }
+    return `${range.fechaInicio} — ${range.fechaFin}`;
+  })();
+
+  return {
+    available: true,
+    unidades: rows.length,
+    utilidadNetaTotal: Math.round(utilidadNetaTotal * 100) / 100,
+    utilidadNetaPromedio: netaRows.length
+      ? Math.round((utilidadNetaTotal / netaRows.length) * 100) / 100
+      : null,
+    utilidadBrutaTotal: Math.round(utilidadBrutaTotal * 100) / 100,
+    ingresoFiTotal: Math.round(ingresoFiTotal * 100) / 100,
+    sinIngresoFi,
+    conNetaNegativa: conNetaNegativa.length,
+    menudeo,
+    flotilla,
+    peoresNeta,
+    fechaInicio: range.fechaInicio,
+    fechaFin: range.fechaFin,
+    periodoLabel: monthLabel,
+  };
+}
+
+function renderVendidosKpiCard() {
+  renderAutosVendidosInsightsPanel();
+}
+
+function buildAutosVendidosInsightCards(payload, fmt) {
+  const cards = [];
+  const unidades = Number(payload.unidades || 0);
+
+  if (!unidades) {
+    cards.push({
+      tone: 'warning',
+      icon: 'sell',
+      title: 'Sin unidades vendidas en el periodo',
+      meta: `No hay facturas DMS en ${payload.periodoLabel || 'el periodo seleccionado'}.`,
+      action: 'Revisa el periodo del análisis o cruza con Ventas / SOFIA.',
+    });
+    return cards;
+  }
+
+  const pctSinFi = Math.round((payload.sinIngresoFi / unidades) * 1000) / 10;
+  const pctNetaNeg = Math.round((payload.conNetaNegativa / unidades) * 1000) / 10;
+  const conFi = unidades - payload.sinIngresoFi;
+
+  cards.push({
+    tone: 'ok',
+    icon: 'analytics',
+    title: `${unidades} unidad(es) · neta ${fmt.money(payload.utilidadNetaTotal)}`,
+    meta: `Bruta ${fmt.money(payload.utilidadBrutaTotal)} · menudeo ${payload.menudeo} · flotilla ${payload.flotilla}`
+      + (payload.utilidadNetaPromedio != null ? ` · neta prom. ${fmt.money(payload.utilidadNetaPromedio)}` : ''),
+    action: 'Abre Cierre de unidades vendidas para bajar a VIN y carline.',
+  });
+
+  if (payload.conNetaNegativa > 0) {
+    const peores = (payload.peoresNeta || []).slice(0, 3)
+      .map((p) => `${p.vin || '—'} (${fmt.money(p.utilidadNeta)})`)
+      .join(' · ');
+    cards.push({
+      tone: payload.conNetaNegativa >= 5 || pctNetaNeg >= 40 ? 'critical' : 'warning',
+      icon: 'trending_down',
+      title: `${payload.conNetaNegativa} venta(s) con utilidad neta negativa (${pctNetaNeg}%)`,
+      meta: peores
+        ? `Peores: ${peores}`
+        : 'Comisión E.V., extras o plan piso están comiendo la bruta.',
+      action: 'Prioriza VINs con más días de piso y revisa gastos extra.',
+    });
+  } else {
+    cards.push({
+      tone: 'ok',
+      icon: 'verified',
+      title: 'Todas las ventas cierran con utilidad neta ≥ 0',
+      meta: 'Ninguna unidad del periodo queda en rojo tras comisión, extras y plan piso.',
+      action: 'Mantén el control de extras y rotación antes del umbral de piso.',
+    });
+  }
+
+  if (payload.sinIngresoFi > 0) {
+    cards.push({
+      tone: pctSinFi >= 50 ? 'warning' : 'ok',
+      icon: 'account_balance',
+      title: `F&I: ${conFi}/${unidades} con pagos GMF (${Math.round(1000 - pctSinFi * 10) / 10}%)`,
+      meta: `${payload.sinIngresoFi} sin ingreso F&I · total F&I ${fmt.money(payload.ingresoFiTotal)}.`,
+      action: pctSinFi >= 50
+        ? 'Cruza VIN/contrato con PAGOS GMF; puede faltar carga o match.'
+        : 'Valida que los montos F&I cuadren con comisiones del periodo.',
+    });
+  } else {
+    cards.push({
+      tone: 'ok',
+      icon: 'payments',
+      title: `F&I cubierto · ${fmt.money(payload.ingresoFiTotal)}`,
+      meta: 'Todas las unidades del periodo tienen al menos un pago GMF asociado.',
+      action: 'Revisa el desglose por concepto en la columna Ingresos F&I.',
+    });
+  }
+
+  const byCarline = new Map();
+  for (const r of vendidosRows || []) {
+    const key = r.carline || 'Sin familia';
+    const cur = byCarline.get(key) || { n: 0, neta: 0, fi: 0 };
+    cur.n += 1;
+    cur.neta += Number(r.utilidadNeta || 0);
+    cur.fi += Number(r.ingresoFinanciamiento || 0);
+    byCarline.set(key, cur);
+  }
+  const top = [...byCarline.entries()].sort((a, b) => b[1].n - a[1].n)[0];
+  const worstNeta = [...byCarline.entries()]
+    .filter(([, v]) => v.n > 0)
+    .sort((a, b) => (a[1].neta / a[1].n) - (b[1].neta / b[1].n))[0];
+  if (top) {
+    cards.push({
+      tone: 'ok',
+      icon: 'directions_car',
+      title: `Más volumen: ${top[0]} (${top[1].n})`,
+      meta: worstNeta
+        ? `Menor neta/ud: ${worstNeta[0]} · ${fmt.money(worstNeta[1].neta / worstNeta[1].n)} · F&I carline top ${fmt.money(top[1].fi)}`
+        : `F&I del carline ${fmt.money(top[1].fi)}`,
+      action: 'Usa el filtro de carline en la tabla de vendidos para profundizar.',
+    });
+  }
+
+  return cards;
+}
+
+function renderAutosVendidosInsightsPanel(payload = buildVendidosInsightPayload()) {
+  const { fmt } = Dashboard;
+  const box = document.getElementById('autosVendidosInsights');
+  const lead = document.getElementById('autosVendidosInsightsLead');
+  const compactBox = document.getElementById('autosVendidosInsightsCompact');
+  const compactLead = document.getElementById('autosVendidosInsightsCompactLead');
+  if (!box) return;
+
+  if (lead) {
+    lead.textContent = vendidosLoading
+      ? 'Calculando lectura del mes…'
+      : `Lectura de ${payload.periodoLabel || 'periodo'} · utilidad, F&I y riesgos`;
+  }
+  if (compactLead) {
+    compactLead.textContent = vendidosLoading
+      ? 'Calculando resumen…'
+      : `${payload.periodoLabel || 'Periodo'} · utilidad, F&I y riesgos`;
+  }
+
+  if (vendidosLoading) {
+    const loadingHtml = `<div class="int-acq-alert int-acq-alert--ok">
+      <span class="material-symbols-outlined int-acq-alert__icon">hourglass_empty</span>
+      <div>
+        <p class="int-acq-alert__title">Cargando insights…</p>
+        <p class="int-acq-alert__meta">Se calculan con el cierre de unidades vendidas del periodo.</p>
+      </div>
+    </div>`;
+    box.innerHTML = loadingHtml;
+    if (compactBox) compactBox.innerHTML = loadingHtml;
+    return;
+  }
+
+  const cards = buildAutosVendidosInsightCards(payload, fmt);
+
+  box.innerHTML = cards.map((c) => `
+    <article class="int-acq-alert int-acq-alert--${c.tone}">
+      <span class="material-symbols-outlined int-acq-alert__icon">${c.icon}</span>
+      <div>
+        <p class="int-acq-alert__title">${escapeHtml(c.title)}</p>
+        <p class="int-acq-alert__meta">${escapeHtml(c.meta)}</p>
+        <p class="int-acq-alert__action">${escapeHtml(c.action)}</p>
+      </div>
+    </article>
+  `).join('');
+  if (compactBox) {
+    compactBox.innerHTML = cards.slice(0, 2).map((c) => `
+      <article class="int-acq-alert int-acq-alert--${c.tone}">
+        <span class="material-symbols-outlined int-acq-alert__icon">${c.icon}</span>
+        <div>
+          <p class="int-acq-alert__title">${escapeHtml(c.title)}</p>
+          <p class="int-acq-alert__meta">${escapeHtml(c.meta)}</p>
+        </div>
+      </article>
+    `).join('');
+  }
+}
+
+function applyInventoryInsights() {
+  if (!window.KpiInsights?.apply) return;
+  const s = lastInventorySummary || {};
+  const pv = postventaData || {};
+  const tr = pv.traspasos?.summary || {};
+  window.KpiInsights.apply('inventory', {
+    planPisoPeriod: lastInventoryPlanPisoPeriod,
+    summary: {
+      totalUnits: s.totalUnits,
+      available: s.available,
+      availableLibres: s.availableLibres,
+      availableApartadas: s.availableApartadas,
+      sinPrevias: s.sinPrevias,
+      conPrevias: s.conPrevias,
+      avgDaysAvailable: s.avgDaysAvailable,
+      ageingAlertsCount: s.ageingAlertsCount ?? s.urgentAlerts,
+      ageingAlertsPlanPisoTotal: s.ageingAlertsPlanPisoTotal,
+      planPisoTotal: s.planPisoTotal,
+      planPisoUnits: s.planPisoUnits,
+      planPisoPeriodLabel: s.planPisoPeriodLabel,
+      entregasSinPreviasSofia: (window.__invSofiaSinPrevias || []).length,
+      entregasSofiaMes: Number(window.__invSofiaTotalMes || 0),
+    },
+    vendidos: buildVendidosInsightPayload(),
+    postventa: {
+      totalCosto: pv.overview?.totalCosto,
+      servicio: pv.overview?.servicio,
+      refacciones: pv.overview?.refacciones,
+      hyp: pv.overview?.hyp,
+      traspasos: tr,
+    },
+  });
+}
+
+async function loadVendidosAnalisis({ quiet = false } = {}) {
+  const { api } = Dashboard;
+  const range = currentVendidosRange();
+  vendidosLoading = true;
+  renderVendidosKpiCard();
+  if (!quiet) renderVendidosTable([]);
+  try {
+    const data = await api(`/inventory/vendidos?fechaInicio=${encodeURIComponent(range.fechaInicio)}&fechaFin=${encodeURIComponent(range.fechaFin)}`);
+    vendidosRows = Array.isArray(data.vendidosTable) ? data.vendidosTable : [];
+    vendidosCarlineFilters = Array.isArray(data.carlineFilters) ? data.carlineFilters : [];
+    renderVendidosCarlineFilterTabs(vendidosCarlineFilters);
+    renderVendidosTable();
+    renderIemcF2(data.iemc || null);
+  } catch (err) {
+    vendidosRows = [];
+    vendidosCarlineFilters = [];
+    const body = document.getElementById('vendidosSlowBody');
+    if (body) {
+      body.innerHTML = `<tr><td colspan="13" class="empty-row">${escapeHtml(err.message || 'No se pudieron cargar las ventas.')}</td></tr>`;
+    }
+    renderIemcF2(null, err.message);
+  } finally {
+    vendidosLoading = false;
+    renderVendidosKpiCard();
+    applyInventoryInsights();
+  }
+}
+
+function iemcTone(pct) {
+  if (pct == null) return '';
+  if (pct >= 100) return 'is-ok';
+  if (pct >= 90) return 'is-warn';
+  return 'is-neg';
+}
+
+function iemcFuenteLabel(src) {
+  if (src === 'dms_catalogo') return 'catálogo DMS';
+  if (src === 'dms_inventario') return 'remisión DMS (piso)';
+  if (src === 'dms_vendidos') return 'ventas del mes (costo)';
+  if (src === 'faltante') return 'faltante';
+  return src || '';
+}
+
+function renderIemcF2(data, errorMessage) {
+  const { fmt } = Dashboard;
+  const setTxt = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  const setTone = (id, tone) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('is-ok', 'is-warn', 'is-neg');
+    if (tone) el.classList.add(tone);
+  };
+
+  if (errorMessage) {
+    setTxt('iemcF2MargenReal', '—');
+    setTxt('iemcF2MargenObj', '—');
+    setTxt('iemcF2Iemc', '—');
+    setTxt('iemcF2Brecha', '—');
+    setTone('iemcF2MargenReal', '');
+    setTone('iemcF2MargenObj', '');
+    setTone('iemcF2Iemc', '');
+    setTone('iemcF2Brecha', '');
+    const status = document.getElementById('iemcF2Status');
+    if (status) {
+      status.textContent = errorMessage;
+      status.classList.add('is-warn');
+    }
+    const body = document.getElementById('iemcF2MixBody');
+    if (body) body.innerHTML = `<tr><td colspan="9" class="empty-row">${escapeHtml(errorMessage)}</td></tr>`;
+    return;
+  }
+
+  const real = data?.real || {};
+  const obj = data?.objetivo || {};
+  const iemc = data?.iemcPct;
+  const brecha = data?.brecha;
+  setTxt('iemcF2MargenReal', real.margenBrutoPct == null ? '—' : `${real.margenBrutoPct.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`);
+  setTxt('iemcF2MargenObj', obj.margenBrutoPct == null ? '—' : `${obj.margenBrutoPct.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`);
+  setTxt('iemcF2Iemc', iemc == null ? '—' : `${iemc.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%`);
+  setTxt('iemcF2Brecha', brecha == null ? '—' : fmt.money(brecha));
+  setTxt('iemcF2MargenRealHint', `UBA ${fmt.money(real.uba || 0)} ÷ ${fmt.money(real.ventaNeta || 0)}`);
+  setTxt('iemcF2MargenObjHint', `UBA ${fmt.money(obj.uba || 0)} ÷ ${fmt.money(obj.ventaNeta || 0)}`);
+  setTone('iemcF2Iemc', iemcTone(iemc));
+  setTone('iemcF2Brecha', brecha == null ? '' : (brecha >= 0 ? 'is-ok' : 'is-neg'));
+
+  const status = document.getElementById('iemcF2Status');
+  if (status) {
+    const bits = [];
+    if (!data?.mixDisponible) bits.push('Sin mix objetivo para este mes. Cargue el PDF en Objetivos Web.');
+    else if (data.plantilla?.aplicadaAlPeriodo) bits.push(`Mix fijo ${data.plantilla.label || data.periodo} · UO del PDF · PL/CF del DMS.`);
+    else bits.push(`Mix de captura ${data.periodo}.`);
+    if (data?.incompleto) bits.push(`Faltan PL en ${obj.lineasSinPl || 0} línea(s) y CF en ${obj.lineasSinCf || 0}.`);
+    if (real.unidadesSinUba) bits.push(`${real.unidadesSinUba} unidad(es) sin utilidad bruta no entran al IEMC.`);
+    status.textContent = bits.join(' ');
+    status.classList.toggle('is-warn', Boolean(!data?.mixDisponible || data?.incompleto));
+  }
+
+  const footnote = document.getElementById('iemcF2Footnote');
+  if (footnote) {
+    footnote.textContent = Array.isArray(data?.notas) ? data.notas[0] : '';
+  }
+
+  const body = document.getElementById('iemcF2MixBody');
+  if (!body) return;
+  const rows = Array.isArray(data?.mix) ? data.mix : [];
+  const otras = Array.isArray(data?.otrasLineasReales) ? data.otrasLineasReales : [];
+  if (!rows.length && !otras.length) {
+    body.innerHTML = '<tr><td colspan="9" class="empty-row">Sin mix objetivo para el mes.</td></tr>';
+    return;
+  }
+
+  const cellMoney = (n) => (n == null ? '—' : fmt.money(n));
+
+  const mixHtml = rows.map((r) => {
+    const plCell = `${cellMoney(r.pl)}<span class="iemc-f2-src">${escapeHtml(iemcFuenteLabel(r.plFuente))}</span>`;
+    const cfCell = `${cellMoney(r.cf)}<span class="iemc-f2-src">${escapeHtml(iemcFuenteLabel(r.cfFuente))}</span>`;
+    return `<tr>
+      <td><strong>${escapeHtml(r.linea)}</strong>${r.familia ? `<span class="ageing-slow-hint">${escapeHtml(r.familia)}</span>` : ''}</td>
+      <td class="cell-num">${Number(r.uo || 0)}</td>
+      <td class="cell-num">${plCell}</td>
+      <td class="cell-num">${cfCell}</td>
+      <td class="cell-num">${cellMoney(r.ventaObjetivo)}</td>
+      <td class="cell-num">${cellMoney(r.ubaObjetivo)}</td>
+      <td class="cell-num">${Number(r.unidadesReales || 0)}</td>
+      <td class="cell-num">${cellMoney(r.ventaNetaReal)}</td>
+      <td class="cell-num">${cellMoney(r.ubaReal)}</td>
+    </tr>`;
+  }).join('');
+
+  const otrasHtml = otras.map((r) => `<tr>
+    <td><strong>${escapeHtml(r.linea)}</strong><span class="ageing-slow-hint">Vendido sin línea en el mix</span></td>
+    <td class="cell-num">—</td>
+    <td class="cell-num">—</td>
+    <td class="cell-num">—</td>
+    <td class="cell-num">—</td>
+    <td class="cell-num">—</td>
+    <td class="cell-num">${Number(r.unidadesReales || 0)}</td>
+    <td class="cell-num">${cellMoney(r.ventaNetaReal)}</td>
+    <td class="cell-num">${cellMoney(r.ubaReal)}</td>
+  </tr>`).join('');
+
+  body.innerHTML = mixHtml + otrasHtml;
+}
+
+function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
+  closeExtrasPopover();
   const body = document.getElementById('ageingSlowBody');
   if (!body) return;
+  const { fmt } = Dashboard;
 
   const list = Array.isArray(rows) ? rows : [];
+  const meta = document.getElementById('ageingSearchMeta');
+  if (meta) {
+    const filtered = ageingSearch.trim() || ageingCarlineFilter !== 'all';
+    meta.classList.toggle('hidden', !filtered);
+    if (filtered) meta.textContent = `${list.length} de ${ageingSlowRows.length}`;
+  }
+
   if (!list.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-row">Sin datos de antigüedad en inventario.</td></tr>';
+    const empty = ageingSlowRows.length
+      ? 'Sin coincidencias para el filtro.'
+      : 'Sin inventario real (DIS / FIS / SEP) para analizar.';
+    body.innerHTML = `<tr><td colspan="11" class="empty-row">${empty}</td></tr>`;
     return;
   }
 
   body.innerHTML = list.map((r) => {
     const carline = r.carline || (r.model ? String(r.model).split(' · ')[0] : '—');
     const version = r.version || (r.model ? String(r.model).split(' · ').slice(1).join(' · ') : '—') || '—';
-    const color = r.color || '—';
-    const avg = Number(r.avgDays || 0);
-    const rowClass = r.critical || avg >= 90
-      ? 'ageing-slow-row--critical'
-      : (r.warn || avg >= 60 ? 'ageing-slow-row--warn' : '');
+    const paquete = String(r.paquete || '').trim();
+    const versionLabel = paquete && !version.toUpperCase().includes(` ${paquete}`)
+      ? `${version} · ${paquete}`
+      : version;
+    const vin = r.vin || '—';
+    const days = r.daysInStock == null ? Number(r.avgDays || 0) : Number(r.daysInStock);
+    const utilidad = r.utilidadPromedio == null ? null : Number(r.utilidadPromedio);
+    const utilidadNeta = r.utilidadNeta == null ? null : Number(r.utilidadNeta);
+    const vendidas = Number(r.unidadesVendidas || 0);
+    const planPiso = Number(r.planPisoAcumulado || 0);
+    const generaInteres = Boolean(r.generaInteres) || days > 30;
+    const extrasComenUtilidad = utilidadNeta != null && utilidadNeta < 0;
+    const pisoSuperaUtilidad = extrasComenUtilidad || (utilidad != null && planPiso > utilidad);
+    const rowClass = [
+      pisoSuperaUtilidad ? 'ageing-slow-row--piso-over' : '',
+      !pisoSuperaUtilidad && (r.critical || days >= 90) ? 'ageing-slow-row--critical' : '',
+      !pisoSuperaUtilidad && (r.warn || days >= 60) ? 'ageing-slow-row--warn' : '',
+    ].filter(Boolean).join(' ');
+    const costoNeto = costoNetoConBonif(r);
+    const bonif = Number(r.bonificacion || 0);
+    const notaSinIva = notaCreditoSinIva(r);
+    const utilidadCell = utilidad == null
+      ? '<span class="ageing-slow-hint">Sin histórico</span>'
+      : `<strong>${fmt.money(utilidad)}</strong><span class="ageing-slow-hint">${vendidas.toLocaleString('es-MX')} vendida${vendidas === 1 ? '' : 's'}</span>`;
+    const extrasCell = renderExtrasCell(r, fmt);
+    const pisoCell = generaInteres && planPiso > 0
+      ? `<strong>${fmt.money(planPiso)}</strong><span class="ageing-slow-hint">${pisoSuperaUtilidad ? 'Come utilidad' : '+30 días'}</span>`
+      : '<span class="ageing-slow-hint">Sin cargo</span>';
+    const netaCell = utilidadNeta == null
+      ? '<span class="ageing-slow-hint">—</span>'
+      : `<strong>${fmt.money(utilidadNeta)}</strong>`;
+    const costoCell = costoNeto == null
+      ? '—'
+      : `<strong>${fmt.money(costoNeto)}</strong>${bonif > 0 ? `<span class="ageing-slow-hint">− Bonif. ${fmt.money(bonif)}</span>` : ''}`;
+    const notaCell = notaSinIva > 0
+      ? `<strong>${fmt.money(notaSinIva)}</strong>`
+      : '<span class="ageing-slow-hint">Sin nota</span>';
     return `<tr class="${rowClass}">
       <td class="ageing-slow-carline"><strong>${escapeHtml(carline)}</strong></td>
-      <td class="ageing-slow-version" title="${escapeHtml(version)}"><span>${escapeHtml(version)}</span></td>
-      <td class="ageing-slow-color" title="${escapeHtml(color)}">${escapeHtml(color)}</td>
-      <td class="cell-num">${Number(r.units || 0).toLocaleString('es-MX')}</td>
-      <td class="cell-num ageing-slow-avg"><strong>${avg.toLocaleString('es-MX')}</strong></td>
-      <td class="cell-num">${Number(r.maxDays || avg || 0).toLocaleString('es-MX')}</td>
+      <td class="ageing-slow-version" title="${escapeHtml(versionLabel)}"><span>${escapeHtml(versionLabel)}</span></td>
+      <td class="ageing-slow-vin" title="${escapeHtml(vin)}">${escapeHtml(vin)}</td>
+      <td class="cell-num">${r.precio ? fmt.money(r.precio) : '—'}</td>
+      <td class="cell-num">${costoCell}</td>
+      <td class="cell-num ageing-slow-nota">${notaCell}</td>
+      <td class="cell-num ageing-slow-utilidad">${utilidadCell}</td>
+      <td class="cell-num ageing-slow-extras">${extrasCell}</td>
+      <td class="cell-num ageing-slow-piso">${pisoCell}</td>
+      <td class="cell-num ageing-slow-neta">${netaCell}</td>
+      <td class="cell-num">${renderRetencionCell(pctRetencion(utilidad, utilidadNeta))}</td>
+    </tr>`;
+  }).join('');
+  bindExtrasPopover(body);
+  renderPlanPisoCommercialScenario();
+}
+
+const PLAN_PISO_DAILY_FACTOR = 0.00020778;
+
+function estimatePlanPisoBurnPerDay(row) {
+  const planPiso = Number(row.planPisoAcumulado || 0);
+  const chargeable = Number(row.daysChargeable || 0);
+  if (planPiso > 0 && chargeable > 0) return planPiso / chargeable;
+  const base = Number(row.precio || row.costo || 450000) || 450000;
+  return base * PLAN_PISO_DAILY_FACTOR;
+}
+
+function pickPlanPisoStrategy(row, ctx) {
+  const days = ageingDaysOf(row);
+  const planPiso = Number(row.planPisoAcumulado || 0);
+  const neta = row.utilidadNeta == null ? null : Number(row.utilidadNeta);
+  const bruta = row.utilidadPromedio == null ? null : Number(row.utilidadPromedio);
+  const carline = String(row.carline || '').toUpperCase();
+  const isTruck = /SILVERADO|CHEYENNE|TAHOE|SUBURBAN|COLORADO|TRAVERSE|EXPRESS/.test(carline);
+  const burn = ctx.burnDay;
+  const costo15 = ctx.costo15d;
+  const incentivo = ctx.incentivoMax;
+
+  if (neta != null && neta < 0 && planPiso > Math.abs(neta)) {
+    return {
+      priority: 'Crítica',
+      tone: 'critical',
+      code: 'break-even',
+      title: 'Salida a break-even / transferencia',
+      detail: `La neta ya está en ${Dashboard.fmt.money(neta)} y el piso (${Dashboard.fmt.money(planPiso)}) sigue comiendo margen. Mejor mover ya aunque sea a margen cero.`,
+      plays: [
+        `Autorizar descuento hasta ${Dashboard.fmt.money(incentivo)} si cierra en ≤7 días.`,
+        'Ofertar a otras sucursales / intercambio de planta si no hay retail caliente.',
+        'No invertir más en previa/publicidad de esta unidad.',
+      ],
+    };
+  }
+
+  if (days >= 90) {
+    return {
+      priority: 'Alta',
+      tone: 'critical',
+      code: 'liquidacion',
+      title: 'Liquidación 90+ · liberar piso',
+      detail: `${days} días en stock. Cada quincena suma ~${Dashboard.fmt.money(burn * 15)} de interés. El costo de no vender supera un descuento puntual.`,
+      plays: [
+        `Publicar oferta flash 72 h con techo ${Dashboard.fmt.money(incentivo)}.`,
+        'Asignar un EV dueño + seguimiento diario en CRM.',
+        isTruck
+          ? 'Empujar a flotilla / gobierno / taxi con bonos de volumen.'
+          : 'Cruzar con leads de prueba de manejo del mismo carline.',
+      ],
+    };
+  }
+
+  if (days >= 60) {
+    return {
+      priority: 'Alta',
+      tone: 'warning',
+      code: 'promo-fi',
+      title: 'Promo retail + paquete F&I',
+      detail: `En 60–89 días aún hay margen para recuperar con F&I. 15 días más cuestan ~${Dashboard.fmt.money(costo15)}; un GAP/OnStar bien colocado puede compensar parte del incentivo.`,
+      plays: [
+        `Descuento visible ≤ ${Dashboard.fmt.money(incentivo * 0.7)} + bono F&I al asesor.`,
+        'Demo en piso / prueba de manejo obligatoria esta semana.',
+        bruta != null
+          ? `Proteger bruta histórica (~${Dashboard.fmt.money(bruta)}) no regalando todo el incentivo de golpe.`
+          : 'Validar utilidad histórica del carline antes de bajar lista.',
+      ],
+    };
+  }
+
+  if (isTruck) {
+    return {
+      priority: 'Media',
+      tone: 'warning',
+      code: 'flotilla',
+      title: 'Empuje flotilla / corporativo',
+      detail: `${carline || 'Unidad'} con ticket alto: el plan piso duele rápido. Canal flotilla suele cerrar más rápido que menudeo puro.`,
+      plays: [
+        'Lista corta a 3 cuentas flotilla activas esta semana.',
+        `Incentivo negociable hasta ${Dashboard.fmt.money(incentivo)} si facturan en 10 días.`,
+        'Preparar dossier (ficha, stock, entrega) para gerente de flotillas.',
+      ],
+    };
+  }
+
+  return {
+    priority: 'Media',
+    tone: 'ok',
+    code: 'spotlight',
+    title: 'Spotlight en piso + agenda de pruebas',
+    detail: `Todavía es recuperable con rotación comercial. Si se queda 15 días más, el piso suma ~${Dashboard.fmt.money(costo15)}.`,
+    plays: [
+      'Ubicar en plaza premium / rotar a demo de patio.',
+      `Tope de cortesía comercial ${Dashboard.fmt.money(incentivo * 0.5)} solo con cierre en cita.`,
+      'Activar 5 leads calientes del mismo carline en Seguimiento 360.',
+    ],
+  };
+}
+
+function buildPlanPisoScenarioRows(sourceRows = ageingSlowRows) {
+  const withPiso = (sourceRows || [])
+    .filter((r) => Number(r.planPisoAcumulado || 0) > 0)
+    .slice()
+    .sort((a, b) => Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0)
+      || ageingDaysOf(b) - ageingDaysOf(a));
+
+  return withPiso.slice(0, 8).map((r, idx) => {
+    const planPiso = Number(r.planPisoAcumulado || 0);
+    const burnDay = estimatePlanPisoBurnPerDay(r);
+    const costo15d = burnDay * 15;
+    const incentivoMax = Math.round(Math.max(costo15d * 1.1, planPiso * 0.5) * 100) / 100;
+    const ctx = { burnDay, costo15d, incentivoMax };
+    const strategy = pickPlanPisoStrategy(r, ctx);
+    return {
+      rank: idx + 1,
+      row: r,
+      planPiso,
+      burnDay,
+      costo15d,
+      incentivoMax,
+      strategy,
+    };
+  });
+}
+
+function renderPlanPisoCommercialScenario(rows = ageingSlowRows) {
+  const { fmt } = Dashboard;
+  const body = document.getElementById('invPisoScenarioBody');
+  const cardsEl = document.getElementById('invPisoScenarioCards');
+  const banner = document.getElementById('invPisoScenarioBanner');
+  const lead = document.getElementById('invPisoScenarioLead');
+  const badge = document.getElementById('invPisoScenarioBadge');
+  if (!body || !cardsEl) return;
+
+  const scenario = buildPlanPisoScenarioRows(rows);
+  const totalPiso = scenario.reduce((s, x) => s + x.planPiso, 0);
+  const burn15 = scenario.reduce((s, x) => s + x.costo15d, 0);
+  const criticas = scenario.filter((x) => x.strategy.tone === 'critical').length;
+
+  if (lead) {
+    lead.textContent = scenario.length
+      ? `Top ${scenario.length} VIN por cargo de plan piso · si no salen en 15 días el interés adicional estimado es ${fmt.money(burn15)}.`
+      : 'Cuando haya unidades con cargo de plan piso (+30 días), aquí verás el tablero de salida para gerencia comercial.';
+  }
+  if (badge) {
+    badge.textContent = scenario.length ? `${scenario.length} prioritarias` : 'Sin cargo';
+  }
+
+  if (banner) {
+    if (!scenario.length) {
+      banner.hidden = true;
+    } else {
+      banner.hidden = false;
+      banner.className = criticas
+        ? 'int-acq-banner int-acq-banner--warning'
+        : 'int-acq-banner int-acq-banner--ok';
+      banner.textContent = criticas
+        ? `${criticas} unidad(es) en prioridad crítica · piso en foco ${fmt.money(totalPiso)} · riesgo +15 días ${fmt.money(burn15)}.`
+        : `Piso en foco ${fmt.money(totalPiso)} · riesgo financiero +15 días ${fmt.money(burn15)}. Ejecuta el playbook por VIN.`;
+    }
+  }
+
+  if (!scenario.length) {
+    cardsEl.innerHTML = `<article class="int-acq-alert int-acq-alert--ok">
+      <span class="material-symbols-outlined int-acq-alert__icon">verified</span>
+      <div>
+        <p class="int-acq-alert__title">Sin unidades con plan piso activo</p>
+        <p class="int-acq-alert__meta">El inventario filtrado no tiene cargos (+30 días). El escenario se activa al detectar intereses.</p>
+        <p class="int-acq-alert__action">Mantén rotación antes del día 31 para no abrir este tablero.</p>
+      </div>
+    </article>`;
+    body.innerHTML = '<tr><td colspan="9" class="empty-row">Sin unidades con plan piso en el filtro actual.</td></tr>';
+    return;
+  }
+
+  const playbooks = [];
+  const byCode = new Map();
+  for (const item of scenario) {
+    const key = item.strategy.code;
+    if (!byCode.has(key)) {
+      byCode.set(key, {
+        ...item.strategy,
+        count: 0,
+        piso: 0,
+        sample: item.row.vin,
+      });
+    }
+    const agg = byCode.get(key);
+    agg.count += 1;
+    agg.piso += item.planPiso;
+  }
+  for (const pb of byCode.values()) playbooks.push(pb);
+  playbooks.sort((a, b) => b.count - a.count || b.piso - a.piso);
+
+  cardsEl.innerHTML = playbooks.map((pb) => `
+    <article class="int-acq-alert int-acq-alert--${pb.tone === 'ok' ? 'ok' : pb.tone === 'critical' ? 'critical' : 'warning'}">
+      <span class="material-symbols-outlined int-acq-alert__icon">${pb.tone === 'critical' ? 'priority_high' : pb.tone === 'warning' ? 'campaign' : 'lightbulb'}</span>
+      <div>
+        <p class="int-acq-alert__title">${escapeHtml(pb.title)} · ${pb.count} VIN</p>
+        <p class="int-acq-alert__meta">${escapeHtml(pb.detail)}</p>
+        <ul class="inv-piso-scenario__plays">
+          ${(pb.plays || []).map((p) => `<li>${escapeHtml(p)}</li>`).join('')}
+        </ul>
+        <p class="int-acq-alert__action">Piso en este playbook: ${fmt.money(pb.piso)}${pb.sample ? ` · ej. ${escapeHtml(pb.sample)}` : ''}</p>
+      </div>
+    </article>
+  `).join('');
+
+  body.innerHTML = scenario.map((item) => {
+    const r = item.row;
+    const carline = r.carline || '—';
+    const version = r.version || '—';
+    const vin = r.vin || '—';
+    const days = ageingDaysOf(r);
+    const tone = item.strategy.tone;
+    return `<tr class="inv-piso-scenario__row inv-piso-scenario__row--${tone}">
+      <td>${item.rank}</td>
+      <td><span class="inv-piso-scenario__pill inv-piso-scenario__pill--${tone}">${escapeHtml(item.strategy.priority)}</span></td>
+      <td>
+        <strong>${escapeHtml(carline)}</strong>
+        <span class="ageing-slow-hint">${escapeHtml(version)}</span>
+        <span class="ageing-slow-hint">${escapeHtml(vin)}</span>
+      </td>
+      <td class="cell-num">${fmt.number(days)}</td>
+      <td class="cell-num"><strong>${fmt.money(item.planPiso)}</strong></td>
+      <td class="cell-num">${fmt.money(item.burnDay)}</td>
+      <td class="cell-num">${fmt.money(item.costo15d)}</td>
+      <td class="cell-num"><strong>${fmt.money(item.incentivoMax)}</strong></td>
+      <td>
+        <strong>${escapeHtml(item.strategy.title)}</strong>
+        <span class="ageing-slow-hint">${escapeHtml((item.strategy.plays || [])[0] || '')}</span>
+      </td>
     </tr>`;
   }).join('');
 }
 
 function renderCharts(data) {
-  const { chartOptions, chartPalette, chartColors } = Dashboard;
-  const s = data.summary;
-
-  renderAgeingSlowTable(data.ageingSlowTable || data.ageingChart || []);
+  ageingSlowRows = Array.isArray(data.ageingSlowTable)
+    ? data.ageingSlowTable
+    : (Array.isArray(data.ageingChart) ? data.ageingChart : []);
+  ageingCarlineFilters = Array.isArray(data.ageingCarlineFilters) ? data.ageingCarlineFilters : [];
+  renderAgeingCarlineFilterTabs(ageingCarlineFilters);
+  renderAgeingSlowTable();
 
   destroyChart(ageingChart);
   ageingChart = null;
-
-  destroyChart(situacionChart);
-  situacionChart = new Chart(document.getElementById('situacionChart'), {
-    type: 'doughnut',
-    data: {
-      labels: (s.bySituacion || []).map((r) => r.label),
-      datasets: [{
-        data: (s.bySituacion || []).map((r) => r.units),
-        backgroundColor: chartPalette,
-        borderWidth: 0,
-      }],
-    },
-    options: chartOptions({ plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } }),
-  });
-
-  destroyChart(familiaChart);
-  familiaChart = new Chart(document.getElementById('familiaChart'), {
-    type: 'bar',
-    data: {
-      labels: (data.byFamilia || []).map((r) => r.label.slice(0, 16)),
-      datasets: [{
-        label: 'Unidades',
-        data: (data.byFamilia || []).map((r) => r.units),
-        backgroundColor: chartColors.secondary,
-        borderRadius: 8,
-      }],
-    },
-    options: chartOptions({ plugins: { legend: { display: false } } }),
-  });
 }
 
 async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
@@ -1230,6 +2663,8 @@ async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
   try {
     const data = await api(`/inventory?planPisoPeriod=${encodeURIComponent(period)}`);
     const s = data.summary;
+    lastInventorySummary = s;
+    lastInventoryPlanPisoPeriod = period;
 
     populatePlanPisoPeriod(data.planPisoMonths || [], s.planPisoPeriod || period);
 
@@ -1297,28 +2732,7 @@ async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
     }
 
     await loadEntregasSinPreviasMes({ quiet });
-
-    if (window.KpiInsights?.apply) {
-      window.KpiInsights.apply('inventory', {
-        planPisoPeriod: period,
-        summary: {
-          totalUnits: s.totalUnits,
-          available: s.available,
-          availableLibres: s.availableLibres,
-          availableApartadas: s.availableApartadas,
-          sinPrevias: s.sinPrevias,
-          conPrevias: s.conPrevias,
-          avgDaysAvailable: s.avgDaysAvailable,
-          ageingAlertsCount: s.ageingAlertsCount ?? s.urgentAlerts,
-          ageingAlertsPlanPisoTotal: s.ageingAlertsPlanPisoTotal,
-          planPisoTotal: s.planPisoTotal,
-          planPisoUnits: s.planPisoUnits,
-          planPisoPeriodLabel: s.planPisoPeriodLabel,
-          entregasSinPreviasSofia: (window.__invSofiaSinPrevias || []).length,
-          entregasSofiaMes: Number(window.__invSofiaTotalMes || 0),
-        },
-      });
-    }
+    applyInventoryInsights();
   } catch (err) {
     if (!quiet && status) {
       status.textContent = err.message;
@@ -1342,11 +2756,38 @@ function currentMonthRange() {
   };
 }
 
+function currentInventoryGlobalRange() {
+  const fi = String(document.getElementById('fechaInicio')?.value || '').trim();
+  const ff = String(document.getElementById('fechaFin')?.value || '').trim();
+  if (fi && ff) {
+    return {
+      fechaInicio: fi,
+      fechaFin: ff,
+      label: Dashboard.formatPeriodLabel ? Dashboard.formatPeriodLabel(fi, ff) : `${fi} — ${ff}`,
+    };
+  }
+  return currentMonthRange();
+}
+
+function inventoryDefaultDateRange() {
+  const now = new Date();
+  // Días 1 y 2: mostrar por defecto el mes que acaba de cerrar.
+  if (now.getDate() <= 2) {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    return {
+      fechaInicio: Dashboard.formatDateInput ? Dashboard.formatDateInput(start) : isoDate(start),
+      fechaFin: Dashboard.formatDateInput ? Dashboard.formatDateInput(end) : isoDate(end),
+    };
+  }
+  return Dashboard.getDefaultDateRange ? Dashboard.getDefaultDateRange() : currentMonthRange();
+}
+
 async function loadEntregasSinPreviasMes({ quiet = false } = {}) {
   const { api, setText, fmt } = Dashboard;
   if (entregasSinPreviasLoading) return;
   entregasSinPreviasLoading = true;
-  const range = currentMonthRange();
+  const range = currentInventoryGlobalRange();
   if (!quiet) {
     setText('sEntregasSinPreviasSub', 'Actualizando SOFIA…');
   }
@@ -1403,7 +2844,7 @@ document.getElementById('planPisoPeriod')?.addEventListener('change', (e) => {
 });
 
 function setInventoryScope(scope) {
-  const next = ['autos', 'seminuevos', 'postventa'].includes(scope) ? scope : 'autos';
+  const next = ['autos', 'cierre', 'seminuevos', 'postventa'].includes(scope) ? scope : 'autos';
   inventoryScope = next;
   if (inventoryScope !== 'autos' && autosDrawerUi?.panel?.classList.contains('ops-orders-drawer--open')) {
     autosDrawerUi.close();
@@ -1415,6 +2856,7 @@ function setInventoryScope(scope) {
     btn.classList.toggle('active', btn.dataset.inventoryScope === inventoryScope);
   });
   document.getElementById('panelInventarioAutos')?.classList.toggle('hidden', inventoryScope !== 'autos');
+  document.getElementById('panelInventarioCierre')?.classList.toggle('hidden', inventoryScope !== 'cierre');
   document.getElementById('panelInventarioSeminuevos')?.classList.toggle('hidden', inventoryScope !== 'seminuevos');
   document.getElementById('panelInventarioPostventa')?.classList.toggle('hidden', inventoryScope !== 'postventa');
 
@@ -1424,14 +2866,26 @@ function setInventoryScope(scope) {
       ? 'Inventario · Postventa'
       : inventoryScope === 'seminuevos'
         ? 'Inventario · Autos seminuevos'
-        : 'Gestión de Inventario';
+        : inventoryScope === 'cierre'
+          ? 'Inventario · Cierre de unidades vendidas'
+          : 'Gestión de Inventario';
   }
 
   if (inventoryScope === 'postventa') {
-    loadInventoryPostventa();
+    postventaLoaded = false;
+    loadInventoryPostventa({ force: true });
   } else if (inventoryScope === 'seminuevos') {
     loadInventorySeminuevos();
+  } else if (inventoryScope === 'cierre' && !vendidosRows.length && !vendidosLoading) {
+    loadVendidosAnalisis({ quiet: true });
   }
+}
+
+function gotoCierreUnidadesVendidas() {
+  setInventoryScope('cierre');
+  requestAnimationFrame(() => {
+    document.getElementById('panelInventarioCierre')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 }
 
 function setPostventaArea(area) {
@@ -1456,6 +2910,104 @@ function renderPostventaOverview(data) {
   setText('pvKpiHyp', fmt.currency(hyp.costo || 0));
   setText('pvKpiHypSub', `${fmt.number(hyp.lineas || 0)} líneas · ${fmt.number(hyp.existencia || 0)} pzas`);
   setText('pvKpiTotal', fmt.currency(ov.totalCosto || 0));
+  renderPostventaInsights(data);
+  renderPostventaTraspasos(data);
+}
+
+function renderPostventaInsights(data) {
+  const root = document.getElementById('pvInsightsCards');
+  const meta = document.getElementById('pvInsightsMeta');
+  if (!root) return;
+  const list = data?.insights || [];
+  if (meta) {
+    const p = data?.periodo || {};
+    meta.textContent = p.fechaInicio && p.fechaFin
+      ? `${list.length} hallazgos · ${p.fechaInicio} — ${p.fechaFin}`
+      : `${list.length} hallazgos`;
+  }
+  if (!list.length) {
+    root.innerHTML = '<p class="section-subtitle" style="margin:0">Sin insights para el periodo.</p>';
+    return;
+  }
+  root.innerHTML = list.map((c) => `
+    <article class="ref-alerta ref-alerta--${escapeHtml(c.severity || 'info')}">
+      <span class="material-symbols-outlined ref-alerta__icon" aria-hidden="true">${escapeHtml(c.icon || 'insights')}</span>
+      <div class="ref-alerta__body">
+        <h4 class="ref-alerta__title">${escapeHtml(c.title || '')}</h4>
+        <p class="ref-alerta__summary">${escapeHtml(c.summary || '')}</p>
+        ${c.detail ? `<p class="ref-alerta__detail">${escapeHtml(c.detail)}</p>` : ''}
+        ${c.action ? `<p class="ref-alerta__action">${escapeHtml(c.action)}</p>` : ''}
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderPostventaTraspasos(data) {
+  const { fmt, setText } = Dashboard;
+  const tr = data?.traspasos || {};
+  const s = tr.summary || {};
+  const p = tr.periodo || data?.periodo || {};
+  setText('pvKpiTraspasosPiezas', fmt.number(s.piezas || 0));
+  setText('pvKpiTraspasosPartes', fmt.number(s.partes || 0));
+  setText('pvKpiTraspasosDocs', fmt.number(s.documentos || 0));
+  setText('pvKpiTraspasosCosto', fmt.currency(s.costo || 0));
+  const meta = document.getElementById('pvTraspasosMeta');
+  if (meta) {
+    meta.textContent = p.fechaInicio && p.fechaFin
+      ? `${p.fechaInicio} — ${p.fechaFin}`
+      : '—';
+  }
+  const sub = document.getElementById('pvTraspasosSubtitle');
+  if (sub) {
+    sub.textContent = tr.fuente || 'Piezas movidas DE un almacén A otro (PAR_MOVTOS)';
+  }
+
+  const rutasEl = document.getElementById('pvTraspasosRutas');
+  if (rutasEl) {
+    const rows = tr.rutas || [];
+    rutasEl.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td><strong>${escapeHtml(r.ruta || `${r.origen} → ${r.destino}`)}</strong></td>
+          <td class="cell-num">${fmt.number(r.lineas || 0)}</td>
+          <td class="cell-num">${fmt.number(r.piezas || 0)}</td>
+          <td class="cell-money">${fmt.money(r.costo || 0)}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="4">Sin traspasos en el periodo.</td></tr>';
+  }
+
+  const topEl = document.getElementById('pvTraspasosTopPartes');
+  if (topEl) {
+    const rows = tr.topPartes || [];
+    topEl.innerHTML = rows.length
+      ? rows.slice(0, 25).map((r) => `
+        <tr>
+          <td><strong>${escapeHtml(r.parte || '')}</strong></td>
+          <td>${escapeHtml(r.descripcion || '—')}</td>
+          <td class="cell-num">${fmt.number(r.movimientos || 0)}</td>
+          <td class="cell-num">${fmt.number(r.piezas || 0)}</td>
+          <td class="cell-money">${fmt.money(r.costo || 0)}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="5">Sin partes traspasadas.</td></tr>';
+  }
+
+  const detEl = document.getElementById('pvTraspasosDetalle');
+  if (detEl) {
+    const rows = tr.detalle || [];
+    detEl.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td>${escapeHtml(r.fecha || '—')}</td>
+          <td><strong>${escapeHtml(r.parte || '')}</strong></td>
+          <td>${escapeHtml(r.descripcion || '—')}</td>
+          <td>${escapeHtml(r.origen || '—')}</td>
+          <td>${escapeHtml(r.destino || '—')}</td>
+          <td class="cell-num">${fmt.number(r.piezas || 0)}</td>
+          <td class="cell-money">${fmt.money(r.costo || 0)}</td>
+          <td>${escapeHtml(r.observa || '')}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="8">Sin detalle de traspasos.</td></tr>';
+  }
 }
 
 function getPostventaSearchTerm() {
@@ -1569,6 +3121,7 @@ async function loadInventoryPostventa({ force = false } = {}) {
   if (postventaLoaded && postventaData && !force) {
     renderPostventaOverview(postventaData);
     renderPostventaArea();
+    applyInventoryInsights();
     return;
   }
 
@@ -1579,10 +3132,25 @@ async function loadInventoryPostventa({ force = false } = {}) {
   showLoading(true);
 
   try {
-    postventaData = await api('/inventory/postventa');
+    let fi = document.getElementById('fechaInicio')?.value || '';
+    let ff = document.getElementById('fechaFin')?.value || '';
+    if ((!fi || !ff) && typeof currentVendidosRange === 'function') {
+      try {
+        const range = currentVendidosRange();
+        fi = range?.fechaInicio || fi;
+        ff = range?.fechaFin || ff;
+      } catch {
+        /* ignore */
+      }
+    }
+    const qs = fi && ff
+      ? `?fechaInicio=${encodeURIComponent(fi)}&fechaFin=${encodeURIComponent(ff)}`
+      : '';
+    postventaData = await api(`/inventory/postventa${qs}`);
     postventaLoaded = true;
     renderPostventaOverview(postventaData);
     renderPostventaArea();
+    applyInventoryInsights();
     setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
     status.textContent = 'Inventario Postventa';
     status.className = 'sidebar-status-line';
@@ -1683,7 +3251,7 @@ function semiKpiMeta(kpi) {
     total: { title: 'Unidades en stock', hint: 'Inventario vivo SFIS', icon: 'directions_car' },
     toma: { title: 'Precio de toma', hint: 'VEH_TOMAIMPADQUI · costo de toma / adquisición', icon: 'payments' },
     days: { title: 'Días en stock', hint: 'Desde VEH_SFECADQUI', icon: 'schedule' },
-    ageing: { title: 'Envejecidas 60+', hint: 'Unidades con 60 o más días en inventario', icon: 'warning' },
+    ageing: { title: 'Antigüedad 60+', hint: 'Unidades con 60 o más días en inventario', icon: 'warning' },
   };
   return map[kpi] || { title: 'Seminuevos', hint: '', icon: 'directions_car' };
 }
@@ -1985,9 +3553,9 @@ function ensureSemiUnitDetailPanel() {
                 )}
                 ${fichaRowText('Rango', ageingLabel)}
                 ${fichaRow(
-                  'Envejecida 60+',
+                  'Antigüedad 60+',
                   u.envejecida
-                    ? `${escapeHtml('Sí')} <span class="semi-ficha__chip semi-ficha__chip--warn"><span class="material-symbols-outlined" aria-hidden="true">warning</span> Envejecida 60+</span>`
+                    ? `${escapeHtml('Sí')} <span class="semi-ficha__chip semi-ficha__chip--warn"><span class="material-symbols-outlined" aria-hidden="true">warning</span> Antigüedad 60+</span>`
                     : escapeHtml('No'),
                 )}
               </div>
@@ -2368,7 +3936,7 @@ function ensureSemiKpiDrawer() {
         <div class="ops-orders-drawer__row"><span class="lbl">Venta IVA incl.</span><span class="val">${moneyInt(sumVenta)}</span></div>
         <div class="ops-orders-drawer__row"><span class="lbl">Compra guía</span><span class="val">${moneyInt(sumGuia)}</span></div>
         <div class="ops-orders-drawer__row"><span class="lbl">Días prom.</span><span class="val">${avgDays.toLocaleString('es-MX')}</span></div>
-        <div class="ops-orders-drawer__row"><span class="lbl">Envejecidas 60+</span><span class="val">${envejecidas.toLocaleString('es-MX')}</span></div>
+        <div class="ops-orders-drawer__row"><span class="lbl">Antigüedad 60+</span><span class="val">${envejecidas.toLocaleString('es-MX')}</span></div>
         <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
       </div>
       ${block('Marca', 'marca', countByField(rows, (u) => u.marca || 'Sin marca').slice(0, 12))}
@@ -2459,7 +4027,7 @@ function ensureSemiKpiDrawer() {
             <span>${escapeHtml(u.color || '—')}</span>
             <span>${escapeHtml(u.ubicacion || '—')}</span>
           </div>
-          <p class="ops-orders-drawer__sub">Inv. ${escapeHtml(u.noInventario != null ? String(u.noInventario) : '—')}${u.envejecida ? ' · Envejecida' : ''}${u.tomaUsn ? ' · Toma USN' : ''} · Clic para ver detalle</p>
+          <p class="ops-orders-drawer__sub">Inv. ${escapeHtml(u.noInventario != null ? String(u.noInventario) : '—')}${u.envejecida ? ' · Antigüedad alta' : ''}${u.tomaUsn ? ' · Toma USN' : ''} · Clic para ver detalle</p>
           <span class="ops-orders-drawer__open-hint">
             <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
             Abrir detalle
@@ -2765,15 +4333,15 @@ function isoDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-function initIntercambiosHistoricoDates() {
+function initIntercambiosHistoricoDates({ force = false } = {}) {
   const inicioEl = document.getElementById('intHistFechaInicio');
   const finEl = document.getElementById('intHistFechaFin');
   if (!inicioEl || !finEl) return;
   const now = new Date();
   // Incluye año anterior: los intercambios de planta suelen verse mejor en ventana amplia.
   const start = new Date(now.getFullYear() - 1, 0, 1);
-  if (!inicioEl.value) inicioEl.value = isoDate(start);
-  if (!finEl.value) finEl.value = isoDate(now);
+  if (force || !inicioEl.value) inicioEl.value = isoDate(start);
+  if (force || !finEl.value) finEl.value = isoDate(now);
 }
 
 function formatIntHistDate(v) {
@@ -3075,10 +4643,14 @@ async function refreshInventoryPageQuiet() {
   if (inventoryQuietRefreshing) return;
   inventoryQuietRefreshing = true;
   try {
-    await Promise.all([
+    const jobs = [
       loadInventory({ quiet: true }),
       loadIntercambiosHistorico({ quiet: true }),
-    ]);
+      loadVendidosAnalisis({ quiet: true }),
+      loadEntregasSinPreviasMes({ quiet: true }),
+    ];
+    if (inventoryScope === 'postventa') jobs.push(loadInventoryPostventa({ force: true }));
+    await Promise.all(jobs);
   } finally {
     inventoryQuietRefreshing = false;
   }
@@ -3102,6 +4674,60 @@ document.getElementById('buscarIntHist')?.addEventListener('input', (e) => {
   intHistSearch = e.target.value || '';
   renderIntercambiosHistoricoTable();
 });
+document.getElementById('buscarAgeingInv')?.addEventListener('input', (e) => {
+  ageingSearch = e.target.value || '';
+  renderAgeingSlowTable();
+});
+document.getElementById('buscarVendidosInv')?.addEventListener('input', (e) => {
+  vendidosSearch = e.target.value || '';
+  renderVendidosTable();
+});
+document.getElementById('vendidosCarlineFilterTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-vendidos-filter]');
+  if (!btn) return;
+  vendidosCarlineFilter = btn.dataset.vendidosFilter || 'all';
+  document.querySelectorAll('#vendidosCarlineFilterTabs [data-vendidos-filter]').forEach((el) => {
+    const on = el.dataset.vendidosFilter === vendidosCarlineFilter;
+    el.classList.toggle('is-active', on);
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  renderVendidosTable();
+});
+document.getElementById('vendidosPeriod')?.addEventListener('change', () => {
+  const input = document.getElementById('vendidosPeriod');
+  const raw = String(input?.value || '').trim();
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    const year = Number(raw.slice(0, 4));
+    const month = Number(raw.slice(5, 7));
+    const last = new Date(year, month, 0).getDate();
+    const mm = String(month).padStart(2, '0');
+    const fi = `${year}-${mm}-01`;
+    const ff = `${year}-${mm}-${String(last).padStart(2, '0')}`;
+    const fiEl = document.getElementById('fechaInicio');
+    const ffEl = document.getElementById('fechaFin');
+    if (fiEl) fiEl.value = fi;
+    if (ffEl) ffEl.value = ff;
+    Dashboard.updateCompactFilterLabels?.();
+  }
+  vendidosCarlineFilter = 'all';
+  loadVendidosAnalisis({ quiet: false });
+});
+document.getElementById('autosVendidosInsightsCompactGoto')?.addEventListener('click', () => {
+  gotoCierreUnidadesVendidas();
+});
+document.getElementById('ageingCarlineFilterTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ageing-filter]');
+  if (!btn) return;
+  ageingCarlineFilter = btn.dataset.ageingFilter || 'all';
+  document.querySelectorAll('#ageingCarlineFilterTabs [data-ageing-filter]').forEach((el) => {
+    const on = el.dataset.ageingFilter === ageingCarlineFilter;
+    el.classList.toggle('is-active', on);
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  renderAgeingSlowTable();
+});
 document.getElementById('intHistFilterTabs')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-int-filter]');
   if (!btn) return;
@@ -3117,12 +4743,35 @@ document.getElementById('intHistFilterTabs')?.addEventListener('click', (e) => {
 const params = new URLSearchParams(window.location.search);
 if (params.get('tab') === 'postventa') setInventoryScope('postventa');
 else if (params.get('tab') === 'seminuevos') setInventoryScope('seminuevos');
+else if (params.get('tab') === 'cierre') setInventoryScope('cierre');
 else setInventoryScope('autos');
 
 initPlanPisoKpiCard();
-initIntercambiosHistoricoDates();
+initIntercambiosHistoricoDates({ force: true });
+initVendidosPeriod();
+Dashboard.initDateFilter?.({
+  onConsult: async (fi, ff) => {
+    const vendidosInput = document.getElementById('vendidosPeriod');
+    if (vendidosInput && fi.slice(0, 7) === ff.slice(0, 7)) vendidosInput.value = fi.slice(0, 7);
 
-// Carga inicial en paralelo: inventario puede mostrar overlay; intercambios no bloquea el resto.
-loadInventory({ quiet: false });
-loadIntercambiosHistorico({ quiet: false });
+    // Intercambios usa su propio rango (año anterior → hoy). No lo pisa el filtro global.
+    initIntercambiosHistoricoDates();
+
+    await Promise.all([
+      loadInventory({ quiet: false }),
+      loadIntercambiosHistorico({ quiet: false }),
+      loadVendidosAnalisis({ quiet: false }),
+      loadEntregasSinPreviasMes({ quiet: false }),
+      inventoryScope === 'postventa' ? loadInventoryPostventa({ force: true }) : Promise.resolve(),
+    ]);
+  },
+  getInitialRange: (fromUrl) => {
+    if (fromUrl?.fechaInicio && fromUrl?.fechaFin) return fromUrl;
+    return inventoryDefaultDateRange();
+  },
+});
+if (!params.get('fechaInicio') && !params.get('fechaFin')) {
+  const defaultPreset = new Date().getDate() <= 2 ? 'mes-anterior' : 'mes-actual';
+  Dashboard.setActivePresetChip?.(defaultPreset);
+}
 startInventoryAutoRefresh();

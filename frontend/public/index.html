@@ -6,7 +6,7 @@
 <title>Resumen Ejecutivo | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=45" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=95" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="overview">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -62,19 +62,50 @@
 </section>
 
 <section class="section-panel dashboard-section">
-<h3 class="section-title">Tablero ejecutivo</h3>
-<p class="section-subtitle">Resumen ejecutivo para alta dirección · ventas, inventario, taller y rentabilidad</p>
+<div class="section-head-row summary-head-row">
+  <div>
+    <h3 class="section-title">Tablero ejecutivo</h3>
+    <p class="section-subtitle" id="summaryHeadSubtitle">Resumen fijo de tu perfil con KPIs y gráficas · abajo el monitoreo que configures</p>
+  </div>
+  <button type="button" class="btn-secondary summary-customize-btn" id="btnCustomizeSummary" aria-pressed="false">
+    <span class="material-symbols-outlined">settings</span>
+    Configurar
+  </button>
+</div>
 <div class="kpi-summary" id="financialSummary"></div>
 </section>
+
+<dialog class="summary-prefs-dialog" id="summaryPrefsDialog">
+  <form method="dialog" class="summary-prefs-panel" id="summaryPrefsForm">
+    <header class="summary-prefs-panel__head">
+      <div>
+        <h2>Monitoreo de otras áreas</h2>
+        <p>Elige un KPI adicional. Los indicadores de tu perfil ya están fijos y no se pueden cambiar aquí.</p>
+      </div>
+      <button type="button" class="summary-prefs-close" id="btnCloseSummaryPrefs" aria-label="Cerrar">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </header>
+    <div class="summary-prefs-panel__body" id="summaryPrefsBody"></div>
+    <footer class="summary-prefs-panel__foot">
+      <button type="button" class="btn-ghost" id="btnResetSummaryPrefs">Vaciar todos</button>
+      <div class="summary-prefs-panel__actions">
+        <button type="button" class="btn-secondary" id="btnCancelSummaryPrefs">Cancelar</button>
+        <button type="submit" class="btn-primary" id="btnSaveSummaryPrefs">Guardar resumen</button>
+      </div>
+    </footer>
+  </form>
+</dialog>
 </div>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
-<script src="/js/shared.js?v=5"></script>
-<script src="/js/sidebar.js?v=10"></script>
-<script src="/js/topbar.js?v=17"></script>
+<script src="/js/shared.js?v=6"></script>
+<script src="/js/sidebar.js?v=11"></script>
+<script src="/js/topbar.js?v=18"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=4"></script>
+<script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/overview.js?v=15"></script>
+<script src="/js/overview.js?v=35"></script>
 </body>
 </html>

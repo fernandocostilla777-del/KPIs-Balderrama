@@ -170,7 +170,7 @@ window.AssistantChat = (function () {
     ],
     inventory: [
       '¿Cómo va inventario y plan piso?',
-      'Unidades envejecidas +60 días disponibles',
+      'Antigüedad alta (+60 días) disponible',
       'Stock sin previas de taller',
       'Comparar inventario nuevos vs seminuevos',
       '¿Qué modelos concentran más interés de plan piso?',

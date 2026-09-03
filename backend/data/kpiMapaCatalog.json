@@ -1,0 +1,855 @@
+{
+  "source": "Catálogo de KPI´s ABP 2026",
+  "sheet": "Mapa de indicadores",
+  "generatedAt": "2026-08-17T20:39:01.781Z",
+  "count": 47,
+  "items": [
+    {
+      "id": "SV-4-0",
+      "clave": "SV-4",
+      "perspectiva": "Signos Vitales",
+      "indicador": "Crecimiento",
+      "kpi": "Variación porcentual Utilidad Neta",
+      "formula": "Utilida neta nueva/Utilidad neta anterior",
+      "interpretacion": "En que % crecieron las utilidades",
+      "valorControl": "Igual al proyectado en presupuesto",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Contador General",
+        "Gerente General"
+      ]
+    },
+    {
+      "id": "SV-3-0",
+      "clave": "SV-3",
+      "perspectiva": "Signos Vitales",
+      "indicador": "Liquidez",
+      "kpi": "Ratio de liqidez",
+      "formula": "Activo circulante/Pasivo circualnte",
+      "interpretacion": "Cuantas veces el AC cubre el PC",
+      "valorControl": "Entre 1.5 y 2.0",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Contador General",
+        "Gerente General"
+      ]
+    },
+    {
+      "id": "SV-2-0",
+      "clave": "SV-2",
+      "perspectiva": "Signos Vitales",
+      "indicador": "Endeudamiento",
+      "kpi": "Ratio de endeudamiento",
+      "formula": "Pasivo/Activo",
+      "interpretacion": "Que % del activo está financiado con deuda",
+      "valorControl": "Entre 0.4 y 0.6",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Contador General",
+        "Gerente General"
+      ]
+    },
+    {
+      "id": "SV-1-0",
+      "clave": "SV-1",
+      "perspectiva": "Signos Vitales",
+      "indicador": "Rentabilidad",
+      "kpi": "ROE (Return on Equity)",
+      "formula": "Utilidad neta/Capital",
+      "interpretacion": "Que % de capital retornó la empresa a sus dueños",
+      "valorControl": "Igual al proyectado en presupuesto",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Contador General",
+        "Gerente General"
+      ]
+    },
+    {
+      "id": "F-8-0",
+      "clave": "F-8",
+      "perspectiva": "Financiera",
+      "indicador": "Crecimiento EBIT",
+      "kpi": "Crecimiento porcentual del EBIT",
+      "formula": "(EBIT actual − EBIT del periodo comparable) ÷ EBIT del periodo comparable × 100",
+      "interpretacion": "Mide el crecimiento o contracción de la utilidad operativa antes de intereses e impuestos.",
+      "valorControl": "≥ crecimiento presupuestado; caída >10% interanual o EBIT < gastos por intereses = alerta.",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Gerencia General",
+        "Gerencia Tácticas",
+        "Contador General"
+      ]
+    },
+    {
+      "id": "F-7-0",
+      "clave": "F-7",
+      "perspectiva": "Financiera",
+      "indicador": "Calidad de la deuda",
+      "kpi": "Ratio de Calidad de Deuda",
+      "formula": "Pasivo circulante ÷ Pasivo total × 100",
+      "interpretacion": "Porcentaje de la deuda total que vence en el corto plazo.",
+      "valorControl": "≤ meta de estructura de deuda; aumento >5 p.p. vs. presupuesto = alerta.",
+      "responsable": "Tesorero",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Gerencia General",
+        "Gerencia Tácticas",
+        "Contador General"
+      ]
+    },
+    {
+      "id": "F-6-0",
+      "clave": "F-6",
+      "perspectiva": "Financiera",
+      "indicador": "Margen EBITDA",
+      "kpi": "Margen EBITDA",
+      "formula": "(EBIT + Depreciación + Amortización) ÷ Ventas netas × 100",
+      "interpretacion": "Porcentaje de las ventas que se convierte en EBITDA antes de depreciación, amortización, intereses e impuestos.",
+      "valorControl": "≥ margen EBITDA presupuestado; caída >2 p.p. vs. meta = alerta.",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Gerencia General",
+        "Gerencia Tácticas",
+        "Contador General"
+      ]
+    },
+    {
+      "id": "F-5-0",
+      "clave": "F-5",
+      "perspectiva": "Financiera",
+      "indicador": "Eficiencia en la gestión de pagos",
+      "kpi": "Días de Rotación de Pago a Proveedores (DRP)",
+      "formula": "(Cuentas por pagar promedio / Compras a crédito) × Días del periodo",
+      "interpretacion": "Días promedio que tarda la empresa en pagar a proveedores y grado de aprovechamiento del crédito comercial.",
+      "valorControl": "Dentro del plazo pactado; referencia 30–45 días. Vencimiento excedido = alerta.",
+      "responsable": "Tesorero",
+      "usadoPor": [
+        "Director",
+        "Gerencia Administrativa",
+        "Finanzas",
+        "Tesorería",
+        "Cuentas por Pagar"
+      ]
+    },
+    {
+      "id": "F-4-0",
+      "clave": "F-4",
+      "perspectiva": "Financiera",
+      "indicador": "Eficiencia en la recuperación de cartera",
+      "kpi": "Días de Rotación de Cuentas por Cobrar (DRC)",
+      "formula": "(Cuentas por cobrar promedio / Ventas a crédito) × Días del periodo",
+      "interpretacion": "Días promedio que tarda la empresa en convertir sus cuentas por cobrar en efectivo.",
+      "valorControl": "≤ plazo de crédito otorgado; referencia ≤30 días. >45 días = alerta.",
+      "responsable": "Crédito y Cobranza",
+      "usadoPor": [
+        "Director",
+        "Gerencia Administrativa",
+        "Finanzas",
+        "Crédito y Cobranza",
+        "Contabilidad"
+      ]
+    },
+    {
+      "id": "F-3-0",
+      "clave": "F-3",
+      "perspectiva": "Financiera",
+      "indicador": "Eficiencia del capital de trabajo",
+      "kpi": "Ciclo de efectivo",
+      "formula": "DRI + DRC − DRP",
+      "interpretacion": "Días durante los cuales los recursos permanecen comprometidos en la operación antes de regresar a efectivo.",
+      "valorControl": "≤30 días = objetivo; 31–45 = atención; >45 = alerta.",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Gerencia Administrativa",
+        "Finanzas",
+        "Contabilidad"
+      ]
+    },
+    {
+      "id": "F-2-0",
+      "clave": "F-2",
+      "perspectiva": "Financiera",
+      "indicador": "Liquidez inmediata",
+      "kpi": "Ratio de disponibilidad inmediata (CyB/PC)",
+      "formula": "Caja y Bancos / Pasivo Circulante",
+      "interpretacion": "Proporción del pasivo circulante que puede cubrirse de inmediato únicamente con caja y bancos.",
+      "valorControl": "≥0.33 = objetivo; 0.20–0.32 = atención; <0.20 = alerta.",
+      "responsable": "Tesorero",
+      "usadoPor": [
+        "Director",
+        "Gerencia Administrativa",
+        "Finanzas",
+        "Tesorería",
+        "Contabilidad"
+      ]
+    },
+    {
+      "id": "F-1-0",
+      "clave": "F-1",
+      "perspectiva": "Financiera",
+      "indicador": "Apalancamiento financiero",
+      "kpi": "Factor de apalancamiento sobre ROE",
+      "formula": "(Activo total ÷ Capital contable) × (EBT ÷ EBIT)",
+      "interpretacion": "Mide el efecto combinado del apalancamiento y del costo financiero sobre el ROE antes de impuestos.",
+      "valorControl": "≥1.00 con EBIT y EBT positivos = apalancamiento favorable; <1.00 = reduce el retorno. Revisar junto con endeudamiento y cobertura de intereses.",
+      "responsable": "Contador General",
+      "usadoPor": [
+        "Director",
+        "Auditor",
+        "Data Manager",
+        "Gerencia General",
+        "Gerencia Tácticas",
+        "Contador General"
+      ]
+    },
+    {
+      "id": "C-6-0",
+      "clave": "C-6",
+      "perspectiva": "Comercial",
+      "indicador": "Crecimiento en Ventas",
+      "kpi": "Crecimiento porcentual de ventas",
+      "formula": "(Ventas netas del periodo actual − Ventas netas del periodo comparable) ÷ Ventas netas del periodo comparable × 100",
+      "interpretacion": "Mide el crecimiento o contracción de las ventas netas frente al periodo comparable.",
+      "valorControl": "≥ crecimiento presupuestado; caída >10% vs. periodo comparable = alerta.",
+      "responsable": "Gerente Comercial Ventas",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "C-5-0",
+      "clave": "C-5",
+      "perspectiva": "Comercial",
+      "indicador": "Satisfacción al cliente",
+      "kpi": "NPS / Índice de satisfacción del cliente (CSI)",
+      "formula": "NPS = % Promotores − % Detractores; CSI = Calificación obtenida ÷ Calificación máxima × 100",
+      "interpretacion": "Mide la percepción del cliente y su disposición a recomendar o volver a comprar.",
+      "valorControl": "≥ meta de la marca; caída >5 p.p. vs. periodo anterior = alerta.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "CRM",
+        "Experiencia Cliente",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "C-4-0",
+      "clave": "C-4",
+      "perspectiva": "Comercial",
+      "indicador": "Ingresos Financieros",
+      "kpi": "Ingreso financiero promedio por unidad (PVR F&I)",
+      "formula": "Ingresos financieros y comisiones F&I ÷ unidades retail vendidas",
+      "interpretacion": "Mide cuánto ingreso financiero adicional genera en promedio cada unidad vendida.",
+      "valorControl": "≥ presupuesto por unidad; caída >10% vs. meta = alerta.",
+      "responsable": "Gerente F&I",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "F&I",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "C-3-0",
+      "clave": "C-3",
+      "perspectiva": "Comercial",
+      "indicador": "Rotación de inventario",
+      "kpi": "Días de Rotación de Inventario (DRI)",
+      "formula": "(Inventario promedio ÷ Costo de ventas) × días del periodo (365 anual)",
+      "interpretacion": "Mide los días promedio que el inventario permanece inmovilizado antes de convertirse en venta.",
+      "valorControl": "45–60 días = objetivo; 61–90 = atención; >90 días = alerta crítica.",
+      "responsable": "Logística de Inventarios e Intercambios",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Inventarios",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "C-2-0",
+      "clave": "C-2",
+      "perspectiva": "Comercial",
+      "indicador": "Margen bruto",
+      "kpi": "Margen bruto porcentual",
+      "formula": "Utilidad bruta ÷ ventas netas × 100",
+      "interpretacion": "Indica qué porcentaje de las ventas permanece después del costo directo de las unidades/productos vendidos.",
+      "valorControl": "≥ margen presupuestado; disminución >2 p.p. vs. meta = alerta.",
+      "responsable": "Gerente Comercial Ventas",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "C-1-0",
+      "clave": "C-1",
+      "perspectiva": "Comercial",
+      "indicador": "Gastos variables",
+      "kpi": "Gastos variables sobre ventas",
+      "formula": "Gastos variables ÷ ventas netas × 100",
+      "interpretacion": "Mide qué proporción de las ventas se consume en gastos que varían con el nivel de operación comercial.",
+      "valorControl": "≤ presupuesto; desviación >2 p.p. sobre la meta = alerta.",
+      "responsable": "Gerente Comercial Ventas",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-6-0",
+      "clave": "P-6",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de recompra",
+      "kpi": "Valor de vida del cliente",
+      "formula": "Margen promedio × frecuencia de compra × permanencia estimada",
+      "interpretacion": "Valor económico esperado que aporta un cliente durante toda su relación comercial.",
+      "valorControl": "≥ CLV objetivo/presupuestado y tendencia creciente.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "CRM",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-6-1",
+      "clave": "P-6",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de recompra",
+      "kpi": "TAC en recompras",
+      "formula": null,
+      "interpretacion": "Porcentaje de clientes elegibles que concretan una nueva compra.",
+      "valorControl": "≥ meta anual; caída >10% vs. periodo comparable = alerta.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "CRM",
+        "BDC",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-6-2",
+      "clave": "P-6",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de recompra",
+      "kpi": "Tiempo promedio entre compras",
+      "formula": "Fecha de nueva compra − fecha de compra anterior",
+      "interpretacion": "Mide la velocidad con la que un cliente vuelve a comprar.",
+      "valorControl": "≤ ciclo de renovación objetivo por segmento/modelo.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Gerencia Comercial",
+        "CRM",
+        "BDC",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-6-3",
+      "clave": "P-6",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de recompra",
+      "kpi": "Retención de clientes",
+      "formula": "Clientes activos o recurrentes ÷ clientes de la cohorte original",
+      "interpretacion": "Porcentaje de clientes de una cohorte que permanecen activos o vuelven a comprar.",
+      "valorControl": "≥ meta de retención; caída >5 p.p. vs. periodo anterior = alerta.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "CRM",
+        "BDC"
+      ]
+    },
+    {
+      "id": "P-5-0",
+      "clave": "P-5",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de entrega",
+      "kpi": "Satisfacción en la entrega",
+      "formula": "Calificación CSI, NPS",
+      "interpretacion": "Evalúa la experiencia del cliente al recibir su unidad.",
+      "valorControl": "Cumplir meta CSI/NPS de la marca; tendencia estable o creciente.",
+      "responsable": "Coordinador de Entregas Matriz",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Experiencia Cliente",
+        "CRM"
+      ]
+    },
+    {
+      "id": "P-5-1",
+      "clave": "P-5",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de entrega",
+      "kpi": "Entregas sin incidencias",
+      "formula": "Entregas sin errores o reclamaciones ÷ entregas totales",
+      "interpretacion": "Mide la calidad operativa de la entrega y la ausencia de errores.",
+      "valorControl": "≥95% sin incidencias.",
+      "responsable": "Coordinador de Entregas Matriz",
+      "usadoPor": [
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "Administración",
+        "CRM"
+      ]
+    },
+    {
+      "id": "P-4-0",
+      "clave": "P-4",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de venta",
+      "kpi": "Mix de ventas",
+      "formula": null,
+      "interpretacion": "Muestra cómo se distribuyen las ventas entre carlines/canales frente al plan comercial.",
+      "valorControl": "Desviación ideal ≤5 p.p. respecto al mix objetivo.",
+      "responsable": "Gerente Comercial Ventas",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-4-1",
+      "clave": "P-4",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de venta",
+      "kpi": "Penetración de financiamiento",
+      "formula": "Ventas GMF ÷ ventas totales",
+      "interpretacion": "Porcentaje de operaciones que se colocan mediante GM Financial.",
+      "valorControl": "≥ objetivo mensual de penetración GMF.",
+      "responsable": "Gerente Comercial Ventas",
+      "usadoPor": [
+        "Director",
+        "Gerencia Comercial",
+        "F&I",
+        "Gerencia Ventas"
+      ]
+    },
+    {
+      "id": "P-4-2",
+      "clave": "P-4",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de venta",
+      "kpi": "Margen bruto por carline",
+      "formula": "Utilidad bruta total ÷ unidades vendidas",
+      "interpretacion": "Utilidad bruta promedio generada por cada unidad vendida de un carline.",
+      "valorControl": "≥ margen presupuestado por carline.",
+      "responsable": "Gerente Comercial Ventas",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-4-3",
+      "clave": "P-4",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de venta",
+      "kpi": "Cumplimiento del objetivo",
+      "formula": "Ventas realizadas ÷ objetivo de ventas",
+      "interpretacion": "Mide qué tanto se alcanzó la meta comercial del periodo.",
+      "valorControl": "≥100% = cumplimiento; 90–99% = atención; <90% = alerta.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Gerencia Ventas"
+      ]
+    },
+    {
+      "id": "P-4-4",
+      "clave": "P-4",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de venta",
+      "kpi": "Tasa de cierre",
+      "formula": "Unidades vendidas ÷ oportunidades atendidas",
+      "interpretacion": "Porcentaje de oportunidades atendidas que terminan en venta.",
+      "valorControl": "≥ objetivo por canal/asesor; caída >10% vs. promedio 3 meses = alerta.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "CRM",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-3-0",
+      "clave": "P-3",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de prospección",
+      "kpi": "Conversión de prospecto a oportunidad",
+      "formula": "Prospectos calificados ÷ prospectos contactados",
+      "interpretacion": "Mide la calidad de la prospección y la capacidad de generar oportunidades reales.",
+      "valorControl": "≥ objetivo por fuente; caída >10% vs. promedio 3 meses = alerta.",
+      "responsable": "Gerencia BDC",
+      "usadoPor": [
+        "Gerencia Comercial",
+        "CRM",
+        "BDC",
+        "Gerencia Ventas",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-3-1",
+      "clave": "P-3",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de prospección",
+      "kpi": "Tasa de asistencia",
+      "formula": "Citas asistidas ÷ citas agendadas",
+      "interpretacion": "Porcentaje de citas agendadas que realmente se presentan.",
+      "valorControl": "≥ meta por canal; caída >5 p.p. vs. periodo anterior = alerta.",
+      "responsable": "Gerente de MKT",
+      "usadoPor": [
+        "CRM",
+        "BDC",
+        "Gerencia Ventas",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-3-2",
+      "clave": "P-3",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de prospección",
+      "kpi": "Tasa de citas generadas",
+      "formula": "Citas agendadas ÷ prospectos contactados",
+      "interpretacion": "Mide la efectividad del contacto para convertir prospectos en citas.",
+      "valorControl": "≥ meta por fuente y asesor.",
+      "responsable": "Gerente de MKT",
+      "usadoPor": [
+        "CRM",
+        "BDC",
+        "Gerencia Ventas",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-2-0",
+      "clave": "P-2",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de marketing",
+      "kpi": "Costo por lead calificado",
+      "formula": "Inversión de marketing ÷ leads calificados",
+      "interpretacion": "Costo necesario para generar un lead que cumple los criterios de calidad.",
+      "valorControl": "≤ presupuesto/meta por canal; menor es mejor sin deteriorar calidad.",
+      "responsable": "Gerente de MKT",
+      "usadoPor": [
+        "Gerencia Marketing",
+        "Gerencia Comercial",
+        "CRM",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-2-1",
+      "clave": "P-2",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de marketing",
+      "kpi": "Conversión de marketing a venta",
+      "formula": "Ventas originadas por marketing ÷ leads generados",
+      "interpretacion": "Porcentaje de leads de marketing que terminan en venta.",
+      "valorControl": "≥ objetivo por campaña/canal y tendencia creciente.",
+      "responsable": "Gerente de MKT",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Marketing",
+        "Gerencia Comercial",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-2-2",
+      "clave": "P-2",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de marketing",
+      "kpi": "Costo de adquisición de cliente",
+      "formula": "Inversión comercial de marketing ÷ clientes adquiridos",
+      "interpretacion": "Costo promedio requerido para adquirir un cliente nuevo.",
+      "valorControl": "CAC ≤ límite definido por margen/CLV; tendencia decreciente.",
+      "responsable": "Gerente de MKT",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Marketing",
+        "Gerencia Comercial",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-2-3",
+      "clave": "P-2",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de marketing",
+      "kpi": "Participación de ventas por campaña",
+      "formula": "Ventas de la campaña ÷ ventas totales",
+      "interpretacion": "Mide qué proporción de las ventas totales es atribuible a cada campaña.",
+      "valorControl": "Cumplir objetivo de contribución de campaña y justificar inversión.",
+      "responsable": "Gerente de MKT",
+      "usadoPor": [
+        "Gerencia Marketing",
+        "Gerencia Comercial",
+        "CRM",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-1-0",
+      "clave": "P-1",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de compra de unidades",
+      "kpi": "Costo financiero del inventario",
+      "formula": "Intereses y costos de almacenamiento ÷ unidades en inventario",
+      "interpretacion": "Costo financiero promedio asociado a mantener una unidad disponible para venta.",
+      "valorControl": "≤ presupuesto; incremento por antigüedad = alerta.",
+      "responsable": "Logística de Inventarios e Intercambios",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-1-1",
+      "clave": "P-1",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de compra de unidades",
+      "kpi": "Mix de demanda",
+      "formula": "Unidades compradas de modelos demandados ÷ total de unidades compradas",
+      "interpretacion": "Evalúa si las compras de inventario corresponden al mix que realmente demanda el mercado.",
+      "valorControl": "≥90% alineado al mix objetivo o pronóstico.",
+      "responsable": "Logística de Inventarios e Intercambios",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Compras/Inventarios",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-1-2",
+      "clave": "P-1",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de compra de unidades",
+      "kpi": "Rotación de inventario",
+      "formula": "Unidades vendidas ÷ inventario promedio",
+      "interpretacion": "Número de veces que el inventario promedio se vende y repone en un año.",
+      "valorControl": "≥6 rotaciones/año como referencia de ≈60 días; ajustar a meta de la agencia.",
+      "responsable": "Logística de Inventarios e Intercambios",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Inventarios",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-1-3",
+      "clave": "P-1",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de compra de unidades",
+      "kpi": "Inventario envejecido",
+      "formula": "Unidades con más de 60/90 días ÷ inventario total",
+      "interpretacion": "Porcentaje del inventario que supera los rangos de antigüedad definidos.",
+      "valorControl": "≤ meta; inventario >90 días requiere plan de salida inmediato.",
+      "responsable": "Logística de Inventarios e Intercambios",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Inventarios",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "P-1-4",
+      "clave": "P-1",
+      "perspectiva": "Procesos",
+      "indicador": "Proceso de compra de unidades",
+      "kpi": "Días promedio de inventario",
+      "formula": "Inventario promedio ÷ ventas promedio diarias",
+      "interpretacion": "Días promedio que una unidad permanece en inventario antes de venderse.",
+      "valorControl": "45–60 días objetivo; >90 días = alerta crítica.",
+      "responsable": "Logística de Inventarios e Intercambios",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Inventarios",
+        "Contabilidad",
+        "Data Manager"
+      ]
+    },
+    {
+      "id": "RH-6-0",
+      "clave": "RH-6",
+      "perspectiva": "Desarrollo organizacional",
+      "indicador": "% Capacitación Gerentes de ventas y Negocios (de acuerdo a su plan de carrera)",
+      "kpi": "Cumplimiento del plan de capacitación gerencial",
+      "formula": "Capacitaciones completadas del plan ÷ capacitaciones programadas del plan × 100",
+      "interpretacion": "Mide el grado de cumplimiento del plan de desarrollo de los Gerentes de Ventas y Negocios y su preparación para gestionar ventas, rentabilidad y productos financieros.",
+      "valorControl": "≥95% de cumplimiento; 90–94% = seguimiento; <90% = alerta.",
+      "responsable": "Gerencia R. H.",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Capital Humano",
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "F&I"
+      ]
+    },
+    {
+      "id": "RH-5-0",
+      "clave": "RH-5",
+      "perspectiva": "Desarrollo organizacional",
+      "indicador": "% de Capacitación Administrativos (de acuerdo a su plan de carrera)",
+      "kpi": "Cumplimiento del plan de capacitación administrativa",
+      "formula": "Capacitaciones completadas del plan ÷ capacitaciones programadas del plan × 100",
+      "interpretacion": "Mide el avance de capacitación del personal administrativo conforme a su plan de carrera, buscando fortalecer eficiencia, calidad y continuidad operativa.",
+      "valorControl": "≥95% de cumplimiento; 90–94% = seguimiento; <90% = alerta.",
+      "responsable": "Gerencia R. H.",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Capital Humano",
+        "Administración",
+        "Gerentes de área"
+      ]
+    },
+    {
+      "id": "RH-4-0",
+      "clave": "RH-4",
+      "perspectiva": "Desarrollo organizacional",
+      "indicador": "% Capacitación Ejecutivos por Fuerza de Ventas",
+      "kpi": "Cumplimiento de capacitación de ejecutivos",
+      "formula": "Capacitaciones completadas por los ejecutivos ÷ capacitaciones programadas para los ejecutivos × 100",
+      "interpretacion": "Mide el cumplimiento de la capacitación comercial por fuerza de ventas y permite relacionar el desarrollo de habilidades con prospección, cierre y crecimiento.",
+      "valorControl": "≥95% de cumplimiento por fuerza; <90% = alerta.",
+      "responsable": "Gerencia R. H.",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Capital Humano",
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "BDC"
+      ]
+    },
+    {
+      "id": "RH-3-0",
+      "clave": "RH-3",
+      "perspectiva": "Desarrollo organizacional",
+      "indicador": "Rotación de personal Administrativos x área",
+      "kpi": "Tasa de rotación de personal administrativo",
+      "formula": "Bajas de personal administrativo del periodo ÷ plantilla administrativa promedio del periodo × 100",
+      "interpretacion": "Mide qué proporción de la plantilla administrativa promedio sale de la organización en el periodo y permite identificar áreas con problemas de permanencia.",
+      "valorControl": "≤1.5% mensual o meta interna; >2.5% mensual = alerta.",
+      "responsable": "Gerencia R. H.",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Capital Humano",
+        "Administración",
+        "Gerentes de área"
+      ]
+    },
+    {
+      "id": "RH-2-0",
+      "clave": "RH-2",
+      "perspectiva": "Desarrollo organizacional",
+      "indicador": "Rotación de personal Ejecutivos x Fuerza de ventas",
+      "kpi": "Tasa de rotación de ejecutivos de ventas",
+      "formula": "Bajas de ejecutivos del periodo ÷ plantilla promedio de ejecutivos del periodo × 100",
+      "interpretacion": "Mide la pérdida de talento comercial por fuerza de ventas y su posible impacto en cobertura, prospección, productividad y cumplimiento del objetivo.",
+      "valorControl": "≤2.5% mensual o meta interna; >4% mensual = alerta.",
+      "responsable": "Gerencia R. H.",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Capital Humano",
+        "Gerencia Comercial",
+        "Gerencia Ventas"
+      ]
+    },
+    {
+      "id": "RH-1-0",
+      "clave": "RH-1",
+      "perspectiva": "Desarrollo organizacional",
+      "indicador": "Cumplimiento de plantilla autorizada",
+      "kpi": "Cobertura de plantilla autorizada",
+      "formula": "Plazas ocupadas ÷ plazas autorizadas × 100",
+      "interpretacion": "Mide si la organización cuenta con la dotación de personal autorizada para sostener la operación y cumplir los objetivos comerciales y de servicio.",
+      "valorControl": "95–100% = objetivo; <90% = alerta; >100% requiere autorización.",
+      "responsable": "Gerencia R. H.",
+      "usadoPor": [
+        "Director",
+        "Gerencia General",
+        "Capital Humano",
+        "Gerentes de área"
+      ]
+    }
+  ]
+}

@@ -79,6 +79,7 @@ La carpeta `desktop/` envuelve el mismo backend + frontend en una ventana nativa
 npm run install:all
 npm run desktop          # desarrollo (abre la app)
 npm run dist:win         # instalador Windows (.exe NSIS + portable)
+npm run publish:win      # sube el .exe a Railway para actualizar PCs remotas
 npm run dist:mac         # .dmg — ejecutar en un Mac (no desde Windows)
 ```
 

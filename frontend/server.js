@@ -47,6 +47,9 @@ app.use(createProxyMiddleware({
   changeOrigin: true,
   pathFilter: '/api',
   cookieDomainRewrite: { '*': '' },
+  // Cuadre HyP / post-sales pueden tardar >30s en Contpaq+DMS
+  proxyTimeout: 180000,
+  timeout: 180000,
   on: {
     error(err, _req, res) {
       console.error('[Proxy Error]', err.message);
@@ -62,7 +65,15 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(PUBLIC_DIR, {
+  etag: true,
+  maxAge: '7d',
+  setHeaders(res, filePath) {
+    if (/\.html$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 const server = app.listen(PORT, HOST, () => {
   printStartupUrls();

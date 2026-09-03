@@ -1,12 +1,14 @@
 /**
- * ETL: carga "Balderrama Ciclos" (CRM) a base interna SQLite.
+ * ETL histórico: carga completa "Balderrama Ciclos" a SQLite local.
  *
  * Fuente : CSV o XLSX export del CRM (ID_CONTACTO = ID CRM)
- * Destino: backend/data/crm-ciclos.db  · tabla crm_actividades
+ * Destino: backend/data/crm-ciclos.db  · tabla crm_actividades (archivo histórico)
  *
- * Uso:
- *   node backend/scripts/etl-crm-ciclos.js "C:/ruta/Balderrama acumulados ciclos.xlsx"
- *   node backend/scripts/etl-crm-ciclos.js "C:/ruta/Balderrama Ciclos.csv"
+ * Para seguir alimentando el embudo BDC y el histórico local use:
+ *   node backend/scripts/ingest-crm-ciclos-railway.js "<export reciente>"
+ *
+ * Uso (solo reconstrucción histórica — borra y recrea crm_actividades):
+ *   node backend/scripts/etl-crm-ciclos.js --historical "C:/ruta/Balderrama acumulados ciclos.xlsx"
  */
 const fs = require('fs');
 const path = require('path');
@@ -172,7 +174,17 @@ function loadFromXlsx(xlsxPath, insertMany) {
 }
 
 async function run() {
-  const sourcePath = process.argv[2] || DEFAULT_SOURCE;
+  const args = process.argv.slice(2);
+  const historical = args.includes('--historical');
+  const sourcePath = args.find((a) => a !== '--historical') || DEFAULT_SOURCE;
+
+  if (!historical) {
+    console.error('Este ETL reemplaza la tabla histórica local. Para carga operativa en Railway use:');
+    console.error('  node backend/scripts/ingest-crm-ciclos-railway.js "<export Balderrama Ciclos>"');
+    console.error('Si desea reconstruir el histórico local, agregue --historical');
+    process.exit(1);
+  }
+
   if (!fs.existsSync(sourcePath)) {
     console.error(`No existe el archivo: ${sourcePath}`);
     process.exit(1);
@@ -183,6 +195,7 @@ async function run() {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = OFF');
 
+  console.warn('Modo --historical: se reemplazará crm_actividades en SQLite local.');
   db.exec(`
     DROP TABLE IF EXISTS crm_actividades;
     CREATE TABLE crm_actividades (

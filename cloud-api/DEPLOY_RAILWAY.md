@@ -138,7 +138,30 @@ npm run init-db
 
 ---
 
-## 7. Dominio público y verificación
+## 6.1 Almacén IEMC financiero (F-1…F-7.1)
+
+Si Excel/presupuesto no alcanza para metas de Ventas Nuevos, `cloud-api` guarda parámetros en PostgreSQL:
+
+| Tabla | Uso |
+|---|---|
+| `iemc_financiero_periodos` | Metas por mes (venta económica, gasto controlable, F&I, UOC, carga estructural) |
+| `iemc_gasto_clasificacion` | Prefijos de cuenta: `controlable` / `estructural` / `excluir` |
+| `iemc_financiero_snapshots` | Resultados calculados por KPI (`F-1`…`F-7.1`) |
+
+Las tablas se crean solas al arrancar el servicio (`ensureIemcFinancieroTables`).
+
+```bash
+# Listar periodos capturados
+curl -H "X-API-Key: TU_CLAVE" https://TU-URL.up.railway.app/api/iemc-financiero/periodos
+
+# Guardar metas de un mes
+curl -X PUT -H "X-API-Key: TU_CLAVE" -H "Content-Type: application/json" \
+  -d '{"objetivoVentaEconomica":85000000,"gastoOperativoControlablePpto":4200000,"pvrFiObjetivo":8500}' \
+  https://TU-URL.up.railway.app/api/iemc-financiero/periodos/2026-08
+```
+
+## 7. Dominio público
+ y verificación
 
 1. Servicio **cloud-api** → **Settings** → **Networking** → **Generate Domain**.
 2. Obtendrás una URL como: `https://cloud-api-production-xxxx.up.railway.app`

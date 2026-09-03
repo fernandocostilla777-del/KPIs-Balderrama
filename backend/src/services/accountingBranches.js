@@ -29,6 +29,7 @@ const INCOME_DEFAULT = {
     prefixes: ['0467', '0477', '0480', '0481', '0482', '0483', '0484', '0490', '0491'],
   },
   hyp: { label: 'Ventas hojalatería y pintura', prefixes: ['0470', '0476', '0479'] },
+  financiamiento: { label: 'Ingresos F&I (financiamiento y seguros)', prefixes: ['0800'] },
 };
 
 const COST_DEFAULT = {
@@ -40,6 +41,7 @@ const COST_DEFAULT = {
     prefixes: ['0667', '0677', '0680', '0681', '0682', '0683', '0684', '0690', '0691'],
   },
   hyp: { label: 'Costo hojalatería y pintura', prefixes: ['0670', '0676', '0679'] },
+  financiamiento: { label: 'Costo F&I', prefixes: [] },
 };
 
 const POSTVENTA_AREAS = ['servicio', 'refacciones', 'hyp'];
@@ -126,7 +128,6 @@ function resolveScope(sucursalId = 'todos', areaId = 'todos') {
     costLines,
     expenseDef,
     balancePatterns: segment ? branchBalancePatterns(segment) : null,
-    applyDiscounts: isConsolidated,
   };
 }
 

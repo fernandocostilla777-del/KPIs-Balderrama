@@ -99,6 +99,9 @@ CLOUD_SYNC_API_KEY=la-misma-clave-del-cloud
 | GET | `/api/personal` | Lista personal DMS activo (`categoria`, `subtipo`, `q`, `limit`) |
 | GET | `/api/personal/summary` | Conteos por categoría / subtipo |
 | GET | `/api/personal/:categoria` | Filtra por `VENDEDOR`, `PERSONAL_DMS` o `ASESOR_SERVICIO` |
+| POST | `/api/crm/ingest` | Ingest de ciclos/actividades CRM (histórico acumulativo) |
+| GET | `/api/crm` | Lista actividades (`idContacto`, `limit`, `offset`) |
+| GET | `/api/crm/contactos/:idContacto/historico` | Persona → ciclos → actividades |
 
 Los endpoints `/api/sync/*` usan `X-API-Key`. Los endpoints `/api/mobile/*` usan el token devuelto por `/api/auth/login`; la clave de sincronización nunca debe incluirse en la app.
 

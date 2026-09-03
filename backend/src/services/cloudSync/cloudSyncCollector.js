@@ -5,6 +5,7 @@ const { getInventoryPostventa } = require('../inventoryPostventaService');
 const { getContabilidad } = require('../contabilidadService');
 const { getPostSales } = require('../postSalesService');
 const { getForecast } = require('../forecastService');
+const { getObjetivosResultadosCompleto } = require('../objetivosResultadosService');
 const { getGoals } = require('../salesGoals');
 const crmCiclos = require('../crmCiclosService');
 const userStore = require('../../auth/userStore');
@@ -273,6 +274,30 @@ async function collectCrm({ periodKey, fechaInicio, fechaFin, syncType = 'increm
   };
 }
 
+/**
+ * Tablero de objetivos ya calculado. Se envía como snapshot por periodo para que
+ * la nube no tenga que replicar la lógica de agregación ni el acceso al DMS.
+ */
+async function collectObjetivos({ periodKey, fechaInicio, fechaFin, syncType = 'incremental' } = {}) {
+  const range = resolveRange({ periodKey, fechaInicio, fechaFin });
+  const data = await getObjetivosResultadosCompleto({
+    fechaInicio: range.fechaInicio,
+    fechaFin: range.fechaFin,
+  });
+  return {
+    domain: 'objetivos',
+    syncType,
+    periodKey: range.periodKey,
+    periodStart: range.fechaInicio,
+    periodEnd: range.fechaFin,
+    records: [{ id: range.periodKey, data }],
+    meta: {
+      generadoEn: data.generadoEn || null,
+      metricas: Object.keys(data.resultados || {}).length,
+    },
+  };
+}
+
 /** Usuarios del dashboard web → Cloud API (mismo login móvil). */
 async function collectAuth(_options = {}) {
   const records = userStore.exportCloudSyncRecords();
@@ -299,6 +324,7 @@ const COLLECTORS = {
   postventa: collectPostventa,
   forecast: collectForecast,
   crm: collectCrm,
+  objetivos: collectObjetivos,
   auth: collectAuth,
   personal: collectPersonal,
 };
@@ -317,6 +343,7 @@ module.exports = {
   collectPostventa,
   collectForecast,
   collectCrm,
+  collectObjetivos,
   collectAuth,
   collectPersonal,
   collectDomain,

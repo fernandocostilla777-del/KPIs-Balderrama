@@ -18,6 +18,7 @@ const SYNC_DOMAINS = [
   'contabilidad',
   'crm',
   'postventa',
+  'objetivos',
   'auth',
   'personal',
 ];
@@ -116,10 +117,27 @@ async function syncAuthUsers({ reason = 'manual' } = {}) {
 /**
  * Sincroniza TODOS los dominios del mes en curso en el mismo ciclo.
  */
+async function refreshCrmSheetsForObjetivos() {
+  const sheetsSync = require('../crmSheetsSync');
+  console.log('[cloud-sync] Actualizando tráfico y solicitudes desde Google Sheets');
+  return sheetsSync.runSync({
+    reason: 'cloud-sync',
+    skipCloud: true,
+    etls: ['etl-crm-solicitudes.js', 'etl-crm-trafico-piso.js'],
+  });
+}
+
 async function runFullSync({ reason = 'schedule', syncType = 'incremental' } = {}) {
   const range = getCurrentMonthRange();
   const results = {};
   const at = new Date().toISOString();
+
+  try {
+    results.crmSheets = await refreshCrmSheetsForObjetivos();
+  } catch (err) {
+    results.crmSheets = { ok: false, error: err.message };
+    console.warn('[cloud-sync] No se pudo actualizar Sheets CRM:', err.message);
+  }
 
   for (const domain of SYNC_DOMAINS) {
     const domainSyncType = domain === 'auth' || domain === 'personal' ? 'monthly' : syncType;

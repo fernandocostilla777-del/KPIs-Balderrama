@@ -6,7 +6,7 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=56" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=98" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -100,12 +100,13 @@
 </section>
 
 <nav class="contabilidad-tabs" id="contabilidadMainTabs" aria-label="Secciones de contabilidad">
-<button type="button" class="contabilidad-tab active" data-tab="catalogo">Catálogo de cuentas</button>
-<button type="button" class="contabilidad-tab" data-tab="balance">Balance General</button>
+<button type="button" class="contabilidad-tab" data-tab="catalogo" hidden aria-hidden="true">Catálogo de cuentas</button>
+<button type="button" class="contabilidad-tab active" data-tab="balance">Balance General</button>
 <button type="button" class="contabilidad-tab" data-tab="eeff">EEFF</button>
+<button type="button" class="contabilidad-tab" data-tab="analisis">Análisis financiero</button>
 </nav>
 
-<div id="panelContabilidadCatalogo" class="contabilidad-main-panel">
+<div id="panelContabilidadCatalogo" class="contabilidad-main-panel hidden" hidden aria-hidden="true">
 
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Estado de resultados · Catálogo de cuentas</h3>
@@ -215,7 +216,7 @@
 </div>
 <div class="section-panel table-panel">
 <h3 class="section-title">Ratios financieros</h3>
-<p class="section-subtitle">Márgenes, EBITDA, liquidez y prueba ácida</p>
+<p class="section-subtitle">Márgenes, EBITDA (UAFIDA), liquidez y prueba ácida</p>
 <div id="ratiosEeff" class="kpi-summary"></div>
 <div id="liquidezInterpretacion" class="liquidez-note hidden" aria-live="polite"></div>
 </div>
@@ -234,7 +235,7 @@
 
 </div>
 
-<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid hidden">
+<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid">
 
 <section class="bg-balance-head dashboard-section">
 <div class="bg-balance-head__row">
@@ -267,8 +268,8 @@
 </section>
 
 <section class="bg-indicadores-section dashboard-section">
-<h4 class="bg-composicion-title">Indicadores clave de liquidez y endeudamiento</h4>
-<div id="bgIndicadores" class="bg-indicadores-grid" aria-label="Indicadores"></div>
+<h4 class="bg-composicion-title">Indicadores financieros clave</h4>
+<div id="bgIndicadores" class="bg-indicadores-groups" aria-label="Indicadores de crecimiento, liquidez, endeudamiento y rentabilidad"></div>
 </section>
 
 <section class="bg-analisis-grid" aria-label="Análisis">
@@ -295,6 +296,9 @@
 
 <div id="eeffKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
 <aside id="eeffKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="eeffKpiFloatTitle"></aside>
+
+<div id="afKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
+<aside id="afKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="afKpiFloatTitle"></aside>
 
 <div id="panelContabilidadEeff" class="contabilidad-main-panel hidden">
 
@@ -563,16 +567,47 @@ Exportar CSV
 
 </div>
 
+<div id="panelContabilidadAnalisis" class="contabilidad-main-panel hidden">
+<section class="eeff-edo-overview af-overview" id="afOverview" aria-label="Análisis financiero IEMC">
+  <div class="section-head-row" style="margin-bottom:14px">
+    <div>
+      <h3 class="section-title">Análisis financiero · Ventas nuevos</h3>
+      <p class="section-subtitle">IEMC F-1…F-7.1 · periodo <span id="afPeriodLabel">—</span></p>
+    </div>
+    <span id="afLoading" class="pe-mode-badge hidden">Cargando…</span>
+  </div>
+  <p id="afEmpty" class="liquidez-note hidden" aria-live="polite"></p>
+  <div class="eeff-edo-kpi-row af-kpi-row" id="afKpiPrimary"></div>
+  <div id="afKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+  <p class="eeff-edo-footnote" id="afFootnote">
+    <span class="material-symbols-outlined" aria-hidden="true">info</span>
+    Clic en un KPI para ver fórmula, numerador/denominador, componentes y meta · cifras en MXN
+  </p>
+</section>
+
+<section class="section-panel dashboard-section">
+  <h3 class="section-title">Lectura del marco</h3>
+  <p class="section-subtitle">F-1 venta económica · F-2/F-2.1 mix y brecha de margen · F-3/F-3.1 gasto operativo · F-4/F-4.1 F&amp;I · F-5 cobertura plan piso · F-6 crecimiento UOC · F-7/F-7.1 carga estructural</p>
+  <div class="af-legend">
+    <span class="af-kpi__status af-kpi__status--completo">Completo</span>
+    <span class="af-kpi__status af-kpi__status--parcial">Parcial (proxy o sin clasificación)</span>
+    <span class="af-kpi__status af-kpi__status--pendiente_meta">Falta meta</span>
+  </div>
+</section>
+</div>
+
 </div>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=6"></script>
-<script src="/js/sidebar.js?v=10"></script>
-<script src="/js/topbar.js?v=17"></script>
+<script src="/js/sidebar.js?v=11"></script>
+<script src="/js/topbar.js?v=18"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/kpi-insights.js?v=4"></script>
+<script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/eeff.js?v=29"></script>
-<script src="/js/contabilidad.js?v=50"></script>
+<script src="/js/eeff.js?v=31"></script>
+<script src="/js/analisisFinanciero.js?v=3"></script>
+<script src="/js/contabilidad.js?v=72"></script>
 </body>
 </html>

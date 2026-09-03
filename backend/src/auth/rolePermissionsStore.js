@@ -15,9 +15,9 @@ const PAGE_CATALOG = [
   {
     id: 'sales',
     label: 'Ventas',
-    description: 'Ventas, financiamiento y CRM comercial.',
+    description: 'Ventas, financiamiento, CRM y objetivos comerciales.',
     homePath: '/sales.html',
-    apiPrefixes: ['/ventas', '/crm'],
+    apiPrefixes: ['/ventas', '/crm', '/objetivos-resultados'],
   },
   {
     id: 'post-sales',
@@ -29,7 +29,7 @@ const PAGE_CATALOG = [
   {
     id: 'inventory',
     label: 'Inventario',
-    description: 'Inventario de unidades y postventa.',
+    description: 'Autos nuevos, cierre de unidades vendidas, seminuevos y postventa.',
     homePath: '/inventory.html',
     apiPrefixes: ['/inventory'],
   },
@@ -125,7 +125,7 @@ function resolveHomePath(pages) {
 }
 
 function resolveApiPrefixes(pages) {
-  const prefixes = new Set(['/health', '/ai', '/auth/me', '/auth/logout', '/auth/alerts', '/auth/config']);
+  const prefixes = new Set(['/health', '/ai', '/auth/me', '/auth/logout', '/auth/alerts', '/auth/config', '/auth/password-reset']);
   for (const id of pages) {
     for (const p of PAGE_BY_ID[id]?.apiPrefixes || []) prefixes.add(p);
   }

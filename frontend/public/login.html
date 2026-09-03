@@ -6,7 +6,7 @@
 <title>Iniciar sesión | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=45" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=85" rel="stylesheet"/>
 </head>
 <body class="login-body">
 <main class="login-shell">
@@ -30,14 +30,53 @@
         </div>
       </label>
       <p id="loginError" class="login-error hidden" role="alert"></p>
+      <p id="loginSuccess" class="login-success hidden" role="status"></p>
       <button type="submit" class="login-submit" id="btnLogin">
         <span class="material-symbols-outlined">login</span>
         <span>Ingresar</span>
       </button>
+      <button type="button" class="login-text-btn" id="btnForgot">¿Olvidaste tu contraseña?</button>
+    </form>
+
+    <form id="resetForm" class="login-form hidden" autocomplete="off">
+      <h2 class="login-panel-title">Restablecer contraseña</h2>
+      <p class="login-lead">Pide un código de 6 dígitos. Administración lo recibe en Mensajes y te lo comparte.</p>
+      <label class="login-field">
+        <span>Usuario</span>
+        <input type="text" id="resetUsername" name="resetUsername" required autocomplete="username" placeholder="Tu usuario"/>
+      </label>
+      <button type="button" class="login-submit login-submit--ghost" id="btnRequestCode">
+        <span class="material-symbols-outlined">forward_to_inbox</span>
+        <span>Enviar código</span>
+      </button>
+      <p id="resetInfo" class="login-success hidden" role="status"></p>
+      <label class="login-field">
+        <span>Código de 6 dígitos</span>
+        <input type="text" id="resetCode" name="resetCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="000000"/>
+      </label>
+      <label class="login-field">
+        <span>Nueva contraseña</span>
+        <div class="login-password-wrap">
+          <input type="password" id="resetPassword" name="resetPassword" autocomplete="new-password" minlength="8"/>
+          <button type="button" class="login-password-toggle" id="btnToggleResetPassword" aria-label="Mostrar contraseña" aria-pressed="false" title="Mostrar contraseña">
+            <span class="material-symbols-outlined" data-reset-password-icon>visibility</span>
+          </button>
+        </div>
+      </label>
+      <label class="login-field">
+        <span>Confirmar contraseña</span>
+        <input type="password" id="resetPassword2" name="resetPassword2" autocomplete="new-password" minlength="8"/>
+      </label>
+      <p id="resetError" class="login-error hidden" role="alert"></p>
+      <button type="submit" class="login-submit" id="btnResetPassword">
+        <span class="material-symbols-outlined">lock_reset</span>
+        <span>Guardar nueva contraseña</span>
+      </button>
+      <button type="button" class="login-text-btn" id="btnBackLogin">Volver a iniciar sesión</button>
     </form>
   </section>
 </main>
 <script src="/js/auth-client.js"></script>
-<script src="/js/login.js?v=2"></script>
+<script src="/js/login.js?v=3"></script>
 </body>
 </html>

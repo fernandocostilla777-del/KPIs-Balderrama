@@ -14,7 +14,11 @@
     "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac",
     "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac --arm64",
     "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac --x64",
-    "dist:mac:universal": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac --universal"
+    "dist:mac:universal": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac --universal",
+    "publish:win": "node scripts/publish-update.js"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^37.2.0",

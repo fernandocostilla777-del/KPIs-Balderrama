@@ -7,9 +7,14 @@ const syncRoutes = require('./src/routes/sync');
 const authRoutes = require('./src/routes/auth');
 const mobileRoutes = require('./src/routes/mobile');
 const personalRoutes = require('./src/routes/personal');
+const objetivosResultadosRoutes = require('./src/routes/objetivosResultados');
 const crmRoutes = require('./src/routes/crm');
+const desktopUpdatesRoutes = require('./src/routes/desktopUpdates');
+const iemcFinancieroRoutes = require('./src/routes/iemcFinanciero');
 const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
 const { ensureCrmCiclosTable } = require('./src/services/crmCiclosCloudService');
+const { ensureCrmTables } = require('./src/services/crmCiclosCloud');
+const { ensureIemcFinancieroTables } = require('./src/services/iemcFinancieroStore');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -27,6 +32,9 @@ const defaultOrigins = [
   'http://localhost:4200',
   'http://127.0.0.1:8100',
   'http://127.0.0.1:4200',
+  'http://localhost:3002',
+  'http://127.0.0.1:3002',
+  'https://objetivos-web-production.up.railway.app',
   'http://localhost',
   'https://localhost',
   'capacitor://localhost',
@@ -44,7 +52,7 @@ app.use((req, res, next) => {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   return next();
 });
@@ -57,7 +65,10 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/mobile', mobileRoutes);
 app.use('/api/personal', personalRoutes);
+app.use('/api/objetivos-resultados', objetivosResultadosRoutes);
 app.use('/api/crm', crmRoutes);
+app.use('/api/iemc-financiero', iemcFinancieroRoutes);
+app.use('/desktop-updates', desktopUpdatesRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error('[cloud-api]', err.message);
@@ -82,6 +93,8 @@ async function ensureSchema() {
   await query('ALTER TABLE sync_batches ADD COLUMN IF NOT EXISTS meta JSONB');
   await ensurePersonalTable();
   await ensureCrmCiclosTable();
+  await ensureCrmTables();
+  await ensureIemcFinancieroTables();
 }
 
 ensureSchema()
@@ -93,6 +106,8 @@ ensureSchema()
       console.log(`  → POST http://localhost:${PORT}/api/sync/ingest`);
       console.log(`  → GET  http://localhost:${PORT}/api/personal`);
       console.log(`  → POST http://localhost:${PORT}/api/crm/ingest`);
+      console.log(`  → GET  http://localhost:${PORT}/api/iemc-financiero/periodos`);
+      console.log(`  → GET  http://localhost:${PORT}/desktop-updates/status`);
       console.log('');
     });
   })

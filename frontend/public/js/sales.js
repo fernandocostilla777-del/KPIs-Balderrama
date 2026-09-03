@@ -1,7 +1,7 @@
 ﻿(function () {
   'use strict';
 
-  const SALES_JS_BUILD = 93;
+  const SALES_JS_BUILD = 99;
   if (window.__salesPageInitBuild === SALES_JS_BUILD) return;
 
   let registrosActuales = [];
@@ -98,75 +98,27 @@
     mixOtrosFloat.classList.add('hidden');
   }
 
-  function openMixOtrosFuerzaFloat(fuerzaRow) {
-    if (!fuerzaRow) return;
-    const el = ensureMixOtrosFloat();
-    const mix = lastMixAutos;
-    const otrosTotal = mix?.otrosTotal || 0;
-    const total = mix?.total || 0;
-    const pctOtros = otrosTotal > 0 ? Math.round((fuerzaRow.count / otrosTotal) * 1000) / 10 : 0;
-    const pctMix = total > 0 ? Math.round((fuerzaRow.count / total) * 1000) / 10 : 0;
-
-    el.querySelector('[data-mix-otros-title]').textContent = fuerzaRow.fuerza || 'Sin asignación';
-    el.querySelector('[data-mix-otros-sub]').textContent =
-      `${fuerzaRow.count} uds · ${pctOtros}% de Otros · ${pctMix}% del mix`;
-
-    const models = fuerzaRow.modelos || [];
-    const body = el.querySelector('[data-mix-otros-body]');
-    if (!models.length) {
-      body.innerHTML = '<p class="toma-float__subtitle">Sin modelos en esta fuerza.</p>';
-    } else {
-      body.innerHTML = `
-        <section class="toma-float__section">
-          <h4>Modelos en Otros</h4>
-          <div class="table-scroll">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Modelo / carline</th>
-                  <th class="cell-num">Uds</th>
-                  <th class="cell-num">% fuerza</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${models.map(([label, n]) => {
-                  const p = fuerzaRow.count > 0 ? Math.round((n / fuerzaRow.count) * 1000) / 10 : 0;
-                  return `<tr>
-                    <td>${escapeHtml(label)}</td>
-                    <td class="cell-num">${n}</td>
-                    <td class="cell-num">${p}%</td>
-                  </tr>`;
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
-        </section>`;
-    }
-
-    if (!el.style.left && !el.style.top) {
-      el.style.left = 'auto';
-      el.style.right = '24px';
-      el.style.top = '96px';
-      el.style.bottom = 'auto';
-    }
-    el.classList.remove('hidden');
+  function openMixOtrosModeloDrawer(modeloLabel) {
+    if (!modeloLabel) return;
+    openMixAutosDrawer({
+      filter: { dim: 'carline', value: modeloLabel, label: modeloLabel },
+    });
   }
 
   function renderMixOtrosDetalle(mix) {
     const controls = document.getElementById('mixOtrosControls');
     const body = document.getElementById('mixOtrosBody');
     const meta = document.getElementById('mixOtrosMeta');
-    const fuerzas = mix?.otrosPorFuerza || [];
+    const modelos = mix?.otrosDetalle || [];
     const otrosTotal = mix?.otrosTotal || 0;
     const total = mix?.total || 0;
-    const modelosCount = (mix?.otrosDetalle || []).length;
 
     if (!controls || !body) return;
 
-    if (!fuerzas.length && !modelosCount) {
+    if (!modelos.length) {
       controls.classList.add('hidden');
       setMixOtrosExpanded(false);
-      body.innerHTML = '<tr class="empty-row"><td colspan="5">Sin unidades en Otros.</td></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="4">Sin unidades en Otros.</td></tr>';
       if (meta) meta.textContent = '';
       return;
     }
@@ -174,23 +126,18 @@
     controls.classList.remove('hidden');
     controls.style.display = 'flex';
     if (meta) {
-      meta.textContent = `${fuerzas.length} fuerzas · ${modelosCount} modelos · ${otrosTotal} uds (${total > 0 ? Math.round((otrosTotal / total) * 1000) / 10 : 0}% del mix)`;
+      meta.textContent = `${modelos.length} modelos · ${otrosTotal} uds (${total > 0 ? Math.round((otrosTotal / total) * 1000) / 10 : 0}% del mix)`;
     }
 
-    if (!fuerzas.length) {
-      body.innerHTML = '<tr class="empty-row"><td colspan="5">Sin desglose por fuerza (faltan asignaciones).</td></tr>';
-      return;
-    }
-
-    body.innerHTML = fuerzas.map((f, idx) => {
-      const pctMix = total > 0 ? Math.round((f.count / total) * 1000) / 10 : 0;
-      const pctOtros = otrosTotal > 0 ? Math.round((f.count / otrosTotal) * 1000) / 10 : 0;
-      return `<tr class="mix-otros-row" data-mix-fuerza-idx="${idx}" title="Ver modelos de esta fuerza" tabindex="0" role="button">
-        <td><strong>${escapeHtml(f.fuerza)}</strong></td>
-        <td class="cell-num">${f.count}</td>
+    body.innerHTML = modelos.map(([label, count], idx) => {
+      const n = Number(count || 0);
+      const pctMix = total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
+      const pctOtros = otrosTotal > 0 ? Math.round((n / otrosTotal) * 1000) / 10 : 0;
+      return `<tr class="mix-otros-row" data-mix-modelo-idx="${idx}" data-mix-modelo="${escapeHtml(label)}" title="Ver unidades de este modelo" tabindex="0" role="button">
+        <td><strong>${escapeHtml(label)}</strong></td>
+        <td class="cell-num">${n}</td>
         <td class="cell-num">${pctMix}%</td>
         <td class="cell-num">${pctOtros}%</td>
-        <td class="cell-num">${(f.modelos || []).length}</td>
       </tr>`;
     }).join('');
   }
@@ -212,18 +159,18 @@
     if (body && body.dataset.bound !== '1') {
       body.dataset.bound = '1';
       const openFromRow = (row) => {
-        const idx = Number(row?.dataset?.mixFuerzaIdx);
+        const idx = Number(row?.dataset?.mixModeloIdx);
         if (!Number.isFinite(idx)) return;
-        const fuerzaRow = lastMixAutos?.otrosPorFuerza?.[idx];
-        if (fuerzaRow) openMixOtrosFuerzaFloat(fuerzaRow);
+        const modelo = lastMixAutos?.otrosDetalle?.[idx]?.[0];
+        if (modelo) openMixOtrosModeloDrawer(modelo);
       };
       body.addEventListener('click', (e) => {
-        const row = e.target.closest('tr[data-mix-fuerza-idx]');
+        const row = e.target.closest('tr[data-mix-modelo-idx]');
         if (row) openFromRow(row);
       });
       body.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
-        const row = e.target.closest('tr[data-mix-fuerza-idx]');
+        const row = e.target.closest('tr[data-mix-modelo-idx]');
         if (!row) return;
         e.preventDefault();
         openFromRow(row);
@@ -413,11 +360,59 @@
     }
   }
 
+  function resolveDataLabelKind(config) {
+    if (!config || config.type === 'doughnut' || config.type === 'pie' || config.type === 'polarArea') {
+      return null;
+    }
+    if (config.type === 'line') return 'line';
+    const opts = config.options || {};
+    const stacked = Boolean(opts.scales?.x?.stacked || opts.scales?.y?.stacked);
+    if (opts.indexAxis === 'y') return stacked ? 'barStacked' : 'barHorizontal';
+    return stacked ? 'barStacked' : 'bar';
+  }
+
+  function withUnitSalesDataLabels(config) {
+    if (!config || typeof ChartDataLabels === 'undefined') return config;
+    const kind = resolveDataLabelKind(config);
+    if (!kind) {
+      config.options = config.options || {};
+      config.options.plugins = {
+        ...(config.options.plugins || {}),
+        datalabels: { display: false, ...(config.options.plugins?.datalabels || {}) },
+      };
+      return config;
+    }
+    const baseLabels = (Dashboard.chartDataLabels || (() => ({ display: true })))(kind);
+    const prev = config.options?.plugins?.datalabels || {};
+    config.options = config.options || {};
+    config.options.plugins = {
+      ...(config.options.plugins || {}),
+      datalabels: { ...baseLabels, ...prev, display: prev.display === false ? false : true },
+    };
+    const already = Array.isArray(config.plugins) && config.plugins.includes(ChartDataLabels);
+    if (!already) {
+      config.plugins = [...(config.plugins || []), ChartDataLabels];
+    }
+    const pad = kind === 'barHorizontal'
+      ? { top: 4, right: 36, bottom: 0, left: 0 }
+      : kind === 'line'
+        ? { top: 22, right: 8, bottom: 0, left: 0 }
+        : { top: 22, right: 8, bottom: 0, left: 0 };
+    const prevPad = config.options.layout?.padding;
+    config.options.layout = {
+      ...(config.options.layout || {}),
+      padding: typeof prevPad === 'number'
+        ? prevPad
+        : { ...pad, ...(prevPad || {}) },
+    };
+    return config;
+  }
+
   function createChart(name, canvasId, config) {
     destroyChart(name, canvasId);
     const canvas = document.getElementById(canvasId);
     if (!canvas) return null;
-    charts[name] = new Chart(canvas, config);
+    charts[name] = new Chart(canvas, withUnitSalesDataLabels(config));
     return charts[name];
   }
 
@@ -1144,9 +1139,11 @@
     if (esAcumulado) renderChartsMensuales(resumen.comparativoMensual, resumen);
 
     destroyChart('departamento', 'chartDepartamento');
-    const porCanal = resumen.porCanal?.length
+    const porCanalRaw = resumen.porCanal?.length
       ? resumen.porCanal
       : (typeof CanalesVenta !== 'undefined' ? CanalesVenta.countByCanal(registrosActuales) : []);
+    const porCanal = [...(porCanalRaw || [])].sort((a, b) => Number(b.count || 0) - Number(a.count || 0)
+      || String(a.label || '').localeCompare(String(b.label || ''), 'es'));
     if (porCanal.length) {
       createChart('departamento', 'chartDepartamento', {
         type: 'bar',
@@ -1231,7 +1228,7 @@
               openMixAutosDrawer({
                 filter: { dim: 'carline', value: label, label },
               });
-              if (label === 'Otros' && ((mix.otrosPorFuerza || []).length || (mix.otrosDetalle || []).length)) {
+              if (label === 'Otros' && (mix.otrosDetalle || []).length) {
                 setMixOtrosExpanded(true);
               }
             },
@@ -1347,7 +1344,6 @@
         data: [],
         total: 0,
         otrosDetalle: [],
-        otrosPorFuerza: [],
         otrosTotal: 0,
       };
     }
@@ -1357,37 +1353,12 @@
     const restSum = rest.reduce((s, [, n]) => s + n, 0);
     if (restSum > 0) top.push(['Otros', restSum]);
 
-    const otrosKeys = new Set(rest.map(([label]) => label));
-    const byFuerza = new Map();
-    if (rows && otrosKeys.size) {
-      for (const row of rows) {
-        const modelo = normalizeCarlineLabel(row.VEH_TIPOAUTO);
-        if (!otrosKeys.has(modelo)) continue;
-        const fuerza = String(row.CANAL_LABEL || 'Sin asignación').trim() || 'Sin asignación';
-        if (!byFuerza.has(fuerza)) {
-          byFuerza.set(fuerza, { count: 0, models: new Map() });
-        }
-        const entry = byFuerza.get(fuerza);
-        entry.count += 1;
-        entry.models.set(modelo, (entry.models.get(modelo) || 0) + 1);
-      }
-    }
-
-    const otrosPorFuerza = [...byFuerza.entries()]
-      .map(([fuerza, entry]) => ({
-        fuerza,
-        count: entry.count,
-        modelos: [...entry.models.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es')),
-      }))
-      .sort((a, b) => b.count - a.count || a.fuerza.localeCompare(b.fuerza, 'es'));
-
     const total = top.reduce((s, [, n]) => s + n, 0);
     return {
       labels: top.map(([label]) => label),
       data: top.map(([, n]) => n),
       total,
       otrosDetalle: rest,
-      otrosPorFuerza,
       otrosTotal: restSum,
     };
   }
@@ -1472,6 +1443,10 @@
     return { labels, datasets, ranked };
   }
 
+  function isDemoRow(row) {
+    return Boolean(row.IS_DEMO);
+  }
+
   function isFlotillaRow(row) {
     return row.TIPOVENTA === 'FLOTILLA';
   }
@@ -1482,6 +1457,27 @@
 
   function getFlotillaRows() {
     return registrosActuales.filter((row) => isFlotillaRow(row));
+  }
+
+  function getDemoRows() {
+    return registrosActuales.filter((row) => isDemoRow(row));
+  }
+
+  function renderDemosNota(resumen) {
+    const note = document.getElementById('ventasDemosNota');
+    if (!note) return;
+    const n = Number(resumen?.totalDemos || 0);
+    const text = resumen?.demosNota
+      || (n > 0
+        ? `${n} demo${n === 1 ? '' : 's'} incluidos en el total de facturas.`
+        : '');
+    if (!text) {
+      note.classList.add('hidden');
+      note.textContent = '';
+      return;
+    }
+    note.classList.remove('hidden');
+    note.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">info</span> ${escapeHtml(text)}`;
   }
 
   function ventasRowsHtml(rows, emptyMessage) {
@@ -2311,7 +2307,7 @@
         }));
         const fi = els.fechaInicio?.value || '';
         const ff = els.fechaFin?.value || '';
-        const periodoLabel = fi && ff ? `${fi} â†’ ${ff}` : 'Periodo seleccionado';
+        const periodoLabel = fi && ff ? `${fi} → ${ff}` : 'Periodo seleccionado';
         const topCarlines = countByField(rows, (r) => normalizeCarlineLabel(r.VEH_TIPOAUTO));
         summaryEl.innerHTML = `
           <div class="ops-orders-drawer__group">
@@ -2319,10 +2315,9 @@
             <p class="ops-orders-drawer__hint">${escapeHtml(periodoLabel)}</p>
             <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${total}</span></div>
             <div class="ops-orders-drawer__row"><span class="lbl">Carlines</span><span class="val">${topCarlines.length}</span></div>
-            <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+            <p class="ops-orders-drawer__hint">Detalle por unidad (serie / factura). Filtra por carline o modelo.</p>
           </div>
           ${block('Carline / modelo', 'carline', withMixPct(topCarlines))}
-          ${block('Canal', 'canal', withMixPct(countByField(rows, (r) => r.CANAL_LABEL)))}
           ${block('Tipo venta', 'tipo', withMixPct(countByField(rows, (r) => r.TIPOVENTA)))}
           ${block('Vendedor', 'vendedor', withMixPct(countByField(rows, (r) => r.VENDEDOR)))}
         `;
@@ -2448,6 +2443,28 @@
                 ? `${escapeHtml(r.clienteUsado || '—')} · Pedido USN ${escapeHtml(String(r.pedidoUsn ?? '—'))} · ${escapeHtml(moneyCell(r.montoVentaUsado))}`
                 : `${escapeHtml(r.cliente || '—')} · Pedido nuevo ${escapeHtml(String(r.idPedido ?? '—'))}`}</p>
             </button>`).join('')}`;
+        return;
+      }
+
+      if (currentMeta.kpi === 'mixAutos') {
+        bodyEl.innerHTML = `
+          <div class="ops-orders-drawer__list-head">
+            <span>Unidades</span><span>${filtered.length}</span>
+          </div>
+          ${filtered.map((r) => `
+            <div class="ops-orders-drawer__item" style="cursor:default">
+              <div class="ops-orders-drawer__item-head">
+                <strong>${escapeHtml(r.VTE_SERIE || 'Sin serie')}</strong>
+                <span class="ops-orders-drawer__tag">${escapeHtml(normalizeCarlineLabel(r.VEH_TIPOAUTO) || '—')}</span>
+              </div>
+              <p class="ops-orders-drawer__msg">${escapeHtml(r.CLIENTE || '—')} · ${escapeHtml(r.VENDEDOR || '—')}</p>
+              <div class="ops-orders-drawer__facts">
+                <span>${escapeHtml(r.VTE_FECHDOCTO || '—')}</span>
+                <span>${escapeHtml(r.TIPOVENTA || '—')}</span>
+                <span>${escapeHtml(r.COL_DESCRIPCION || '—')}</span>
+              </div>
+              <p class="ops-orders-drawer__sub">Doc. ${escapeHtml(r.VTE_DOCTO || '—')} · ${escapeHtml(r.CANAL_LABEL || '—')}</p>
+            </div>`).join('')}`;
         return;
       }
 
@@ -2894,17 +2911,23 @@
         throw new Error('La API de ventas no devolvió resumen. Reinicie el backend.');
       }
 
-      if (!resumen.porCanal?.length) resumen.porCanal = CanalesVenta.countByCanal(registrosActuales);
+      if (!resumen.porCanal?.length) {
+        resumen.porCanal = CanalesVenta.countByCanal(registrosActuales.filter((r) => !r.IS_DEMO));
+      }
 
       resumenActual = resumen;
       els.kpiTotal.textContent = resumen.totalVentas;
       els.kpiRetail.textContent = resumen.totalRetail;
       els.kpiFlotillas.textContent = resumen.totalFlotillas;
+      renderDemosNota(resumen);
       els.kpiEntregasSofia.textContent = resumen.totalNotificacionesEntrega ?? 0;
       renderTomasSection(resumen, data.tomasMensual);
       if (els.kpiEntregasSofiaSub) {
         const stamp = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-        els.kpiEntregasSofiaSub.textContent = `Actualizado ${stamp}`;
+        const demosBit = Number(resumen.totalDemosSofia || 0) > 0
+          ? `${resumen.totalDemosSofia} demo${Number(resumen.totalDemosSofia) === 1 ? '' : 's'} del mes · `
+          : '';
+        els.kpiEntregasSofiaSub.textContent = `${demosBit}Actualizado ${stamp}`;
       }
 
       await fetchSharedGoals().catch((err) => console.warn('[Goals]', err.message));
@@ -3552,6 +3575,7 @@
         Zacatelco: chartColors.rose,
         Suauto: chartColors.tertiary,
         Casa: chartColors.teal,
+        'Seminuevos Nuevos': '#7c3aed',
         Flotillas: chartColors.tertiary,
         Perdida: chartColors.error,
         Otros: chartColors.slate,

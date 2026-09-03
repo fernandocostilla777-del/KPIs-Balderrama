@@ -79,20 +79,23 @@ function runEtl(scriptName, xlsxPath) {
   }
 }
 
-async function syncCrmSheets({ quiet = false } = {}) {
+const ALL_ETLS = [
+  'etl-crm-leads.js',
+  'etl-crm-solicitudes.js',
+  'etl-crm-pruebas-manejo.js',
+  'etl-crm-trafico-piso.js',
+  'etl-crm-financiamiento.js',
+  'etl-crm-pagos-gmf.js',
+  'etl-crm-csi.js',
+];
+
+async function syncCrmSheets({ quiet = false, etls: onlyEtls } = {}) {
   const startedAt = new Date().toISOString();
   if (!quiet) console.log(`[crm-sheets] Descargando ${SHEETS_URL}`);
   const download = await downloadFile(SHEETS_URL, XLSX_PATH);
   if (!quiet) console.log(`[crm-sheets] Archivo listo: ${download.path} (${download.bytes} bytes)`);
 
-  const etls = [
-    'etl-crm-leads.js',
-    'etl-crm-solicitudes.js',
-    'etl-crm-pruebas-manejo.js',
-    'etl-crm-trafico-piso.js',
-    'etl-crm-financiamiento.js',
-    'etl-crm-csi.js',
-  ];
+  const etls = Array.isArray(onlyEtls) && onlyEtls.length ? onlyEtls : ALL_ETLS;
   for (const script of etls) {
     if (!quiet) console.log(`[crm-sheets] Ejecutando ${script}...`);
     runEtl(script, XLSX_PATH);

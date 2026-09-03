@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const { spawn, execFileSync } = require('child_process');
+const { initAutoUpdater, checkForUpdates, getUpdateStatus, downloadUpdate, installUpdate } = require('./updater');
 
 const isDev = !app.isPackaged;
 // En app empaquetada ignorar DESKTOP_* heredados del shell (p. ej. pruebas);
@@ -411,6 +412,10 @@ function createMenu() {
       label: 'Ayuda',
       submenu: [
         {
+          label: 'Buscar actualizaciones',
+          click: () => checkForUpdates({ silent: false }),
+        },
+        {
           label: 'Acerca de',
           click: () => {
             dialog.showMessageBox(mainWindow, {
@@ -497,6 +502,9 @@ async function createWindow() {
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getPlatform', () => process.platform);
+ipcMain.handle('update:status', () => getUpdateStatus());
+ipcMain.handle('update:download', () => downloadUpdate());
+ipcMain.handle('update:install', () => installUpdate());
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -509,7 +517,13 @@ if (!gotLock) {
     }
   });
 
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.balderrama.kpis');
+    }
+    createWindow();
+    initAutoUpdater({ getWindow: () => mainWindow });
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

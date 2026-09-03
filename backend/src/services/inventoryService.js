@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { query } = require('../db');
+const { VENTAS_BASE_CTE } = require('./ventasNuevosFinanciero');
 
 const INVENTORY_SITUATIONS = `('FIS', 'DIS', 'PED', 'PEN', 'SEP', 'DEMO', 'TRAN')`;
 const PLAN_PISO_FACTOR = 0.00020778;
@@ -18,6 +19,637 @@ const SITUACION_LABELS = {
   DEMO: 'Demo',
   TRAN: 'Tránsito',
 };
+const REAL_INVENTORY_SITUATIONS = new Set(['DIS', 'FIS', 'SEP']);
+const COSTO_PREVIA = 1669;
+const COSTO_PUBLICIDAD = 641.89;
+const COSTO_MERCADOTECNIA = COSTO_PUBLICIDAD;
+const CARGO_ENTREGA_CHICO = 240;
+const CARGO_ENTREGA_GRANDE = 315;
+const ENTREGA_MODELOS_CHICOS = ['AVEO', 'ONIX', 'TORNADO', 'GROOVE'];
+const GASOLINA_PRECIO_LITRO = 23.39;
+const GASOLINA_POR_MODELO = [
+  { key: 'CAPTIVA PHEV', litros: 15 },
+  { key: 'SILVERADO 2500', litros: 25 },
+  { key: 'EXPRESS VAN', litros: 20 },
+  { key: 'EXPRESS', litros: 20 },
+  { key: 'SUBURBAN', litros: 25 },
+  { key: 'SILVERADO', litros: 25 },
+  { key: 'CHEYENNE', litros: 25 },
+  { key: 'TAHOE', litros: 25 },
+  { key: 'TRAVERSE', litros: 20 },
+  { key: 'COLORADO', litros: 20 },
+  { key: 'BLAZER', litros: 20 },
+  { key: 'BLAIZER', litros: 20 },
+  { key: 'CAPTIVA', litros: 15 },
+  { key: 'TRACKER', litros: 15 },
+  { key: 'TRAX', litros: 15 },
+  { key: 'CAVALIER', litros: 13 },
+  { key: 'MONTANA', litros: 13 },
+  { key: 'TORNADO', litros: 13 },
+  { key: 'GROOVE', litros: 13 },
+  { key: 'AVEO', litros: 13 },
+  { key: 'S10', litros: 18 },
+  { key: 'S 10', litros: 18 },
+  { key: 'ONIX', litros: 10 },
+];
+
+function matchCargoEntrega(carline, version) {
+  const hay = normalizeMatchKey(`${carline || ''} ${version || ''}`)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/-/g, ' ');
+  const esChico = ENTREGA_MODELOS_CHICOS.some((key) => hay.includes(key));
+  return esChico ? CARGO_ENTREGA_CHICO : CARGO_ENTREGA_GRANDE;
+}
+
+function buildGastosExtras(carline, version, gastosLibro = 0) {
+  const gasolina = matchGasolina(carline, version);
+  const cargoEntrega = matchCargoEntrega(carline, version);
+  const gastos = roundMoney(Math.abs(Number(gastosLibro) || 0)) || 0;
+  return {
+    previa: COSTO_PREVIA,
+    publicidad: COSTO_PUBLICIDAD,
+    cargoEntrega,
+    gasolina,
+    gastos,
+    total: roundMoney(COSTO_PREVIA + COSTO_PUBLICIDAD + cargoEntrega + gasolina.importe + gastos) || 0,
+  };
+}
+
+function matchGasolina(carline, version) {
+  const hay = normalizeMatchKey(`${carline || ''} ${version || ''}`)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/-/g, ' ');
+  const found = GASOLINA_POR_MODELO
+    .slice()
+    .sort((a, b) => b.key.length - a.key.length)
+    .find((row) => hay.includes(row.key));
+  if (!found) {
+    return { litros: 0, precioLitro: GASOLINA_PRECIO_LITRO, importe: 0 };
+  }
+  return {
+    litros: found.litros,
+    precioLitro: GASOLINA_PRECIO_LITRO,
+    importe: roundMoney(found.litros * GASOLINA_PRECIO_LITRO) || 0,
+  };
+}
+
+function normalizeMatchKey(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function extractPaqueteLetter(tipoAuto) {
+  const parts = String(tipoAuto || '').toUpperCase().split(/\s+/).filter(Boolean);
+  return parts.find((p) => /^[A-Z]$/.test(p)) || '';
+}
+
+function roundMoney(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.round(x * 100) / 100;
+}
+
+const CRM_DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const COMISION_EV_LEASING_PCT = 1;
+
+function previousCalendarMonth(fechaInicio) {
+  const [y, m] = String(fechaInicio || '').split('-').map(Number);
+  if (!y || !m) return null;
+  const prevMonth = m === 1 ? 12 : m - 1;
+  const prevYear = m === 1 ? y - 1 : y;
+  const lastDay = new Date(prevYear, prevMonth, 0).getDate();
+  const mm = String(prevMonth).padStart(2, '0');
+  return {
+    fechaInicio: `${prevYear}-${mm}-01`,
+    fechaFin: `${prevYear}-${mm}-${String(lastDay).padStart(2, '0')}`,
+    label: `${MONTH_NAMES[prevMonth - 1]} ${prevYear}`,
+  };
+}
+
+function pctComisionVehiculoEv(unidadesPrev) {
+  const n = Math.max(0, Math.floor(Number(unidadesPrev) || 0));
+  if (n >= 10) return 16;
+  if (n >= 8) return 15;
+  if (n <= 0) return 7;
+  return 7 + n;
+}
+
+function isLeasingFormaPago(formaPago) {
+  const t = String(formaPago || '').toUpperCase();
+  return /\bLEAS(ING)?\b/.test(t) || t.includes('ARREND');
+}
+
+function isLeasingCliente(cliente) {
+  const t = String(cliente || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t.includes('GM FINANCIAL DE MEXICO');
+}
+
+const TIPO_VENTA_LABELS = {
+  CRE: 'GMF',
+  ZACCRE: 'GMF',
+  CHCRE: 'GMF',
+  CASACRE: 'GMF',
+  FORCRE: 'Foráneas GMF',
+  SUAGMF: 'GMF',
+  CASACON: 'Contado',
+  PLNCON: 'Contado',
+  CHCON: 'Contado',
+  FORCON: 'Foráneas contado',
+  ZACCON: 'Contado',
+  CON: 'Contado',
+  FLOT: 'Flotilla',
+  FLOTGMF: 'Flotilla GMF',
+  PERDIDA: 'Pérdida',
+  PISOBBVA: 'BBVA',
+  FORBBVA: 'Foráneas BBVA',
+  CHBBVA: 'BBVA',
+  ZACBBVA: 'BBVA',
+  PISOHSBC: 'HSBC',
+  FORHSBC: 'Foráneas HSBC',
+  CHHSBC: 'HSBC',
+  ZACHSBC: 'HSBC',
+  PISOSANT: 'Santander',
+  FORSANT: 'Foráneas Santander',
+  CHSANT: 'Santander',
+  ZACSANT: 'Santander',
+  PISOBNTE: 'Banorte',
+  FORBNTE: 'Foráneas Banorte',
+  CHBNTE: 'Banorte',
+  ZACBNTE: 'Banorte',
+  FORSCOT: 'Foráneas Scotiabank',
+  PISOSCOT: 'Scotiabank',
+  CHOSCOT: 'Scotiabank',
+  ZACSCOT: 'Scotiabank',
+  CASASCOT: 'Scotiabank',
+  CXCSUAU: 'Suauto',
+  CXCSUAUC: 'Suauto',
+  SNPSUA: 'Suauto',
+  SUA: 'Suauto',
+};
+
+function labelTipoVenta(formaPago) {
+  const key = String(formaPago || '').trim().toUpperCase();
+  return TIPO_VENTA_LABELS[key] || key || '—';
+}
+
+function isFlotillaFormaPago(formaPago) {
+  const key = String(formaPago || '').trim().toUpperCase();
+  return key === 'FLOT' || key === 'FLOTGMF';
+}
+
+function detectDemoVendido(row = {}) {
+  const hay = [
+    row.observacion,
+    row.observs,
+    row.ubicacion,
+    row.tipoAuto,
+    row.situaciones,
+  ].map((v) => String(v || '').toUpperCase()).join(' ');
+  if (!/\bDEMO\b|\bDVIN\b/.test(hay)) {
+    return { isDemo: false, demoHint: null };
+  }
+  const hint = String(row.observacion || row.observs || row.ubicacion || '')
+    .trim() || 'Marcada como demo';
+  return { isDemo: true, demoHint: hint };
+}
+
+function isLeasingCrmText(...parts) {
+  const t = parts.map((p) => String(p || '').toUpperCase()).join(' ');
+  return /\bLEAS(ING)?\b/.test(t) || t.includes('ARREND');
+}
+
+function normalizeVinKey(value) {
+  const vin = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  return vin.length >= 5 ? vin : '';
+}
+
+async function loadVentasPreviasPorVendedor(fechaInicio, fechaFin) {
+  const rows = await query(`
+    SELECT
+      LTRIM(RTRIM(ISNULL(veh.VEH_VENDEDOR, ''))) AS vendedorId,
+      COUNT(*) AS unidades
+    FROM ADE_VTAFI v
+    INNER JOIN SER_VEHICULO veh
+      ON veh.VEH_NUMSERIE = v.VTE_SERIE
+      AND veh.VEH_NOINVENTA > 0
+    WHERE v.VTE_TIPODOCTO = 'A'
+      AND v.VTE_STATUS = 'I'
+      AND veh.VEH_SITUACION = 'VEN'
+      AND v.VTE_FORMAPAGO NOT IN ('VENTAMRS', 'VTACON', 'FLOT', 'FLOTGMF', 'PERDIDA')
+      AND CONVERT(date, v.VTE_FECHDOCTO, 103) BETWEEN CONVERT(date, @fechaInicio, 23) AND CONVERT(date, @fechaFin, 23)
+    GROUP BY LTRIM(RTRIM(ISNULL(veh.VEH_VENDEDOR, '')))
+  `, { fechaInicio, fechaFin });
+  const map = new Map();
+  for (const row of rows || []) {
+    const id = String(row.vendedorId || '').trim();
+    if (!id) continue;
+    map.set(id, Number(row.unidades || 0) || 0);
+  }
+  return map;
+}
+
+function loadLeasingVinSet(vins = []) {
+  const unique = [...new Set((vins || []).map(normalizeVinKey).filter(Boolean))];
+  const set = new Set();
+  if (!unique.length || !fs.existsSync(CRM_DB_PATH)) return set;
+  let db;
+  try {
+    const Database = require('better-sqlite3');
+    db = new Database(CRM_DB_PATH, { readonly: true, fileMustExist: true });
+    const hasTable = db.prepare(
+      `SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'crm_financiamiento'`
+    ).get();
+    if (!hasTable) return set;
+    const chunkSize = 200;
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const chunk = unique.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT vin, plan_2, especial, plan, tipo_compra
+        FROM crm_financiamiento
+        WHERE UPPER(REPLACE(vin, ' ', '')) IN (${placeholders})
+      `).all(...chunk);
+      for (const row of rows || []) {
+        if (!isLeasingCrmText(row.plan_2, row.especial, row.plan, row.tipo_compra)) continue;
+        const key = normalizeVinKey(row.vin);
+        if (key) set.add(key);
+      }
+    }
+  } catch {
+    return set;
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
+  return set;
+}
+
+/**
+ * Ingresos F&I por VIN: solo PAGOS GMF (por serie y por contrato del histórico para cruce).
+ * Sin pagos en PAGOS GMF → sin ingreso (no se usan montos del histórico de contratos).
+ * @returns {Map<string, { monto: number, count: number, fuente: string, byConcepto: Array }>}
+ */
+function loadIngresosFinanciamientoByVin(vins = []) {
+  const map = new Map();
+  const unique = [...new Set((vins || []).map(normalizeVinKey).filter(Boolean))];
+  if (!unique.length || !fs.existsSync(CRM_DB_PATH)) return map;
+
+  let db;
+  try {
+    const Database = require('better-sqlite3');
+    db = new Database(CRM_DB_PATH, { readonly: true, fileMustExist: true });
+    const hasPagos = !!db.prepare(
+      `SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='crm_pagos_gmf'`
+    ).get();
+    const hasFin = !!db.prepare(
+      `SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='crm_financiamiento'`
+    ).get();
+
+    const chunkSize = 200;
+    /** vin → Set de ids de pago ya contados */
+    const seenPagoIds = new Map();
+    const ensureEntry = (vinKey) => {
+      if (!map.has(vinKey)) {
+        map.set(vinKey, { monto: 0, count: 0, fuente: 'pagos_gmf', byConcepto: [] });
+        seenPagoIds.set(vinKey, new Set());
+      }
+      return map.get(vinKey);
+    };
+    const addPagoToVin = (vinKey, pagoId, concepto, monto, n = 1) => {
+      if (!vinKey) return;
+      const entry = ensureEntry(vinKey);
+      const seen = seenPagoIds.get(vinKey);
+      if (pagoId != null) {
+        if (seen.has(pagoId)) return;
+        seen.add(pagoId);
+      }
+      const m = Number(monto || 0) || 0;
+      entry.monto = roundMoney(entry.monto + m) || 0;
+      entry.count += Number(n) || 1;
+      const label = String(concepto || 'PAGO GMF');
+      const prev = entry.byConcepto.find((c) => c.concepto === label);
+      if (prev) {
+        prev.count += Number(n) || 1;
+        prev.monto = roundMoney(prev.monto + m) || 0;
+      } else {
+        entry.byConcepto.push({
+          concepto: label,
+          count: Number(n) || 1,
+          monto: roundMoney(m) || 0,
+        });
+      }
+    };
+
+    // Contratos del histórico por VIN (solo para cruzar clave con PAGOS GMF; no suma montos).
+    const vinByContrato = new Map();
+    if (hasFin) {
+      for (let i = 0; i < unique.length; i += chunkSize) {
+        const chunk = unique.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(',');
+        const rows = db.prepare(`
+          SELECT UPPER(REPLACE(vin, ' ', '')) AS vin, contrato, no_contrato
+          FROM crm_financiamiento
+          WHERE UPPER(REPLACE(vin, ' ', '')) IN (${placeholders})
+        `).all(...chunk);
+        for (const row of rows || []) {
+          const vinKey = normalizeVinKey(row.vin);
+          if (!vinKey) continue;
+          for (const raw of [row.contrato, row.no_contrato]) {
+            const digits = String(raw || '').replace(/[^\d]/g, '');
+            if (!digits) continue;
+            if (!vinByContrato.has(digits)) vinByContrato.set(digits, vinKey);
+            if (digits.length > 10) {
+              const trunc = digits.slice(0, -1);
+              if (!vinByContrato.has(trunc)) vinByContrato.set(trunc, vinKey);
+            }
+          }
+        }
+      }
+    }
+
+    if (!hasPagos) return map;
+
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const chunk = unique.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT
+          id,
+          UPPER(REPLACE(vin, ' ', '')) AS vin,
+          COALESCE(NULLIF(TRIM(concepto), ''), 'PAGO GMF') AS concepto,
+          COALESCE(monto, 0) AS monto
+        FROM crm_pagos_gmf
+        WHERE vin IS NOT NULL
+          AND UPPER(REPLACE(vin, ' ', '')) IN (${placeholders})
+      `).all(...chunk);
+      for (const row of rows || []) {
+        addPagoToVin(normalizeVinKey(row.vin), row.id, row.concepto, row.monto, 1);
+      }
+    }
+
+    const allContratos = [...vinByContrato.keys()];
+    for (let i = 0; i < allContratos.length; i += chunkSize) {
+      const chunk = allContratos.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT
+          id,
+          UPPER(REPLACE(COALESCE(vin, ''), ' ', '')) AS vin,
+          contrato_norm,
+          contrato_raw,
+          contrato_historico,
+          COALESCE(NULLIF(TRIM(concepto), ''), 'PAGO GMF') AS concepto,
+          COALESCE(monto, 0) AS monto
+        FROM crm_pagos_gmf
+        WHERE contrato_norm IN (${placeholders})
+           OR contrato_raw IN (${placeholders})
+           OR contrato_historico IN (${placeholders})
+      `).all(...chunk, ...chunk, ...chunk);
+      for (const row of rows || []) {
+        const vinFromPago = normalizeVinKey(row.vin);
+        const cands = [row.contrato_norm, row.contrato_raw, row.contrato_historico]
+          .map((c) => String(c || '').replace(/[^\d]/g, ''))
+          .filter(Boolean);
+        let vinKey = vinFromPago && unique.includes(vinFromPago) ? vinFromPago : null;
+        if (!vinKey) {
+          for (const c of cands) {
+            if (vinByContrato.has(c)) {
+              vinKey = vinByContrato.get(c);
+              break;
+            }
+          }
+        }
+        if (!vinKey || !unique.includes(vinKey)) continue;
+        addPagoToVin(vinKey, row.id, row.concepto, row.monto, 1);
+      }
+    }
+
+    for (const entry of map.values()) {
+      entry.byConcepto.sort((a, b) => b.monto - a.monto);
+    }
+  } catch {
+    return map;
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
+  return map;
+}
+
+function calcComisionEv({ utilidad, extras, vendedorId, vin, formaPago, cliente, prevByVendedor, leasingVins }) {
+  const unidadesPrev = prevByVendedor.get(String(vendedorId || '').trim()) || 0;
+  const pctVehiculo = pctComisionVehiculoEv(unidadesPrev);
+  const esArrendamiento = Boolean(leasingVins.has(normalizeVinKey(vin)))
+    || isLeasingFormaPago(formaPago)
+    || isLeasingCliente(cliente);
+  const pctLeasing = esArrendamiento ? COMISION_EV_LEASING_PCT : 0;
+  const pctTotal = pctVehiculo + pctLeasing;
+  const bruta = Number(utilidad);
+  const extrasNum = Number(extras) || 0;
+  const base = Number.isFinite(bruta) ? roundMoney(bruta - extrasNum) : null;
+  const importe = base != null && base > 0
+    ? roundMoney(base * (pctTotal / 100))
+    : 0;
+  return {
+    unidadesPrev,
+    pctVehiculo,
+    pctLeasing,
+    pctTotal,
+    esArrendamiento,
+    base: base,
+    importe: importe || 0,
+  };
+}
+
+function addUtilidadSample(map, key, unidades, promedio, subtotalPromedio) {
+  if (!key || !unidades) return;
+  const prev = map.get(key) || { unidades: 0, utilidadPonderada: 0, subtotalPonderado: 0 };
+  prev.unidades += unidades;
+  prev.utilidadPonderada += (Number(promedio) || 0) * unidades;
+  prev.subtotalPonderado += (Number(subtotalPromedio) || 0) * unidades;
+  map.set(key, prev);
+}
+
+function utilidadFromMap(map, key) {
+  const row = map.get(key);
+  if (!row || !row.unidades) return null;
+  const utilidadPromedio = roundMoney(row.utilidadPonderada / row.unidades);
+  const subtotalPromedio = row.subtotalPonderado
+    ? roundMoney(row.subtotalPonderado / row.unidades)
+    : null;
+  return {
+    utilidadPromedio,
+    unidadesVendidas: row.unidades,
+    subtotalPromedio,
+    utilidadPct: subtotalPromedio
+      ? roundMoney((utilidadPromedio / subtotalPromedio) * 100)
+      : null,
+  };
+}
+
+/**
+ * Utilidad promedio histórica por carline + versión/paquete.
+ * Del libro UNI_TEMLIBROVENTAS: pen_costo1 (mi costo), BONIFICACION, VEH_MISELANEOS (gastos).
+ * Costo = Mi costo − BONIFICACION + GASTOS
+ * Utilidad = Subtotal − ese costo.
+ */
+async function loadUtilidadHistoricaPorVersion() {
+  try {
+    const rows = await query(`
+      ${VENTAS_BASE_CTE}
+      SELECT
+        UPPER(LTRIM(RTRIM(ISNULL(NULLIF(cat.UNC_FAMILIA, ''), 'SIN FAMILIA')))) AS carline,
+        LTRIM(RTRIM(v.modelo)) AS version,
+        LTRIM(RTRIM(ISNULL(veh.VEH_CATALOGO, ''))) AS catalogo,
+        COUNT(*) AS unidadesVendidas,
+        AVG(v.ventaSubtotal) AS subtotalPromedio,
+        AVG(
+          v.ventaSubtotal
+          - (
+            ISNULL(NULLIF(libro.pen_costo1, 0), v.costoMiCosto)
+            - ISNULL(libro.BONIFICACION, 0)
+            + ISNULL(libro.VEH_MISELANEOS, 0)
+          )
+        ) AS utilidadPromedio
+      FROM ventas v
+      INNER JOIN SER_VEHICULO veh
+        ON veh.VEH_NUMSERIE = v.VTE_SERIE
+        AND veh.VEH_NOINVENTA > 0
+      INNER JOIN UNI_TEMLIBROVENTAS libro
+        ON libro.VTE_DOCTO = v.VTE_DOCTO
+        AND libro.VTE_ORGSTATUS = 'I'
+      LEFT JOIN UNI_CATALOGO cat
+        ON cat.UNC_MODELO = veh.VEH_ANMODELO
+        AND cat.UNC_IDCATALOGO = veh.VEH_CATALOGO
+      WHERE ISNULL(NULLIF(libro.pen_costo1, 0), v.costoMiCosto) > 0
+      GROUP BY
+        UPPER(LTRIM(RTRIM(ISNULL(NULLIF(cat.UNC_FAMILIA, ''), 'SIN FAMILIA')))),
+        LTRIM(RTRIM(v.modelo)),
+        LTRIM(RTRIM(ISNULL(veh.VEH_CATALOGO, '')))
+    `);
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    console.warn('[inventory] utilidad historica por version:', err.message);
+    return [];
+  }
+}
+
+function buildUtilidadLookups(rows) {
+  const byCatalogo = new Map();
+  const byVersion = new Map();
+  const byCarline = new Map();
+  for (const row of rows) {
+    const carline = normalizeMatchKey(row.carline);
+    const version = normalizeMatchKey(row.version);
+    const catalogo = normalizeMatchKey(row.catalogo);
+    const unidades = Number(row.unidadesVendidas || 0);
+    const promedio = Number(row.utilidadPromedio || 0);
+    const subtotal = Number(row.subtotalPromedio || 0);
+    if (!carline || !unidades) continue;
+    addUtilidadSample(byCarline, carline, unidades, promedio, subtotal);
+    if (catalogo) addUtilidadSample(byCatalogo, `${carline}||${catalogo}`, unidades, promedio, subtotal);
+    if (version) addUtilidadSample(byVersion, `${carline}||${version}`, unidades, promedio, subtotal);
+  }
+  return { byCatalogo, byVersion, byCarline };
+}
+
+function matchUtilidadHistorica(lookups, carline, version, catalogo) {
+  const cl = normalizeMatchKey(carline);
+  const cat = normalizeMatchKey(catalogo);
+  const ver = normalizeMatchKey(version);
+  return utilidadFromMap(lookups.byCatalogo, `${cl}||${cat}`)
+    || utilidadFromMap(lookups.byVersion, `${cl}||${ver}`)
+    || null;
+}
+
+function unitBaseCost(unit) {
+  const miCosto = Number(unit.miCosto || 0) || Number(unit.importeRemision || 0) || 0;
+  if (!miCosto) return null;
+  return roundMoney(miCosto - (Number(unit.bonificacion || 0) || 0));
+}
+
+function buildAgeingSlowTable(units, utilidadRows = []) {
+  const lookups = buildUtilidadLookups(utilidadRows);
+  const ageingSlowTable = [];
+
+  for (const unit of units) {
+    if (!REAL_INVENTORY_SITUATIONS.has(unit.situacion)) continue;
+    const carline = unit.familia || 'Sin familia';
+    const version = unit.tipoAuto || 'Sin versión';
+    const catalogo = unit.catalogo || '';
+    const days = unit.daysInStock;
+    const hist = matchUtilidadHistorica(lookups, carline, version, catalogo);
+    const carlineHist = utilidadFromMap(lookups.byCarline, normalizeMatchKey(carline));
+    const planPiso = calcPlanPisoForPeriod(unit.importeRemision, unit.remisionDate, 'all');
+    const generaInteres = days != null && days > PLAN_PISO_DIAS_GRACIA;
+    const planPisoAcumulado = generaInteres ? (planPiso.intereses || 0) : 0;
+    const costo = unitBaseCost(unit);
+    const precio = unit.precio || null;
+    const extras = buildGastosExtras(carline, version, unit.gastos);
+    const costoPrevia = extras.previa;
+    const costoMercadotecnia = extras.publicidad;
+    const gasolina = extras.gasolina;
+    const gastosAdicionales = extras.total;
+    const utilidadEsperada = hist?.utilidadPromedio
+      ?? (precio && costo ? roundMoney(precio - costo) : null);
+    const utilidadNeta = utilidadEsperada == null
+      ? null
+      : roundMoney(utilidadEsperada - gastosAdicionales - (planPisoAcumulado || 0));
+
+    ageingSlowTable.push({
+      carline,
+      version,
+      paquete: extractPaqueteLetter(version) || null,
+      catalogo: catalogo || null,
+      vin: unit.serie || null,
+      daysInStock: days,
+      precio,
+      costo,
+      utilidadPromedio: utilidadEsperada,
+      utilidadPctCarline: carlineHist?.utilidadPct ?? null,
+      unidadesVendidas: hist?.unidadesVendidas || 0,
+      costoPrevia,
+      costoMercadotecnia,
+      costoPublicidad: extras.publicidad,
+      gasolinaLitros: gasolina.litros,
+      gasolinaPrecioLitro: gasolina.precioLitro,
+      costoGasolina: gasolina.importe,
+      costoEntrega: extras.cargoEntrega,
+      gastos: extras.gastos,
+      gastosAdicionales,
+      utilidadNeta,
+      planPisoAcumulado: roundMoney(planPisoAcumulado) || 0,
+      daysChargeable: planPiso.daysChargeable || 0,
+      generaInteres,
+      units: 1,
+      inventarioReal: 1,
+      avgDays: days || 0,
+      maxDays: days || 0,
+      critical: days != null && days >= 90,
+      warn: days != null && days >= 60 && days < 90,
+    });
+  }
+
+  ageingSlowTable.sort((a, b) =>
+    (Number(b.daysInStock || 0) - Number(a.daysInStock || 0))
+    || (Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0))
+    || String(a.carline || '').localeCompare(String(b.carline || ''))
+  );
+
+  const carlineFilters = [...ageingSlowTable.reduce((map, row) => {
+    const label = row.carline || 'Sin familia';
+    map.set(label, (map.get(label) || 0) + row.units);
+    return map;
+  }, new Map()).entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  return { ageingSlowTable, carlineFilters };
+}
 
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -47,15 +679,39 @@ function interestStartDate(remisionDate) {
  * period = 'YYYY-MM' → acumulado al corte del mes (desde día 31 hasta el último día del mes, o hoy si es el mes en curso).
  * Intereses = factor × importe de remisión × días de cargo en el rango.
  */
+function calcPlanPisoUntil(importeRemision, remisionDate, cutoffDate) {
+  if (!remisionDate || !cutoffDate) {
+    return { daysInStock: null, daysChargeable: 0, intereses: 0, cutoffDate: null };
+  }
+
+  const remision = startOfDay(remisionDate);
+  const cutoff = startOfDay(cutoffDate);
+  if (cutoff < remision) {
+    return { daysInStock: 0, daysChargeable: 0, intereses: 0, cutoffDate: cutoff };
+  }
+
+  const interestStart = interestStartDate(remision);
+  const daysInStock = Math.max(0, Math.round((cutoff - remision) / 86400000));
+  const daysChargeable = interestStart > cutoff
+    ? 0
+    : daysInclusive(interestStart, cutoff);
+  const monto = Number(importeRemision) || 0;
+  const intereses = daysChargeable > 0 ? PLAN_PISO_FACTOR * monto * daysChargeable : 0;
+
+  return {
+    daysInStock,
+    daysChargeable,
+    intereses: Math.round(intereses * 100) / 100,
+    cutoffDate: cutoff,
+  };
+}
+
 function calcPlanPisoForPeriod(importeRemision, remisionDate, period = 'all') {
   if (!remisionDate) {
     return { daysInStock: null, daysChargeable: 0, intereses: 0, cutoffDate: null };
   }
 
   const today = startOfDay(new Date());
-  const remision = startOfDay(remisionDate);
-  const interestStart = interestStartDate(remision);
-
   let cutoffDate = today;
 
   if (period && period !== 'all') {
@@ -67,19 +723,7 @@ function calcPlanPisoForPeriod(importeRemision, remisionDate, period = 'all') {
     cutoffDate = monthEnd < today ? monthEnd : today;
   }
 
-  const daysInStock = Math.max(0, Math.round((cutoffDate - remision) / 86400000));
-  const daysChargeable = interestStart > cutoffDate
-    ? 0
-    : daysInclusive(interestStart, cutoffDate);
-  const monto = Number(importeRemision) || 0;
-  const intereses = daysChargeable > 0 ? PLAN_PISO_FACTOR * monto * daysChargeable : 0;
-
-  return {
-    daysInStock,
-    daysChargeable,
-    intereses: Math.round(intereses * 100) / 100,
-    cutoffDate,
-  };
+  return calcPlanPisoUntil(importeRemision, remisionDate, cutoffDate);
 }
 
 function formatPlanPisoPeriodLabel(period, months) {
@@ -219,6 +863,10 @@ function mapRow(row) {
     apartadoPor,
     usuarioApartado: String(row.VEH_CVEUSU || '').trim(),
     previas: Number(row.PREVIAS || 0) || 0,
+    precio: Number(row.PRECIO_LISTA || row.VEH_VENTA || 0) || 0,
+    miCosto: Number(row.VEH_COSTO1 || 0) || 0,
+    bonificacion: Number(row.VEH_REBATE || 0) || 0,
+    gastos: Number(row.GASTOS_REMISION || row.VEH_MISELANEOS || 0) || 0,
   };
 }
 
@@ -304,7 +952,13 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       LTRIM(RTRIM(ISNULL(ap.PER_PATERNO, ''))) AS APAR_PATERNO,
       LTRIM(RTRIM(ISNULL(ap.PER_MATERNO, ''))) AS APAR_MATERNO,
       ISNULL(rem.IMPORTE_REMISION, 0) AS IMPORTE_REMISION,
-      ISNULL(prev.PREVIAS, 0) AS PREVIAS
+      ISNULL(rem.GASTOS_REMISION, 0) AS GASTOS_REMISION,
+      ISNULL(prev.PREVIAS, 0) AS PREVIAS,
+      ISNULL(UNI_CATALOGO.UNC_PrecListaPub, ISNULL(UNI_CATALOGO.UNC_PRECLISTA, 0)) AS PRECIO_LISTA,
+      ISNULL(SER_VEHICULO.VEH_VENTA, 0) AS VEH_VENTA,
+      ISNULL(SER_VEHICULO.VEH_COSTO1, 0) AS VEH_COSTO1,
+      ISNULL(SER_VEHICULO.VEH_REBATE, 0) AS VEH_REBATE,
+      ISNULL(SER_VEHICULO.VEH_MISELANEOS, 0) AS VEH_MISELANEOS
     FROM SER_VEHICULO
     LEFT JOIN (
       SELECT
@@ -315,7 +969,14 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
             + CASE WHEN ISNULL(vd.VHD_APLICAIVA, '') = 'S'
               THEN ISNULL(vd.VHD_COSTO, 0) * 0.16 ELSE 0 END
           ELSE 0 END
-        ) AS IMPORTE_REMISION
+        ) AS IMPORTE_REMISION,
+        SUM(
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_DESCRIPCION, '')))) LIKE 'GASTOS%'
+            THEN ISNULL(vd.VHD_COSTO, 0)
+            ELSE 0
+          END
+        ) AS GASTOS_REMISION
       FROM UNI_VEHDETA vd
       GROUP BY vd.VHD_NOSERIE
     ) rem ON rem.VHD_NOSERIE = SER_VEHICULO.VEH_NUMSERIE
@@ -352,6 +1013,7 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
   `);
 
   const units = enrichUnitsWithPruebasManejo(rows.map(mapRow));
+  const utilidadHistorica = await loadUtilidadHistoricaPorVersion();
   const availableSituations = new Set(['DIS', 'FIS', 'SEP']);
   const available = units.filter((u) => availableSituations.has(u.situacion));
   const demos = units.filter((u) => u.situacion === 'DEMO');
@@ -361,47 +1023,7 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     ? Math.round(daysValues.reduce((s, d) => s + d, 0) / daysValues.length)
     : 0;
 
-  const ageingSlowMap = new Map();
-  for (const unit of units) {
-    if (unit.situacion === 'DEMO') continue;
-    if (unit.daysInStock === null) continue;
-    const carline = unit.familia || 'Sin familia';
-    const version = unit.tipoAuto || 'Sin versión';
-    const color = unit.colorExterior || 'Sin color';
-    const key = `${carline}||${version}||${color}`;
-    if (!ageingSlowMap.has(key)) {
-      ageingSlowMap.set(key, {
-        carline,
-        version,
-        color,
-        days: [],
-        units: 0,
-      });
-    }
-    const entry = ageingSlowMap.get(key);
-    entry.units += 1;
-    entry.days.push(unit.daysInStock);
-  }
-
-  const ageingSlowTable = [...ageingSlowMap.values()]
-    .map((r) => {
-      const avgDays = r.days.length
-        ? Math.round(r.days.reduce((s, d) => s + d, 0) / r.days.length)
-        : 0;
-      const maxDaysUnit = r.days.length ? Math.max(...r.days) : 0;
-      return {
-        carline: r.carline,
-        version: r.version,
-        color: r.color,
-        units: r.units,
-        avgDays,
-        maxDays: maxDaysUnit,
-        critical: avgDays >= 90,
-        warn: avgDays >= 60 && avgDays < 90,
-      };
-    })
-    .sort((a, b) => b.avgDays - a.avgDays || b.units - a.units)
-    .slice(0, 30);
+  const { ageingSlowTable, carlineFilters } = buildAgeingSlowTable(units, utilidadHistorica);
 
   // Compat: chart legacy (por modelo) ya no se usa en UI; se mantiene resumen top
   const ageingChart = ageingSlowTable.slice(0, 10).map((r) => ({
@@ -507,6 +1129,7 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     planPisoMonths,
     ageingChart,
     ageingSlowTable,
+    ageingCarlineFilters: carlineFilters,
     stockAlerts: ageingAlerts,
     byFamilia,
     inventoryTable,
@@ -815,9 +1438,349 @@ async function getIntercambiosHistorico({ fechaInicio, fechaFin } = {}) {
   };
 }
 
+function formatIsoDate(value) {
+  const date = parseRemisionDate(value);
+  if (!date) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Análisis de unidades vendidas: utilidad real, % por carline,
+ * extras fijos y plan piso según días que duró en inventario (remisión → venta).
+ * Utilidad bruta = Subtotal − costo (valor de unidad) + bonificación − nota crédito s/IVA.
+ * Comisión E.V. = % menudeo del mes anterior × (utilidad bruta − gastos extra).
+ */
+async function getVendidosAnalisis({ fechaInicio, fechaFin } = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaInicio || '') || !/^\d{4}-\d{2}-\d{2}$/.test(fechaFin || '')) {
+    const err = new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).');
+    err.status = 400;
+    throw err;
+  }
+
+  const rows = await query(`
+    ${VENTAS_BASE_CTE}
+    SELECT
+      UPPER(LTRIM(RTRIM(ISNULL(NULLIF(cat.UNC_FAMILIA, ''), 'SIN FAMILIA')))) AS carline,
+      LTRIM(RTRIM(v.modelo)) AS version,
+      LTRIM(RTRIM(ISNULL(veh.VEH_CATALOGO, ''))) AS catalogo,
+      v.VTE_SERIE AS vin,
+      v.VTE_DOCTO AS factura,
+      v.VTE_FECHDOCTO AS fechaVenta,
+      v.VTE_FORMAPAGO AS formaPago,
+      LTRIM(RTRIM(ISNULL(veh.VEH_VENDEDOR, ''))) AS vendedorId,
+      RTRIM(LTRIM(
+        ISNULL(ven.PER_NOMRAZON, '') + ' ' + ISNULL(ven.PER_PATERNO, '') + ' ' + ISNULL(ven.PER_MATERNO, '')
+      )) AS vendedor,
+      v.cliente,
+      LTRIM(RTRIM(ISNULL(veh.VEH_OBSERVACION, ''))) AS observacion,
+      LTRIM(RTRIM(ISNULL(veh.veh_observs, ''))) AS observs,
+      LTRIM(RTRIM(ISNULL(veh.VEH_SITUACIONES, ''))) AS situaciones,
+      LTRIM(RTRIM(ISNULL(veh.VEH_UBICACION, ''))) AS ubicacion,
+      LTRIM(RTRIM(ISNULL(veh.VEH_TIPOAUTO, ''))) AS tipoAuto,
+      veh.VEH_FECREMISION AS fechaRemision,
+      COALESCE(
+        NULLIF(libro.SUBTOTAL, 0),
+        CASE
+          WHEN ISNULL(v.ventaSubtotal, 0) > 0
+          THEN ISNULL(v.ventaSubtotal, 0) - ISNULL(v.ventaIsan, 0)
+          ELSE 0
+        END
+      ) AS subtotal,
+      ISNULL(v.ventaIsan, 0) AS isan,
+      ISNULL(NULLIF(libro.pen_costo1, 0), v.costoMiCosto) AS miCosto,
+      ISNULL(libro.BONIFICACION, v.bonificacion) AS bonificacion,
+      ISNULL(veh.VEH_REBATE, 0) AS rebate,
+      COALESCE(
+        NULLIF(ABS(ISNULL(rem.GASTOS_REMISION, 0)), 0),
+        NULLIF(ABS(ISNULL(libro.pen_costo3, 0)), 0),
+        ABS(ISNULL(libro.VEH_MISELANEOS, v.gastos))
+      ) AS gastos,
+      ISNULL(rem.IMPORTE_REMISION, 0) AS importeRemision,
+      ISNULL(rem.VALOR_UNIDAD, 0) AS valorUnidad,
+      ISNULL(rem.COSTO_REMISION, 0) AS costoRemision,
+      ISNULL(rem.BONIFICACION_REMISION, 0) AS bonificacionRemision,
+      ISNULL(libro.IMPNCRBON, 0) AS notaCargoLibro,
+      LTRIM(RTRIM(ISNULL(libro.IDNCRBON, ''))) AS notaCargoFolioLibro,
+      ISNULL(ncr.IMPORTE, 0) AS notaCargoCxc,
+      LTRIM(RTRIM(ISNULL(ncr.FOLIO, ''))) AS notaCargoFolioCxc,
+      ISNULL(apn.IMPORTE, 0) AS notaCargoAplicada,
+      LTRIM(RTRIM(ISNULL(apn.FOLIO, ''))) AS notaCargoFolioAplicada,
+      ISNULL(ncPago.IMPORTE, 0) AS notaCreditoPago,
+      LTRIM(RTRIM(ISNULL(ncPago.FOLIO, ''))) AS notaCreditoFolioPago
+    FROM ventas v
+    INNER JOIN SER_VEHICULO veh
+      ON veh.VEH_NUMSERIE = v.VTE_SERIE
+      AND veh.VEH_NOINVENTA > 0
+    LEFT JOIN PER_PERSONAS ven ON ven.PER_IDPERSONA = veh.VEH_VENDEDOR
+    LEFT JOIN UNI_TEMLIBROVENTAS libro
+      ON libro.VTE_DOCTO = v.VTE_DOCTO
+      AND libro.VTE_ORGSTATUS = 'I'
+    LEFT JOIN UNI_CATALOGO cat
+      ON cat.UNC_MODELO = veh.VEH_ANMODELO
+      AND cat.UNC_IDCATALOGO = veh.VEH_CATALOGO
+    LEFT JOIN (
+      SELECT
+        LTRIM(RTRIM(CCP_REFERNCRBONI)) AS FACTURA,
+        SUM(ISNULL(CCP_ABONO, 0)) AS IMPORTE,
+        MIN(LTRIM(RTRIM(CCP_IDDOCTO))) AS FOLIO
+      FROM VIS_CONCAR01
+      WHERE CCP_TIPODOCTO = 'NCRBON'
+        AND LTRIM(RTRIM(ISNULL(CCP_REFERNCRBONI, ''))) LIKE 'ANS%'
+        AND ISNULL(CCP_ABONO, 0) > 0
+      GROUP BY LTRIM(RTRIM(CCP_REFERNCRBONI))
+    ) ncr ON ncr.FACTURA = v.VTE_DOCTO
+    LEFT JOIN (
+      SELECT
+        LTRIM(RTRIM(CCP_IDDOCTO)) AS FACTURA,
+        SUM(ISNULL(CCP_ABONO, 0)) AS IMPORTE,
+        MIN(LTRIM(RTRIM(ISNULL(CCP_VFDOCTO, '')))) AS FOLIO
+      FROM VIS_CONCAR01
+      WHERE CCP_TIPODOCTO IN ('APNCBON', 'APNCRBONI')
+        AND LTRIM(RTRIM(ISNULL(CCP_IDDOCTO, ''))) LIKE 'ANS%'
+        AND ISNULL(CCP_ABONO, 0) > 0
+      GROUP BY LTRIM(RTRIM(CCP_IDDOCTO))
+    ) apn ON apn.FACTURA = v.VTE_DOCTO
+    LEFT JOIN (
+      SELECT
+        LTRIM(RTRIM(p.PAM_DOCAFECTADO)) AS FACTURA,
+        SUM(ISNULL(d.PAD_IMPORTE, 0)) AS IMPORTE,
+        MIN(LTRIM(RTRIM(ISNULL(d.PAD_REFERENCIA, '')))) AS FOLIO
+      FROM CXC_PAGANT p
+      INNER JOIN CXC_PAGANTDET d ON d.PAD_CONSPAGO = p.PAM_CONSCARTERA
+      WHERE UPPER(LTRIM(RTRIM(ISNULL(d.PAD_TIPOPAGO, '')))) = 'SCOTI'
+        AND LTRIM(RTRIM(ISNULL(p.PAM_DOCAFECTADO, ''))) LIKE 'ANS%'
+        AND ISNULL(d.PAD_IMPORTE, 0) > 0
+      GROUP BY LTRIM(RTRIM(p.PAM_DOCAFECTADO))
+    ) ncPago ON ncPago.FACTURA = v.VTE_DOCTO
+    LEFT JOIN (
+      SELECT
+        vd.VHD_NOSERIE,
+        SUM(
+          CASE WHEN ISNULL(vd.VHD_TRASPLANPISO, '') = 'S' THEN
+            ISNULL(vd.VHD_COSTO, 0)
+            + CASE WHEN ISNULL(vd.VHD_APLICAIVA, '') = 'S'
+              THEN ISNULL(vd.VHD_COSTO, 0) * 0.16 ELSE 0 END
+          ELSE 0 END
+        ) AS IMPORTE_REMISION,
+        SUM(
+          CASE WHEN ISNULL(vd.VHD_TRASPLANPISO, '') = 'S'
+            THEN ISNULL(vd.VHD_COSTO, 0) ELSE 0 END
+        ) AS COSTO_REMISION,
+        MAX(
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_DESCRIPCION, '')))) LIKE 'VALOR DE UNIDAD%'
+              OR UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_DESCRIPCION, '')))) LIKE 'VALOR DE LA UNIDAD%'
+              OR UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_DESCRIPCION, '')))) LIKE 'VALOR UNIDAD%'
+            THEN ISNULL(vd.VHD_COSTO, 0)
+            ELSE NULL
+          END
+        ) AS VALOR_UNIDAD,
+        SUM(
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_TIPO, '')))) = 'BON'
+              OR UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_DESCRIPCION, '')))) LIKE '%BONIFICACION%'
+            THEN ISNULL(vd.VHD_COSTO, 0)
+            ELSE 0
+          END
+        ) AS BONIFICACION_REMISION,
+        SUM(
+          CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(vd.VHD_DESCRIPCION, '')))) LIKE 'GASTOS%'
+            THEN ISNULL(vd.VHD_COSTO, 0)
+            ELSE 0
+          END
+        ) AS GASTOS_REMISION
+      FROM UNI_VEHDETA vd
+      GROUP BY vd.VHD_NOSERIE
+    ) rem ON rem.VHD_NOSERIE = v.VTE_SERIE
+    WHERE CONVERT(date, v.VTE_FECHDOCTO, 103) BETWEEN CONVERT(date, @fechaInicio, 23) AND CONVERT(date, @fechaFin, 23)
+    ORDER BY CONVERT(date, v.VTE_FECHDOCTO, 103) DESC, v.VTE_SERIE
+  `, { fechaInicio, fechaFin });
+
+  const seen = new Set();
+  const unique = [];
+  for (const row of rows || []) {
+    const key = `${row.factura || ''}|${row.vin || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+  }
+
+  const prevMonth = previousCalendarMonth(fechaInicio);
+  const vinsList = unique.map((r) => r.vin);
+  const [prevByVendedor, leasingVins, ingresosFiByVin] = await Promise.all([
+    prevMonth
+      ? loadVentasPreviasPorVendedor(prevMonth.fechaInicio, prevMonth.fechaFin)
+      : Promise.resolve(new Map()),
+    Promise.resolve(loadLeasingVinSet(vinsList)),
+    Promise.resolve(loadIngresosFinanciamientoByVin(vinsList)),
+  ]);
+
+  const table = [];
+  for (const row of unique) {
+    const remisionDate = parseRemisionDate(row.fechaRemision);
+    const ventaDate = parseRemisionDate(row.fechaVenta);
+    const piso = calcPlanPisoUntil(row.importeRemision, remisionDate, ventaDate);
+    const days = piso.daysInStock;
+    const bonifLibro = Number(row.bonificacion || 0) || 0;
+    const bonifRemision = Math.abs(Number(row.bonificacionRemision || 0) || 0);
+    const bonifVehiculo = Math.abs(Number(row.rebate || 0) || 0);
+    const bonificacion = bonifLibro || bonifRemision || bonifVehiculo;
+    const valorUnidad = Number(row.valorUnidad || 0) || 0;
+    const costo = valorUnidad > 0 ? roundMoney(valorUnidad) : null;
+    const notaCargo = Math.abs(Number(row.notaCreditoPago || 0) || 0)
+      || Math.abs(Number(row.notaCargoCxc || 0) || 0)
+      || Math.abs(Number(row.notaCargoAplicada || 0) || 0)
+      || Math.abs(Number(row.notaCargoLibro || 0) || 0);
+    const notaCargoFolio = String(
+      row.notaCreditoFolioPago
+      || row.notaCargoFolioCxc
+      || row.notaCargoFolioAplicada
+      || row.notaCargoFolioLibro
+      || ''
+    ).trim() || null;
+    const notaCargoSinIva = notaCargo > 0 ? roundMoney(notaCargo / 1.16) : 0;
+    const subtotal = Number(row.subtotal || 0) || 0;
+    const utilidad = costo != null && subtotal > 0
+      ? roundMoney(subtotal - costo + bonificacion - (notaCargoSinIva || 0))
+      : null;
+    const extrasDet = buildGastosExtras(row.carline, row.version, row.gastos);
+    const extras = extrasDet.total;
+    const demo = detectDemoVendido(row);
+    const formaPago = String(row.formaPago || '').trim();
+    const planPiso = days != null && days > PLAN_PISO_DIAS_GRACIA ? (piso.intereses || 0) : 0;
+    const comisionEv = calcComisionEv({
+      utilidad,
+      extras,
+      vendedorId: row.vendedorId,
+      vin: row.vin,
+      formaPago: formaPago,
+      cliente: row.cliente,
+      prevByVendedor,
+      leasingVins,
+    });
+    const utilidadNeta = utilidad == null
+      ? null
+      : roundMoney(utilidad - (comisionEv.importe || 0) - extras - planPiso);
+    const fi = ingresosFiByVin.get(normalizeVinKey(row.vin)) || null;
+
+    table.push({
+      carline: row.carline || 'Sin familia',
+      version: row.version || 'Sin versión',
+      paquete: extractPaqueteLetter(row.version) || null,
+      catalogo: row.catalogo || null,
+      vin: row.vin || null,
+      factura: row.factura || null,
+      fechaVenta: formatIsoDate(ventaDate),
+      fechaRemision: formatIsoDate(remisionDate),
+      daysInStock: days,
+      precio: subtotal || null,
+      isan: Number(row.isan || 0) || 0,
+      costo,
+      bonificacion,
+      notaCargo,
+      notaCargoFolio,
+      utilidadPromedio: utilidad,
+      unidadesVendidas: 1,
+      vendedorId: row.vendedorId || null,
+      vendedor: String(row.vendedor || '').trim() || null,
+      cliente: String(row.cliente || '').replace(/\s+/g, ' ').trim() || null,
+      formaPago: formaPago || null,
+      tipoVenta: labelTipoVenta(formaPago),
+      isFlotilla: isFlotillaFormaPago(formaPago),
+      isDemo: demo.isDemo,
+      demoHint: demo.demoHint,
+      observacion: String(row.observacion || row.observs || '').trim() || null,
+      ubicacion: String(row.ubicacion || '').trim() || null,
+      comisionEv: comisionEv.importe || 0,
+      comisionEvBase: comisionEv.base,
+      comisionEvPct: comisionEv.pctTotal,
+      comisionEvPctVehiculo: comisionEv.pctVehiculo,
+      comisionEvPctLeasing: comisionEv.pctLeasing,
+      comisionEvUnidadesPrev: comisionEv.unidadesPrev,
+      comisionEvArrendamiento: comisionEv.esArrendamiento,
+      comisionEvMesPrev: prevMonth?.label || null,
+      costoPrevia: extrasDet.previa,
+      costoMercadotecnia: extrasDet.publicidad,
+      costoPublicidad: extrasDet.publicidad,
+      gasolinaLitros: extrasDet.gasolina.litros,
+      gasolinaPrecioLitro: extrasDet.gasolina.precioLitro,
+      costoGasolina: extrasDet.gasolina.importe,
+      costoEntrega: extrasDet.cargoEntrega,
+      gastos: extrasDet.gastos,
+      gastosAdicionales: extras,
+      planPisoAcumulado: roundMoney(planPiso) || 0,
+      generaInteres: days != null && days > PLAN_PISO_DIAS_GRACIA,
+      ingresoFinanciamiento: fi ? (fi.monto || 0) : null,
+      ingresoFinanciamientoCount: fi ? (fi.count || 0) : 0,
+      ingresoFinanciamientoFuente: fi ? fi.fuente : null,
+      ingresoFinanciamientoDetalle: fi ? (fi.byConcepto || []) : [],
+      utilidadNeta,
+      daysChargeable: piso.daysChargeable || 0,
+    });
+  }
+
+  const byCarline = new Map();
+  for (const row of table) {
+    if (row.utilidadPromedio == null || !row.precio) continue;
+    const key = normalizeMatchKey(row.carline);
+    const prev = byCarline.get(key) || { utilidad: 0, subtotal: 0 };
+    prev.utilidad += Number(row.utilidadPromedio || 0);
+    prev.subtotal += Number(row.precio || 0);
+    byCarline.set(key, prev);
+  }
+  for (const row of table) {
+    const agg = byCarline.get(normalizeMatchKey(row.carline));
+    row.utilidadPctCarline = agg && agg.subtotal
+      ? roundMoney((agg.utilidad / agg.subtotal) * 100)
+      : null;
+  }
+
+  table.sort((a, b) =>
+    (Number(b.daysInStock || 0) - Number(a.daysInStock || 0))
+    || (Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0))
+    || String(b.fechaVenta || '').localeCompare(String(a.fechaVenta || ''))
+  );
+
+  const carlineFilters = [...table.reduce((map, row) => {
+    const label = row.carline || 'Sin familia';
+    map.set(label, (map.get(label) || 0) + 1);
+    return map;
+  }, new Map()).entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  return {
+    fechaInicio,
+    fechaFin,
+    vendidosTable: table,
+    carlineFilters,
+    comisionEvMesPrev: prevMonth?.label || null,
+    summary: {
+      unidades: table.length,
+      utilidad: roundMoney(table.reduce((s, r) => s + Number(r.utilidadPromedio || 0), 0)),
+      comisionEv: roundMoney(table.reduce((s, r) => s + Number(r.comisionEv || 0), 0)),
+      extras: roundMoney(table.reduce((s, r) => s + Number(r.gastosAdicionales || 0), 0)),
+      planPiso: roundMoney(table.reduce((s, r) => s + Number(r.planPisoAcumulado || 0), 0)),
+      ingresoFinanciamiento: roundMoney(
+        table.reduce((s, r) => s + Number(r.ingresoFinanciamiento || 0), 0)
+      ),
+      conIngresoFinanciamiento: table.filter((r) => Number(r.ingresoFinanciamiento || 0) > 0).length,
+      utilidadNeta: roundMoney(table.reduce((s, r) => s + Number(r.utilidadNeta || 0), 0)),
+      conPlanPiso: table.filter((r) => Number(r.planPisoAcumulado || 0) > 0).length,
+      conNotaCargo: table.filter((r) => Number(r.notaCargo || 0) > 0).length,
+      conArrendamiento: table.filter((r) => r.comisionEvArrendamiento).length,
+    },
+  };
+}
+
 module.exports = {
   getInventory,
   getIntercambiosHistorico,
+  getVendidosAnalisis,
   vinSuffix8,
   loadPruebasManejoCountByVin8,
 };

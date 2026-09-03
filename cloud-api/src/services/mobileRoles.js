@@ -57,6 +57,15 @@ const ROLE_SCOPES = {
     tools: ['consultar_contabilidad'],
     label: 'Contabilidad',
   },
+  marketing: {
+    pages: ['metrics', 'seguimiento', 'assistant', 'profile'],
+    metricSections: ['ventas', 'seguimiento'],
+    tools: [
+      'consultar_ventas',
+      'resumen_seguimiento_360',
+    ],
+    label: 'Mercadotecnia (MTK)',
+  },
 };
 
 const METRIC_SECTION_ALIASES = {

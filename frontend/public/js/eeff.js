@@ -392,18 +392,20 @@ function buildEdoFinKpiItems(data) {
   const gastosPct = pctOfSales(s.sumaGastos, ventas);
   const perdida = Number(s.perdidaFinanciera);
 
+  // Referencias de agencia de autos nuevos: margen bruto consolidado 13–16%,
+  // costo de ventas ~85% y gastos totales 10–13% sobre ventas.
   const ubBadge = !Number.isFinite(margenBruto) ? eeffStatusBadge('slate', 'info', 'Sin dato')
-    : margenBruto >= 12 ? eeffStatusBadge('green', 'trending_up', 'Saludable')
-      : margenBruto >= 8 ? eeffStatusBadge('amber', 'warning', 'Atención')
+    : margenBruto >= 13 ? eeffStatusBadge('green', 'trending_up', 'Saludable')
+      : margenBruto >= 10 ? eeffStatusBadge('amber', 'warning', 'Atención')
         : eeffStatusBadge('rose', 'trending_down', 'Presión');
 
   const uoBadge = !Number.isFinite(margenOp) ? eeffStatusBadge('slate', 'info', 'Sin dato')
-    : margenOp >= 5 ? eeffStatusBadge('violet', 'trending_up', 'Eficiente')
+    : margenOp >= 2.5 ? eeffStatusBadge('violet', 'trending_up', 'Eficiente')
       : margenOp >= 0 ? eeffStatusBadge('amber', 'warning', 'Ajustado')
         : eeffStatusBadge('rose', 'trending_down', 'Negativo');
 
   const ebitdaBadge = !Number.isFinite(margenEbitda) ? eeffStatusBadge('slate', 'info', 'Sin dato')
-    : margenEbitda >= 5 ? eeffStatusBadge('green', 'trending_up', 'Sobre objetivo')
+    : margenEbitda >= 3.5 ? eeffStatusBadge('green', 'trending_up', 'Sobre objetivo')
       : margenEbitda >= 0 ? eeffStatusBadge('amber', 'warning', 'Bajo objetivo')
         : eeffStatusBadge('rose', 'trending_down', 'Negativo');
 
@@ -412,19 +414,19 @@ function buildEdoFinKpiItems(data) {
       : eeffStatusBadge('rose', 'trending_down', 'Resultado negativo');
 
   const costoBadge = !Number.isFinite(costoPct) ? eeffStatusBadge('slate', 'info', 'Sin dato')
-    : costoPct >= 80 ? eeffStatusBadge('rose', 'trending_up', 'Alta presión')
-      : costoPct >= 70 ? eeffStatusBadge('amber', 'warning', 'Atención')
+    : costoPct >= 90 ? eeffStatusBadge('rose', 'trending_up', 'Alta presión')
+      : costoPct >= 87 ? eeffStatusBadge('amber', 'warning', 'Atención')
         : eeffStatusBadge('green', 'check_circle', 'Controlado');
 
   const gastosBadge = !Number.isFinite(gastosPct) ? eeffStatusBadge('slate', 'info', 'Sin dato')
-    : gastosPct >= 10 ? eeffStatusBadge('rose', 'trending_up', 'Alta presión')
-      : gastosPct >= 6 ? eeffStatusBadge('amber', 'warning', 'Atención')
+    : gastosPct >= 13 ? eeffStatusBadge('rose', 'trending_up', 'Alta presión')
+      : gastosPct >= 11 ? eeffStatusBadge('amber', 'warning', 'Atención')
         : eeffStatusBadge('green', 'check_circle', 'Controlado');
 
   const crecBadge = !Number.isFinite(crecEbit) ? eeffStatusBadge('slate', 'info', 'Sin dato')
     : crecEbit >= 20 ? eeffStatusBadge('green', 'trending_up', 'Crecimiento sólido')
-      : crecEbit > 0 ? eeffStatusBadge('green', 'trending_up', 'En crecimiento')
-        : crecEbit === 0 ? eeffStatusBadge('slate', 'trending_flat', 'Sin cambio')
+      : crecEbit >= 5 ? eeffStatusBadge('green', 'trending_up', 'Crecimiento real')
+        : crecEbit >= -5 ? eeffStatusBadge('amber', 'trending_flat', 'Bajo inflación')
           : eeffStatusBadge('rose', 'trending_down', 'Contracción');
 
   const perdidaBadge = !Number.isFinite(perdida) ? eeffStatusBadge('slate', 'info', 'Sin dato')
@@ -475,19 +477,20 @@ function buildEdoFinKpiItems(data) {
       ],
     },
     {
-      id: 'margenEbitda',
-      label: 'Margen EBITDA',
-      value: s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct,
-      displayOverride: formatPctLabel(s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct),
+      id: 'ebitda',
+      label: 'EBITDA (UAFIDA)',
+      value: s.ebitda ?? data.ebitMetrics?.ebitda,
       icon: 'trending_up',
-      color: Number(s.margenEbitdaPct ?? data.ebitMetrics?.margenEbitdaPct ?? 0) < 0 ? 'rose' : 'green',
-      sub: `EBITDA ${formatEbitMoney(s.ebitda ?? data.ebitMetrics?.ebitda)}`,
+      color: Number(s.ebitda ?? data.ebitMetrics?.ebitda ?? 0) < 0 ? 'rose' : 'green',
+      sub: Number.isFinite(margenEbitda)
+        ? `Margen ${margenEbitda}% · UO + depreciación`
+        : 'Utilidad operación + depreciación',
       badge: ebitdaBadge,
       row: 'primary',
       drilldown: [
-        drillRow('EBIT (util. operación)', s.ebit ?? data.ebitMetrics?.ebit ?? s.utilidadOperacion, { id: 'ebitda-ebit', highlight: true }),
-        drillRow('(+) Depreciación periodo', s.depreciacionPeriodo ?? data.ebitMetrics?.depreciacionPeriodo, { id: 'ebitda-dep' }),
-        drillRow('EBITDA', s.ebitda ?? data.ebitMetrics?.ebitda, { id: 'ebitda-total', highlight: true }),
+        drillRow('EBIT / UAFI (util. operación)', s.ebit ?? data.ebitMetrics?.ebit ?? s.utilidadOperacion, { id: 'ebitda-ebit', highlight: true }),
+        drillRow('(+) Depreciación del periodo', s.depreciacionPeriodo ?? data.ebitMetrics?.depreciacionPeriodo, { id: 'ebitda-dep' }),
+        drillRow('EBITDA / UAFIDA', s.ebitda ?? data.ebitMetrics?.ebitda, { id: 'ebitda-total', highlight: true }),
         drillRow('Ventas totales', s.ventasTotales, { id: 'ebitda-vtas' }),
       ],
     },

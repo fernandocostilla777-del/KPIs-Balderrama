@@ -52,6 +52,28 @@ npm run dist:win
 
 Salida en `desktop/dist/`.
 
+## Actualizaciones remotas (Windows)
+
+El instalador NSIS busca solo nuevas versiones en:
+
+`https://kpis-balderrama-production.up.railway.app/desktop-updates`
+
+1. Sube la versión en `desktop/package.json` (por ejemplo `1.0.1`).
+2. Genera el instalador: `npm run dist:win`
+3. Publícalo a Railway:
+
+```bash
+set CLOUD_API_URL=https://kpis-balderrama-production.up.railway.app
+set CLOUD_SYNC_API_KEY=tu-clave
+npm run publish:win
+```
+
+Las PCs con el `.exe` instalado detectan el cambio al abrir la app o en **Ayuda → Buscar actualizaciones**. El portable no se autoactualiza.
+
+Para otra URL de canal, crea `update-feed.txt` en la carpeta de configuración de la app (una línea con `https://.../desktop-updates`).
+
+En Railway conviene un volumen montado en `/data/desktop-updates` y la variable `DESKTOP_UPDATES_DIR=/data/desktop-updates`.
+
 ### Requisitos Mac
 
 | Requisito | Notas |

@@ -5,6 +5,7 @@ const CANALES_ORDEN = [
   'ZACATELCO',
   'SUAUTO',
   'CASA',
+  'SEMINUEVOS_NUEVOS',
   'FLOTILLAS',
   'PERDIDA',
   'OTROS',
@@ -17,6 +18,7 @@ const CANALES_LABEL = {
   ZACATELCO: 'Zacatelco',
   SUAUTO: 'Suauto',
   CASA: 'Casa',
+  SEMINUEVOS_NUEVOS: 'Seminuevos Nuevos',
   FLOTILLAS: 'Flotillas',
   PERDIDA: 'Perdida',
   OTROS: 'Otros',
@@ -57,7 +59,44 @@ const CANALES_MAP = {
   },
 };
 
-function getCanalVenta(formapago) {
+/** Asesores cuyas ventas se contabilizan como Seminuevos Nuevos (por nombre). */
+const SEMINUEVOS_NUEVOS_VENDEDORES = [
+  'LOPEZ PEREZ LUIS PABLO',
+  'CALDERON CARCANO LUIS ARTURO',
+  'FLORES PARADA LAURA GABRIELA',
+  'RAMIREZ TORRES JACOB NOEL',
+  'NAHUACATL HERNANDEZ HECTOR URIEL',
+  'PEREZ HERNANDEZ CARLOS IVAN',
+  'ESCOBAR GUZMAN JUAN CARLOS',
+  'FLORES QUIROZ VIRIDIANA ITZEL',
+  'AGUILAR VAZQUEZ FERNANDO',
+  'ROJAS ROBLES CINTHIA DEL CARMEN',
+  'LOPEZ CORTES ANA EUGENIA',
+  'MOGUEL PEREZ EDSON OSWALDO',
+  'MARTINEZ RODRIGUEZ EMMANUEL',
+];
+
+function normalizePersonName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+const SEMINUEVOS_NUEVOS_VENDEDORES_SET = new Set(
+  SEMINUEVOS_NUEVOS_VENDEDORES.map(normalizePersonName),
+);
+
+function isVendedorSeminuevosNuevos(vendedor) {
+  const key = normalizePersonName(vendedor);
+  return Boolean(key) && SEMINUEVOS_NUEVOS_VENDEDORES_SET.has(key);
+}
+
+function getCanalVenta(formapago, vendedor) {
+  if (isVendedorSeminuevosNuevos(vendedor)) return 'SEMINUEVOS_NUEVOS';
+
   const codigo = String(formapago || '').trim().toUpperCase();
   if (!codigo) return 'OTROS';
 
@@ -78,7 +117,7 @@ function getCanalLabel(canal) {
 
 function enrichVentasRows(rows) {
   return rows.map((row) => {
-    const canal = getCanalVenta(row.FORMAPAGO_ORIGINAL);
+    const canal = getCanalVenta(row.FORMAPAGO_ORIGINAL, row.VENDEDOR);
     return {
       ...row,
       CANAL_VENTA: canal,
@@ -91,7 +130,7 @@ function countByCanal(rows) {
   const map = Object.fromEntries(CANALES_ORDEN.map((c) => [c, 0]));
 
   for (const row of rows) {
-    const canal = row.CANAL_VENTA || getCanalVenta(row.FORMAPAGO_ORIGINAL);
+    const canal = row.CANAL_VENTA || getCanalVenta(row.FORMAPAGO_ORIGINAL, row.VENDEDOR);
     map[canal] = (map[canal] || 0) + 1;
   }
 
@@ -107,8 +146,10 @@ function countByCanal(rows) {
 module.exports = {
   CANALES_ORDEN,
   CANALES_LABEL,
+  SEMINUEVOS_NUEVOS_VENDEDORES,
   getCanalVenta,
   getCanalLabel,
+  isVendedorSeminuevosNuevos,
   enrichVentasRows,
   countByCanal,
 };

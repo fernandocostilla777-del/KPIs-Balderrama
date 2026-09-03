@@ -3,7 +3,7 @@
  * Teoría operativa Balderrama:
  * - Capital de trabajo = AC − PC
  * - Razón circulante = AC ÷ PC
- * - Prueba ácida = (AC − inventarios/WIP − pagos anticipados) ÷ PC
+ * - Prueba ácida = (Caja + Bancos + Equivalentes a efectivo + CxC) ÷ Pasivo a corto plazo
  */
 
 function normalizeLabel(value) {
@@ -16,11 +16,28 @@ function normalizeLabel(value) {
 }
 
 /**
- * @returns {'inventariosYProceso'|'pagosAnticipados'|'excluir'|'rapido'}
+ * @returns {'efectivo'|'cxc'|'inventariosYProceso'|'pagosAnticipados'|'excluir'|'otro'}
  */
 function classifyActivoCirculanteAccount(label) {
   const L = normalizeLabel(label);
-  if (!L) return 'rapido';
+  if (!L) return 'otro';
+
+  // CxC primero (evita falsos positivos con “caja” u otras etiquetas)
+  if (
+    /CUENTAS POR COBRAR|DOCUMENTOS Y CTAS\.? POR COBRAR|ADEUDOS DE COMPANIAS FINANCIERAS|RECLAMACION DE GARANTIAS/.test(L)
+  ) {
+    return 'cxc';
+  }
+
+  // Caja + Bancos + Equivalentes a efectivo
+  if (
+    /^CAJA$/.test(L)
+    || /FONDO DE CAJA|CAJA CHICA/.test(L)
+    || /\bBANCOS?\b/.test(L)
+    || /EQUIVALENTES? A EFECTIVO|INVERSIONES EN VALORES|INVERSIONES TEMPORALES/.test(L)
+  ) {
+    return 'efectivo';
+  }
 
   if (/PAGADO.?S? POR ANTICIPADO|PAGOS ANTICIPADOS|SEGUROS PAGADOS POR ANTICIPADO/.test(L)) {
     return 'pagosAnticipados';
@@ -35,14 +52,13 @@ function classifyActivoCirculanteAccount(label) {
     return 'inventariosYProceso';
   }
 
-  // Cuentas de activo fijo / diferido que a veces aparecen mal en nomenclatura
   if (
     /MAQUINARIA|MUEBLES Y ENSERES|VEHICULOS USO|EQUIPO DE COMPUTO|EQUIPO DE PARTES|MEJORAS EN INMUEBLE|DEPREC\.|INVERSIONES Y ACTIVOS DIVERSOS|EDIFICIOS/.test(L)
   ) {
     return 'excluir';
   }
 
-  return 'rapido';
+  return 'otro';
 }
 
 function round2(n) {
@@ -62,35 +78,37 @@ function interpretRazonCirculante(ratio) {
       summary: 'No hay suficiente información de activo/pasivo circulante para evaluar liquidez.',
     };
   }
-  if (ratio < 1) {
+  // Referencia de agencia: el pasivo circulante carga el plan piso, así que el
+  // estándar del sector es 1.10–1.30, más bajo que el de una empresa comercial.
+  if (ratio < 1.1) {
     return {
       band: 'insuficiente',
-      label: 'Insuficiencia de activos circulantes',
+      label: 'Liquidez insuficiente',
       tone: 'rose',
-      summary: 'Los activos circulantes no alcanzan a cubrir el pasivo de corto plazo (razón < 1.00).',
+      summary: 'El activo circulante no alcanza el mínimo de 1.10 que se espera en una agencia. Aun contando el inventario de unidades, no hay con qué cubrir el plan piso y los proveedores del corto plazo.',
     };
   }
-  if (ratio < 1.2) {
+  if (ratio < 1.3) {
     return {
       band: 'ajustada',
-      label: 'Liquidez muy ajustada',
+      label: 'Liquidez ajustada',
       tone: 'amber',
-      summary: 'Puede cubrir contablemente las obligaciones de corto plazo, pero el margen de seguridad es muy bajo (1.00–1.20).',
+      summary: 'Entre 1.10 y 1.30: la agencia cubre el plan piso y los proveedores, pero sin colchón. Depende de que las unidades se desplacen en tiempo.',
     };
   }
-  if (ratio < 1.5) {
+  if (ratio < 1.6) {
     return {
       band: 'moderada',
-      label: 'Liquidez moderada',
-      tone: 'blue',
-      summary: 'Hay un margen razonable para cubrir el pasivo circulante (1.20–1.50).',
+      label: 'Liquidez sana',
+      tone: 'green',
+      summary: 'Entre 1.30 y 1.60: rango sano para una agencia de autos nuevos. El activo circulante cubre el plan piso con margen razonable.',
     };
   }
   return {
     band: 'holgada',
-    label: 'Mayor margen de seguridad',
+    label: 'Liquidez holgada',
     tone: 'green',
-    summary: 'La razón circulante supera 1.50: hay holgura relativa frente a obligaciones de corto plazo.',
+    summary: 'Arriba de 1.60. Hay bastante holgura frente al plan piso y los proveedores; conviene revisar que no sea inventario detenido o cartera sin cobrar.',
   };
 }
 
@@ -102,9 +120,11 @@ function computeLiquidezAnalysis(input = {}) {
   const pasivoCirculante = Number(input.pasivoCirculante || 0);
   const accounts = Array.isArray(input.accounts) ? input.accounts : [];
 
+  const efectivo = [];
+  const cxc = [];
   const inventarios = [];
   const anticipados = [];
-  const rapidos = [];
+  const otros = [];
   const excluidos = [];
 
   for (const acc of accounts) {
@@ -115,15 +135,21 @@ function computeLiquidezAnalysis(input = {}) {
       value: round2(value),
     };
     const kind = classifyActivoCirculanteAccount(acc.label);
-    if (kind === 'inventariosYProceso') inventarios.push(item);
+    if (kind === 'efectivo') efectivo.push(item);
+    else if (kind === 'cxc') cxc.push(item);
+    else if (kind === 'inventariosYProceso') inventarios.push(item);
     else if (kind === 'pagosAnticipados') anticipados.push(item);
     else if (kind === 'excluir') excluidos.push(item);
-    else rapidos.push(item);
+    else otros.push(item);
   }
 
+  const efectivoTotal = round2(efectivo.reduce((a, x) => a + x.value, 0));
+  const cxcTotal = round2(cxc.reduce((a, x) => a + x.value, 0));
   const inventariosTotal = round2(inventarios.reduce((a, x) => a + x.value, 0));
   const anticipadosTotal = round2(anticipados.reduce((a, x) => a + x.value, 0));
-  const activosRapidos = round2(activoCirculante - inventariosTotal - anticipadosTotal);
+
+  // Numerador estricto de prueba ácida Balderrama
+  const activosRapidos = round2(efectivoTotal + cxcTotal);
 
   const capitalTrabajo = round2(activoCirculante - pasivoCirculante);
   const razonCirculante = pasivoCirculante
@@ -138,11 +164,13 @@ function computeLiquidezAnalysis(input = {}) {
     : null;
 
   const interpretacion = interpretRazonCirculante(razonCirculante);
+  // Agencia: el grueso del activo circulante es inventario de unidades financiado con
+  // plan piso, por lo que la prueba ácida del sector se mueve entre 0.50 y 0.70.
   const acidTone = pruebaAcida == null
     ? 'slate'
-    : pruebaAcida < 1
+    : pruebaAcida < 0.5
       ? 'rose'
-      : pruebaAcida < 1.1
+      : pruebaAcida < 0.7
         ? 'amber'
         : 'green';
 
@@ -154,6 +182,8 @@ function computeLiquidezAnalysis(input = {}) {
     razonCirculante: razonCirculante != null ? round2(razonCirculante) : null,
     pruebaAcida: pruebaAcida != null ? round2(pruebaAcida) : null,
     activosRapidos,
+    efectivoYEquivalentes: efectivoTotal,
+    cuentasPorCobrar: cxcTotal,
     inventariosYProceso: inventariosTotal,
     pagosAnticipados: anticipadosTotal,
     deficitAcido,
@@ -161,23 +191,29 @@ function computeLiquidezAnalysis(input = {}) {
     interpretacion,
     acidTone,
     desglose: {
+      efectivo,
+      cxc,
       inventarios,
       pagosAnticipados: anticipados,
-      rapidos,
+      otros,
       excluidos,
+      // compat: UI previa agrupaba “rápidos”
+      rapidos: [...efectivo, ...cxc],
     },
     formula: {
       capitalTrabajo: 'Activo circulante − Pasivo circulante',
       razonCirculante: 'Activo circulante ÷ Pasivo circulante',
-      pruebaAcida: '(Activo circulante − inventarios/WIP − pagos anticipados) ÷ Pasivo circulante',
+      pruebaAcida: '(Caja + Bancos + Equivalentes a efectivo + CxC) ÷ Pasivo a corto plazo',
     },
     lectura: {
       razon: interpretacion.summary,
       acida: pruebaAcida == null
         ? 'Sin dato de prueba ácida.'
-        : pruebaAcida < 1
-          ? `Sin inventarios ni anticipados, hay un faltante de liquidez inmediata de ${Math.abs(deficitAcido).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
-          : 'La prueba ácida cubre el pasivo circulante sin depender de inventarios ni anticipados.',
+        : pruebaAcida < 0.5
+          ? `Sin contar el inventario de unidades, faltan ${Math.abs(deficitAcido).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 2 })} para cubrir el pasivo de corto plazo. Por debajo del 0.50 que se considera mínimo en una agencia: la operación depende por completo de que se desplace el piso.`
+        : pruebaAcida < 0.7
+          ? `Con caja, bancos y cartera se cubre ${pruebaAcida.toFixed(2)} del pasivo de corto plazo. Está en la banda ajustada del sector (0.50–0.70); el resto depende del desplazamiento de unidades.`
+          : `Con caja, bancos y cartera se cubre ${pruebaAcida.toFixed(2)} del pasivo de corto plazo, arriba del 0.70 que se considera sano en una agencia sin recurrir al inventario de piso.`,
     },
   };
 }

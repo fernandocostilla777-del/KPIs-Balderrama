@@ -1,64 +1,70 @@
-import { AUGUST_2026_SEED } from "./seed";
 import type { MonthlyGoals } from "./types";
-
-/** Sube de versión para invalidar metas viejas en el navegador (p. ej. GMF Seminuevos 26 → 10). */
-const STORAGE_KEY = "balderrama-monthly-objectives-v2";
+import { applyBdcCatalog, applyProductCatalog, AUGUST_2026_SEED } from "./seed";
+import { authHeaders } from "./auth";
 
 function normalizeMonth(month: MonthlyGoals): MonthlyGoals {
-  if (month.id !== AUGUST_2026_SEED.id) return month;
+  const withCatalog = {
+    ...month,
+    products: applyProductCatalog(month.products),
+    bdc: applyBdcCatalog(month.bdc),
+  };
+
+  if (withCatalog.id !== AUGUST_2026_SEED.id) return withCatalog;
+
   return {
     ...AUGUST_2026_SEED,
-    ...month,
-    tacNuevosTarget: month.tacNuevosTarget ?? AUGUST_2026_SEED.tacNuevosTarget,
-    usedVehiclesPoints: month.usedVehiclesPoints ?? AUGUST_2026_SEED.usedVehiclesPoints,
-    // Meta corregida: siempre 10 para Agosto 2026 (no dejar 26 del PDF/caché).
-    gmfSeminuevosTarget: AUGUST_2026_SEED.gmfSeminuevosTarget,
+    ...withCatalog,
+    products: applyProductCatalog(withCatalog.products),
+    bdc: applyBdcCatalog(withCatalog.bdc),
+    tacNuevosTarget: withCatalog.tacNuevosTarget ?? AUGUST_2026_SEED.tacNuevosTarget,
+    usedVehiclesPoints: withCatalog.usedVehiclesPoints ?? AUGUST_2026_SEED.usedVehiclesPoints,
+    gmfSeminuevosTarget: withCatalog.gmfSeminuevosTarget ?? AUGUST_2026_SEED.gmfSeminuevosTarget,
   };
 }
 
-function persist(months: MonthlyGoals[]): MonthlyGoals[] {
-  const sorted = [...months].sort((a, b) => b.id.localeCompare(a.id));
-  if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
-    // Limpia la clave anterior para no volver a leer el 26.
-    localStorage.removeItem("balderrama-monthly-objectives-v1");
-  }
-  return sorted;
+function fallbackMonths(): MonthlyGoals[] {
+  return [normalizeMonth({ ...AUGUST_2026_SEED })];
 }
 
-export function loadMonths(): MonthlyGoals[] {
-  if (typeof window === "undefined") return [AUGUST_2026_SEED];
+/** Carga meses compartidos desde el servidor (backend/data o Postgres en Railway). */
+export async function loadMonths(): Promise<MonthlyGoals[]> {
   try {
-    const raw =
-      localStorage.getItem(STORAGE_KEY)
-      || localStorage.getItem("balderrama-monthly-objectives-v1")
-      || "[]";
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length) {
-      const months = (parsed as MonthlyGoals[]).map(normalizeMonth);
-      if (!months.some((month) => month.id === AUGUST_2026_SEED.id)) {
-        months.push(AUGUST_2026_SEED);
-      }
-      return persist(months);
+    const response = await fetch("/backend-api/objetivos-resultados/meses", {
+      credentials: "include",
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const months = Array.isArray(data.months) ? (data.months as MonthlyGoals[]) : [];
+    const normalized = months.map(normalizeMonth);
+    if (!normalized.some((month) => month.id === AUGUST_2026_SEED.id)) {
+      normalized.push(normalizeMonth({ ...AUGUST_2026_SEED }));
     }
+    return normalized.sort((a, b) => b.id.localeCompare(a.id));
   } catch {
-    // Recupera la plantilla conocida si el almacenamiento local se dañó.
+    return fallbackMonths();
   }
-  return persist([AUGUST_2026_SEED]);
 }
 
-export function saveMonth(month: MonthlyGoals): MonthlyGoals[] {
+/** Guarda/actualiza un mes en el servidor (solo admin). */
+export async function saveMonth(month: MonthlyGoals): Promise<MonthlyGoals[]> {
   const normalized = normalizeMonth(month);
-  const months = loadMonths().filter((item) => item.id !== normalized.id);
-  months.push(normalized);
-  return persist(months);
-}
-
-export function removeMonth(id: string): MonthlyGoals[] {
-  const months = loadMonths().filter(
-    (item) => item.id !== id || item.id === AUGUST_2026_SEED.id,
-  );
-  return persist(months);
+  const response = await fetch("/backend-api/objetivos-resultados/meses", {
+    method: "PUT",
+    credentials: "include",
+    cache: "no-store",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ month: normalized }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || data.message || `No se pudo guardar el mes (${response.status})`);
+  }
+  if (Array.isArray(data.months) && data.months.length) {
+    return (data.months as MonthlyGoals[]).map(normalizeMonth);
+  }
+  return loadMonths();
 }
 
 export function monthRange(month: MonthlyGoals): { fechaInicio: string; fechaFin: string } {

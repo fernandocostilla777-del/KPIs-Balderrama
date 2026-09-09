@@ -5,6 +5,7 @@ const {
   getObjetivosSnapshot,
   listObjetivosPeriodos,
 } = require('../services/objetivosResultadosService');
+const monthlyObjectives = require('../services/monthlyObjectivesStore');
 
 const router = express.Router();
 
@@ -13,6 +14,54 @@ router.get('/periodos', requireMobileAuth, async (_req, res, next) => {
     res.json({ ok: true, periodos: await listObjetivosPeriodos() });
   } catch (err) {
     next(err);
+  }
+});
+
+router.get('/meses', requireMobileAuth, async (_req, res, next) => {
+  try {
+    res.json({ ok: true, months: await monthlyObjectives.listMonths() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/meses/:id', requireMobileAuth, async (req, res, next) => {
+  try {
+    const month = await monthlyObjectives.getMonth(req.params.id);
+    if (!month) return res.status(404).json({ ok: false, error: 'Mes no encontrado' });
+    return res.json({ ok: true, month });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.put('/meses', requireMobileAuth, async (req, res, next) => {
+  try {
+    if (!monthlyObjectives.isAdminUser(req.mobileUser)) {
+      return res.status(403).json({ ok: false, error: 'Solo Administración puede guardar meses.' });
+    }
+    const month = await monthlyObjectives.upsertMonth(req.body?.month || req.body);
+    return res.json({
+      ok: true,
+      month,
+      months: await monthlyObjectives.listMonths(),
+    });
+  } catch (err) {
+    if (err?.status) return res.status(err.status).json({ ok: false, error: err.message });
+    return next(err);
+  }
+});
+
+router.delete('/meses/:id', requireMobileAuth, async (req, res, next) => {
+  try {
+    if (!monthlyObjectives.isAdminUser(req.mobileUser)) {
+      return res.status(403).json({ ok: false, error: 'Solo Administración puede eliminar meses.' });
+    }
+    const months = await monthlyObjectives.removeMonth(req.params.id);
+    return res.json({ ok: true, months });
+  } catch (err) {
+    if (err?.status) return res.status(err.status).json({ ok: false, error: err.message });
+    return next(err);
   }
 });
 

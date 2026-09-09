@@ -244,6 +244,70 @@ function parseDateInput(value) {
   return date;
 }
 
+function formatDateInput(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** Mismo día/mes del año corrido ±years (ajusta 29-feb → último día de feb). */
+function shiftDateYear(value, years) {
+  const src = parseDateInput(value);
+  const target = new Date(src.getFullYear() + years, src.getMonth(), src.getDate(), 12, 0, 0);
+  if (target.getMonth() !== src.getMonth()) {
+    // Día inexistente (p. ej. 29-feb): último día del mes destino.
+    target.setDate(0);
+  }
+  return formatDateInput(target);
+}
+
+function pctDelta(actual, anterior) {
+  const a = Number(actual);
+  const b = Number(anterior);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+  return Math.round(((a - b) / Math.abs(b)) * 1000) / 10;
+}
+
+function pickKpiSnapshot(resumen) {
+  return {
+    totalVentas: Number(resumen?.totalVentas || 0),
+    totalRetail: Number(resumen?.totalRetail || 0),
+    totalFlotillas: Number(resumen?.totalFlotillas || 0),
+    totalNotificacionesEntrega: Number(resumen?.totalNotificacionesEntrega || 0),
+    numeradorCobertura: Number(resumen?.numeradorCobertura || 0),
+    totalTomasACuenta: Number(resumen?.totalTomasACuenta || 0),
+  };
+}
+
+function buildComparativoPeriodo({ fechaInicio, fechaFin, actual, anterior }) {
+  const anioActual = parseDateInput(fechaFin).getFullYear();
+  const anioAnterior = anioActual - 1;
+  const keys = [
+    'totalVentas',
+    'totalRetail',
+    'totalFlotillas',
+    'totalNotificacionesEntrega',
+    'numeradorCobertura',
+    'totalTomasACuenta',
+  ];
+  const variacion = {};
+  for (const key of keys) {
+    variacion[key] = pctDelta(actual?.[key], anterior?.[key]);
+  }
+  return {
+    anioActual,
+    anioAnterior,
+    fechaInicio,
+    fechaFin,
+    fechaInicioAnterior: shiftDateYear(fechaInicio, -1),
+    fechaFinAnterior: shiftDateYear(fechaFin, -1),
+    actual,
+    anterior,
+    variacion,
+  };
+}
+
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const FLOTILLA_LABEL = 'FLOTILLA';
 
@@ -961,14 +1025,28 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
   const ytdRanges = buildYtdRanges(fechaFin);
   const sameAsYtd = fechaInicio === ytdRanges.inicioActual && fechaFin === ytdRanges.finActual;
 
-  const [core, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
+  const fechaInicioAnterior = shiftDateYear(fechaInicio, -1);
+  const fechaFinAnterior = shiftDateYear(fechaFin, -1);
+  const inicioAnterior = parseDateInput(fechaInicioAnterior);
+  const finAnterior = parseDateInput(fechaFinAnterior);
+
+  const [core, coreAnterior, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
     getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes, fresh }),
+    getVentasSofiaCore({
+      fechaInicio: fechaInicioAnterior,
+      fechaFin: fechaFinAnterior,
+      incluirPorMes: false,
+      fresh: false,
+    }).catch((err) => {
+      console.warn('[ventas] periodo año anterior:', err.message);
+      return null;
+    }),
     getComparativoYtd(fechaFin),
     getInventory({ planPisoPeriod: 'all' }).catch(() => null),
     getMejorUtilidadPorCarline({
       fechaInicio: ytdRanges.inicioActual,
       fechaFin: ytdRanges.finActual,
-      metric: 'utilidad_promedio',
+      metric: 'utilidad_neta',
       minUnidades: 1,
     }).catch((err) => {
       console.warn('[ventas] utilidad carline:', err.message);
@@ -1009,9 +1087,29 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
     parseDateInput(ytdRanges.finActual)
   );
 
+  let resumenAnterior = null;
+  if (coreAnterior?.registros) {
+    resumenAnterior = summarizeVentas(
+      coreAnterior.registros,
+      inicioAnterior,
+      finAnterior,
+      coreAnterior.sofiaEntregas || {},
+    );
+    // Tomas del mismo periodo del año previo (consulta ligera ya hecha no; opcional omitir).
+    resumenAnterior.totalTomasACuenta = 0;
+  }
+
+  const comparativoPeriodo = buildComparativoPeriodo({
+    fechaInicio,
+    fechaFin,
+    actual: pickKpiSnapshot(resumen),
+    anterior: pickKpiSnapshot(resumenAnterior),
+  });
+
   return {
     filtros: { fechaInicio, fechaFin },
     resumen,
+    comparativoPeriodo,
     comparativoYtd,
     utilidadCarline,
     registros: rows,

@@ -2910,8 +2910,153 @@ function renderPostventaOverview(data) {
   setText('pvKpiHyp', fmt.currency(hyp.costo || 0));
   setText('pvKpiHypSub', `${fmt.number(hyp.lineas || 0)} líneas · ${fmt.number(hyp.existencia || 0)} pzas`);
   setText('pvKpiTotal', fmt.currency(ov.totalCosto || 0));
+  renderPostventaRotacionUtilidad(data);
   renderPostventaInsights(data);
   renderPostventaTraspasos(data);
+}
+
+const PV_QUADRANT_LABELS = {
+  estrella: 'Estrella',
+  regalo: 'Rápida · baja util.',
+  pregunta: 'Alto margen',
+  desarrollo: 'Baja rotación',
+};
+
+function pvQuadrantMap(ru) {
+  const map = new Map();
+  const qs = ru?.cuadrantes || {};
+  for (const key of Object.keys(qs)) {
+    for (const row of qs[key] || []) {
+      if (row?.parte) map.set(String(row.parte), key);
+    }
+  }
+  return map;
+}
+
+function pvQuadrantBadge(id) {
+  const key = PV_QUADRANT_LABELS[id] ? id : '';
+  if (!key) return '<span class="top-bar-meta">—</span>';
+  return `<span class="quadrant-badge quadrant-badge--${escapeHtml(key)}">${escapeHtml(PV_QUADRANT_LABELS[key])}</span>`;
+}
+
+function renderPostventaRotacionUtilidad(data) {
+  const { fmt, setText } = Dashboard;
+  const ru = data?.rotacionUtilidad || {};
+  const s = ru.summary || {};
+  const p = data?.periodo || {};
+  const u = ru.umbrales || {};
+  const qMap = pvQuadrantMap(ru);
+
+  setText('pvKpiRuVenta', fmt.currency(s.ventaPeriodo || 0));
+  setText('pvKpiRuVentaSub', `${fmt.number(s.cantidadVendida || 0)} pzas · ${fmt.number(s.partesAnalizadas || 0)} en matriz`);
+  setText('pvKpiRuUtilidad', fmt.currency(s.utilidadPeriodo || 0));
+  const margen = Number(s.ventaPeriodo) > 0
+    ? Math.round((Number(s.utilidadPeriodo) / Number(s.ventaPeriodo)) * 1000) / 10
+    : 0;
+  setText('pvKpiRuUtilidadSub', margen ? `Margen periodo ${margen}%` : 'Venta − costo');
+  setText('pvKpiRuRegalos', fmt.number(s.regalos || 0));
+  setText('pvKpiRuObsoleto', fmt.currency(s.costoTrabado90 || 0));
+  setText('pvKpiRuObsoletoSub', `${fmt.number(s.trabados90 || 0)} líneas sin rotación`);
+
+  const meta = document.getElementById('pvRotUtilMeta');
+  if (meta) {
+    meta.textContent = p.fechaInicio && p.fechaFin
+      ? `${p.fechaInicio} — ${p.fechaFin}`
+      : '—';
+  }
+  const sub = document.getElementById('pvRotUtilSubtitle');
+  if (sub) {
+    sub.textContent = ru.nota || 'Qué se mueve rápido, qué deja margen y qué ya está trabado';
+  }
+  const umb = document.getElementById('pvRotUtilUmbrales');
+  if (umb) {
+    umb.textContent = (u.medianaCantidad || u.medianaMargenPct)
+      ? `Corte de la matriz: ≥ ${fmt.number(u.medianaCantidad || 0)} pzas y ≥ ${fmt.number(u.medianaMargenPct || 0)}% de margen (medianas del periodo).`
+      : '';
+  }
+
+  const matriz = document.getElementById('pvMatrizCuadrantes');
+  if (matriz) {
+    const order = ['estrella', 'regalo', 'pregunta', 'desarrollo'];
+    const metaQ = ru.meta || {};
+    matriz.innerHTML = order.map((id) => {
+      const m = metaQ[id] || { label: id, hint: '', icon: 'insights' };
+      const rows = (ru.cuadrantes?.[id] || []).slice(0, 5);
+      const list = rows.length
+        ? `<ul class="pv-matriz-list">${rows.map((r) => `
+            <li>
+              <span class="pv-matriz-list__name" title="${escapeHtml(r.descripcion || '')}">
+                <strong>${escapeHtml(r.parte || '')}</strong> · ${escapeHtml((r.descripcion || '').slice(0, 36))}
+              </span>
+              <span class="pv-matriz-list__meta">${fmt.number(r.cantidad || 0)} pzas · ${fmt.number(r.margenPct || 0)}%</span>
+            </li>`).join('')}</ul>`
+        : '<p class="pv-matriz-empty">Sin piezas en este cuadrante.</p>';
+      return `<article class="pv-matriz-card pv-matriz-card--${escapeHtml(id)}">
+        <div class="pv-matriz-card__head">
+          <div>
+            <h4 class="pv-matriz-card__title">
+              <span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px" aria-hidden="true">${escapeHtml(m.icon || 'insights')}</span>
+              ${escapeHtml(m.label || id)}
+            </h4>
+            <p class="pv-matriz-card__hint">${escapeHtml(m.hint || '')}</p>
+          </div>
+          <div class="pv-matriz-card__count">${fmt.number((ru.cuadrantes?.[id] || []).length)}</div>
+        </div>
+        ${list}
+      </article>`;
+    }).join('');
+  }
+
+  const vendEl = document.getElementById('pvTblTopVendidos');
+  if (vendEl) {
+    const rows = ru.topVendidos || [];
+    vendEl.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td><strong>${escapeHtml(r.parte || '')}</strong></td>
+          <td>${escapeHtml(r.descripcion || '—')}</td>
+          <td class="cell-num">${fmt.number(r.cantidad || 0)}</td>
+          <td class="cell-money">${fmt.money(r.venta || 0)}</td>
+          <td class="cell-num">${fmt.number(r.margenPct || 0)}%</td>
+          <td>${pvQuadrantBadge(qMap.get(String(r.parte || '')))}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="6">Sin salidas con venta en el periodo.</td></tr>';
+  }
+
+  const utilEl = document.getElementById('pvTblTopUtilidad');
+  if (utilEl) {
+    const rows = ru.topUtilidad || [];
+    utilEl.innerHTML = rows.length
+      ? rows.map((r) => `
+        <tr>
+          <td><strong>${escapeHtml(r.parte || '')}</strong></td>
+          <td>${escapeHtml(r.descripcion || '—')}</td>
+          <td class="cell-money">${fmt.money(r.utilidad || 0)}</td>
+          <td class="cell-num">${fmt.number(r.margenPct || 0)}%</td>
+          <td class="cell-num">${fmt.number(r.cantidad || 0)}</td>
+          <td>${pvQuadrantBadge(qMap.get(String(r.parte || '')))}</td>
+        </tr>`).join('')
+      : '<tr class="empty-row"><td colspan="6">Sin utilidad positiva en el periodo.</td></tr>';
+  }
+
+  const obsEl = document.getElementById('pvTblObsoleto');
+  if (obsEl) {
+    const rows = ru.obsoleto || [];
+    obsEl.innerHTML = rows.length
+      ? rows.map((r) => {
+        const dias = Number(r.diasSinVenta || 0);
+        const diasLabel = dias >= 9999 ? 'Sin venta' : fmt.number(dias);
+        return `
+        <tr>
+          <td><strong>${escapeHtml(r.parte || '')}</strong></td>
+          <td>${escapeHtml(r.descripcion || '—')}</td>
+          <td>${escapeHtml(r.almacen || '—')}</td>
+          <td class="cell-num">${diasLabel}</td>
+          <td class="cell-money">${fmt.money(r.costo || 0)}</td>
+        </tr>`;
+      }).join('')
+      : '<tr class="empty-row"><td colspan="5">Sin stock obsoleto (≥90 días) en el top.</td></tr>';
+  }
 }
 
 function renderPostventaInsights(data) {

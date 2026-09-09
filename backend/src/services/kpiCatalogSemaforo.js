@@ -48,6 +48,10 @@ const ROLE_TO_CATALOG_PROFILES = {
   marketing: [
     'Gerente de MKT', 'Gerencia Marketing', 'Marketing', 'MTK', 'CRM', 'BDC',
   ],
+  gestion_inventario: [
+    'Inventarios', 'Compras/Inventarios', 'Logística de inventarios e intercambios',
+    'Coordinador de entregas Matriz', 'Data Manager',
+  ],
 };
 
 /** Vincula insights operativos existentes con entradas del catálogo ABP. */

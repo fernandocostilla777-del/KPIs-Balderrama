@@ -40,7 +40,7 @@ const METAS_AGOSTO_2026 = {
   essentialsAnualPct: 30,
   essentialsMultianualPct: 23,
   usedVehiclesPoints: 5,
-  tacNuevos: 28,
+  tacNuevos: 25,
   contratosGmfSeminuevos: 10,
   bdc: {
     contactos: 1420,
@@ -444,7 +444,8 @@ function loadTraficoPorLinea(fechaInicio, fechaFin) {
         || ''
       ).toUpperCase();
       porLinea.set(linea, (porLinea.get(linea) || 0) + 1);
-      if (carlineKey && linea !== 'AVEO' && linea !== 'S10') {
+      // Incluye AVEO/S10 genéricos en carline para poder repartirlos entre HB/NB / cabinas.
+      if (carlineKey) {
         porCarline.set(carlineKey, (porCarline.get(carlineKey) || 0) + 1);
       }
       total += 1;
@@ -751,38 +752,69 @@ async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefet
   }
 
   // Evita doble conteo cuando varias líneas PDF comparten carline (p. ej. Captiva).
-  const solicitudesAsignadas = new Map();
-  for (const [key, siblings] of ownersByKey.entries()) {
-    const total = Number(solByCarline.get(key)?.total || 0);
+  const allocateByCarline = (siblings, total, weightKey) => {
+    const out = new Map();
+    if (!siblings.length) return out;
     if (siblings.length === 1) {
-      solicitudesAsignadas.set(siblings[0].linea, total);
-      continue;
+      out.set(siblings[0].linea, total);
+      return out;
     }
-    const metaSum = siblings.reduce((a, s) => a + Number(s.solicitudes || 0), 0) || siblings.length;
+    const metaSum = siblings.reduce((a, s) => a + Number(s[weightKey] || 0), 0) || siblings.length;
     let used = 0;
     siblings.forEach((sibling, index) => {
-      const weight = Number(sibling.solicitudes || 0) || 1;
+      const weight = Number(sibling[weightKey] || 0) || 1;
       const value = index === siblings.length - 1
         ? Math.max(0, total - used)
         : Math.floor((total * weight) / metaSum);
       used += value;
-      solicitudesAsignadas.set(sibling.linea, value);
+      out.set(sibling.linea, value);
     });
+    return out;
+  };
+
+  const solicitudesAsignadas = new Map();
+  for (const [key, siblings] of ownersByKey.entries()) {
+    const total = Number(solByCarline.get(key)?.total || 0);
+    for (const [linea, value] of allocateByCarline(siblings, total, 'solicitudes')) {
+      solicitudesAsignadas.set(linea, value);
+    }
   }
+
+  // Tráfico: reparte por carline (HB/NB, cabinas S10, etc.).
+  const traficoAsignado = new Map();
+  for (const [key, siblings] of ownersByKey.entries()) {
+    const bucket = Number(trafico.porCarline.get(key) || 0);
+    for (const [linea, value] of allocateByCarline(siblings, bucket, 'trafico')) {
+      traficoAsignado.set(linea, Number(traficoAsignado.get(linea) || 0) + value);
+    }
+  }
+
+  // AVEO / S10 sin variante se reparte una sola vez entre las líneas de esa familia.
+  const allocateGeneric = (genericKey, prefix) => {
+    const amount = Number(trafico.porCarline.get(genericKey) || 0);
+    if (!amount) return;
+    const siblings = (metas.lineasProducto || []).filter((m) => {
+      const c = String(carlineFromLineaPdf(m.linea) || '').toUpperCase();
+      return c === genericKey || c.startsWith(prefix);
+    });
+    if (!siblings.length) return;
+    for (const [linea, value] of allocateByCarline(siblings, amount, 'trafico')) {
+      traficoAsignado.set(linea, Number(traficoAsignado.get(linea) || 0) + value);
+    }
+  };
+  allocateGeneric('AVEO', 'AVEO ');
+  allocateGeneric('S10', 'S10');
 
   const metaMatch = built.metaMatch.map((m) => {
     const carline = carlineFromLineaPdf(m.linea);
     const solicitudesReal = Number(solicitudesAsignadas.get(m.linea) || 0);
     const carlineKey = carline ? String(carline).toUpperCase() : '';
     const uniqueCarline = Boolean(carlineKey && carlineOwners.get(carlineKey) === 1);
+    const fromAssigned = Number(traficoAsignado.get(m.linea) || 0);
     const fromLinea = Number(trafico.porLinea.get(m.linea) || 0);
-    const fromCarline = uniqueCarline ? Number(trafico.porCarline.get(carlineKey) || 0) : 0;
-    const skipTokenFallback = /^(AVEO|S10|CAPTIVA)/.test(carlineKey);
-    const fromToken = uniqueCarline && !skipTokenFallback
-      ? Number(trafico.porCarline.get(carlineKey.split(/\s+/)[0]) || 0)
-      : 0;
-    const traficoReal = fromLinea || fromCarline || fromToken;
+    const traficoReal = fromAssigned || fromLinea;
     const inventarioFromLinea = Number(inventario.porLinea.get(m.linea) || 0);
+    const skipTokenFallback = /^(AVEO|S10|CAPTIVA)/.test(carlineKey);
     const inventarioFromCarline = uniqueCarline && !skipTokenFallback
       ? Number(inventario.porCarline.get(carlineKey) || 0)
       : 0;
@@ -808,6 +840,8 @@ async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefet
   const solicitudesEnLineas = metaMatch.reduce((a, r) => a + Number(r.solicitudesReal || 0), 0);
   const solicitudesTotal = (sol?.porCarline || []).reduce((a, r) => a + Number(r.total || 0), 0);
   const solicitudesOtros = carlinesSinMeta.reduce((a, r) => a + Number(r.total || 0), 0);
+  const traficoEnLineas = metaMatch.reduce((a, r) => a + Number(r.traficoReal || 0), 0);
+  const traficoOtros = Math.max(0, Number(trafico.total || 0) - traficoEnLineas);
 
   return {
     periodo: { fechaInicio, fechaFin },
@@ -829,6 +863,8 @@ async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefet
         solicitudesEnLineas,
         solicitudesOtros,
         trafico: Number(trafico.total || 0),
+        traficoEnLineas,
+        traficoOtros,
         inventario: Number(inventario.total || 0),
         modelos: built.reales.length,
         lineasCumplidas: metaMatch.filter((m) => m.cumplida).length,

@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=112" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=117" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -703,11 +703,113 @@
 </div>
 </section>
 
+<section id="panelPvRotacionUtilidad" class="section-panel dashboard-section">
+<div class="table-header-row">
+<div>
+<h3 class="section-title" style="margin-bottom:4px">Rotación · utilidad · obsolescencia</h3>
+<p class="section-subtitle" style="margin:0" id="pvRotUtilSubtitle">Qué se mueve rápido, qué deja margen y qué ya está trabado</p>
+</div>
+<span id="pvRotUtilMeta" class="top-bar-meta">—</span>
+</div>
+
+<div class="kpi-grid kpi-grid--eeff" style="margin:14px 0" id="kpiPvRotUtil">
+<div class="kpi-card kpi-card--eeff kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Venta periodo</span></div>
+<div id="pvKpiRuVenta" class="kpi-value money">—</div>
+<p id="pvKpiRuVentaSub" class="kpi-subtitle">Salidas a costo/venta</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title">Utilidad neta</span></div>
+<div id="pvKpiRuUtilidad" class="kpi-value money">—</div>
+<p id="pvKpiRuUtilidadSub" class="kpi-subtitle">Venta − costo</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--violet">
+<div class="kpi-card-head"><span class="kpi-title">Rápidas · baja util.</span></div>
+<div id="pvKpiRuRegalos" class="kpi-value">—</div>
+<p class="kpi-subtitle">Alto volumen · bajo margen</p>
+</div>
+<div class="kpi-card kpi-card--eeff kpi-card--rose">
+<div class="kpi-card-head"><span class="kpi-title">Obsoleto (≥90 d)</span></div>
+<div id="pvKpiRuObsoleto" class="kpi-value money">—</div>
+<p id="pvKpiRuObsoletoSub" class="kpi-subtitle">Capital trabado</p>
+</div>
+</div>
+
+<p class="section-subtitle pv-matriz-legend" id="pvRotUtilUmbrales" style="margin:0 0 10px"></p>
+<div class="pv-matriz-grid" id="pvMatrizCuadrantes" aria-label="Matriz rotación vs margen"></div>
+
+<div class="ref-intel-grid" style="margin-top:16px">
+<div>
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Top vendidos</h3>
+<span class="top-bar-meta">Más piezas</span>
+</div>
+<div class="table-scroll ref-intel-table">
+<table class="data-table">
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th class="cell-num">Cant.</th>
+<th class="cell-money">Venta</th>
+<th class="cell-num">Margen</th>
+<th>Tipo</th>
+</tr>
+</thead>
+<tbody id="pvTblTopVendidos"></tbody>
+</table>
+</div>
+</div>
+<div>
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Mejor utilidad neta</h3>
+<span class="top-bar-meta">Más $ de margen</span>
+</div>
+<div class="table-scroll ref-intel-table">
+<table class="data-table">
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th class="cell-money">Utilidad</th>
+<th class="cell-num">Margen</th>
+<th class="cell-num">Cant.</th>
+<th>Tipo</th>
+</tr>
+</thead>
+<tbody id="pvTblTopUtilidad"></tbody>
+</table>
+</div>
+</div>
+<div>
+<div class="table-header-row">
+<h3 class="section-title" style="margin-bottom:0">Ya obsoleto</h3>
+<span class="top-bar-meta">≥ 90 días sin venta</span>
+</div>
+<div class="table-scroll ref-intel-table">
+<table class="data-table">
+<thead>
+<tr>
+<th>Parte</th>
+<th>Descripción</th>
+<th>Alm.</th>
+<th class="cell-num">Días</th>
+<th class="cell-money">Costo</th>
+</tr>
+</thead>
+<tbody id="pvTblObsoleto"></tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+
 <section id="panelPvInsights" class="section-panel dashboard-section">
 <div class="table-header-row">
 <h3 class="section-title" style="margin-bottom:0">Insights · Refacciones</h3>
-<span id="pvInsightsMeta" class="top-bar-meta">Stock · traspasos · rotación</span>
+<span id="pvInsightsMeta" class="top-bar-meta">Observaciones de rotación, utilidad y stock</span>
 </div>
+<p class="section-subtitle" style="margin:4px 0 0">Lectura amena de lo que conviene proteger, empujar, repriciar o liquidar.</p>
 <div id="pvInsightsCards" class="ref-alertas" aria-live="polite"></div>
 </section>
 
@@ -856,6 +958,6 @@
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/inventory.js?v=85"></script>
+<script src="/js/inventory.js?v=87"></script>
 </body>
 </html>

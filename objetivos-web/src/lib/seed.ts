@@ -25,7 +25,7 @@ export const AUGUST_2026_SEED: MonthlyGoals = {
   essentialsAnnualPct: 30,
   essentialsMultiAnnualPct: 23,
   usedVehiclesPoints: 5,
-  tacNuevosTarget: 28,
+  tacNuevosTarget: 25,
   gmfSeminuevosTarget: 10,
   bdc: {
     contacts: 1420,
@@ -53,35 +53,78 @@ export const AUGUST_2026_SEED: MonthlyGoals = {
     facturas,
     entregas,
   })),
-  products: [
-    ["Aveo HB", "Pasajeros", 124, 93, 31, 30],
-    ["Aveo NB", "Pasajeros", 88, 66, 22, 22],
-    ["Onix", "Pasajeros", 52, 39, 13, 13],
-    ["Tracker", "SUV's", 12, 9, 3, 3],
-    ["Trax", "SUV's", 20, 15, 5, 5],
-    ["Captiva", "SUV's", 36, 27, 9, 9],
-    ["Groove", "SUV's", 64, 48, 16, 16],
-    ["Traverse", "SUV's", 4, 3, 1, 1],
-    ["Tahoe", "SUV's", 4, 3, 1, 1],
-    ["Suburban", "SUV's", 8, 6, 2, 2],
-    ["Blazer EV", "SUV's", 4, 3, 1, 1],
-    ["Spark EUV", "SUV's", 16, 12, 4, 4],
-    ["Captiva PHEV SUV", "SUV's", 28, 21, 7, 7],
-    ["Colorado", "Pick up's", 4, 3, 1, 1],
-    ["Silverado / Cheyenne Crew Cab", "Pick up's", 4, 3, 1, 1],
-    ["S10 MAX Chassis Cab", "Pick up's", 20, 15, 5, 5],
-    ["S10 MAX Crew Cab", "Pick up's", 24, 18, 6, 6],
-    ["S10 MAX Regular Cab", "Pick up's", 12, 9, 3, 3],
-    ["Montana", "Pick up's", 8, 6, 2, 2],
-    ["Tornado Van", "Van's", 36, 27, 9, 9],
-    ["Express Max", "Van's", 4, 3, 1, 1],
-  ].map(([linea, familia, trafico, solicitudes, facturas, entregas]) => ({
-    linea: String(linea),
-    familia: String(familia),
-    trafico: Number(trafico),
-    solicitudes: Number(solicitudes),
-    facturas: Number(facturas),
-    entregas: Number(entregas),
-  })),
+  products: [],
 };
+
+/** Catálogo fijo de líneas (mismo set que Agosto 2026). */
+export const PRODUCT_LINES_CATALOG: MonthlyGoals["products"] = [
+  ["Aveo HB", "Pasajeros", 124, 93, 31, 30],
+  ["Aveo NB", "Pasajeros", 88, 66, 22, 22],
+  ["Onix", "Pasajeros", 52, 39, 13, 13],
+  ["Tracker", "SUV's", 12, 9, 3, 3],
+  ["Trax", "SUV's", 20, 15, 5, 5],
+  ["Captiva", "SUV's", 36, 27, 9, 9],
+  ["Groove", "SUV's", 64, 48, 16, 16],
+  ["Traverse", "SUV's", 4, 3, 1, 1],
+  ["Tahoe", "SUV's", 4, 3, 1, 1],
+  ["Suburban", "SUV's", 8, 6, 2, 2],
+  ["Blazer EV", "SUV's", 4, 3, 1, 1],
+  ["Spark EUV", "SUV's", 16, 12, 4, 4],
+  ["Captiva PHEV SUV", "SUV's", 28, 21, 7, 7],
+  ["Colorado", "Pick up's", 4, 3, 1, 1],
+  ["Silverado / Cheyenne Crew Cab", "Pick up's", 4, 3, 1, 1],
+  ["S10 MAX Chassis Cab", "Pick up's", 20, 15, 5, 5],
+  ["S10 MAX Crew Cab", "Pick up's", 24, 18, 6, 6],
+  ["S10 MAX Regular Cab", "Pick up's", 12, 9, 3, 3],
+  ["Montana", "Pick up's", 8, 6, 2, 2],
+  ["Tornado Van", "Van's", 36, 27, 9, 9],
+  ["Express Max", "Van's", 4, 3, 1, 1],
+].map(([linea, familia, trafico, solicitudes, facturas, entregas]) => ({
+  linea: String(linea),
+  familia: String(familia),
+  trafico: Number(trafico),
+  solicitudes: Number(solicitudes),
+  facturas: Number(facturas),
+  entregas: Number(entregas),
+}));
+
+AUGUST_2026_SEED.products = PRODUCT_LINES_CATALOG.map((row) => ({ ...row }));
+
+/**
+ * Fuerza el mismo catálogo de modelos que Agosto.
+ * Si el PDF trae metas por línea con el mismo nombre, conserva esos números.
+ */
+export function applyProductCatalog(
+  products: MonthlyGoals["products"] | null | undefined,
+): MonthlyGoals["products"] {
+  const byLinea = new Map(
+    (products || []).map((row) => [String(row.linea || "").trim().toLowerCase(), row]),
+  );
+  return PRODUCT_LINES_CATALOG.map((catalog) => {
+    const fromPdf = byLinea.get(catalog.linea.toLowerCase());
+    if (!fromPdf) return { ...catalog };
+    return {
+      linea: catalog.linea,
+      familia: catalog.familia,
+      trafico: Number(fromPdf.trafico ?? catalog.trafico) || 0,
+      solicitudes: Number(fromPdf.solicitudes ?? catalog.solicitudes) || 0,
+      facturas: Number(fromPdf.facturas ?? catalog.facturas) || 0,
+      entregas: Number(fromPdf.entregas ?? catalog.entregas) || 0,
+    };
+  });
+}
+
+/** Completa BDC con la plantilla de Agosto si el PDF no trajo la sección OBJETIVO BDC. */
+export function applyBdcCatalog(
+  bdc: MonthlyGoals["bdc"] | null | undefined,
+): MonthlyGoals["bdc"] {
+  const seed = AUGUST_2026_SEED.bdc;
+  return {
+    contacts: bdc?.contacts ?? seed.contacts,
+    appointmentsScheduled: bdc?.appointmentsScheduled ?? seed.appointmentsScheduled,
+    appointmentsConfirmed: bdc?.appointmentsConfirmed ?? seed.appointmentsConfirmed,
+    appointmentsCompleted: bdc?.appointmentsCompleted ?? seed.appointmentsCompleted,
+    deliveries: bdc?.deliveries ?? seed.deliveries,
+  };
+}
 

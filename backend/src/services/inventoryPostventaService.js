@@ -337,11 +337,209 @@ async function getTraspasosEntreAlmacenes({ fechaInicio, fechaFin, limit = 80 } 
   };
 }
 
-function buildRefaccionesInsights({ refaccionesRows, traspasos, overview }) {
+const QUADRANT_META = {
+  estrella: {
+    id: 'estrella',
+    label: 'Estrellas',
+    hint: 'Se mueven rápido y dejan buena utilidad',
+    icon: 'star',
+  },
+  regalo: {
+    id: 'regalo',
+    label: 'Rápidas · baja utilidad',
+    hint: 'Alta rotación, poco margen: revisar precio o costo',
+    icon: 'trending_down',
+  },
+  pregunta: {
+    id: 'pregunta',
+    label: 'Alto margen · poca venta',
+    hint: 'Buenas en utilidad unitaria; empujar volumen',
+    icon: 'help',
+  },
+  desarrollo: {
+    id: 'desarrollo',
+    label: 'Baja rotación · bajo margen',
+    hint: 'Candidatas a despriorizar o liquidar',
+    icon: 'low_priority',
+  },
+};
+
+function median(nums) {
+  const arr = (nums || []).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!arr.length) return 0;
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
+function classifyPiezaQuadrant(pieza, medCantidad, medMargen) {
+  const altaVenta = Number(pieza.cantidad) >= medCantidad;
+  const altoMargen = Number(pieza.margenPct) >= medMargen;
+  if (altaVenta && altoMargen) return 'estrella';
+  if (altaVenta && !altoMargen) return 'regalo';
+  if (!altaVenta && altoMargen) return 'pregunta';
+  return 'desarrollo';
+}
+
+/**
+ * Cruza top ventas + utilidad + stock trabado para la matriz rotación × margen.
+ */
+function buildRotacionUtilidad(alertas = {}) {
+  const byParte = new Map();
+  for (const row of [...(alertas.topVendidos || []), ...(alertas.topUtilidad || [])]) {
+    const parte = String(row.parte || '').trim();
+    if (!parte) continue;
+    const prev = byParte.get(parte);
+    if (!prev || Number(row.cantidad) > Number(prev.cantidad)) {
+      byParte.set(parte, {
+        parte,
+        descripcion: row.descripcion || 'Sin descripción',
+        cantidad: round2(row.cantidad),
+        venta: round2(row.venta),
+        costo: round2(row.costo),
+        utilidad: round2(row.utilidad),
+        margenPct: round2(row.margenPct),
+      });
+    }
+  }
+
+  const piezas = [...byParte.values()];
+  const medCantidad = median(piezas.map((p) => p.cantidad)) || 1;
+  const medMargen = median(piezas.map((p) => p.margenPct));
+
+  const cuadrantes = {
+    estrella: [],
+    regalo: [],
+    pregunta: [],
+    desarrollo: [],
+  };
+
+  for (const p of piezas) {
+    const q = classifyPiezaQuadrant(p, medCantidad, medMargen);
+    cuadrantes[q].push({ ...p, quadrant: q, quadrantLabel: QUADRANT_META[q].label });
+  }
+
+  for (const key of Object.keys(cuadrantes)) {
+    cuadrantes[key].sort((a, b) => {
+      if (key === 'regalo') return (b.cantidad - a.cantidad) || (a.margenPct - b.margenPct);
+      if (key === 'estrella' || key === 'pregunta') return (b.utilidad - a.utilidad) || (b.cantidad - a.cantidad);
+      return (a.margenPct - b.margenPct) || (a.cantidad - b.cantidad);
+    });
+  }
+
+  const obsoleto = (alertas.stockTrabado || []).map((r) => ({
+    parte: r.parte,
+    descripcion: r.descripcion,
+    almacen: r.almacen || null,
+    existencia: round2(r.existencia),
+    costo: round2(r.costo),
+    diasSinVenta: Number(r.diasSinVenta || 0),
+    ultimaVenta: r.ultimaVenta || null,
+  }));
+
+  const sum = alertas.summary || {};
+  return {
+    fuente: alertas.fuente || 'PAR_MOVTOS/PAR_MOVDET · PAR_ALMACEN',
+    nota: 'Matriz por mediana de piezas vendidas y margen % del periodo. Obsoleto = ≥90 días sin venta (o sin fecha).',
+    umbrales: {
+      medianaCantidad: round2(medCantidad),
+      medianaMargenPct: round2(medMargen),
+    },
+    summary: {
+      partesAnalizadas: piezas.length,
+      ventaPeriodo: round2(sum.ventaPeriodo),
+      utilidadPeriodo: round2(sum.utilidadPeriodo),
+      cantidadVendida: round2(sum.cantidadVendida),
+      trabados90: Number(sum.trabados90 || 0),
+      costoTrabado90: round2(sum.costoTrabado90),
+      estrellas: cuadrantes.estrella.length,
+      regalos: cuadrantes.regalo.length,
+      preguntas: cuadrantes.pregunta.length,
+      desarrollo: cuadrantes.desarrollo.length,
+    },
+    meta: QUADRANT_META,
+    cuadrantes,
+    topVendidos: alertas.topVendidos || [],
+    topUtilidad: alertas.topUtilidad || [],
+    obsoleto,
+    alerts: alertas.alerts || [],
+  };
+}
+
+function buildRefaccionesInsights({ refaccionesRows, traspasos, overview, rotacionUtilidad }) {
   const insights = [];
   const ref = overview?.refacciones || {};
   const tr = traspasos?.summary || {};
   const rutas = traspasos?.rutas || [];
+  const ru = rotacionUtilidad || {};
+  const qs = ru.cuadrantes || {};
+  const sumRu = ru.summary || {};
+
+  const regalos = qs.regalo || [];
+  if (regalos.length) {
+    const top = regalos[0];
+    insights.push({
+      id: 'ref-rapidas-baja-utilidad',
+      severity: 'warning',
+      icon: 'speed',
+      title: 'Piezas rápidas con poca utilidad',
+      summary: `${regalos.length} parte(s) venden por encima de la mediana pero con margen bajo`,
+      detail: top
+        ? `Ejemplo: ${top.parte} · ${top.descripcion} · ${Number(top.cantidad).toLocaleString('es-MX')} pzas · margen ${top.margenPct}%`
+        : '',
+      action: 'Revisar precio de lista, descuentos o costo promedio; no reponer a ciegas por volumen.',
+      metrics: { partes: regalos.length, topParte: top?.parte, margenPct: top?.margenPct },
+    });
+  }
+
+  const estrellas = qs.estrella || [];
+  if (estrellas.length) {
+    const top = estrellas[0];
+    insights.push({
+      id: 'ref-estrellas',
+      severity: 'success',
+      icon: 'star',
+      title: 'Estrellas: rotan y dejan utilidad',
+      summary: `${estrellas.length} parte(s) con alta venta y buen margen`,
+      detail: top
+        ? `Líder: ${top.parte} · utilidad $${round2(top.utilidad).toLocaleString('es-MX')} · margen ${top.margenPct}%`
+        : '',
+      action: 'Proteger existencia y priorizar surtido / pedidos de compra.',
+      metrics: { partes: estrellas.length, topParte: top?.parte, utilidad: top?.utilidad },
+    });
+  }
+
+  const preguntas = qs.pregunta || [];
+  if (preguntas.length) {
+    const top = preguntas[0];
+    insights.push({
+      id: 'ref-alto-margen-poca-venta',
+      severity: 'info',
+      icon: 'trending_up',
+      title: 'Alto margen, poca rotación',
+      summary: `${preguntas.length} parte(s) con buen margen pero venta bajo la mediana`,
+      detail: top
+        ? `${top.parte} · margen ${top.margenPct}% · solo ${Number(top.cantidad).toLocaleString('es-MX')} pzas`
+        : '',
+      action: 'Empujar en mostrador/taller o vincular a campañas / kits.',
+      metrics: { partes: preguntas.length, topParte: top?.parte },
+    });
+  }
+
+  if (Number(sumRu.trabados90) > 0 || (ru.obsoleto || []).length) {
+    const top = (ru.obsoleto || [])[0];
+    insights.push({
+      id: 'ref-obsoleto',
+      severity: Number(sumRu.costoTrabado90) >= 500000 ? 'critical' : 'warning',
+      icon: 'hourglass_disabled',
+      title: 'Obsolescencia (≥90 días sin venta)',
+      summary: `${Number(sumRu.trabados90 || 0).toLocaleString('es-MX')} líneas · $${round2(sumRu.costoTrabado90).toLocaleString('es-MX')}`,
+      detail: top
+        ? `Mayor inmovilizado: ${top.parte} · ${top.descripcion} · ${top.diasSinVenta >= 9999 ? 'sin venta' : `${top.diasSinVenta} días`} · $${round2(top.costo).toLocaleString('es-MX')}`
+        : 'Capital trabado sin rotación reciente.',
+      action: 'Liquidar, devolver a planta o traspasar antes de recomprar.',
+      metrics: { lineas: sumRu.trabados90, costo: round2(sumRu.costoTrabado90) },
+    });
+  }
 
   if (Number(tr.piezas) > 0) {
     const topRuta = rutas[0];
@@ -387,37 +585,6 @@ function buildRefaccionesInsights({ refaccionesRows, traspasos, overview }) {
     });
   }
 
-  // Stock trabado proxy: sin venta o fechaUltVen vieja (si viene)
-  let trabados = 0;
-  let costoTrabado = 0;
-  const now = Date.now();
-  for (const r of refaccionesRows || []) {
-    if (!(Number(r.existencia) > 0)) continue;
-    const fv = String(r.fechaUltVen || '').trim();
-    let dias = 9999;
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(fv)) {
-      const [dd, mm, yyyy] = fv.split('/').map(Number);
-      const t = new Date(yyyy, mm - 1, dd).getTime();
-      if (!Number.isNaN(t)) dias = Math.floor((now - t) / 86400000);
-    }
-    if (dias >= 90) {
-      trabados += 1;
-      costoTrabado += Number(r.costo) || 0;
-    }
-  }
-  if (trabados > 0) {
-    insights.push({
-      id: 'ref-stock-trabado',
-      severity: costoTrabado >= 500000 ? 'critical' : 'warning',
-      icon: 'hourglass_disabled',
-      title: 'Stock trabado (≥90 días sin venta)',
-      summary: `${trabados} líneas · $${round2(costoTrabado).toLocaleString('es-MX')}`,
-      detail: 'Capital inmovilizado en refacciones sin rotación reciente.',
-      action: 'Liquidar, devolver a planta o traspasar a sucursal con demanda.',
-      metrics: { lineas: trabados, costo: round2(costoTrabado) },
-    });
-  }
-
   if (Number(ref.costo) > 0) {
     insights.push({
       id: 'ref-valuacion',
@@ -438,10 +605,15 @@ async function getInventoryPostventa(opts = {}) {
   const def = defaultPeriodo();
   const fechaInicio = parseDateInput(opts.fechaInicio, def.fechaInicio);
   const fechaFin = parseDateInput(opts.fechaFin, def.fechaFin);
+  const { getInventarioAlertas } = require('./refaccionesPedidosService');
 
-  const [stock, traspasos] = await Promise.all([
+  const [stock, traspasos, alertasInv] = await Promise.all([
     loadStockRows(),
     getTraspasosEntreAlmacenes({ fechaInicio, fechaFin, limit: 80 }),
+    getInventarioAlertas({ fechaInicio, fechaFin, limit: 12 }).catch((err) => {
+      console.warn('[inventoryPostventa] alertas rotación/utilidad:', err.message);
+      return { summary: {}, topVendidos: [], topUtilidad: [], stockTrabado: [], alerts: [] };
+    }),
   ]);
 
   const hyp = stock.filter((r) => r.isHyp && r.existencia > 0);
@@ -479,17 +651,21 @@ async function getInventoryPostventa(opts = {}) {
         + areas.hyp.summary.costo),
   };
 
+  const rotacionUtilidad = buildRotacionUtilidad(alertasInv);
+
   const insights = buildRefaccionesInsights({
     refaccionesRows: refacciones,
     traspasos,
     overview,
+    rotacionUtilidad,
   });
 
   return {
-    fuente: 'PAR_ALMACEN · PAR_PARTES · PAR_MOVTOS/PAR_MOVDET (traspasos)',
+    fuente: 'PAR_ALMACEN · PAR_PARTES · PAR_MOVTOS/PAR_MOVDET (ventas, utilidad, traspasos)',
     periodo: { fechaInicio, fechaFin },
     areas,
     overview,
+    rotacionUtilidad,
     traspasos,
     insights,
   };
@@ -499,6 +675,7 @@ module.exports = {
   getInventoryPostventa,
   getTraspasosEntreAlmacenes,
   buildRefaccionesInsights,
+  buildRotacionUtilidad,
   HYP_GRUPO,
   HYP_ALMACEN,
 };

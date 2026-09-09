@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=89" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=118" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -87,32 +87,48 @@ Afluencia
 <span class="material-symbols-outlined" aria-hidden="true">payments</span>
 Comisiones
 </button>
+<button type="button" class="contabilidad-tab" data-sales-tab="analisis" aria-controls="panelVentasAnalisisComercial" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">monitoring</span>
+Análisis comercial
+</button>
 </nav>
 
 <div id="panelVentasUnidades" class="sales-main-panel" data-sales-panel="ventas">
 
-<section class="kpi-grid">
-<div class="kpi-card kpi-card--blue">
+<section class="kpi-grid kpi-grid--yoy">
+<div class="kpi-card kpi-card--blue kpi-card--yoy">
 <div class="kpi-card-head"><span class="kpi-title">Total ventas</span><span class="material-symbols-outlined kpi-icon">shopping_cart</span></div>
 <div id="kpiTotal" class="kpi-value">0</div>
-<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="total"></span></div>
+<div class="kpi-yoy" data-kpi-yoy="totalVentas" hidden>
+  <span class="kpi-yoy-badge" data-yoy-badge></span>
+  <span class="kpi-yoy-prior" data-yoy-prior></span>
 </div>
-<div class="kpi-card kpi-card--green kpi-card--interactive" id="kpiCardRetail" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle ventas retail">
+</div>
+<div class="kpi-card kpi-card--green kpi-card--yoy kpi-card--interactive" id="kpiCardRetail" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle ventas retail">
 <div class="kpi-card-head"><span class="kpi-title">Ventas retail</span><span class="material-symbols-outlined kpi-icon">storefront</span></div>
 <div id="kpiRetail" class="kpi-value">0</div>
-<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="retail"></span></div>
+<div class="kpi-yoy" data-kpi-yoy="totalRetail" hidden>
+  <span class="kpi-yoy-badge" data-yoy-badge></span>
+  <span class="kpi-yoy-prior" data-yoy-prior></span>
 </div>
-<div class="kpi-card kpi-card--slate kpi-card--interactive" id="kpiCardFlotillas" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle flotillas">
+</div>
+<div class="kpi-card kpi-card--slate kpi-card--yoy kpi-card--interactive" id="kpiCardFlotillas" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle flotillas">
 <div class="kpi-card-head"><span class="kpi-title">Flotillas</span><span class="material-symbols-outlined kpi-icon">local_shipping</span></div>
 <div id="kpiFlotillas" class="kpi-value">0</div>
-<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="flotillas"></span></div>
+<div class="kpi-yoy" data-kpi-yoy="totalFlotillas" hidden>
+  <span class="kpi-yoy-badge" data-yoy-badge></span>
+  <span class="kpi-yoy-prior" data-yoy-prior></span>
+</div>
 </div>
 <div class="kpi-card-anchor" id="kpiEntregasSofiaWrap">
-<div class="kpi-card kpi-card--magenta kpi-card--interactive" id="kpiCardEntregasSofia" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle de entregas SOFIA">
+<div class="kpi-card kpi-card--magenta kpi-card--yoy kpi-card--interactive" id="kpiCardEntregasSofia" role="button" tabindex="0" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Ver detalle de entregas SOFIA">
 <div class="kpi-card-head"><span class="kpi-title">Notif. entrega SOFIA</span></div>
 <div id="kpiEntregasSofia" class="kpi-value">0</div>
 <p id="kpiEntregasSofiaSub" class="kpi-subtitle">—</p>
-<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="sofia"></span></div>
+<div class="kpi-yoy" data-kpi-yoy="totalNotificacionesEntrega" hidden>
+  <span class="kpi-yoy-badge" data-yoy-badge></span>
+  <span class="kpi-yoy-prior" data-yoy-prior></span>
+</div>
 </div>
 <button type="button" id="btnRefreshEntregasSofia" class="kpi-card-refresh-btn" title="Actualizar notificaciones SOFIA (manual)" aria-label="Actualizar notificaciones de entrega SOFIA">
 <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
@@ -123,12 +139,14 @@ Comisiones
 <div id="kpiCarryOver" class="kpi-value">0</div>
 <p id="kpiCarryOverSub" class="kpi-subtitle">Apartadas SEP · clic para % y detalle</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
-<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="carryOver"></span></div>
 </button>
-<div class="kpi-card kpi-card--violet" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
+<div class="kpi-card kpi-card--violet kpi-card--yoy" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
 <div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
 <div id="kpiCobertura" class="kpi-value">—</div>
-<div class="kpi-progress" aria-hidden="true"><span class="kpi-progress-fill" data-kpi-fill="cobertura"></span></div>
+<div class="kpi-yoy" data-kpi-yoy="numeradorCobertura" hidden>
+  <span class="kpi-yoy-badge" data-yoy-badge></span>
+  <span class="kpi-yoy-prior" data-yoy-prior></span>
+</div>
 </div>
 </section>
 <p id="ventasDemosNota" class="liquidez-note ventas-demos-nota hidden" aria-live="polite"></p>
@@ -455,13 +473,20 @@ Detalle
 <section class="section-panel dashboard-section">
 <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;margin-bottom:12px">
 <div>
-<h3 class="section-title">Comparativo acumulado anual vs año anterior</h3>
-<p id="ytdSubtitle" class="section-subtitle">Ventas acumuladas al corte · meses por trimestre</p>
+<h3 class="section-title">Variación Interanual (YoY) de Ventas Mensuales</h3>
+<p id="ytdSubtitle" class="section-subtitle">Ventas por mes · año actual vs año anterior</p>
 </div>
 <div class="ytd-stats">
-<div><span id="ytdLabelActual" class="ytd-stat-label">YTD actual</span><strong id="ytdTotalActual" class="ytd-stat-value" style="color:#2563eb">0</strong></div>
-<div><span id="ytdLabelAnterior" class="ytd-stat-label">YTD anterior</span><strong id="ytdTotalAnterior" class="ytd-stat-value">0</strong></div>
-<div><span class="ytd-stat-label">Variación</span><strong id="ytdVariacion" class="ytd-stat-value">-</strong></div>
+<div><span id="ytdLabelActual" class="ytd-stat-label">Año actual</span><strong id="ytdTotalActual" class="ytd-stat-value" style="color:#2563eb">0</strong></div>
+<div><span id="ytdLabelAnterior" class="ytd-stat-label">Año anterior</span><strong id="ytdTotalAnterior" class="ytd-stat-value">0</strong></div>
+<div class="ytd-yoy-stat">
+<span class="ytd-stat-label">Variación</span>
+<div class="kpi-yoy ytd-yoy-indicator" id="ytdYoyIndicator" hidden>
+  <span class="kpi-yoy-badge" data-yoy-badge id="ytdYoyBadge"></span>
+  <span class="kpi-yoy-prior" data-yoy-prior id="ytdYoyPrior"></span>
+</div>
+<strong id="ytdVariacion" class="ytd-stat-value visually-hidden" aria-hidden="true">-</strong>
+</div>
 </div>
 </div>
 <div class="filter-chips" id="ytdQuarterChips" role="group" aria-label="Trimestres visibles" style="margin:0 0 12px">
@@ -478,7 +503,7 @@ Detalle
 <h3 class="section-title" style="margin-bottom:0">Mejor utilidad por carline</h3>
 <span id="carlineInsightAnchor" class="tomas-insight-anchor kpi-insight-anchor" aria-label="Alerta de utilidad por carline"></span>
 </div>
-<p id="carlineUtilidadSubtitle" class="section-subtitle" style="margin:0">Mejor versión · utilidad por unidad</p>
+<p id="carlineUtilidadSubtitle" class="section-subtitle" style="margin:0">Mejor versión · utilidad neta (cierre de vendidos)</p>
 </div>
 <div class="table-scroll carline-utilidad-table-wrap">
 <table class="data-table carline-utilidad-table">
@@ -492,8 +517,8 @@ Detalle
 <tr>
 <th>Carline</th>
 <th>Mejor versión</th>
-<th class="cell-num">Util. / ud</th>
-<th class="cell-num">MB %</th>
+<th class="cell-num">Util. neta / ud</th>
+<th class="cell-num">Margen %</th>
 </tr>
 </thead>
 <tbody id="carlineUtilidadBody">
@@ -1010,6 +1035,36 @@ Exportar CSV
 
 </div>
 
+<div id="panelVentasAnalisisComercial" class="sales-main-panel hidden" data-sales-panel="analisis" hidden>
+<section class="eeff-edo-overview af-overview" id="acOverview" aria-label="Análisis comercial CMI">
+  <div class="section-head-row" style="margin-bottom:14px">
+    <div>
+      <h3 class="section-title">Análisis comercial · Ventas nuevos</h3>
+      <p class="section-subtitle">CMI C-1…C-12.1 · periodo <span id="acPeriodLabel">—</span></p>
+    </div>
+    <span id="acLoading" class="pe-mode-badge hidden">Cargando…</span>
+  </div>
+  <p id="acEmpty" class="liquidez-note hidden" aria-live="polite"></p>
+  <div class="eeff-edo-kpi-row af-kpi-row" id="acKpiPrimary"></div>
+  <p class="eeff-edo-footnote" id="acFootnote">
+    <span class="material-symbols-outlined" aria-hidden="true">info</span>
+    Manual metodológico CMI v3 · clic en un KPI para fórmula, brecha y componentes
+  </p>
+</section>
+<section class="section-panel dashboard-section">
+  <h3 class="section-title">Lectura del marco</h3>
+  <p class="section-subtitle">C-1/C-1.1 entregas · C-2/C-2.1 mix · C-3 antigüedad · C-4 market share · C-5 GMF · C-6/C-6.1 cliente · C-7 productividad · C-8 concesiones · C-9 facturación · C-10/C-10.1 TAC · C-11/C-11.1 accesorios · C-12/C-12.1 OnStar</p>
+  <div class="af-legend">
+    <span class="af-kpi__status af-kpi__status--completo">Completo</span>
+    <span class="af-kpi__status af-kpi__status--parcial">Parcial / sin fuente</span>
+    <span class="af-kpi__status af-kpi__status--pendiente_meta">Falta meta</span>
+  </div>
+</section>
+</div>
+
+<div id="acKpiFloatBackdrop" class="bg-kpi-float-backdrop hidden" aria-hidden="true"></div>
+<aside id="acKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="acKpiFloatTitle"></aside>
+
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -1026,6 +1081,7 @@ Exportar CSV
 <script src="/js/leads.js?v=13"></script>
 <script src="/js/afluencia.js?v=10"></script>
 <script src="/js/comisiones.js?v=2"></script>
-<script src="/js/sales.js?v=99"></script>
+<script src="/js/analisisComercial.js?v=1"></script>
+<script src="/js/sales.js?v=106"></script>
 </body>
 </html>

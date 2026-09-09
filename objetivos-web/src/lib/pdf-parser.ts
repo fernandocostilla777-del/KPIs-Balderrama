@@ -41,6 +41,36 @@ function firstMatch(text: string, pattern: RegExp): string | null {
   return text.match(pattern)?.[1]?.trim() || null;
 }
 
+/** Bloque 6. OBJETIVO SEMINUEVOS — TAC Nuevos y Contratos GMF (seminuevos). */
+function extractSeminuevosBlock(text: string): string {
+  return (
+    text.match(
+      /6\.\s*OBJETIVO\s+SEMINEU[\s\S]{0,800}?(?=5\.\s*OBJETIVO\s+ACCESOR|7\.\s*OBJETIVO\s+OnStar|OBJETIVO\s+ACCESOR|OBJETIVO\s+OnStar|TOTAL\s+OnStar|$)/i,
+    )?.[0] ||
+    text.match(
+      /OBJETIVO\s+SEMINEU[\s\S]{0,800}?(?=OBJETIVO\s+ACCESOR|OBJETIVO\s+OnStar|TOTAL\s+OnStar|$)/i,
+    )?.[0] ||
+    text
+  );
+}
+
+function parseTacNuevosTarget(semiBlock: string): number | null {
+  return (
+    numberAfter(semiBlock, /TAC\s*Nuevos?\s*:?\s*([\d,]+)/i) ||
+    numberAfter(semiBlock, /([\d,]+)\s*TAC\s*Nuevos?/i)
+  );
+}
+
+/** En el PDF la meta de seminuevos aparece como "Contratos GMF" (sin sufijo). */
+function parseGmfSeminuevosTarget(semiBlock: string): number | null {
+  return (
+    numberAfter(semiBlock, /Contratos\s+GMF\s+Seminuevos?\s*:?\s*([\d,]+)/i) ||
+    numberAfter(semiBlock, /([\d,]+)\s*Contratos\s+GMF\s+Seminuevos?/i) ||
+    numberAfter(semiBlock, /Contratos\s+GMF\s*:?\s*([\d,]+)/i) ||
+    numberAfter(semiBlock, /([\d,]+)\s*Contratos\s+GMF/i)
+  );
+}
+
 function isoDate(day: string, month: string, year: string): string {
   const monthNumber = MONTH_SHORT[month.toLowerCase()] || 1;
   const fullYear = year.length === 2 ? Number(`20${year}`) : Number(year);
@@ -66,7 +96,8 @@ function parseDaily(text: string): DailyGoal[] {
 function parseProducts(text: string): ProductGoal[] {
   const rows: ProductGoal[] = [];
   let pendingRows: ProductGoal[] = [];
-  const ignored = /^(total|día|linea|línea|agosto|marzo|contactos|citas|contratos|ventas)/i;
+  const ignored =
+    /^(total|día|dia|linea|línea|agosto|marzo|septiembre|octubre|noviembre|diciembre|enero|febrero|abril|mayo|junio|julio|contactos|citas|contratos|ventas|market share|industria|ind\.proy|ms cv|fecha|durante|debe|quedando|deberias|para generar|generando|tomando|tu equipo|el promedio|el distribuidor)/i;
   const familyTotals = [
     { marker: "Total Pasajeros", family: "Pasajeros" },
     { marker: "Total Suv", family: "SUV's" },
@@ -75,7 +106,7 @@ function parseProducts(text: string): ProductGoal[] {
   ];
 
   for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/\s+/g, " ").trim();
+    let line = rawLine.replace(/\s+/g, " ").trim();
     if (!line) continue;
     const total = familyTotals.find((item) =>
       line.toLocaleLowerCase("es").startsWith(item.marker.toLocaleLowerCase("es")),
@@ -87,41 +118,170 @@ function parseProducts(text: string): ProductGoal[] {
       continue;
     }
 
-    const match = line.match(/^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/);
-    if (!match || ignored.test(match[1])) continue;
-    const name = match[1].trim();
-    if (/^\d+$/.test(name)) continue;
+    // Quita fecha diaria y acumulados del calendario pegados a la línea de producto.
+    line = line.replace(/\b\d{1,2}-[a-z]{3}-\d{2}\b.*$/i, "").trim();
+    if (!line || /^\d{1,2}-[a-z]{3}-\d{2}\b/i.test(line)) continue;
+
+    const tokens = line.split(" ");
+    let idx = 0;
+    while (idx < tokens.length && !/^\d+$/.test(tokens[idx])) idx += 1;
+    const name = tokens.slice(0, idx).join(" ").trim();
+    if (!name || name.length < 2 || ignored.test(name)) continue;
+    if (idx + 4 > tokens.length) continue;
+    const nums = tokens.slice(idx, idx + 4).map(Number);
+    if (nums.some((n) => !Number.isFinite(n))) continue;
+
     pendingRows.push({
       linea: name,
       familia: "Sin clasificar",
-      trafico: Number(match[2]),
-      solicitudes: Number(match[3]),
-      facturas: Number(match[4]),
-      entregas: Number(match[5]),
+      trafico: nums[0],
+      solicitudes: nums[1],
+      facturas: nums[2],
+      entregas: nums[3],
     });
   }
   rows.push(...pendingRows);
   return rows;
 }
 
-function detectPeriod(text: string): { month: number; year: number; label: string } {
-  const lowered = text.toLocaleLowerCase("es");
-  const monthEntry = Object.entries(MONTHS).find(([name]) => lowered.includes(name));
-  const month = monthEntry?.[1] || new Date().getMonth() + 1;
-  const yearMatch = text.match(/\b(20\d{2})\b/);
-  const year = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear();
+function periodLabel(month: number, year: number): string {
   const monthName =
     Object.entries(MONTHS).find(([, value]) => value === month)?.[0] || "mes";
-  return {
-    month,
-    year,
-    label: `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)} ${year}`,
-  };
+  return `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)} ${year}`;
+}
+
+function plausibleYear(year: number): boolean {
+  const current = new Date().getFullYear();
+  return year >= 2020 && year <= current + 1;
+}
+
+/** Detecta mes/año desde el nombre del archivo (p. ej. "Objetivos Septiembre 2026.pdf"). */
+function detectPeriodFromFilename(sourceFile: string): { month: number; year: number } | null {
+  const name = sourceFile
+    .replace(/\.[^.]+$/, "")
+    .toLocaleLowerCase("es")
+    // Normaliza separadores para que "Septiembre_2026_objetivos" sí matchee.
+    .replace(/[_\-.]+/g, " ");
+
+  const monthAlt = Object.keys(MONTHS).join("|");
+  const shortAlt = "ene|feb|mar|abr|may|jun|jul|ago|sep|sept|oct|nov|dic";
+
+  const pair =
+    name.match(new RegExp(`\\b(${monthAlt})\\s+(20\\d{2})\\b`)) ||
+    name.match(new RegExp(`\\b(${shortAlt})\\s+(20\\d{2})\\b`)) ||
+    name.match(/\b(20\d{2})\s+(0?[1-9]|1[0-2])\b/) ||
+    name.match(/\b(0?[1-9]|1[0-2])\s+(20\d{2})\b/);
+
+  if (!pair) return null;
+
+  let month: number | undefined;
+  let year: number | undefined;
+
+  if (/^20\d{2}$/.test(pair[1])) {
+    year = Number(pair[1]);
+    month = Number(pair[2]);
+  } else if (/^\d{1,2}$/.test(pair[1])) {
+    month = Number(pair[1]);
+    year = Number(pair[2]);
+  } else {
+    const token = pair[1].toLowerCase();
+    month = MONTHS[token] || MONTH_SHORT[token === "sept" ? "sep" : token];
+    year = Number(pair[2]);
+  }
+
+  if (!month || !year || month < 1 || month > 12 || !plausibleYear(year)) return null;
+  return { month, year };
+}
+
+/**
+ * Evita el bug de tomar el primer mes/año que aparezca en el PDF
+ * (p. ej. "marzo" y "2013" en tablas históricas) cuando el documento es de otro periodo.
+ */
+function detectPeriod(
+  text: string,
+  sourceFile = "",
+): { month: number; year: number; label: string } {
+  const fromFile = detectPeriodFromFilename(sourceFile);
+  if (fromFile) {
+    return { ...fromFile, label: periodLabel(fromFile.month, fromFile.year) };
+  }
+
+  const lowered = text.toLocaleLowerCase("es");
+  const monthNames = Object.keys(MONTHS).sort((a, b) => b.length - a.length);
+
+  // 1) Pares explícitos "septiembre 2026" / "septiembre de 2026"
+  const pairMatches = [
+    ...lowered.matchAll(
+      new RegExp(
+        `\\b(${monthNames.join("|")})(?:\\s+de)?\\s+(20\\d{2})\\b`,
+        "gi",
+      ),
+    ),
+  ];
+  const plausiblePairs = pairMatches
+    .map((match) => ({
+      month: MONTHS[match[1].toLowerCase()],
+      year: Number(match[2]),
+      index: match.index ?? 0,
+    }))
+    .filter((item) => item.month && plausibleYear(item.year));
+  if (plausiblePairs.length) {
+    // Prefiere el par más reciente en el documento (suele ser el título del mes actual).
+    const best = plausiblePairs.sort((a, b) => b.year - a.year || b.index - a.index)[0];
+    return { month: best.month, year: best.year, label: periodLabel(best.month, best.year) };
+  }
+
+  // 2) Mayoría de fechas del calendario diario del PDF
+  const daily = parseDaily(text);
+  if (daily.length) {
+    const counts = new Map<string, number>();
+    for (const row of daily) {
+      const key = row.fecha.slice(0, 7); // YYYY-MM
+      if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(key)) continue;
+      const year = Number(key.slice(0, 4));
+      if (!plausibleYear(year)) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]));
+    if (ranked[0]) {
+      const [yearStr, monthStr] = ranked[0][0].split("-");
+      const month = Number(monthStr);
+      const year = Number(yearStr);
+      return { month, year, label: periodLabel(month, year) };
+    }
+  }
+
+  // 3) Fallback: mes mencionado + año plausible más reciente del texto
+  const years = [...text.matchAll(/\b(20\d{2})\b/g)]
+    .map((match) => Number(match[1]))
+    .filter(plausibleYear);
+  const year =
+    years.length > 0
+      ? Math.max(...years)
+      : new Date().getFullYear();
+
+  // Ordenar por longitud evita que "mayo" gane dentro de otra palabra; tomar el último mes del doc.
+  let month = new Date().getMonth() + 1;
+  let lastIndex = -1;
+  for (const name of monthNames) {
+    let from = 0;
+    while (from < lowered.length) {
+      const idx = lowered.indexOf(name, from);
+      if (idx < 0) break;
+      if (idx >= lastIndex) {
+        lastIndex = idx;
+        month = MONTHS[name];
+      }
+      from = idx + name.length;
+    }
+  }
+
+  return { month, year, label: periodLabel(month, year) };
 }
 
 export function parseObjectivesText(text: string, sourceFile: string): MonthlyGoals {
   const normalized = text.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ");
-  const period = detectPeriod(normalized);
+  const period = detectPeriod(normalized, sourceFile);
   const id = `${period.year}-${String(period.month).padStart(2, "0")}`;
 
   return {
@@ -187,28 +347,30 @@ export function parseObjectivesText(text: string, sourceFile: string): MonthlyGo
       normalized,
       /OBJETIVO SEMINUEVOS\s*\(([\d.]+)\s*pts?\)/i,
     ),
-    tacNuevosTarget:
-      numberAfter(normalized, /TAC\s*Nuevos\s+([\d,]+)/i) ||
-      numberAfter(normalized, /([\d,]+)\s*TAC\s*Nuevos/i),
-    gmfSeminuevosTarget:
-      numberAfter(normalized, /Contratos\s+GMF\s+Seminuevos?\s*:?\s*([\d,]+)/i) ||
-      numberAfter(normalized, /([\d,]+)\s*Contratos\s+GMF\s+Seminuevos?/i),
-    bdc: {
-      contacts: numberAfter(normalized, /Contactos\s+([\d,]+)/i),
-      appointmentsScheduled: numberAfter(
-        normalized,
-        /Citas Agendadas\s+[\d.]+%\s+([\d,]+)/i,
-      ),
-      appointmentsConfirmed: numberAfter(
-        normalized,
-        /Citas Confirmadas\s+[\d.]+%\s+([\d,]+)/i,
-      ),
-      appointmentsCompleted: numberAfter(
-        normalized,
-        /Citas Cumplidas\s+[\d.]+%\s+([\d,]+)/i,
-      ),
-      deliveries: numberAfter(normalized, /Entregas BDC\s+[\d.]+%\s+([\d,]+)/i),
-    },
+    tacNuevosTarget: parseTacNuevosTarget(extractSeminuevosBlock(normalized)),
+    gmfSeminuevosTarget: parseGmfSeminuevosTarget(extractSeminuevosBlock(normalized)),
+    bdc: (() => {
+      // Acota al bloque OBJETIVO BDC para no tomar "Contactos" de otras secciones.
+      const bdcBlock =
+        normalized.match(
+          /OBJETIVO\s*BDC([\s\S]{0,1200}?)(?=OBJETIVO\s+SEMINEU|OBJETIVO\s+SEMINUEV|OBJETIVO\s+ACCESOR|OBJETIVO\s+OnStar|TOTAL\s+OnStar|$)/i,
+        )?.[1] || normalized;
+      return {
+        contacts: numberAfter(bdcBlock, /Contactos\s+([\d,]+)/i),
+        appointmentsScheduled:
+          numberAfter(bdcBlock, /Citas\s+Agendadas\s+[\d.]+%\s+([\d,]+)/i) ||
+          numberAfter(bdcBlock, /Citas\s+Agendadas\s+([\d,]+)/i),
+        appointmentsConfirmed:
+          numberAfter(bdcBlock, /Citas\s+Confirmadas\s+[\d.]+%\s+([\d,]+)/i) ||
+          numberAfter(bdcBlock, /Citas\s+Confirmadas\s+([\d,]+)/i),
+        appointmentsCompleted:
+          numberAfter(bdcBlock, /Citas\s+Cumplidas\s+[\d.]+%\s+([\d,]+)/i) ||
+          numberAfter(bdcBlock, /Citas\s+Cumplidas\s+([\d,]+)/i),
+        deliveries:
+          numberAfter(bdcBlock, /Entregas\s+BDC\s+[\d.]+%\s+([\d,]+)/i) ||
+          numberAfter(bdcBlock, /Entregas\s+BDC\s+([\d,]+)/i),
+      };
+    })(),
     daily: parseDaily(normalized),
     products: parseProducts(normalized),
     rawText: normalized,

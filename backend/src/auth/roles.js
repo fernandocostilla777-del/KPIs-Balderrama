@@ -53,6 +53,20 @@ const ROLE_DEFAULTS = {
     homePath: '/',
     apiPrefixes: ['/overview', '/ventas', '/crm', '/objetivos-resultados', '/ai', '/health'],
   },
+  gestion_inventario: {
+    id: 'gestion_inventario',
+    label: 'Gestión de inventario',
+    pages: ['overview', 'inventory', 'post-sales', 'lista-precios'],
+    homePath: '/inventory.html',
+    apiPrefixes: [
+      '/overview',
+      '/inventory',
+      '/post-sales',
+      '/lista-precios',
+      '/ai',
+      '/health',
+    ],
+  },
 };
 
 /** @deprecated use ROLE_DEFAULTS — kept for compatibility with require('./roles').ROLES */
@@ -72,6 +86,10 @@ const USERNAME_TO_ROLE = {
   mtk: 'marketing',
   marketing: 'marketing',
   mercadotecnia: 'marketing',
+  inventario: 'gestion_inventario',
+  'gestion.inventario': 'gestion_inventario',
+  gestion_inventario: 'gestion_inventario',
+  'gestor.inventario': 'gestion_inventario',
 };
 
 const ALWAYS_API_PREFIXES = [

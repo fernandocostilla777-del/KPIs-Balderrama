@@ -21,6 +21,7 @@ const financiamientoNotes = require('../services/financiamientoNotesStore');
 const gerentesFi = require('../services/gerentesFinanciamientoStore');
 const { getFacturaMovimientos } = require('../services/facturaMovimientosService');
 const { getAnalisisFinanciero } = require('../services/analisisFinancieroService');
+const { getAnalisisComercial } = require('../services/analisisComercialService');
 const { getContabilidad } = require('../services/contabilidadService');
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
@@ -619,6 +620,19 @@ router.get('/contabilidad/analisis-financiero', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     res.json(await getAnalisisFinanciero({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/analisis-comercial', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(await getAnalisisComercial({ fechaInicio, fechaFin }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

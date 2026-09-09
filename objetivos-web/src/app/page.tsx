@@ -31,6 +31,7 @@ import {
 } from "@/lib/auth";
 import { downloadElementPdf } from "@/lib/export-pdf";
 import { extractPdfText, parseObjectivesText } from "@/lib/pdf-parser";
+import { applyBdcCatalog, applyProductCatalog } from "@/lib/seed";
 import { loadMonths, monthRange, saveMonth } from "@/lib/monthly-store";
 import { allocateSolicitudesPorModelo } from "@/lib/solicitudes-por-modelo";
 import type {
@@ -152,6 +153,18 @@ function bdcGoal(base: number | null | undefined, rate: number) {
 function bdcRate(part: number | null | undefined, total: number | null | undefined) {
   if (part == null || total == null || Number(total) <= 0) return null;
   return Math.round((Number(part) / Number(total)) * 1000) / 10;
+}
+
+/** Prefiere el número absoluto del PDF (OBJETIVO BDC); si falta, cae al % del scorecard. */
+function bdcTargetAbsolute(
+  absolute: number | null | undefined,
+  base: number | null | undefined,
+  rate: number,
+) {
+  if (absolute != null && Number.isFinite(Number(absolute)) && Number(absolute) >= 0) {
+    return Number(absolute);
+  }
+  return bdcGoal(base, rate);
 }
 
 function MetricCard({
@@ -317,9 +330,11 @@ export default function Home() {
   const [activeId, setActiveId] = useState("2026-08");
   const [results, setResults] = useState<ResultsPayload | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
+  const [syncingCrm, setSyncingCrm] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const syncingCrmRef = useRef(false);
   const [calendarMetric, setCalendarMetric] = useState<CalendarMetric>("entregas");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
@@ -330,6 +345,7 @@ export default function Home() {
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const pullStateRef = useRef({
     startY: 0,
+    startX: 0,
     tracking: false,
     pulling: false,
     armed: false,
@@ -343,13 +359,21 @@ export default function Home() {
   const dayPanelOpenRef = useRef(false);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const stored = loadMonths();
+    if (!authReady || !user) return undefined;
+    let cancelled = false;
+    void (async () => {
+      const stored = await loadMonths();
+      if (cancelled) return;
       setMonths(stored);
-      setActiveId(stored[0]?.id || "2026-08");
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+      const prefer =
+        stored.find((item) => item.id === "2026-09")
+        || stored[0];
+      if (prefer?.id) setActiveId(prefer.id);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -390,16 +414,23 @@ export default function Home() {
         cache: "no-store",
         headers: authHeaders(),
       });
+      const payload = await response.json().catch(() => ({}));
       if (response.status === 401) {
         clearSession();
         setUser(null);
         throw new Error("Sesión expirada. Vuelve a iniciar sesión.");
       }
       if (response.status === 404) {
-        throw new Error("La API de objetivos aún no está disponible en este entorno.");
+        const periodHint = `${range.fechaInicio} → ${range.fechaFin}`;
+        throw new Error(
+          payload.error ||
+            `Sin datos sincronizados para ${periodHint}. Verifica el mes del PDF o espera la sync.`,
+        );
       }
-      if (!response.ok) throw new Error(`API de resultados: ${response.status}`);
-      setResults(await response.json());
+      if (!response.ok) {
+        throw new Error(payload.error || `API de resultados: ${response.status}`);
+      }
+      setResults(payload);
       if (!opts?.silent) setMessage(null);
     } catch (error) {
       setResults(null);
@@ -414,6 +445,44 @@ export default function Home() {
     if (!selected || loadingResultsRef.current) return;
     loadingResultsRef.current = true;
     void fetchResults(selected);
+  }, [fetchResults]);
+
+  /** Sync CRM (contratos) + refrescar resultados. Accion oculta en el icono $ de Contratos GMF. */
+  const syncCrmContractsNow = useCallback(async () => {
+    const selected = monthRef.current;
+    if (!selected || syncingCrmRef.current) return;
+    syncingCrmRef.current = true;
+    setSyncingCrm(true);
+    setMessage("Sincronizando contratos CRM…");
+    try {
+      const response = await fetch("/backend-api/crm/sheets-sync/run", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        clearSession();
+        setUser(null);
+        throw new Error("Sesión expirada. Vuelve a iniciar sesión.");
+      }
+      if (response.status === 409 && payload.skipped) {
+        setMessage(payload.reason || "Sync CRM ya en curso o desactivada.");
+        return;
+      }
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || payload.message || `Sync CRM: ${response.status}`);
+      }
+      setMessage("Contratos CRM actualizados. Recargando resultados…");
+      await fetchResults(selected, { silent: true });
+      setMessage("Contratos GMF actualizados.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo sincronizar CRM.");
+    } finally {
+      syncingCrmRef.current = false;
+      setSyncingCrm(false);
+    }
   }, [fetchResults]);
 
   useEffect(() => {
@@ -441,14 +510,15 @@ export default function Home() {
   useEffect(() => {
     if (!authReady || !user) return undefined;
 
-    const PULL_ACTIVATE = 12;
-    const PULL_THRESHOLD = 72;
+    // Umbrales altos: no robar el scroll normal hacia abajo.
+    const PULL_ACTIVATE = 48;
+    const PULL_THRESHOLD = 88;
     const PULL_MAX = 120;
 
     const scrollTop = () =>
       window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
 
-    const atTop = () => scrollTop() <= 1;
+    const atTop = () => scrollTop() <= 0;
 
     const beginRefresh = () => {
       if (loadingResultsRef.current) return;
@@ -470,6 +540,7 @@ export default function Home() {
       pullStateRef.current.pulling = false;
       pullStateRef.current.armed = false;
       pullStateRef.current.startY = 0;
+      pullStateRef.current.startX = 0;
       pullStateRef.current.distance = 0;
       if (!loadingResultsRef.current) setPullDistance(0);
     };
@@ -480,6 +551,7 @@ export default function Home() {
         return;
       }
       pullStateRef.current.startY = event.touches[0]?.clientY || 0;
+      pullStateRef.current.startX = event.touches[0]?.clientX || 0;
       pullStateRef.current.tracking = true;
       pullStateRef.current.pulling = false;
       pullStateRef.current.armed = false;
@@ -493,23 +565,26 @@ export default function Home() {
         return;
       }
 
-      const currentY = event.touches[0]?.clientY || 0;
-      const delta = currentY - pullStateRef.current.startY;
+      const touch = event.touches[0];
+      if (!touch) return;
+      const deltaY = touch.clientY - pullStateRef.current.startY;
+      const deltaX = touch.clientX - pullStateRef.current.startX;
 
-      if (delta < PULL_ACTIVATE && !pullStateRef.current.pulling) {
-        return;
-      }
-
-      if (delta <= 0) {
+      // Scroll hacia abajo (dedo hacia arriba) o gesto horizontal: liberar el scroll nativo.
+      if (deltaY <= 0 || Math.abs(deltaX) > Math.abs(deltaY) * 0.85) {
         clearPullUi();
         return;
       }
 
+      // Hasta activar el pull, NO preventDefault: el navegador hace scroll normal.
+      if (deltaY < PULL_ACTIVATE && !pullStateRef.current.pulling) {
+        return;
+      }
+
       pullStateRef.current.pulling = true;
-      // Evita que el navegador “coma” el gesto de scroll mientras tiramos.
       if (event.cancelable) event.preventDefault();
 
-      const distance = Math.min(PULL_MAX, (delta - PULL_ACTIVATE) * 0.65);
+      const distance = Math.min(PULL_MAX, (deltaY - PULL_ACTIVATE) * 0.65);
       pullStateRef.current.distance = distance;
       pullStateRef.current.armed = distance >= PULL_THRESHOLD;
       setPullDistance(distance);
@@ -517,49 +592,22 @@ export default function Home() {
 
     const onTouchEnd = () => {
       if (!pullStateRef.current.tracking && !pullStateRef.current.pulling) return;
-      const shouldRefresh = pullStateRef.current.armed && pullStateRef.current.distance >= PULL_THRESHOLD;
+      const shouldRefresh =
+        pullStateRef.current.armed && pullStateRef.current.distance >= PULL_THRESHOLD;
       if (shouldRefresh) beginRefresh();
       else clearPullUi();
     };
 
-    let wheelAcc = 0;
-    let wheelResetTimer: number | null = null;
-    let wheelArmed = false;
-
+    // Pull con rueda solo con Ctrl+rueda hacia arriba (evita pelear con el trackpad).
     const onWheel = (event: WheelEvent) => {
-      if (dayPanelOpenRef.current || loadingResultsRef.current) {
-        wheelAcc = 0;
-        wheelArmed = false;
-        return;
-      }
-      if (!atTop()) {
-        wheelAcc = 0;
-        wheelArmed = false;
+      if (!event.ctrlKey || dayPanelOpenRef.current || loadingResultsRef.current || !atTop()) {
         if (!loadingResultsRef.current) setPullDistance(0);
         return;
       }
-      // Solo gestos hacia arriba (deltaY negativo) cuentan como “tirar”.
-      if (event.deltaY >= 0) {
-        wheelAcc = 0;
-        wheelArmed = false;
-        if (!loadingResultsRef.current) setPullDistance(0);
-        return;
-      }
-
-      wheelAcc += Math.abs(event.deltaY);
-      const distance = Math.min(PULL_MAX, wheelAcc * 0.22);
-      wheelArmed = distance >= PULL_THRESHOLD;
+      if (event.deltaY >= 0) return;
+      const distance = Math.min(PULL_MAX, Math.abs(event.deltaY) * 0.35);
       setPullDistance(distance);
-
-      if (wheelResetTimer) window.clearTimeout(wheelResetTimer);
-      wheelResetTimer = window.setTimeout(() => {
-        if (wheelArmed && !loadingResultsRef.current) beginRefresh();
-        else if (!loadingResultsRef.current) {
-          wheelAcc = 0;
-          wheelArmed = false;
-          setPullDistance(0);
-        }
-      }, 160);
+      if (distance >= PULL_THRESHOLD) beginRefresh();
     };
 
     window.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -574,7 +622,7 @@ export default function Home() {
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchEnd);
       window.removeEventListener("wheel", onWheel);
-      if (wheelResetTimer) window.clearTimeout(wheelResetTimer);
+      clearPullUi();
     };
   }, [authReady, user]);
 
@@ -610,11 +658,11 @@ export default function Home() {
       if (event.key === "Escape") setDayPanelOpen(false);
     };
     window.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
+      document.body.style.overflow = previousOverflow || "";
     };
   }, [dayPanelOpen]);
 
@@ -635,14 +683,41 @@ export default function Home() {
     try {
       const text = await extractPdfText(file);
       const parsed = parseObjectivesText(text, file.name);
-      const updated = saveMonth(parsed);
+      // Siempre las mismas 21 líneas de Agosto; si el PDF no trae texto, hereda esas metas.
+      const withCatalog = {
+        ...parsed,
+        products: applyProductCatalog(parsed.products),
+        bdc: applyBdcCatalog(parsed.bdc),
+      };
+      const year = Number(withCatalog.year);
+      const current = new Date().getFullYear();
+      if (!year || year < 2024 || year > current + 1) {
+        setMessage(
+          `Periodo inválido detectado (${withCatalog.label}). No se guardó. Usa un PDF con mes/año correctos (p. ej. Septiembre 2026).`,
+        );
+        return;
+      }
+      const updated = await saveMonth(withCatalog);
+      const saved = updated.find((item) => item.id === withCatalog.id);
+      if (!saved) {
+        setMessage(`No se pudo guardar ${withCatalog.label}. Revisa el mes/año del PDF.`);
+        setMonths(updated);
+        return;
+      }
       setMonths(updated);
-      setActiveId(parsed.id);
+      setActiveId(saved.id);
       setCalendarMetric("entregas");
       setSelectedDay(null);
       setDayPanelOpen(false);
       setDaySearch("");
-      setMessage(`${parsed.label} importado: ${parsed.products.length} líneas y ${parsed.daily.length} días.`);
+      setProductFamily("todas");
+      setProductCumplimiento("todas");
+      const fromPdf = parsed.products.length;
+      setMessage(
+        fromPdf > 0
+          ? `${withCatalog.label} guardado en servidor: ${withCatalog.products.length} modelos y ${withCatalog.daily.length} días.`
+          : `${withCatalog.label} guardado en servidor con ${withCatalog.products.length} modelos (el PDF no trajo líneas legibles).`,
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No fue posible interpretar el PDF.");
     } finally {
@@ -723,42 +798,40 @@ export default function Home() {
   const confirmadasReal = bdcReal?.citasConfirmadas ?? null;
   const cumplidasReal = bdcReal?.citasCumplidas ?? null;
   const entregasReal = bdcReal?.entregasBdc ?? null;
+  // Metas = sección OBJETIVO BDC del PDF (números fijos), no % sobre el real del mes.
   const contactosMeta = month.bdc.contacts;
-  const contactosBase = contactosReal ?? contactosMeta;
-  const agendadasMeta = bdcGoal(contactosBase, 0.25);
-  const agendadasBase = agendadasReal ?? agendadasMeta;
-  const confirmadasMeta = bdcGoal(agendadasBase, 0.80);
-  const cumplidasMeta = bdcGoal(agendadasBase, 0.60);
-  const cumplidasBase = cumplidasReal ?? cumplidasMeta;
-  const entregasMeta = bdcGoal(cumplidasBase, 0.40);
+  const agendadasMeta = bdcTargetAbsolute(month.bdc.appointmentsScheduled, contactosMeta, 0.25);
+  const confirmadasMeta = bdcTargetAbsolute(month.bdc.appointmentsConfirmed, agendadasMeta, 0.80);
+  const cumplidasMeta = bdcTargetAbsolute(month.bdc.appointmentsCompleted, agendadasMeta, 0.60);
+  const entregasMeta = bdcTargetAbsolute(month.bdc.deliveries, cumplidasMeta, 0.40);
   const bdcStages = [
     {
       label: "Contactos",
-      hint: "Base del embudo",
+      hint: "OBJETIVO BDC",
       target: contactosMeta,
       real: contactosReal,
     },
     {
       label: "Citas agendadas",
-      hint: `Meta 25% de contactos · real ${formatValue(bdcRate(agendadasReal, contactosBase), "percent")}`,
+      hint: `OBJETIVO BDC 25% · real ${formatValue(bdcRate(agendadasReal, contactosMeta), "percent")} de meta contactos`,
       target: agendadasMeta,
       real: agendadasReal,
     },
     {
       label: "Citas confirmadas",
-      hint: `Meta 80% de agendadas · real ${formatValue(bdcRate(confirmadasReal, agendadasBase), "percent")}`,
+      hint: `OBJETIVO BDC 80% · real ${formatValue(bdcRate(confirmadasReal, agendadasMeta), "percent")} de meta agendadas`,
       target: confirmadasMeta,
       real: confirmadasReal,
     },
     {
       label: "Citas cumplidas",
-      hint: `Meta 60% de agendadas · real ${formatValue(bdcRate(cumplidasReal, agendadasBase), "percent")}`,
+      hint: `OBJETIVO BDC 60% · real ${formatValue(bdcRate(cumplidasReal, agendadasMeta), "percent")} de meta agendadas`,
       target: cumplidasMeta,
       real: cumplidasReal,
     },
     {
       label: "Entregas BDC",
-      hint: `Meta 40% de cumplidas · real ${formatValue(bdcRate(entregasReal, cumplidasBase), "percent")}`,
+      hint: `OBJETIVO BDC 40% · real ${formatValue(bdcRate(entregasReal, cumplidasMeta), "percent")} de meta cumplidas`,
       target: entregasMeta,
       real: entregasReal,
     },
@@ -1205,7 +1278,7 @@ export default function Home() {
             tone="violet"
           />
           <MetricCard
-            title="Contratos GMF"
+            title="Contratos GMF Nuevos"
             target={month.gmfContractsTarget}
             result={contratosGmfNuevosReal}
             icon={<CircleDollarSign />}
@@ -1213,21 +1286,22 @@ export default function Home() {
           />
           <MetricCard
             title="TAC Nuevos"
-            target={month.tacNuevosTarget ?? 28}
+            target={month.tacNuevosTarget ?? null}
             result={seminuevos?.real ?? null}
             icon={<CarFront />}
             tone="cyan"
           />
           <MetricCard
-            title="Contratos GMF Seminuevos"
+            title="Contratos GMF"
             target={
-              month.id === "2026-08"
-                ? 10
-                : (gmfSeminuevos?.meta as number | null) ?? month.gmfSeminuevosTarget ?? 10
+              (gmfSeminuevos?.meta as number | null) ?? month.gmfSeminuevosTarget ?? null
             }
             result={gmfSemiReal || null}
-            icon={<WalletCards />}
+            icon={<CircleDollarSign />}
             tone="amber"
+            onIconClick={() => { void syncCrmContractsNow(); }}
+            iconBusy={syncingCrm}
+            iconTitle="Sincronizar contratos CRM"
           />
         </section>
 

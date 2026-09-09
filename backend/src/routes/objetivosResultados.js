@@ -11,6 +11,8 @@ const {
   getDiarioResultados,
   getSeminuevosResultados,
 } = require('../services/objetivosResultadosService');
+const monthlyObjectives = require('../services/monthlyObjectivesStore');
+const { requireSession, requireUserManager } = require('../auth/middleware');
 
 const router = express.Router();
 
@@ -44,6 +46,43 @@ router.get('/metas', (req, res) => {
     formato: 'objetivos-resultados-v1',
     plantillaMetas: getPlantillaMetas({ fechaInicio, fechaFin }),
   });
+});
+
+/** Meses/plantillas del scorecard (compartidos: backend/data/monthly-objectives.json). */
+router.get('/meses', (_req, res, next) => {
+  try {
+    res.json({ ok: true, months: monthlyObjectives.listMonths() });
+  } catch (err) {
+    sendError(res, next, err);
+  }
+});
+
+router.get('/meses/:id', (req, res, next) => {
+  try {
+    const month = monthlyObjectives.getMonth(req.params.id);
+    if (!month) return res.status(404).json({ ok: false, error: 'Mes no encontrado' });
+    res.json({ ok: true, month });
+  } catch (err) {
+    sendError(res, next, err);
+  }
+});
+
+router.put('/meses', requireSession, requireUserManager, (req, res, next) => {
+  try {
+    const month = monthlyObjectives.upsertMonth(req.body?.month || req.body);
+    res.json({ ok: true, month, months: monthlyObjectives.listMonths() });
+  } catch (err) {
+    sendError(res, next, err);
+  }
+});
+
+router.delete('/meses/:id', requireSession, requireUserManager, (req, res, next) => {
+  try {
+    const months = monthlyObjectives.removeMonth(req.params.id);
+    res.json({ ok: true, months });
+  } catch (err) {
+    sendError(res, next, err);
+  }
 });
 
 /** Payload completo en formato de resultados. */

@@ -228,19 +228,21 @@
     administracion: ['administracion'],
     'data manager': ['administracion'],
     auditor: ['administracion', 'direccion'],
-    inventarios: ['administracion', 'contabilidad'],
-    'compras/inventarios': ['administracion'],
-    'logistica de inventarios e intercambios': ['administracion'],
-    'coordinador de entregas matriz': ['administracion', 'gerencia_comercial'],
+    inventarios: ['gestion_inventario', 'administracion', 'contabilidad'],
+    'compras/inventarios': ['gestion_inventario', 'administracion'],
+    'logistica de inventarios e intercambios': ['gestion_inventario', 'administracion'],
+    'gestion de inventario': ['gestion_inventario'],
+    'gestión de inventario': ['gestion_inventario'],
+    'coordinador de entregas matriz': ['gestion_inventario', 'administracion', 'gerencia_comercial'],
     'gerencia r. h.': ['administracion'],
     'capital humano': ['administracion'],
     'gerentes de area': ['administracion', 'direccion'],
   };
 
   const MODULE_DEFAULT_ROLES = {
-    inventario: ['gerencia_comercial', 'administracion'],
+    inventario: ['gestion_inventario', 'gerencia_comercial', 'administracion'],
     ventas: ['gerencia_comercial', 'direccion'],
-    postventa: ['administracion', 'contabilidad'],
+    postventa: ['gestion_inventario', 'administracion', 'contabilidad'],
     contabilidad: ['contabilidad', 'administracion'],
     forecast: ['gerencia_comercial', 'direccion'],
     seguimiento: ['gerencia_comercial', 'direccion'],
@@ -249,15 +251,15 @@
 
   /** Overrides por insight: quién debe atender la alerta. */
   const INSIGHT_ASSIGN_ROLES = {
-    'inv-sin-previas': ['gerencia_comercial', 'direccion'],
-    'inv-entregas-sin-previas': ['gerencia_comercial', 'direccion'],
-    'overview-sin-previas': ['gerencia_comercial', 'direccion'],
+    'inv-sin-previas': ['gestion_inventario', 'gerencia_comercial', 'direccion'],
+    'inv-entregas-sin-previas': ['gestion_inventario', 'gerencia_comercial', 'direccion'],
+    'overview-sin-previas': ['gestion_inventario', 'gerencia_comercial', 'direccion'],
     'ventas-sin-timbrar': ['gerencia_comercial', 'direccion'],
-    'inv-aging': ['gerencia_comercial', 'administracion'],
-    'inv-plan-piso': ['contabilidad', 'administracion', 'direccion'],
-    'inv-pv-traspasos': ['administracion', 'contabilidad'],
-    'inv-pv-refacciones-valor': ['administracion', 'contabilidad'],
-    'inv-pv-desbalance': ['administracion', 'contabilidad'],
+    'inv-aging': ['gestion_inventario', 'gerencia_comercial', 'administracion'],
+    'inv-plan-piso': ['gestion_inventario', 'contabilidad', 'administracion', 'direccion'],
+    'inv-pv-traspasos': ['gestion_inventario', 'administracion', 'contabilidad'],
+    'inv-pv-refacciones-valor': ['gestion_inventario', 'administracion', 'contabilidad'],
+    'inv-pv-desbalance': ['gestion_inventario', 'administracion', 'contabilidad'],
   };
 
   function normKey(text) {

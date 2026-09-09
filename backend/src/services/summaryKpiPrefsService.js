@@ -343,6 +343,11 @@ const PROFILE_PACKS = {
     hint: 'Indicadores obligatorios de marketing. No se pueden quitar ni reubicar.',
     ids: ['unidades', 'retail_units', 'ingreso_ventas', 'asesores_activos'],
   },
+  gestion_inventario: {
+    label: 'Gestión de inventario',
+    hint: 'Indicadores obligatorios de inventario. No se pueden quitar ni reubicar.',
+    ids: ['inventario_disponible', 'aging_60', 'plan_piso', 'valor_inventario'],
+  },
 };
 
 /** Espacios visuales que ocupa cada tarjeta en la rejilla ejecutiva. */

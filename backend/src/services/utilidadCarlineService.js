@@ -294,36 +294,203 @@ async function previewPeriodBest(periodoKey, carline, minUnidades) {
 }
 
 /**
- * Versión liviana para el dashboard de ventas (sin previews de periodos).
+ * Versión liviana para el dashboard de ventas.
+ * Misma lógica que Inventario → Cierre de unidades vendidas:
+ * subtotal → costo neto (remisión + bonif.) → nota crédito → utilidad bruta
+ * → comisión E.V. → gastos extra → plan piso → F&I → utilidad neta.
+ * Por carline elige la versión con mejor utilidad neta (+ F&I) por unidad.
  */
 async function getMejorUtilidadPorCarline({
   fechaInicio = null,
   fechaFin = null,
-  metric = 'utilidad_promedio',
+  metric = 'utilidad_neta',
   minUnidades = 1,
 } = {}) {
-  const data = await getUtilidadPorCarlineAiAnalysis({
-    fechaInicio,
-    fechaFin,
-    metric,
-    minUnidades,
-    includePeriodPreviews: false,
-  });
+  if (!fechaInicio || !fechaFin) {
+    return {
+      available: false,
+      reason: 'Se requieren fechaInicio y fechaFin.',
+      porCarline: [],
+    };
+  }
+
+  const { getVendidosAnalisis } = require('./inventoryService');
+  let vendidos;
+  try {
+    vendidos = await getVendidosAnalisis({ fechaInicio, fechaFin });
+  } catch (err) {
+    return {
+      available: false,
+      reason: err.message || 'No se pudo calcular el cierre de unidades vendidas.',
+      porCarline: [],
+    };
+  }
+
+  const minU = Math.min(20, Math.max(1, Number(minUnidades) || 1));
+  const table = Array.isArray(vendidos?.vendidosTable) ? vendidos.vendidosTable : [];
+  const byKey = new Map();
+
+  for (const row of table) {
+    const neta = row.utilidadNeta == null ? null : Number(row.utilidadNeta);
+    const bruta = row.utilidadPromedio == null ? null : Number(row.utilidadPromedio);
+    if (neta == null && bruta == null) continue;
+
+    const carline = normalizeText(row.carline) || 'Sin familia';
+    const version = normalizeText(row.version) || 'Sin versión';
+    const key = `${carline.toUpperCase()}||${version}`;
+    const fi = Number(row.ingresoFinanciamiento || 0);
+    const precio = Number(row.precio || 0);
+    const contrib = (neta != null ? neta : 0) + fi;
+    const cur = byKey.get(key) || {
+      carline,
+      version,
+      catalogo: normalizeText(row.catalogo) || null,
+      unidades: 0,
+      ventaSubtotal: 0,
+      utilidadBrutaTotal: 0,
+      utilidadNetaTotal: 0,
+      ingresoFiTotal: 0,
+      contribucionTotal: 0,
+      conNeta: 0,
+    };
+    cur.unidades += 1;
+    cur.ventaSubtotal += precio;
+    if (bruta != null) cur.utilidadBrutaTotal += bruta;
+    if (neta != null) {
+      cur.utilidadNetaTotal += neta;
+      cur.conNeta += 1;
+    }
+    cur.ingresoFiTotal += fi;
+    cur.contribucionTotal += contrib;
+    byKey.set(key, cur);
+  }
+
+  const versiones = [...byKey.values()]
+    .filter((v) => v.unidades >= minU && v.conNeta > 0)
+    .map((v) => {
+      const utilidadNetaPromedio = roundMoney(v.utilidadNetaTotal / v.conNeta);
+      const utilidadBrutaPromedio = roundMoney(v.utilidadBrutaTotal / v.unidades);
+      const ingresoFiPromedio = roundMoney(v.ingresoFiTotal / v.unidades);
+      const contribucionPromedio = roundMoney(v.contribucionTotal / v.unidades);
+      const margenNetaPct = pct(v.utilidadNetaTotal, v.ventaSubtotal);
+      const margenContribPct = pct(v.contribucionTotal, v.ventaSubtotal);
+      return {
+        ...v,
+        ventaSubtotal: roundMoney(v.ventaSubtotal),
+        utilidadBrutaTotal: roundMoney(v.utilidadBrutaTotal),
+        utilidadNetaTotal: roundMoney(v.utilidadNetaTotal),
+        ingresoFiTotal: roundMoney(v.ingresoFiTotal),
+        contribucionTotal: roundMoney(v.contribucionTotal),
+        utilidadNetaPromedio,
+        utilidadBrutaPromedio,
+        ingresoFiPromedio,
+        contribucionPromedio,
+        // Compat con UI anterior
+        utilidadPromedio: utilidadNetaPromedio,
+        utilidadTotal: roundMoney(v.utilidadNetaTotal),
+        margenBrutoPct: margenNetaPct,
+        margenNetaPct,
+        margenContribPct,
+      };
+    });
+
+  const metricKey = String(metric || 'utilidad_neta').toLowerCase();
+  const sortKey = metricKey === 'margen' || metricKey === 'margen_neta'
+    ? (a, b) => (b.margenNetaPct - a.margenNetaPct)
+      || (b.utilidadNetaPromedio - a.utilidadNetaPromedio)
+    : metricKey === 'utilidad_bruta'
+      ? (a, b) => (b.utilidadBrutaPromedio - a.utilidadBrutaPromedio)
+        || (b.margenNetaPct - a.margenNetaPct)
+      : metricKey === 'utilidad_total'
+        ? (a, b) => (b.contribucionTotal - a.contribucionTotal)
+          || (b.utilidadNetaPromedio - a.utilidadNetaPromedio)
+        : (a, b) => (b.contribucionPromedio - a.contribucionPromedio)
+          || (b.utilidadNetaPromedio - a.utilidadNetaPromedio)
+          || (b.margenNetaPct - a.margenNetaPct);
+
+  const byCarline = new Map();
+  for (const v of versiones) {
+    if (!byCarline.has(v.carline)) byCarline.set(v.carline, []);
+    byCarline.get(v.carline).push(v);
+  }
+
+  const porCarline = [...byCarline.entries()]
+    .map(([carline, list]) => {
+      const sorted = [...list].sort(sortKey);
+      const mejor = sorted[0];
+      const totales = list.reduce((acc, v) => ({
+        unidades: acc.unidades + v.unidades,
+        ventaSubtotal: acc.ventaSubtotal + (v.ventaSubtotal || 0),
+        utilidadNetaTotal: acc.utilidadNetaTotal + (v.utilidadNetaTotal || 0),
+        contribucionTotal: acc.contribucionTotal + (v.contribucionTotal || 0),
+      }), { unidades: 0, ventaSubtotal: 0, utilidadNetaTotal: 0, contribucionTotal: 0 });
+
+      return {
+        carline,
+        unidadesCarline: totales.unidades,
+        utilidadCarline: roundMoney(totales.utilidadNetaTotal),
+        margenBrutoCarlinePct: pct(totales.utilidadNetaTotal, totales.ventaSubtotal),
+        margenNetaCarlinePct: pct(totales.utilidadNetaTotal, totales.ventaSubtotal),
+        mejorVersion: mejor
+          ? {
+            version: mejor.version,
+            catalogo: mejor.catalogo,
+            unidades: mejor.unidades,
+            utilidadPromedio: mejor.utilidadNetaPromedio,
+            utilidadNetaPromedio: mejor.utilidadNetaPromedio,
+            utilidadBrutaPromedio: mejor.utilidadBrutaPromedio,
+            contribucionPromedio: mejor.contribucionPromedio,
+            ingresoFiPromedio: mejor.ingresoFiPromedio,
+            utilidadTotal: mejor.utilidadNetaTotal,
+            margenBrutoPct: mejor.margenNetaPct,
+            margenNetaPct: mejor.margenNetaPct,
+            margenContribPct: mejor.margenContribPct,
+            ventaSubtotal: mejor.ventaSubtotal,
+          }
+          : null,
+      };
+    })
+    .filter((c) => c.mejorVersion)
+    .sort((a, b) => (b.mejorVersion.contribucionPromedio - a.mejorVersion.contribucionPromedio)
+      || (b.mejorVersion.utilidadNetaPromedio - a.mejorVersion.utilidadNetaPromedio)
+      || (b.mejorVersion.margenNetaPct - a.mejorVersion.margenNetaPct));
 
   return {
-    available: Boolean(data?.available),
-    reason: data?.reason || null,
-    periodo: data?.periodo || null,
-    definicion: data?.definicion || null,
-    resumen: data?.resumen || null,
-    lider: data?.lider || null,
-    porCarline: (data?.porCarline || []).map((c) => ({
-      carline: c.carline,
-      unidadesCarline: c.unidadesCarline,
-      utilidadCarline: c.utilidadCarline,
-      margenBrutoCarlinePct: c.margenBrutoCarlinePct,
-      mejorVersion: c.mejorVersion,
-    })),
+    available: true,
+    reason: null,
+    fuente: 'Cierre de unidades vendidas (misma lógica que Inventario)',
+    definicion: {
+      carline: 'UNC_FAMILIA',
+      version: 'TIPOAUTO / versión-paquete',
+      utilidad: 'Utilidad neta del cierre: bruta − comisión E.V. − extras − plan piso (+ F&I en contribución)',
+      margenBrutoPct: 'utilidad neta / subtotal × 100',
+      ranking: 'mejor versión por contribución neta por unidad (utilidad neta + F&I)',
+    },
+    periodo: {
+      key: 'personalizado',
+      fechaInicio,
+      fechaFin,
+      label: `${fechaInicio} → ${fechaFin}`,
+    },
+    filtros: {
+      metric: metricKey,
+      minUnidades: minU,
+    },
+    resumen: {
+      carlines: porCarline.length,
+      versionesEvaluadas: versiones.length,
+      unidades: porCarline.reduce((s, c) => s + c.unidadesCarline, 0),
+      utilidadTotal: roundMoney(porCarline.reduce((s, c) => s + (c.utilidadCarline || 0), 0)),
+    },
+    lider: porCarline[0]
+      ? {
+        carline: porCarline[0].carline,
+        version: porCarline[0].mejorVersion.version,
+        utilidadPromedio: porCarline[0].mejorVersion.utilidadNetaPromedio,
+        margenBrutoPct: porCarline[0].mejorVersion.margenNetaPct,
+      }
+      : null,
+    porCarline,
   };
 }
 

@@ -196,6 +196,48 @@ const PROFILE_PLAYBOOKS = {
       'No inventes asientos: usa consultar_contabilidad.',
     ],
   },
+
+  gestion_inventario: {
+    id: 'gestion_inventario',
+    label: 'Gestión de inventario',
+    mission:
+      'Controlar stock de unidades y refacciones: antigüedad, plan piso, rotación, '
+      + 'sin previas, traspasos y obsolescencia. El foco es liberar capital inmovilizado '
+      + 'y evitar sobrestock o piezas trabadas.',
+    decisionLens: [
+      '¿Qué unidades/piezas llevan más de 60–90 días sin rotar?',
+      '¿El plan piso o el costo de inventario justifican un plan de salida?',
+      '¿Hay stock sin previas, demos o refacciones en obsolescencia?',
+      '¿Compras a planta / entradas están saturando el almacén?',
+    ],
+    priorityKpis: [
+      'Inventario disponible (unidades)',
+      'Antigüedad / aging 60+',
+      'Plan piso acumulado',
+      'Valor de inventario',
+      'Días promedio en piso',
+      'Stock / entregas sin previas',
+      'Inventario postventa y refacciones trabadas',
+      'Traspasos entre almacenes',
+    ],
+    answerStyle: [
+      'Habla en unidades, días en piso, costo inmovilizado y plan de salida.',
+      'Prioriza lo más caro y más viejo primero.',
+      'Separa autos nuevos vs refacciones/postventa cuando aplique.',
+      'Propón dueño + acción (liquidar, traspasar, devolver, empujar venta).',
+    ],
+    typicalQuestions: [
+      '¿Cuánto inventario hay envejecido?',
+      '¿Cuánto plan piso llevamos?',
+      '¿Qué piezas/refacciones están trabadas?',
+      '¿Hay unidades sin previas?',
+      '¿Cómo va el valor del inventario vs rotación?',
+    ],
+    avoid: [
+      'No entres a EEFF profundo ni a rankings comerciales salvo impacto en inventario.',
+      'No inventes existencias: usa consultar_inventario / consultar_inventario_postventa / consultar_refacciones.',
+    ],
+  },
 };
 
 function getProfilePlaybook(roleId) {

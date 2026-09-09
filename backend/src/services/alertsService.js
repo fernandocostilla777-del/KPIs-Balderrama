@@ -93,6 +93,14 @@ const DEFAULT_PREFS = {
     'taller_abiertas',
     'sistema',
   ],
+  gestion_inventario: [
+    'inventario_envejecidas',
+    'inventario_sin_previas',
+    'plan_piso',
+    'entregas_sin_previa',
+    'taller_abiertas',
+    'sistema',
+  ],
 };
 
 let cache = { at: 0, alerts: [] };

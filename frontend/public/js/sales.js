@@ -1,7 +1,7 @@
 ﻿(function () {
   'use strict';
 
-  const SALES_JS_BUILD = 99;
+  const SALES_JS_BUILD = 104;
   if (window.__salesPageInitBuild === SALES_JS_BUILD) return;
 
   let registrosActuales = [];
@@ -19,6 +19,7 @@
   let lastMixAutos = null;
   let mixOtrosExpanded = false;
   let mixOtrosFloat = null;
+  let comparativoPeriodoActual = null;
 
   function setMixOtrosExpanded(open) {
     mixOtrosExpanded = Boolean(open);
@@ -465,6 +466,60 @@
       ? (((resumen.numeradorCobertura ?? 0) + (resumen.unidadesApartadas ?? 0)) / goalSofia) * 100
       : 0);
     setKpiBarFill('cobertura', goalSofia > 0 ? (numerador / goalSofia) * 100 : 0);
+  }
+
+  function formatYoyPct(value) {
+    if (value == null || !Number.isFinite(Number(value))) return null;
+    const n = Number(value);
+    const abs = Math.abs(n).toLocaleString('es-MX', {
+      minimumFractionDigits: Number.isInteger(n) ? 0 : 1,
+      maximumFractionDigits: 1,
+    });
+    if (n > 0) return `+${abs}%`;
+    if (n < 0) return `-${abs}%`;
+    return '0%';
+  }
+
+  function renderKpiYoy(comparativoPeriodo) {
+    const root = document.querySelector('#panelVentasUnidades');
+    if (!root) return;
+    const slots = root.querySelectorAll('[data-kpi-yoy]');
+    if (!comparativoPeriodo?.anterior) {
+      slots.forEach((el) => {
+        el.hidden = true;
+      });
+      return;
+    }
+
+    const year = comparativoPeriodo.anioAnterior;
+    const prior = comparativoPeriodo.anterior || {};
+    const delta = comparativoPeriodo.variacion || {};
+
+    slots.forEach((el) => {
+      const key = el.getAttribute('data-kpi-yoy');
+      const priorVal = prior[key];
+      const pct = delta[key];
+      const badge = el.querySelector('[data-yoy-badge]');
+      const priorEl = el.querySelector('[data-yoy-prior]');
+      if (priorVal == null || !Number.isFinite(Number(priorVal))) {
+        el.hidden = true;
+        return;
+      }
+      el.hidden = false;
+      if (badge) {
+        const label = formatYoyPct(pct);
+        badge.textContent = label || '—';
+        badge.classList.remove('is-up', 'is-down', 'is-flat');
+        if (pct == null) badge.classList.add('is-flat');
+        else if (pct > 0) badge.classList.add('is-up');
+        else if (pct < 0) badge.classList.add('is-down');
+        else badge.classList.add('is-flat');
+      }
+      if (priorEl) {
+        const formatted = Number(priorVal).toLocaleString('es-MX');
+        priorEl.textContent = `${year}: ${formatted}`;
+      }
+    });
   }
 
   function formatCoberturaPct(numerador, goal) {
@@ -979,18 +1034,37 @@
       labels: flatLabels, series: flatSeries, mesEnCursoExcluido, trimestres,
     } = comparativoYtd;
 
-    els.ytdLabelActual.textContent = `YTD ${anioActual}`;
-    els.ytdLabelAnterior.textContent = `YTD ${anioAnterior}`;
+    els.ytdLabelActual.textContent = `${anioActual}`;
+    els.ytdLabelAnterior.textContent = `${anioAnterior}`;
     els.ytdTotalActual.textContent = totalActual;
     els.ytdTotalAnterior.textContent = totalAnterior;
     const corteFmt = String(corte || '').split('-').reverse().join('/');
 
-    if (variacion === null) {
-      els.ytdVariacion.textContent = '-';
-      els.ytdVariacion.className = 'ytd-stat-value';
+    const yoyInd = els.ytdYoyIndicator;
+    const yoyBadge = els.ytdYoyBadge;
+    const yoyPrior = els.ytdYoyPrior;
+    if (variacion === null || variacion === undefined || !Number.isFinite(Number(variacion))) {
+      if (els.ytdVariacion) {
+        els.ytdVariacion.textContent = '-';
+        els.ytdVariacion.className = 'ytd-stat-value visually-hidden';
+      }
+      if (yoyInd) yoyInd.hidden = true;
     } else {
-      els.ytdVariacion.textContent = `${variacion >= 0 ? '+' : ''}${variacion}%`;
-      els.ytdVariacion.className = `ytd-stat-value ${variacion >= 0 ? 'ytd-up' : 'ytd-down'}`;
+      const pct = Number(variacion);
+      const label = formatYoyPct(pct);
+      if (els.ytdVariacion) {
+        els.ytdVariacion.textContent = label || '-';
+        els.ytdVariacion.className = `ytd-stat-value visually-hidden ${pct >= 0 ? 'ytd-up' : 'ytd-down'}`;
+      }
+      if (yoyInd && yoyBadge && yoyPrior) {
+        yoyInd.hidden = false;
+        yoyBadge.textContent = label || '—';
+        yoyBadge.classList.remove('is-up', 'is-down', 'is-flat');
+        if (pct > 0) yoyBadge.classList.add('is-up');
+        else if (pct < 0) yoyBadge.classList.add('is-down');
+        else yoyBadge.classList.add('is-flat');
+        yoyPrior.textContent = `${anioAnterior}: ${Number(totalAnterior || 0).toLocaleString('es-MX')}`;
+      }
     }
 
     const selected = (trimestres || []).filter((t) => ytdQuarters.has(t.quarter));
@@ -1010,16 +1084,16 @@
       actual = monthPoints.map((m) => Number(m.actual || 0));
       anterior = monthPoints.map((m) => Number(m.anterior || 0));
       els.ytdSubtitle.textContent = mesEnCursoExcluido
-        ? `Acumulado al ${corteFmt} · meses del trimestre · mes en curso excluido`
-        : `Acumulado al ${corteFmt} · meses del trimestre · ${anioActual} vs ${anioAnterior}`;
+        ? `Mensual al ${corteFmt} · ${anioActual} vs ${anioAnterior} · mes en curso excluido`
+        : `Mensual al ${corteFmt} · ${anioActual} vs ${anioAnterior}`;
     } else {
       // Fallback si el API aún no trae trimestres
       labels = flatLabels || [];
       actual = flatSeries?.actual || [];
       anterior = flatSeries?.anterior || [];
       els.ytdSubtitle.textContent = mesEnCursoExcluido
-        ? `Acumulado del 1 ene al ${corteFmt} · mes en curso excluido hasta cierre`
-        : `Acumulado del 1 ene al ${corteFmt} · comparación año contra año`;
+        ? `Mensual del 1 ene al ${corteFmt} · mes en curso excluido hasta cierre`
+        : `Mensual del 1 ene al ${corteFmt} · ${anioActual} vs ${anioAnterior}`;
     }
 
     createChart('ytd', 'chartYtd', {
@@ -1027,8 +1101,8 @@
       data: {
         labels,
         datasets: [
-          { label: `YTD ${anioAnterior}`, data: anterior, backgroundColor: chartColors.slate },
-          { label: `YTD ${anioActual}`, data: actual, backgroundColor: chartColors.primary },
+          { label: `${anioAnterior}`, data: anterior, backgroundColor: chartColors.slate },
+          { label: `${anioActual}`, data: actual, backgroundColor: chartColors.primary },
         ],
       },
       options: chartOptions({
@@ -1052,7 +1126,7 @@
                 const delta = a - b;
                 const p = ((delta / b) * 100).toFixed(1);
                 const sign = delta > 0 ? '+' : '';
-                return `Var: ${sign}${delta} (${sign}${p}%)`;
+                return `YoY: ${sign}${delta} u. (${sign}${p}%)`;
               },
             },
           },
@@ -1093,9 +1167,9 @@
     const ff = periodo.fechaFin || comparativoYtd?.corte || null;
     if (sub) {
       const rango = fi && ff
-        ? `${String(fi).slice(0, 10).split('-').reverse().join('/')} â†’ ${String(ff).slice(0, 10).split('-').reverse().join('/')}`
+        ? `${String(fi).slice(0, 10).split('-').reverse().join('/')} → ${String(ff).slice(0, 10).split('-').reverse().join('/')}`
         : 'YTD';
-      sub.textContent = `Mejor versión por utilidad unitaria · ${rango}`;
+      sub.textContent = `Cierre vendidos · mejor versión por utilidad neta (+ F&I) · ${rango}`;
     }
 
     const rows = utilidadCarline?.porCarline || [];
@@ -1104,23 +1178,34 @@
       return;
     }
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="4" class="empty-row">Sin ventas con utilidad en el acumulado anual.</td></tr>';
+      body.innerHTML = '<tr><td colspan="4" class="empty-row">Sin ventas con utilidad neta en el periodo.</td></tr>';
       return;
     }
 
     body.innerHTML = rows.map((c) => {
       const m = c.mejorVersion || {};
-      // Siempre utilidad por unidad (promedio), nunca el acumulado total
-      const utilPorUnidad = m.utilidadPromedio != null
-        ? Number(m.utilidadPromedio)
-        : (m.unidades > 0 && m.utilidadTotal != null
-          ? Number(m.utilidadTotal) / Number(m.unidades)
-          : null);
+      // Misma base que Inventario → Cierre: utilidad neta / ud (+ F&I en contribución)
+      const utilPorUnidad = m.contribucionPromedio != null
+        ? Number(m.contribucionPromedio)
+        : (m.utilidadNetaPromedio != null
+          ? Number(m.utilidadNetaPromedio)
+          : (m.utilidadPromedio != null
+            ? Number(m.utilidadPromedio)
+            : (m.unidades > 0 && m.utilidadTotal != null
+              ? Number(m.utilidadTotal) / Number(m.unidades)
+              : null)));
+      const margen = m.margenContribPct != null
+        ? Number(m.margenContribPct)
+        : (m.margenNetaPct != null ? Number(m.margenNetaPct) : Number(m.margenBrutoPct));
       const utilClass = utilPorUnidad != null && utilPorUnidad >= 0 ? 'cell-money--pos' : 'cell-money--neg';
       const titleBits = [
         m.version || '',
-        m.unidades != null ? `${m.unidades} uds en el periodo` : '',
-        m.utilidadTotal != null ? `utilidad total ${moneyCell(m.utilidadTotal)}` : '',
+        m.unidades != null ? `${m.unidades} uds` : '',
+        m.utilidadNetaPromedio != null ? `neta ${moneyCell(m.utilidadNetaPromedio)}` : '',
+        m.ingresoFiPromedio != null && Number(m.ingresoFiPromedio) !== 0
+          ? `F&I ${moneyCell(m.ingresoFiPromedio)}`
+          : '',
+        m.utilidadBrutaPromedio != null ? `bruta ${moneyCell(m.utilidadBrutaPromedio)}` : '',
       ].filter(Boolean).join(' · ');
       return `<tr>
         <td class="carline-utilidad-carline"><strong>${escapeHtml(c.carline || '—')}</strong></td>
@@ -1128,7 +1213,7 @@
           <span class="carline-utilidad-version__text">${escapeHtml(m.version || '—')}</span>
         </td>
         <td class="cell-num cell-money carline-utilidad-num ${utilClass}">${moneyCell(utilPorUnidad)}</td>
-        <td class="cell-num carline-utilidad-num">${pctCell(m.margenBrutoPct)}</td>
+        <td class="cell-num carline-utilidad-num">${pctCell(margen)}</td>
       </tr>`;
     }).join('');
   }
@@ -2853,6 +2938,9 @@
     if (activeSalesTab === 'comisiones' && window.ComisionesVentas?.load) {
       sideLoads.push(window.ComisionesVentas.load(fechaInicio, fechaFin, { force: true }));
     }
+    if (activeSalesTab === 'analisis' && window.AnalisisComercial?.load) {
+      sideLoads.push(window.AnalisisComercial.load(fechaInicio, fechaFin));
+    }
     // Financiamiento: arrancar de inmediato con el periodo del filtro (no esperar /api/ventas).
     // Así no se queda pintado el mes anterior mientras carga ventas/SOFIA.
     if (activeSalesTab === 'financiamiento' && window.FinanciamientoVentas?.load) {
@@ -2916,6 +3004,7 @@
       }
 
       resumenActual = resumen;
+      comparativoPeriodoActual = data.comparativoPeriodo || null;
       els.kpiTotal.textContent = resumen.totalVentas;
       els.kpiRetail.textContent = resumen.totalRetail;
       els.kpiFlotillas.textContent = resumen.totalFlotillas;
@@ -2935,6 +3024,7 @@
       renderCarryOverKpi();
       renderCoberturaKpi();
       renderKpiVisualBars(resumenActual);
+      renderKpiYoy(comparativoPeriodoActual);
       updateTopBarSummary(resumen);
       els.lastUpdated.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`;
 
@@ -3045,8 +3135,11 @@
                 mejorVersion: c.mejorVersion ? {
                   version: c.mejorVersion.version,
                   utilidadPromedio: c.mejorVersion.utilidadPromedio,
+                  utilidadNetaPromedio: c.mejorVersion.utilidadNetaPromedio,
+                  contribucionPromedio: c.mejorVersion.contribucionPromedio,
                   utilidadTotal: c.mejorVersion.utilidadTotal,
                   margenBrutoPct: c.mejorVersion.margenBrutoPct,
+                  margenNetaPct: c.mejorVersion.margenNetaPct,
                   unidades: c.mejorVersion.unidades,
                 } : null,
               })),
@@ -3249,6 +3342,9 @@
       ytdTotalActual: document.getElementById('ytdTotalActual'),
       ytdTotalAnterior: document.getElementById('ytdTotalAnterior'),
       ytdVariacion: document.getElementById('ytdVariacion'),
+      ytdYoyIndicator: document.getElementById('ytdYoyIndicator'),
+      ytdYoyBadge: document.getElementById('ytdYoyBadge'),
+      ytdYoyPrior: document.getElementById('ytdYoyPrior'),
       ytdQuarterChips: document.getElementById('ytdQuarterChips'),
       carlineUtilidadBody: document.getElementById('carlineUtilidadBody'),
       carlineUtilidadSubtitle: document.getElementById('carlineUtilidadSubtitle'),
@@ -3291,12 +3387,14 @@
       || hash === 'tráfico'
     ) return 'afluencia';
     if (hash === 'comisiones' || hash === 'comision' || hash === 'comisiones-fi') return 'comisiones';
+    if (hash === 'analisis-comercial' || hash === 'analisis' || hash === 'cmi' || hash === 'comercial') return 'analisis';
     const params = new URLSearchParams(location.search);
     const tab = String(params.get('tab') || '').toLowerCase();
     if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
     if (tab === 'leads' || tab === 'lead' || tab === 'oportunidades') return 'leads';
     if (tab === 'afluencia' || tab === 'trafico' || tab === 'tráfico' || tab === 'mtk' || tab === 'marketing') return 'afluencia';
     if (tab === 'comisiones' || tab === 'comision') return 'comisiones';
+    if (tab === 'analisis' || tab === 'analisis-comercial' || tab === 'cmi' || tab === 'comercial') return 'analisis';
     return 'ventas';
   }
 
@@ -3388,11 +3486,16 @@
         return;
       }
       void window.ComisionesVentas.load(fi, ff);
+      return;
+    }
+
+    if (tab === 'analisis' && window.AnalisisComercial?.load) {
+      void window.AnalisisComercial.load(fi, ff);
     }
   }
 
   async function switchSalesTab(tab) {
-    const next = ['financiamiento', 'leads', 'afluencia', 'comisiones'].includes(tab) ? tab : 'ventas';
+    const next = ['financiamiento', 'leads', 'afluencia', 'comisiones', 'analisis'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
     if (next !== 'ventas') {
       ventasDrawerUi?.close?.();
@@ -3409,6 +3512,7 @@
     const panelLd = document.getElementById('panelVentasLeads');
     const panelAf = document.getElementById('panelVentasAfluencia');
     const panelCom = document.getElementById('panelVentasComisiones');
+    const panelAc = document.getElementById('panelVentasAnalisisComercial');
     if (panelVentas) {
       panelVentas.classList.toggle('hidden', next !== 'ventas');
       panelVentas.hidden = next !== 'ventas';
@@ -3429,6 +3533,10 @@
       panelCom.classList.toggle('hidden', next !== 'comisiones');
       panelCom.hidden = next !== 'comisiones';
     }
+    if (panelAc) {
+      panelAc.classList.toggle('hidden', next !== 'analisis');
+      panelAc.hidden = next !== 'analisis';
+    }
 
     const title = document.querySelector('.top-bar-title');
     if (title) {
@@ -3438,7 +3546,9 @@
           ? 'Leads'
           : (next === 'afluencia'
             ? 'Afluencia'
-            : (next === 'comisiones' ? 'Comisiones' : 'Ventas de Unidades')));
+            : (next === 'comisiones'
+              ? 'Comisiones'
+              : (next === 'analisis' ? 'Análisis comercial' : 'Ventas de Unidades'))));
     }
 
     if (next === 'financiamiento') {
@@ -3460,12 +3570,20 @@
       if (location.hash !== '#comisiones') {
         history.replaceState(null, '', `${location.pathname}${location.search}#comisiones`);
       }
+    } else if (next === 'analisis') {
+      if (location.hash !== '#analisis-comercial' && location.hash !== '#analisis') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#analisis-comercial`);
+      }
+      const fi = document.getElementById('fechaInicio')?.value;
+      const ff = document.getElementById('fechaFin')?.value;
+      if (fi && ff) window.AnalisisComercial?.load?.(fi, ff);
     } else if (
       location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
       || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
       || location.hash === '#afluencia' || location.hash === '#afluencia-mtk' || location.hash === '#mtk'
       || location.hash === '#marketing' || location.hash === '#trafico' || location.hash === '#tráfico'
       || location.hash === '#comisiones' || location.hash === '#comision'
+      || location.hash === '#analisis-comercial' || location.hash === '#analisis'
     ) {
       history.replaceState(null, '', `${location.pathname}${location.search}`);
     }

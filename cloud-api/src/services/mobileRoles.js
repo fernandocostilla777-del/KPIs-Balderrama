@@ -66,6 +66,16 @@ const ROLE_SCOPES = {
     ],
     label: 'Mercadotecnia (MTK)',
   },
+  gestion_inventario: {
+    pages: ['dashboard', 'metrics', 'assistant', 'profile'],
+    metricSections: ['inventory', 'post-sales'],
+    tools: [
+      'consultar_resumen_ejecutivo',
+      'consultar_inventario',
+      'consultar_postventa',
+    ],
+    label: 'Gestión de inventario',
+  },
 };
 
 const METRIC_SECTION_ALIASES = {

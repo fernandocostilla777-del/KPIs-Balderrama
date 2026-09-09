@@ -140,6 +140,12 @@ function defaultSeeds() {
       usedVehiclesPoints: 5,
       tacNuevosTarget: 25,
       gmfSeminuevosTarget: 9,
+      bdc: { ...BDC_DEFAULT },
+      daily: buildSeptemberDaily(),
+      products: cloneProducts(),
+    },
+  };
+}
 
 function isPlausibleMonth(month) {
   if (!month || typeof month !== 'object') return false;

@@ -207,11 +207,39 @@ router.get('/ventas/financiamiento/pagos-gmf', (req, res, next) => {
 router.get('/ventas/leads', (req, res, next) => {
   try {
     const crm = require('../services/crmCiclosService');
-    const { fechaInicio, fechaFin, limit } = req.query;
+    const { fechaInicio, fechaFin, limit, kpi } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
+    // ?kpi=compras → detalle completo del indicador (misma ruta, sin depender de /detalle)
+    if (kpi) {
+      return res.json(crm.getLeadsKpiDetalle({
+        fechaInicio,
+        fechaFin,
+        kpi,
+        limit: limit || 5000,
+      }));
+    }
     res.json(crm.getLeadsDashboard({ fechaInicio, fechaFin, limit }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/leads/detalle', (req, res, next) => {
+  try {
+    const crm = require('../services/crmCiclosService');
+    const { fechaInicio, fechaFin, kpi, limit } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(crm.getLeadsKpiDetalle({
+      fechaInicio,
+      fechaFin,
+      kpi: kpi || 'leads',
+      limit: limit || 5000,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

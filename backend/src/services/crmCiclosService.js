@@ -2721,6 +2721,159 @@ function aggregateFuerzaVentas(rows = []) {
   };
 }
 
+/** Filtro SQL adicional por KPI del embudo de leads (misma lógica que summary). */
+function leadKpiExtraWhere(kpi) {
+  const key = String(kpi || '').trim();
+  const cotizadoSql = `(cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0'))`;
+  switch (key) {
+    case 'contactados':
+      return `contacto = 'SI'`;
+    case 'citas':
+      return `cita_programada = 'SI'`;
+    case 'cotizados':
+      return cotizadoSql;
+    case 'compras':
+    case 'convCompra':
+      return `(${COMPRA_LEAD_SQL}) = 1`;
+    case 'sinCompra':
+      return `(${COMPRA_LEAD_SQL}) = 0`;
+    case 'convCitaCompra':
+      return `cita_programada = 'SI' AND (${COMPRA_LEAD_SQL}) = 1`;
+    case 'convContactoCompra':
+      return `contacto = 'SI' AND (${COMPRA_LEAD_SQL}) = 1`;
+    case 'leads':
+    default:
+      return null;
+  }
+}
+
+function mapLeadDetalleRow(r) {
+  const vin = String(r.vinComprado || r.vinCiclo || '').trim() || null;
+  const conCompra = Number(r.conCompra || 0) === 1;
+  return {
+    idCrm: String(r.idCrm || '').trim() || null,
+    idOportunidad: String(r.idOportunidad || '').trim() || null,
+    nombre: String(r.nombre || '').trim() || null,
+    telefono: String(r.telefono || '').trim() || null,
+    fechaEntrada: r.fechaEntrada || null,
+    canal: String(r.canal || '').trim() || null,
+    sucursal: String(r.sucursal || '').trim() || null,
+    tipo: String(r.tipo || '').trim() || null,
+    campana: String(r.campana || '').trim() || null,
+    ejecutivo: String(r.ejecutivo || '').trim() || null,
+    fuerzaVentas: String(r.fuerzaVentas || '').trim() || null,
+    contactado: String(r.contacto || '').trim().toUpperCase() === 'SI',
+    cita: String(r.citaProgramada || '').trim().toUpperCase() === 'SI',
+    fechaCita: r.fechaCita || null,
+    cotizado: !!(r.cotizacion && String(r.cotizacion).trim() && !['NO', 'N', '0'].includes(String(r.cotizacion).trim().toUpperCase())),
+    autoInteres: String(r.autoInteres || '').trim() || null,
+    resultado: String(r.resultado || '').trim() || null,
+    conCompra,
+    vin,
+    fechaFactura: r.fechaFactura || null,
+    estatusCompra: String(r.estatusCompra || '').trim() || null,
+    estatusCiclo: String(r.estatusCiclo || '').trim() || null,
+    etapa: conCompra
+      ? 'compra'
+      : (String(r.citaProgramada || '').trim().toUpperCase() === 'SI'
+        ? 'cita'
+        : (String(r.contacto || '').trim().toUpperCase() === 'SI' ? 'contacto' : 'lead')),
+  };
+}
+
+function queryLeadsDetalleRows(d, { whereSql, params, limit }) {
+  const max = Math.min(20000, Math.max(1, Number(limit) || 400));
+  const rows = d.prepare(`
+    SELECT
+      id_crm AS idCrm,
+      id_oportunidad AS idOportunidad,
+      nombre,
+      telefono,
+      fecha_entrada AS fechaEntrada,
+      canal,
+      sucursal,
+      tipo,
+      campana,
+      ejecutivo_asignado AS ejecutivo,
+      fuerza_ventas AS fuerzaVentas,
+      contacto,
+      cita_programada AS citaProgramada,
+      fecha_cita AS fechaCita,
+      cotizacion,
+      auto_interes AS autoInteres,
+      resultado,
+      vin_comprado AS vinComprado,
+      fecha_factura AS fechaFactura,
+      estatus_compra AS estatusCompra,
+      ${COMPRA_LEAD_SQL} AS conCompra,
+      (
+        SELECT a.vin FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      ) AS vinCiclo,
+      (
+        SELECT a.estatus FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+        ORDER BY COALESCE(a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      ) AS estatusCiclo
+    FROM crm_leads
+    ${whereSql}
+    ORDER BY fecha_entrada DESC, id_crm DESC
+    LIMIT ?
+  `).all(...params, max);
+  return rows.map(mapLeadDetalleRow);
+}
+
+/**
+ * Detalle completo de un KPI del embudo (sin depender del preview truncado del dashboard).
+ */
+function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads', limit = 5000 } = {}) {
+  const d = getDb();
+  if (!hasLeadsTable(d)) {
+    throw Object.assign(
+      new Error('Tabla de leads no cargada. Ejecute: node backend/scripts/etl-crm-leads.js'),
+      { status: 503 },
+    );
+  }
+
+  const rango = resolveCrmPeriod({ desde: fechaInicio || null, hasta: fechaFin || null });
+  const notDupSql = getLeadNotDuplicateSql();
+  const where = [notDupSql];
+  const params = [];
+  if (rango.desde) {
+    where.push('substr(fecha_entrada, 1, 10) >= ?');
+    params.push(String(rango.desde).slice(0, 10));
+  }
+  if (rango.hasta) {
+    where.push('substr(fecha_entrada, 1, 10) <= ?');
+    params.push(String(rango.hasta).slice(0, 10));
+  }
+  const extra = leadKpiExtraWhere(kpi);
+  if (extra) where.push(`(${extra})`);
+  const whereSql = `WHERE ${where.join(' AND ')}`;
+
+  const total = Number(d.prepare(`SELECT COUNT(*) AS n FROM crm_leads ${whereSql}`).get(...params)?.n || 0);
+  const max = Math.min(20000, Math.max(50, Number(limit) || 5000));
+  const detalle = queryLeadsDetalleRows(d, { whereSql, params, limit: max });
+
+  return {
+    filtros: {
+      fechaInicio: rango.desde,
+      fechaFin: rango.hasta,
+      periodo: rango.periodo,
+      kpi: String(kpi || 'leads'),
+    },
+    total,
+    returned: detalle.length,
+    limited: detalle.length < total,
+    limit: max,
+    detalle,
+  };
+}
+
 function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } = {}) {
   const d = getDb();
   if (!hasLeadsTable(d)) {
@@ -2733,7 +2886,6 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   const desde = fechaInicio || null;
   const hasta = fechaFin || null;
   const rango = resolveCrmPeriod({ desde, hasta });
-  const max = Math.min(1000, Math.max(50, Number(limit) || 400));
 
   const notDupSql = getLeadNotDuplicateSql();
   const coberturaRow = d.prepare(`
@@ -3001,79 +3153,37 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     texto: `Cohorte del periodo · campañas documentadas sin compra, con ≤${CADUCAR_ALERTA_DIAS} días de vida restante (de ${LEAD_VIDA_DIAS}).`,
   };
 
+  const max = Math.min(2000, Math.max(50, Number(limit) || 400));
+
   cobertura.sinDatosEnPeriodo = leads === 0 && Number(cobertura.totalLeads || 0) > 0;
 
-  const detalleRows = d.prepare(`
-    SELECT
-      id_crm AS idCrm,
-      id_oportunidad AS idOportunidad,
-      nombre,
-      telefono,
-      fecha_entrada AS fechaEntrada,
-      canal,
-      sucursal,
-      tipo,
-      campana,
-      ejecutivo_asignado AS ejecutivo,
-      fuerza_ventas AS fuerzaVentas,
-      contacto,
-      cita_programada AS citaProgramada,
-      fecha_cita AS fechaCita,
-      cotizacion,
-      auto_interes AS autoInteres,
-      resultado,
-      vin_comprado AS vinComprado,
-      fecha_factura AS fechaFactura,
-      estatus_compra AS estatusCompra,
-      ${COMPRA_LEAD_SQL} AS conCompra,
-      (
-        SELECT a.vin FROM crm_actividades a
-        WHERE a.id_contacto = crm_leads.id_crm
-          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
-        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
-        LIMIT 1
-      ) AS vinCiclo,
-      (
-        SELECT a.estatus FROM crm_actividades a
-        WHERE a.id_contacto = crm_leads.id_crm
-        ORDER BY COALESCE(a.fecha_estatus, a.fecha_inicio_ciclo) DESC
-        LIMIT 1
-      ) AS estatusCiclo
-    FROM crm_leads
-    ${whereSql}
-    ORDER BY fecha_entrada DESC, id_crm DESC
-    LIMIT ?
-  `).all(...params, max);
+  const detalle = queryLeadsDetalleRows(d, { whereSql, params, limit: max });
+  const detalleMeta = {
+    returned: detalle.length,
+    total: leads,
+    limited: detalle.length < leads,
+    limit: max,
+    nota: detalle.length < leads
+      ? `Preview de tabla: ${detalle.length} de ${leads}. El detalle por KPI carga el universo completo del indicador.`
+      : null,
+  };
 
-  const detalle = detalleRows.map((r) => {
-    const vin = String(r.vinComprado || r.vinCiclo || '').trim() || null;
-    const conCompra = Number(r.conCompra || 0) === 1;
-    return {
-      idCrm: String(r.idCrm || '').trim() || null,
-      idOportunidad: String(r.idOportunidad || '').trim() || null,
-      nombre: String(r.nombre || '').trim() || null,
-      telefono: String(r.telefono || '').trim() || null,
-      fechaEntrada: r.fechaEntrada || null,
-      canal: String(r.canal || '').trim() || null,
-      sucursal: String(r.sucursal || '').trim() || null,
-      tipo: String(r.tipo || '').trim() || null,
-      campana: String(r.campana || '').trim() || null,
-      ejecutivo: String(r.ejecutivo || '').trim() || null,
-      fuerzaVentas: String(r.fuerzaVentas || '').trim() || null,
-      contactado: String(r.contacto || '').trim().toUpperCase() === 'SI',
-      cita: String(r.citaProgramada || '').trim().toUpperCase() === 'SI',
-      fechaCita: r.fechaCita || null,
-      cotizado: !!(r.cotizacion && String(r.cotizacion).trim() && !['NO', 'N', '0'].includes(String(r.cotizacion).trim().toUpperCase())),
-      autoInteres: String(r.autoInteres || '').trim() || null,
-      resultado: String(r.resultado || '').trim() || null,
-      conCompra,
-      vin,
-      fechaFactura: r.fechaFactura || null,
-      estatusCompra: String(r.estatusCompra || '').trim() || null,
-      estatusCiclo: String(r.estatusCiclo || '').trim() || null,
-      etapa: conCompra ? 'compra' : (String(r.citaProgramada || '').trim().toUpperCase() === 'SI' ? 'cita' : (String(r.contacto || '').trim().toUpperCase() === 'SI' ? 'contacto' : 'lead')),
-    };
-  });
+  // KPIs poco densos: incluir detalle completo en el payload para que el drawer
+  // no dependa de un segundo request ni del preview truncado.
+  const buildKpiDetalle = (kpiKey, softLimit = 2000) => {
+    const extra = leadKpiExtraWhere(kpiKey);
+    const kpiWhere = extra ? `${whereSql} AND (${extra})` : whereSql;
+    return queryLeadsDetalleRows(d, { whereSql: kpiWhere, params, limit: softLimit });
+  };
+  const detallePorKpi = {
+    compras: buildKpiDetalle('compras', 500),
+    citas: buildKpiDetalle('citas', 2000),
+    cotizados: buildKpiDetalle('cotizados', 2000),
+    convCompra: null, // alias de compras; se resuelve en cliente
+    convCitaCompra: buildKpiDetalle('convCitaCompra', 500),
+    convContactoCompra: buildKpiDetalle('convContactoCompra', 500),
+  };
+  detallePorKpi.convCompra = detallePorKpi.compras;
 
   return {
     filtros: {
@@ -3108,6 +3218,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     campanasCaducarAlertas,
     campanasCaducarResumen,
     detalle,
+    detalleMeta,
+    detallePorKpi,
   };
 }
 
@@ -4400,6 +4512,392 @@ function getBdcEmbudo({ fechaInicio, fechaFin } = {}) {
   };
 }
 
+/**
+ * Días naturales entre dos fechas ISO (YYYY-MM-DD).
+ */
+function daysBetweenIso(startIso, endIso) {
+  const a = toIsoDate(startIso);
+  const b = toIsoDate(endIso);
+  if (!a || !b) return null;
+  const start = new Date(`${a}T00:00:00`);
+  const end = new Date(`${b}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return Math.round((end - start) / 86400000);
+}
+
+function rangoAntiguedad(dias) {
+  if (dias == null || dias < 0) return null;
+  if (dias <= 30) return '0-30';
+  if (dias <= 90) return '31-90';
+  if (dias <= 180) return '91-180';
+  return '>180';
+}
+
+/**
+ * Índice de compras históricas por ID CRM (historial 360):
+ * VIN → fecha más temprana de factura/entrega/inicio de ciclo.
+ * No usa órdenes de taller (CMI prohíbe inferir recompra por posventa).
+ */
+function buildPurchaseHistoryByContact(d) {
+  const byContact = new Map();
+  const add = (idRaw, vinRaw, fechaRaw) => {
+    const id = String(idRaw || '').trim();
+    const vin = normalizeVin(vinRaw);
+    if (!id || !vin) return;
+    const fecha = toIsoDate(fechaRaw);
+    if (!byContact.has(id)) byContact.set(id, new Map());
+    const m = byContact.get(id);
+    const prev = m.get(vin);
+    if (!prev) m.set(vin, fecha);
+    else if (fecha && fecha < prev) m.set(vin, fecha);
+  };
+
+  for (const r of d.prepare(`
+    SELECT id_contacto AS id, vin,
+           fecha_factura, fecha_entrega, fecha_inicio_ciclo
+    FROM crm_actividades
+    WHERE id_contacto IS NOT NULL
+      AND vin IS NOT NULL AND trim(vin) <> ''
+  `).all()) {
+    add(r.id, r.vin, r.fecha_factura || r.fecha_entrega || r.fecha_inicio_ciclo);
+  }
+
+  if (hasLeadsTable(d)) {
+    for (const r of d.prepare(`
+      SELECT id_crm AS id, vin_comprado AS vin,
+             fecha_factura, fecha_entrega, fecha_entrada
+      FROM crm_leads
+      WHERE id_crm IS NOT NULL
+        AND vin_comprado IS NOT NULL AND trim(vin_comprado) <> ''
+    `).all()) {
+      add(r.id, r.vin, r.fecha_factura || r.fecha_entrega || r.fecha_entrada);
+    }
+  }
+
+  if (hasFinanciamientoTable(d)) {
+    for (const r of d.prepare(`
+      SELECT vin, fecha_compra, fecha
+      FROM crm_financiamiento
+      WHERE vin IS NOT NULL AND trim(vin) <> ''
+    `).all()) {
+      const id = resolveIdCrmBySerie(r.vin);
+      if (id) add(id, r.vin, r.fecha_compra || r.fecha);
+    }
+  }
+
+  return byContact;
+}
+
+/**
+ * Fecha de captura CRM de la oportunidad que produjo la entrega (por VIN + ID).
+ * Usa inicio de ciclo / entrada de lead del VIN entregado — no el primer contacto histórico
+ * del cliente (evita inflar >180 en recompras).
+ * Fallback por contacto: última captura ≤ fecha de entrega (ciclo que pudo originar la venta).
+ */
+function buildCaptureDateByContactVin(d) {
+  const map = new Map();
+  const byContact = new Map(); // id -> sorted unique fechas ISO
+  const keyOf = (id, vin) => `${String(id)}|${vin}`;
+  const setMin = (idRaw, vinRaw, fechaRaw) => {
+    const id = String(idRaw || '').trim();
+    const vin = normalizeVin(vinRaw);
+    const fecha = toIsoDate(fechaRaw);
+    if (!id || !fecha) return;
+    if (vin) {
+      const k = keyOf(id, vin);
+      const prev = map.get(k);
+      if (!prev || fecha < prev) map.set(k, fecha);
+    }
+    if (!byContact.has(id)) byContact.set(id, []);
+    byContact.get(id).push(fecha);
+  };
+
+  for (const r of d.prepare(`
+    SELECT id_contacto AS id, vin, fecha_inicio_ciclo, fecha_crea_actividad
+    FROM crm_actividades
+    WHERE id_contacto IS NOT NULL
+  `).all()) {
+    setMin(r.id, r.vin, r.fecha_inicio_ciclo || r.fecha_crea_actividad);
+  }
+
+  if (hasLeadsTable(d)) {
+    for (const r of d.prepare(`
+      SELECT id_crm AS id, vin_comprado AS vin, fecha_entrada
+      FROM crm_leads
+      WHERE id_crm IS NOT NULL AND fecha_entrada IS NOT NULL
+    `).all()) {
+      setMin(r.id, r.vin, r.fecha_entrada);
+    }
+  }
+
+  // Deduplicate and sort fechas por contacto
+  for (const [id, fechas] of byContact.entries()) {
+    byContact.set(id, [...new Set(fechas)].sort());
+  }
+
+  return { byVin: map, byContact };
+}
+
+function findCaptureDate(captureIndex, idCrm, vin, fechaEntrega) {
+  if (!idCrm || !captureIndex) return null;
+  const id = String(idCrm);
+  const byVin = captureIndex.byVin || captureIndex;
+  const byContact = captureIndex.byContact || null;
+
+  if (vin) {
+    const exact = byVin.get?.(`${id}|${normalizeVin(vin)}`);
+    if (exact) return exact;
+    let best = null;
+    for (const [key, fecha] of (byVin.entries?.() || [])) {
+      if (!key.startsWith(`${id}|`)) continue;
+      const keyVin = key.slice(id.length + 1);
+      if (!matchCrmVinToSerie(keyVin, vin)) continue;
+      if (!best || (fecha && fecha < best)) best = fecha;
+    }
+    if (best) return best;
+  }
+
+  // Fallback: captura más reciente del contacto en o antes de la entrega
+  if (byContact && fechaEntrega) {
+    const fechas = byContact.get(id) || [];
+    let pick = null;
+    for (const f of fechas) {
+      if (f <= fechaEntrega) pick = f;
+      else break;
+    }
+    return pick;
+  }
+  return null;
+}
+
+async function loadDmsPurchaseHistoryByClient(clientIds = []) {
+  const ids = [...new Set(
+    (clientIds || [])
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0),
+  )];
+  const byClient = new Map();
+  if (!ids.length) return { error: null, byClient };
+
+  const chunkSize = 400;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const params = {};
+    const placeholders = chunk.map((id, idx) => {
+      const key = `id${idx}`;
+      params[key] = id;
+      return `@${key}`;
+    }).join(',');
+    let rows = [];
+    try {
+      rows = await query(`
+        SELECT
+          a.VTE_IDCLIENTE AS idCliente,
+          UPPER(LTRIM(RTRIM(a.VTE_SERIE))) AS serie,
+          CONVERT(varchar(10), CONVERT(date, a.VTE_FECHDOCTO, 103), 23) AS fecha
+        FROM ADE_VTAFI a
+        WHERE a.VTE_TIPODOCTO = 'A'
+          AND a.VTE_IDCLIENTE IN (${placeholders})
+          AND a.VTE_SERIE IS NOT NULL
+          AND LTRIM(RTRIM(a.VTE_SERIE)) <> ''
+      `, params);
+    } catch (err) {
+      return { error: err.message || String(err), byClient };
+    }
+    for (const r of rows || []) {
+      const id = String(r.idCliente);
+      const vin = normalizeVin(r.serie);
+      const fecha = toIsoDate(r.fecha);
+      if (!id || !vin) continue;
+      if (!byClient.has(id)) byClient.set(id, new Map());
+      const m = byClient.get(id);
+      const prev = m.get(vin);
+      if (!prev) m.set(vin, fecha);
+      else if (fecha && fecha < prev) m.set(vin, fecha);
+    }
+  }
+  return { error: null, byClient };
+}
+
+function countPriorPurchases(purchaseMap, currentVin, fechaEntrega) {
+  if (!purchaseMap || !purchaseMap.size) return 0;
+  let prior = 0;
+  for (const [vin, fecha] of purchaseMap.entries()) {
+    if (matchCrmVinToSerie(vin, currentVin)) continue;
+    if (!fechaEntrega) {
+      prior += 1;
+      continue;
+    }
+    if (!fecha || fecha < fechaEntrega) prior += 1;
+  }
+  return prior;
+}
+
+/**
+ * Clasifica entregas SOFIA (mismo universo C-1) con historial 360 + facturación DMS.
+ * C-6: primera compra vs recurrente.
+ * C-6.1: distribución por antigüedad captura CRM → entrega.
+ *
+ * @param {Array<object>} entregasSofia
+ */
+async function classifyEntregasTipoCliente(entregasSofia = []) {
+  const list = Array.isArray(entregasSofia) ? entregasSofia : [];
+  const empty = {
+    disponible: false,
+    total: list.length,
+    primeraCompra: 0,
+    recurrente: 0,
+    sinClasificar: list.length,
+    pctPrimeraCompra: null,
+    pctRecurrente: null,
+    coberturaPct: null,
+    antiguedad: {
+      clasificables: 0,
+      noClasificables: list.length,
+      coberturaPct: null,
+      rangos: { '0-30': 0, '31-90': 0, '91-180': 0, '>180': 0 },
+      pctRangos: { '0-30': null, '31-90': null, '91-180': null, '>180': null },
+    },
+    fuente: 'Seguimiento 360 (CRM) + ADE_VTAFI',
+    nota: null,
+    error: null,
+  };
+
+  if (!list.length) {
+    return { ...empty, disponible: true, sinClasificar: 0, nota: 'Sin entregas en el periodo.' };
+  }
+
+  let d;
+  try {
+    if (!isAvailable()) {
+      return { ...empty, nota: 'Base CRM (Seguimiento 360) no disponible.' };
+    }
+    d = getDb();
+  } catch (err) {
+    return { ...empty, error: err.message || String(err), nota: 'No se pudo abrir el CRM 360.' };
+  }
+
+  const purchasesByContact = buildPurchaseHistoryByContact(d);
+  const captureIndex = buildCaptureDateByContactVin(d);
+
+  const clientIds = list.map((e) => e.ID_CLIENTE ?? e.SOF_IDCliente ?? e.idCliente).filter((x) => x != null);
+  const dmsHist = await loadDmsPurchaseHistoryByClient(clientIds);
+  const dmsByClient = dmsHist.byClient || new Map();
+
+  let primeraCompra = 0;
+  let recurrente = 0;
+  let sinClasificar = 0;
+  let matchCrm = 0;
+  let matchDmsOnly = 0;
+  const rangos = { '0-30': 0, '31-90': 0, '91-180': 0, '>180': 0 };
+  let clasificables61 = 0;
+  let noClasificables61 = 0;
+
+  for (const e of list) {
+    const vin = normalizeVin(e.SOF_VIN || e.vin || e.SERIE || e.VTE_SERIE);
+    const fechaEntrega = toIsoDate(
+      e.SOF_FechAct || e.FECHA_PERIODO || e.fechaEntrega || e.fecha || e.FECHA_FACTURA,
+    );
+    const idClienteDms = e.ID_CLIENTE ?? e.SOF_IDCliente ?? e.idCliente ?? null;
+
+    let idCrm = vin ? resolveIdCrmBySerie(vin) : null;
+    if (!idCrm && e.CLIENTE) idCrm = resolveIdCrmByNombre(e.CLIENTE);
+
+    let prior = 0;
+    let resolved = false;
+
+    if (idCrm) {
+      matchCrm += 1;
+      prior = countPriorPurchases(purchasesByContact.get(String(idCrm)), vin, fechaEntrega);
+      resolved = true;
+    }
+
+    // Complemento / respaldo: histórico transaccional DMS (facturas), nunca taller.
+    if (idClienteDms != null && dmsByClient.has(String(idClienteDms))) {
+      const dmsPrior = countPriorPurchases(dmsByClient.get(String(idClienteDms)), vin, fechaEntrega);
+      if (dmsPrior > prior) prior = dmsPrior;
+      if (!resolved) {
+        matchDmsOnly += 1;
+        resolved = true;
+      }
+    }
+
+    if (!resolved) {
+      sinClasificar += 1;
+      noClasificables61 += 1;
+      continue;
+    }
+
+    if (prior > 0) recurrente += 1;
+    else primeraCompra += 1;
+
+    // C-6.1 solo con fecha de captura del ciclo/VIN en 360
+    let captura = null;
+    if (idCrm && fechaEntrega) {
+      captura = findCaptureDate(captureIndex, idCrm, vin, fechaEntrega);
+    }
+    const dias = captura && fechaEntrega ? daysBetweenIso(captura, fechaEntrega) : null;
+    const rango = rangoAntiguedad(dias);
+    if (rango) {
+      clasificables61 += 1;
+      rangos[rango] += 1;
+    } else {
+      noClasificables61 += 1;
+    }
+  }
+
+  const clasificados = primeraCompra + recurrente;
+  const total = list.length;
+  const pctPrimera = clasificados ? roundPct(primeraCompra, clasificados) : null;
+  const pctRecurrente = clasificados ? roundPct(recurrente, clasificados) : null;
+  // Si cobertura completa, PC+RC sobre C-1; si no, sobre clasificados y se reporta hueco.
+  const denomC6 = sinClasificar === 0 ? total : clasificados;
+  const c6pc = denomC6 ? roundPct(primeraCompra, denomC6) : null;
+  const c6rc = denomC6 ? roundPct(recurrente, denomC6) : null;
+
+  const pctRangos = {
+    '0-30': clasificables61 ? roundPct(rangos['0-30'], clasificables61) : null,
+    '31-90': clasificables61 ? roundPct(rangos['31-90'], clasificables61) : null,
+    '91-180': clasificables61 ? roundPct(rangos['91-180'], clasificables61) : null,
+    '>180': clasificables61 ? roundPct(rangos['>180'], clasificables61) : null,
+  };
+
+  return {
+    disponible: clasificados > 0,
+    total,
+    primeraCompra,
+    recurrente,
+    sinClasificar,
+    pctPrimeraCompra: c6pc,
+    pctRecurrente: c6rc,
+    coberturaPct: total ? roundPct(clasificados, total) : null,
+    matchCrm,
+    matchDmsOnly,
+    antiguedad: {
+      clasificables: clasificables61,
+      noClasificables: noClasificables61,
+      coberturaPct: total ? roundPct(clasificables61, total) : null,
+      rangos,
+      pctRangos,
+    },
+    fuente: 'Seguimiento 360 (compras por VIN/ID CRM) + ADE_VTAFI; no usa PREVIAS de taller',
+    nota: sinClasificar
+      ? `${sinClasificar} entrega(s) sin match 360/DMS; C-6 se calcula sobre clasificadas (${clasificados}).`
+      : 'Universo conciliado con C-1 (Primera + Recurrente = Entregas).',
+    error: dmsHist.error || null,
+    // aliases útiles para el panel
+    pctPrimeraSobreClasificadas: pctPrimera,
+    pctRecurrenteSobreClasificadas: pctRecurrente,
+  };
+}
+
+function roundPct(num, den) {
+  const n = Number(num);
+  const d = Number(den);
+  if (!Number.isFinite(n) || !Number.isFinite(d) || d === 0) return null;
+  return Math.round((n / d) * 1000) / 10;
+}
+
 module.exports = {
   isAvailable,
   releaseDb,
@@ -4408,6 +4906,7 @@ module.exports = {
   getContactHistory,
   getLeadsSummary,
   getLeadsDashboard,
+  getLeadsKpiDetalle,
   getBdcEmbudo,
   getSeguimiento360Summary,
   resolveCrmPeriod,
@@ -4424,4 +4923,5 @@ module.exports = {
   getVendedorResumen,
   getQuejasCsiSummary,
   getQuejasCsiForPersona,
+  classifyEntregasTipoCliente,
 };

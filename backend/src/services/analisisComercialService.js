@@ -13,6 +13,7 @@ const {
 } = require('./objetivosResultadosService');
 const { getVentas } = require('./ventas');
 const { getInventory } = require('./inventoryService');
+const { classifyEntregasTipoCliente } = require('./crmCiclosService');
 
 function round1(n) {
   const x = Number(n);
@@ -88,12 +89,19 @@ async function getAnalisisComercial({ fechaInicio, fechaFin } = {}) {
     error: ventas?.tomasACuenta?.error || null,
   };
 
-  const [volumen, lineas, financiamiento, seminuevos, inventory] = await Promise.all([
+  const entregasSofiaList = ventas?.entregasSofia || [];
+
+  const [volumen, lineas, financiamiento, seminuevos, inventory, tipoCliente] = await Promise.all([
     getVolumenResultados({ fechaInicio, fechaFin, ventas }),
     getLineasResultados({ fechaInicio, fechaFin, ventas }),
     getFinanciamientoResultados({ fechaInicio, fechaFin }),
     getSeminuevosResultados({ fechaInicio, fechaFin, tomas: tomasFromVentas, skipExtras: true }),
     getInventory({ planPisoPeriod: 'all' }).catch(() => null),
+    classifyEntregasTipoCliente(entregasSofiaList).catch((err) => ({
+      disponible: false,
+      error: err.message || String(err),
+      nota: 'Error al clasificar entregas con Seguimiento 360.',
+    })),
   ]);
 
   const metas = getPlantillaMetas({ fechaInicio, fechaFin });
@@ -278,23 +286,64 @@ async function getAnalisisComercial({ fechaInicio, fechaFin } = {}) {
     kpiBase({
       clave: 'C-6',
       nombre: 'Composición de Entregas por Tipo de Cliente',
-      descripcion: 'Primera compra vs clientes recurrentes.',
-      valor: null,
-      status: 'parcial',
-      tone: 'slate',
-      disponible: false,
-      formula: 'Entregas 1ª compra ÷ Entregas totales',
-      nota: 'Requiere clasificar cliente nuevo vs recurrente en CRM/SOFIA; aún no cableado como KPI formal.',
+      descripcion: 'Primera compra vs clientes recurrentes (historial 360 + facturación).',
+      valor: tipoCliente?.pctPrimeraCompra ?? null,
+      unidad: '%',
+      display: tipoCliente?.pctPrimeraCompra == null
+        ? '—'
+        : `${tipoCliente.pctPrimeraCompra}% 1ª · ${tipoCliente.pctRecurrente ?? '—'}% rec.`,
+      status: tipoCliente?.disponible ? 'completo' : 'parcial',
+      tone: 'blue',
+      disponible: !!tipoCliente?.disponible,
+      formula: 'C-6PC = 1ª compra ÷ total · C-6RC = recurrentes ÷ total',
+      numerador: tipoCliente?.primeraCompra ?? null,
+      denominador: (tipoCliente?.primeraCompra ?? 0) + (tipoCliente?.recurrente ?? 0) || null,
+      nota: tipoCliente?.nota || tipoCliente?.error || null,
+      detalle: {
+        primeraCompra: tipoCliente?.primeraCompra ?? null,
+        recurrente: tipoCliente?.recurrente ?? null,
+        pctPrimeraCompra: tipoCliente?.pctPrimeraCompra ?? null,
+        pctRecurrente: tipoCliente?.pctRecurrente ?? null,
+        sinClasificar: tipoCliente?.sinClasificar ?? null,
+        coberturaPct: tipoCliente?.coberturaPct ?? null,
+        matchCrm: tipoCliente?.matchCrm ?? null,
+        matchDmsOnly: tipoCliente?.matchDmsOnly ?? null,
+        totalEntregas: tipoCliente?.total ?? entregas,
+        fuente: tipoCliente?.fuente ?? null,
+      },
     }),
     kpiBase({
       clave: 'C-6.1',
       nombre: 'Antigüedad de Origen de las Entregas',
-      descripcion: 'Distribución de oportunidades que se convirtieron en entrega por rangos de maduración.',
-      valor: null,
-      status: 'parcial',
-      tone: 'slate',
-      disponible: false,
-      nota: 'Pendiente de cruzar fecha de oportunidad CRM con entrega SOFIA.',
+      descripcion: 'Distribución por días reales captura CRM → entrega (0–30 / 31–90 / 91–180 / >180).',
+      valor: tipoCliente?.antiguedad?.coberturaPct ?? null,
+      unidad: '%',
+      display: (() => {
+        const p = tipoCliente?.antiguedad?.pctRangos;
+        if (!p || tipoCliente?.antiguedad?.clasificables == null) return '—';
+        if (!tipoCliente.antiguedad.clasificables) return '—';
+        return `0-30 ${p['0-30'] ?? '—'}% · 31-90 ${p['31-90'] ?? '—'}% · 91-180 ${p['91-180'] ?? '—'}% · >180 ${p['>180'] ?? '—'}%`;
+      })(),
+      status: (tipoCliente?.antiguedad?.clasificables || 0) > 0 ? 'completo' : 'parcial',
+      tone: 'violet',
+      disponible: (tipoCliente?.antiguedad?.clasificables || 0) > 0,
+      formula: 'Días = Entrega − Captura CRM · % por rango sobre clasificables',
+      nota: (tipoCliente?.antiguedad?.noClasificables)
+        ? `${tipoCliente.antiguedad.noClasificables} sin fecha de captura CRM vinculada al VIN; cobertura ${tipoCliente.antiguedad.coberturaPct ?? '—'}%.`
+        : 'Antigüedad del ciclo del VIN entregado (no del primer contacto histórico).',
+      detalle: {
+        clasificables: tipoCliente?.antiguedad?.clasificables ?? null,
+        noClasificables: tipoCliente?.antiguedad?.noClasificables ?? null,
+        coberturaPct: tipoCliente?.antiguedad?.coberturaPct ?? null,
+        rango_0_30: tipoCliente?.antiguedad?.rangos?.['0-30'] ?? null,
+        rango_31_90: tipoCliente?.antiguedad?.rangos?.['31-90'] ?? null,
+        rango_91_180: tipoCliente?.antiguedad?.rangos?.['91-180'] ?? null,
+        rango_mas_180: tipoCliente?.antiguedad?.rangos?.['>180'] ?? null,
+        pct_0_30: tipoCliente?.antiguedad?.pctRangos?.['0-30'] ?? null,
+        pct_31_90: tipoCliente?.antiguedad?.pctRangos?.['31-90'] ?? null,
+        pct_91_180: tipoCliente?.antiguedad?.pctRangos?.['91-180'] ?? null,
+        pct_mas_180: tipoCliente?.antiguedad?.pctRangos?.['>180'] ?? null,
+      },
     }),
     kpiBase({
       clave: 'C-7',
@@ -436,7 +485,7 @@ async function getAnalisisComercial({ fechaInicio, fechaFin } = {}) {
   const parciales = kpis.filter((k) => k.status === 'parcial' || k.status === 'pendiente_meta').length;
 
   return {
-    fuente: 'Manual CMI v3 · objetivos-resultados + inventario',
+    fuente: 'Manual CMI v3 · objetivos-resultados + inventario + Seguimiento 360 (C-6/C-6.1)',
     alcance: 'Ventas autos nuevos · Comercial C-1…C-12.1',
     periodo: { fechaInicio, fechaFin },
     resumen: {

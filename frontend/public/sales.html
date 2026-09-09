@@ -752,7 +752,7 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 <div class="fi-section-header" style="flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between">
 <div>
 <h2 class="section-title" style="margin-bottom:6px">Afluencia</h2>
-<p id="afSubtitle" class="section-subtitle" style="margin:0">Solo NUEVOS (col R) · Fresh up + Citas (col T) · SNV · Pruebas de manejo por sucursal (Matriz, Zacatelco, Cholula).</p>
+<p id="afSubtitle" class="section-subtitle" style="margin:0">Tráfico piso, SNV y pruebas de manejo.</p>
 </div>
 <nav class="eeff-tabs" id="afInnerTabs" aria-label="Secciones de afluencia">
 <button type="button" class="eeff-tab active" data-af-tab="general" aria-controls="afPanelGeneral" aria-pressed="true">Afluencia</button>
@@ -763,30 +763,6 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 <div id="afPanelGeneral" class="af-inner-panel" data-af-panel="general">
 
 <div id="afKpiOperational" class="fi-kpi-root"></div>
-
-<section class="section-panel table-panel dashboard-section" style="margin-top:12px">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Por sucursal</h3>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead>
-<tr>
-<th>Sucursal</th>
-<th class="cell-num">Afluencia</th>
-<th class="cell-num">Fresh up</th>
-<th class="cell-num">Citas</th>
-<th class="cell-num">SNV</th>
-<th class="cell-num">Pruebas</th>
-<th class="cell-num">Registros</th>
-</tr>
-</thead>
-<tbody id="afSucursalesBody">
-<tr class="empty-row"><td colspan="7">Consulte un periodo para ver afluencia por sucursal.</td></tr>
-</tbody>
-</table>
-</div>
-</section>
 
 <section class="section-panel dashboard-section">
 <div class="kpi-detail-toolbar" style="flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
@@ -801,6 +777,12 @@ Una vez culminado ese plazo, la oportunidad ya no cuenta para conversión de est
 <button type="button" class="chip" data-af-metric="snv">SNV</button>
 <button type="button" class="chip" data-af-metric="pruebasManejo">Pruebas</button>
 </div>
+</div>
+<div class="filter-chips" id="afYtdCentroChips" role="group" aria-label="Centro de trabajo" style="margin:8px 0 0">
+<button type="button" class="chip active" data-af-centro="todos">Todos</button>
+<button type="button" class="chip" data-af-centro="cholula">Cholula</button>
+<button type="button" class="chip" data-af-centro="zacatelco">Zacatelco</button>
+<button type="button" class="chip" data-af-centro="matriz">Matriz Serdan</button>
 </div>
 <div class="filter-chips" id="afYtdQuarterChips" role="group" aria-label="Trimestres visibles" style="margin:10px 0 6px">
 <button type="button" class="chip active" data-af-quarter="1" aria-pressed="true">T1</button>
@@ -1078,8 +1060,8 @@ Exportar CSV
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/financiamiento.js?v=47"></script>
-<script src="/js/leads.js?v=13"></script>
-<script src="/js/afluencia.js?v=10"></script>
+<script src="/js/leads.js?v=15"></script>
+<script src="/js/afluencia.js?v=18"></script>
 <script src="/js/comisiones.js?v=2"></script>
 <script src="/js/analisisComercial.js?v=1"></script>
 <script src="/js/sales.js?v=106"></script>

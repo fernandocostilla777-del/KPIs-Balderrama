@@ -9,9 +9,14 @@ const { getLeadNotDuplicateSql } = require('./crmCiclosService');
 const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
 
 const SUCURSALES = [
-  { key: 'matriz', label: 'Matriz' },
+  { key: 'matriz', label: 'Matriz Serdan' },
   { key: 'zacatelco', label: 'Zacatelco' },
   { key: 'cholula', label: 'Cholula' },
+];
+
+const YTD_CENTROS = [
+  { key: 'todos', label: 'Todos' },
+  ...SUCURSALES,
 ];
 
 function getDb() {
@@ -110,17 +115,20 @@ function monthsOfQuarter(q) {
   return [start, start + 1, start + 2];
 }
 
-/** Serie mensual del año, opcionalmente cortada a YTD (misma fecha MM-DD). */
-function buildYearMonthSeries(d, year, ytdEndDate) {
+/** Serie mensual del año, opcionalmente cortada a YTD (misma fecha MM-DD).
+ *  @param {string|null} centroKey  null|'todos' = todas; 'matriz'|'cholula'|'zacatelco'
+ */
+function buildYearMonthSeries(d, year, ytdEndDate, centroKey = null) {
   const series = Array.from({ length: 12 }, (_, i) => emptyMonthMetrics(i + 1));
   const byM = Object.fromEntries(series.map((m) => [m.month, m]));
   const inicio = `${year}-01-01`;
   const md = String(ytdEndDate || '').slice(5, 10);
   const fin = md && /^\d{2}-\d{2}$/.test(md) ? `${year}-${md}` : `${year}-12-31`;
+  const filterCentro = centroKey && centroKey !== 'todos' ? centroKey : null;
 
   if (hasTable(d, 'crm_trafico_piso')) {
     const rows = d.prepare(`
-      SELECT fecha, comentarios, reconciliacion
+      SELECT fecha, comentarios, reconciliacion, centro_trabajo, fuerza
       FROM crm_trafico_piso
       WHERE fecha IS NOT NULL
         AND fecha >= ?
@@ -129,6 +137,7 @@ function buildYearMonthSeries(d, year, ytdEndDate) {
 
     for (const row of rows) {
       if (!isNuevos(row.comentarios)) continue;
+      if (filterCentro && mapSucursalKey(row.centro_trabajo, row.fuerza) !== filterCentro) continue;
       const month = Number(String(row.fecha || '').slice(5, 7));
       if (!month || !byM[month]) continue;
       const flags = classifyReconciliacion(row.reconciliacion);
@@ -142,13 +151,14 @@ function buildYearMonthSeries(d, year, ytdEndDate) {
 
   if (hasTable(d, 'crm_pruebas_manejo')) {
     const pruebas = d.prepare(`
-      SELECT fecha
+      SELECT fecha, centro_trabajo, fuerza_venta
       FROM crm_pruebas_manejo
       WHERE fecha IS NOT NULL
         AND fecha >= ?
         AND fecha <= ?
     `).all(inicio, fin);
     for (const p of pruebas) {
+      if (filterCentro && mapSucursalKey(p.centro_trabajo, p.fuerza_venta) !== filterCentro) continue;
       const month = Number(String(p.fecha || '').slice(5, 7));
       if (!month || !byM[month]) continue;
       byM[month].pruebasManejo += 1;
@@ -178,20 +188,55 @@ function sumMonthMetrics(months) {
   return out;
 }
 
+function buildTrimestresYtd(actualMonths, anteriorMonths, maxQ, maxMonth) {
+  return [1, 2, 3, 4]
+    .filter((q) => q <= maxQ)
+    .map((q) => {
+      const monthNums = monthsOfQuarter(q);
+      const actualQ = monthNums.map((m) => actualMonths[m - 1] || emptyMonthMetrics(m));
+      const anteriorQ = monthNums.map((m) => anteriorMonths[m - 1] || emptyMonthMetrics(m));
+      return {
+        quarter: q,
+        label: `T${q}`,
+        actual: { quarter: q, label: `T${q}`, ...sumMonthMetrics(actualQ) },
+        anterior: { quarter: q, label: `T${q}`, ...sumMonthMetrics(anteriorQ) },
+        meses: monthNums.map((m, i) => ({
+          month: m,
+          label: MONTH_LABELS[m - 1],
+          quarter: q,
+          withinYtd: m <= maxMonth,
+          actual: actualQ[i],
+          anterior: anteriorQ[i],
+        })),
+      };
+    });
+}
+
 function buildComparativoYtd(d, fechaFin) {
   const end = String(fechaFin || '').slice(0, 10);
   const year = Number(end.slice(0, 4));
   if (!Number.isFinite(year) || year < 2000) return null;
-  const actualMonths = buildYearMonthSeries(d, year, end);
-  const anteriorMonths = buildYearMonthSeries(d, year - 1, end);
   const maxQ = quarterOf(end) || 4;
   const maxMonth = Number(end.slice(5, 7)) || 12;
+
+  const porCentro = {};
+  for (const centro of YTD_CENTROS) {
+    const key = centro.key === 'todos' ? null : centro.key;
+    const actualMonths = buildYearMonthSeries(d, year, end, key);
+    const anteriorMonths = buildYearMonthSeries(d, year - 1, end, key);
+    porCentro[centro.key] = {
+      key: centro.key,
+      label: centro.label,
+      trimestres: buildTrimestresYtd(actualMonths, anteriorMonths, maxQ, maxMonth),
+    };
+  }
 
   return {
     anioActual: year,
     anioAnterior: year - 1,
     hasta: end.slice(5, 10),
     maxMonth,
+    centros: YTD_CENTROS,
     metricas: [
       { key: 'afluenciaTotal', label: 'Afluencia' },
       { key: 'freshUp', label: 'Fresh up' },
@@ -199,27 +244,9 @@ function buildComparativoYtd(d, fechaFin) {
       { key: 'snv', label: 'SNV' },
       { key: 'pruebasManejo', label: 'Pruebas de manejo' },
     ],
-    trimestres: [1, 2, 3, 4]
-      .filter((q) => q <= maxQ)
-      .map((q) => {
-        const monthNums = monthsOfQuarter(q);
-        const actualQ = monthNums.map((m) => actualMonths[m - 1] || emptyMonthMetrics(m));
-        const anteriorQ = monthNums.map((m) => anteriorMonths[m - 1] || emptyMonthMetrics(m));
-        return {
-          quarter: q,
-          label: `T${q}`,
-          actual: { quarter: q, label: `T${q}`, ...sumMonthMetrics(actualQ) },
-          anterior: { quarter: q, label: `T${q}`, ...sumMonthMetrics(anteriorQ) },
-          meses: monthNums.map((m, i) => ({
-            month: m,
-            label: MONTH_LABELS[m - 1],
-            quarter: q,
-            withinYtd: m <= maxMonth,
-            actual: actualQ[i],
-            anterior: anteriorQ[i],
-          })),
-        };
-      }),
+    // Compat: trimestres = Todos los centros
+    trimestres: porCentro.todos.trimestres,
+    porCentro,
   };
 }
 
@@ -604,6 +631,113 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
 }
 
 
+function normNameKey(value) {
+  const s = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  return s.length >= 8 ? s : null;
+}
+
+function normPhoneKey(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+function isLikelyCrmId(value) {
+  const s = String(value || '').trim();
+  if (!s || /^(SI|NO|N\/A|NULL)$/i.test(s)) return false;
+  return /^\d{5,}$/.test(s);
+}
+
+/**
+ * Índice de compradores CRM (tienen VIN de compra).
+ * Permite cruzar afluencia/pruebas por ID, nombre o teléfono.
+ */
+function buildBuyerIndexes(d) {
+  const ids = new Set();
+  const names = new Set();
+  const phones = new Set();
+
+  if (hasTable(d, 'crm_actividades')) {
+    for (const r of d.prepare(`
+      SELECT DISTINCT id_contacto AS id, nombre_contacto AS nombre
+      FROM crm_actividades
+      WHERE vin IS NOT NULL AND trim(vin) <> ''
+        AND id_contacto IS NOT NULL
+    `).all()) {
+      const id = String(r.id || '').trim();
+      if (isLikelyCrmId(id)) ids.add(id);
+      const name = normNameKey(r.nombre);
+      if (name) names.add(name);
+    }
+  }
+
+  if (hasTable(d, 'crm_leads')) {
+    for (const r of d.prepare(`
+      SELECT id_crm AS id, nombre, telefono, vin_comprado
+      FROM crm_leads
+      WHERE id_crm IS NOT NULL
+    `).all()) {
+      const id = String(r.id || '').trim();
+      const hasVin = !!(r.vin_comprado && String(r.vin_comprado).trim());
+      const isBuyer = hasVin || (isLikelyCrmId(id) && ids.has(id));
+      if (!isBuyer) continue;
+      if (isLikelyCrmId(id)) ids.add(id);
+      const name = normNameKey(r.nombre);
+      if (name) names.add(name);
+      const phone = normPhoneKey(r.telefono);
+      if (phone) phones.add(phone);
+    }
+  }
+
+  if (hasTable(d, 'crm_financiamiento')) {
+    // Contratos: enriquecer por nombre de cliente si existe
+    try {
+      for (const r of d.prepare(`
+        SELECT DISTINCT cliente, vin
+        FROM crm_financiamiento
+        WHERE vin IS NOT NULL AND trim(vin) <> ''
+      `).all()) {
+        const name = normNameKey(r.cliente);
+        if (name) names.add(name);
+      }
+    } catch {
+      /* columna puede variar */
+    }
+  }
+
+  return { ids, names, phones };
+}
+
+function rowLooksLikeBuyer(row, buyers) {
+  if (!buyers) return false;
+  if (row.vinVenta && String(row.vinVenta).trim()) return true;
+  if (row.vin && String(row.vin).trim() && row.esPrueba) {
+    // VIN de prueba = unidad ensayada, no evidencia de compra
+  }
+  const idCandidates = [row.idCrm, row.folioFicha, row.folio];
+  for (const raw of idCandidates) {
+    const id = String(raw || '').trim();
+    if (isLikelyCrmId(id) && buyers.ids.has(id)) return true;
+  }
+  const name = normNameKey(row.cliente || row.nombreCliente);
+  if (name && buyers.names.has(name)) return true;
+  const phone = normPhoneKey(row.telefono);
+  if (phone && buyers.phones.has(phone)) return true;
+  return false;
+}
+
+function pctConv(num, den) {
+  const n = Number(num);
+  const d = Number(den);
+  if (!Number.isFinite(n) || !Number.isFinite(d) || d <= 0) return null;
+  return Math.round((n / d) * 1000) / 10;
+}
+
 function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
@@ -628,7 +762,8 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
       SELECT
         id, fuerza, centro_trabajo, mes_registro, fecha, hora_ingreso, asesor, cliente,
         genero, telefono, correo, auto_interes, forma_contacto, medio, submedio,
-        comentarios, reconciliacion, id_crm, hostess, vin_venta
+        comentarios, reconciliacion, id_crm, folio_ficha, hostess, vin_venta,
+        prueba_manejo_flag, solicitud_flag
       FROM crm_trafico_piso
       WHERE fecha IS NOT NULL
         AND fecha >= ?
@@ -636,13 +771,32 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
       ORDER BY fecha DESC, id DESC
     `).all(String(fechaInicio), String(fechaFin));
 
+    const buyers = buildBuyerIndexes(d);
+
     const summary = emptyBucket('General');
     delete summary.sucursal;
+    summary.freshUpCompras = 0;
+    summary.citasCompras = 0;
+    summary.snvCompras = 0;
+    summary.pruebasCompras = 0;
+    summary.freshUpConversionPct = null;
+    summary.citasConversionPct = null;
+    summary.snvConversionPct = null;
+    summary.pruebasConversionPct = null;
     const byKey = Object.fromEntries(SUCURSALES.map((s) => [s.key, emptyBucket(s.label)]));
     byKey.otras = emptyBucket('Otras');
 
     const detalle = [];
-    const maxDetalle = Math.min(2000, Math.max(50, Number(limit) || 300));
+    const detallePorKpi = {
+      afluencia: [],
+      freshUp: [],
+      citas: [],
+      snv: [],
+    };
+    const maxDetalle = Math.min(10000, Math.max(50, Number(limit) || 3000));
+    const pushKpi = (bucket, row) => {
+      if (bucket.length < maxDetalle) bucket.push(row);
+    };
 
     for (const row of rows) {
       // Solo unidad nueva (columna R / COMENTARIOS = NUEVOS)
@@ -661,33 +815,45 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
         if (flags.afluencia) b.afluenciaTotal += 1;
       }
 
-      if (detalle.length < maxDetalle) {
-        detalle.push({
-          fecha: row.fecha,
-          hora: row.hora_ingreso,
-          sucursal: (byKey[key] || byKey.otras).sucursal,
-          sucursalKey: key,
-          fuerza: row.fuerza,
-          centroTrabajo: row.centro_trabajo,
-          asesor: row.asesor,
-          cliente: row.cliente,
-          telefono: row.telefono,
-          autoInteres: row.auto_interes,
-          formaContacto: row.forma_contacto,
-          medio: row.medio,
-          submedio: row.submedio,
-          comentarios: row.comentarios,
-          reconciliacion: row.reconciliacion,
-          freshUp: flags.freshUp,
-          cita: flags.cita,
-          snv: flags.snv,
-          beBack: flags.beBack,
-          afluencia: flags.afluencia,
-          idCrm: row.id_crm,
-          hostess: row.hostess,
-          vinVenta: row.vin_venta,
-        });
-      }
+      const itemBase = {
+        fecha: row.fecha,
+        hora: row.hora_ingreso,
+        sucursal: (byKey[key] || byKey.otras).sucursal,
+        sucursalKey: key,
+        fuerza: row.fuerza,
+        centroTrabajo: row.centro_trabajo,
+        asesor: row.asesor,
+        cliente: row.cliente,
+        telefono: row.telefono,
+        autoInteres: row.auto_interes,
+        formaContacto: row.forma_contacto,
+        medio: row.medio,
+        submedio: row.submedio,
+        comentarios: row.comentarios,
+        reconciliacion: row.reconciliacion,
+        freshUp: flags.freshUp,
+        cita: flags.cita,
+        snv: flags.snv,
+        beBack: flags.beBack,
+        afluencia: flags.afluencia,
+        idCrm: isLikelyCrmId(row.id_crm) ? String(row.id_crm).trim() : null,
+        folioFicha: row.folio_ficha || null,
+        hostess: row.hostess,
+        vinVenta: row.vin_venta,
+        pruebaManejoFlag: row.prueba_manejo_flag || null,
+      };
+      const conCompra = rowLooksLikeBuyer(itemBase, buyers);
+      const item = { ...itemBase, conCompra };
+
+      if (flags.freshUp && conCompra) summary.freshUpCompras += 1;
+      if (flags.cita && conCompra) summary.citasCompras += 1;
+      if (flags.snv && conCompra) summary.snvCompras += 1;
+
+      if (detalle.length < maxDetalle) detalle.push(item);
+      if (flags.afluencia) pushKpi(detallePorKpi.afluencia, item);
+      if (flags.freshUp) pushKpi(detallePorKpi.freshUp, item);
+      if (flags.cita) pushKpi(detallePorKpi.citas, item);
+      if (flags.snv) pushKpi(detallePorKpi.snv, item);
     }
 
     // Pruebas de manejo (hoja aparte)
@@ -719,7 +885,7 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
 
     const pruebasDetalle = pruebas.slice(0, maxDetalle).map((p) => {
       const key = mapSucursalKey(p.centro_trabajo, p.fuerza_venta);
-      return {
+      const item = {
         fecha: p.fecha,
         sucursal: (byKey[key] || byKey.otras).sucursal,
         sucursalKey: key,
@@ -733,8 +899,30 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
         vin: p.vin,
         idCrm: p.id_crm,
         hostess: p.hostess_registro,
+        esPrueba: true,
       };
+      item.conCompra = rowLooksLikeBuyer(item, buyers);
+      if (item.conCompra) summary.pruebasCompras += 1;
+      return item;
     });
+    // Si el slice omite filas, recalcular compras sobre el total de pruebas
+    if (pruebas.length > pruebasDetalle.length) {
+      summary.pruebasCompras = pruebas.reduce((acc, p) => {
+        const hit = rowLooksLikeBuyer({
+          idCrm: p.id_crm,
+          cliente: p.nombre_cliente,
+          telefono: p.telefono,
+          esPrueba: true,
+        }, buyers);
+        return acc + (hit ? 1 : 0);
+      }, 0);
+    }
+    detallePorKpi.pruebas = pruebasDetalle;
+
+    summary.freshUpConversionPct = pctConv(summary.freshUpCompras, summary.freshUp);
+    summary.citasConversionPct = pctConv(summary.citasCompras, summary.citas);
+    summary.snvConversionPct = pctConv(summary.snvCompras, summary.snv);
+    summary.pruebasConversionPct = pctConv(summary.pruebasCompras, summary.pruebasManejo);
 
     return {
       periodo: { fechaInicio, fechaFin },
@@ -749,6 +937,7 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
       summary,
       porSucursal,
       detalle,
+      detallePorKpi,
       pruebasDetalle,
       comparativoYtd: buildComparativoYtd(d, fechaFin),
       marketing: buildMarketing(d, fechaInicio, fechaFin, rows),
@@ -759,8 +948,12 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
         citas: 'Reconciliación CITA / CITA-SNV en nuevos',
         snv: 'Seguimiento a no vendidas (SNV / CITA-SNV) en nuevos',
         pruebasManejo: 'Registros de la hoja Prueba de manejo en el periodo',
+        freshUpCompras: 'Fresh up NUEVOS cruzados a compra CRM (ID/folio, nombre o teléfono con VIN de compra)',
+        citasCompras: 'Citas NUEVOS cruzadas a compra CRM (mismo criterio de identidad)',
+        snvCompras: 'SNV NUEVOS cruzados a compra CRM (mismo criterio de identidad)',
+        pruebasCompras: 'Pruebas cruzadas a compra CRM por ID CRM con VIN en ciclo/actividades',
         sucursales: 'Matriz (Serdan), Zacatelco y Cholula por centro/fuerza',
-        comparativoYtd: 'Totales por trimestre del año de fechaFin vs mismo trimestre del año anterior',
+        comparativoYtd: 'Totales por trimestre YTD vs año anterior; filtrable por centro (Matriz Serdan / Cholula / Zacatelco)',
         marketing: 'Origen de afluencia (medio/submedio) + campañas de leads activas/funcionando',
       },
     };

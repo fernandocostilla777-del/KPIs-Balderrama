@@ -172,6 +172,7 @@ function buildEntregasDetalleQuery() {
       s.SOF_Pedido,
       s.SOF_NoTransaccion,
       s.SOF_IDSOFIA,
+      s.SOF_IDCliente AS ID_CLIENTE,
       s.SOF_Estatus,
       s.SOF_Evento,
       s.SOF_Resultado,

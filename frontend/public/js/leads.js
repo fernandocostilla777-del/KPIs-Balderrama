@@ -14,6 +14,9 @@
     cacheKey: null,
     inflightKey: null,
     inflightPromise: null,
+    /** Detalle completo por KPI (servidor), independiente del preview truncado. */
+    kpiDetalleCache: {},
+    kpiDetalleMeta: {},
   };
 
   const els = {};
@@ -375,7 +378,87 @@
 
   function rowsForKpi(key) {
     const meta = kpiMeta(key);
-    return detalle().filter(meta.filter);
+    const cached = state.kpiDetalleCache?.[key];
+    if (Array.isArray(cached) && cached.length) return cached;
+    const embedded = state.data?.detallePorKpi?.[key];
+    if (Array.isArray(embedded)) return embedded;
+    let rows = detalle().filter(meta.filter);
+    if (meta.highlight === 'compras') rows = rows.filter((r) => r.conCompra);
+    return rows;
+  }
+
+  async function fetchKpiDetalle(kpiKey) {
+    const fi = state.fechaInicio;
+    const ff = state.fechaFin;
+    if (!fi || !ff || !kpiKey) return [];
+
+    // 1) Payload embebido del dashboard (compras/citas/cotizados ya vienen completos)
+    const embedded = state.data?.detallePorKpi?.[kpiKey];
+    if (Array.isArray(embedded)) {
+      state.kpiDetalleCache[kpiKey] = embedded;
+      state.kpiDetalleMeta[kpiKey] = {
+        total: embedded.length,
+        returned: embedded.length,
+        limited: false,
+      };
+      return embedded;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(state.kpiDetalleCache, kpiKey)) {
+      return state.kpiDetalleCache[kpiKey];
+    }
+
+    const qs = new URLSearchParams({
+      fechaInicio: fi,
+      fechaFin: ff,
+      kpi: kpiKey,
+      limit: '10000',
+    });
+
+    // 2) /detalle  3) /leads?kpi=  (misma forma de respuesta)
+    const urls = [
+      `/api/ventas/leads/detalle?${qs}`,
+      `/api/ventas/leads?${qs}`,
+    ];
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          lastErr = new Error(data.error || res.statusText || `HTTP ${res.status}`);
+          continue;
+        }
+
+        // Dashboard completo (servidor viejo que ignora ?kpi=)
+        if (data.summary && Array.isArray(data.detallePorKpi?.[kpiKey])) {
+          const fromDash = data.detallePorKpi[kpiKey];
+          state.kpiDetalleCache[kpiKey] = fromDash;
+          state.kpiDetalleMeta[kpiKey] = {
+            total: fromDash.length,
+            returned: fromDash.length,
+            limited: false,
+          };
+          return fromDash;
+        }
+        if (data.summary && !data.filtros?.kpi) {
+          lastErr = new Error('El servidor devolvió el dashboard, no el detalle del KPI');
+          continue;
+        }
+
+        const rows = Array.isArray(data.detalle) ? data.detalle : [];
+        state.kpiDetalleCache[kpiKey] = rows;
+        state.kpiDetalleMeta[kpiKey] = {
+          total: Number(data.total != null ? data.total : rows.length),
+          returned: Number(data.returned != null ? data.returned : rows.length),
+          limited: Boolean(data.limited),
+        };
+        return rows;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('No se pudo cargar el detalle del KPI');
   }
 
   function filteredDetalle() {
@@ -1020,11 +1103,26 @@
       const filtered = searched.filter(matchesActiveFilter);
       lastExportRows = filtered;
 
-      if (statusEl) statusEl.textContent = `${filtered.length} lead${filtered.length === 1 ? '' : 's'}`;
+      if (statusEl) {
+        const km = state.kpiDetalleMeta?.[currentMeta.kpi] || {};
+        const base = `${filtered.length} lead${filtered.length === 1 ? '' : 's'}`;
+        statusEl.textContent = km.limited
+          ? `${base} (muestra de ${km.returned}/${km.total})`
+          : (km.total != null && km.total !== filtered.length && !q && !activeFilter
+            ? `${base} · total KPI ${km.total}`
+            : base);
+      }
       if (metaEl) {
-        metaEl.textContent = filtered.length !== sourceRows.length
-          ? `${filtered.length} de ${sourceRows.length}`
-          : `${sourceRows.length} registros`;
+        const km = state.kpiDetalleMeta?.[currentMeta.kpi] || {};
+        if (filtered.length !== sourceRows.length) {
+          metaEl.textContent = `${filtered.length} de ${sourceRows.length}`;
+        } else if (km.total != null) {
+          metaEl.textContent = km.limited
+            ? `${sourceRows.length} de ${km.total} (límite)`
+            : `${km.total} registros`;
+        } else {
+          metaEl.textContent = `${sourceRows.length} registros`;
+        }
       }
 
       renderSummary(searched);
@@ -1094,7 +1192,7 @@
       renderTable();
     }
 
-    function open(kpiKey, card) {
+    async function open(kpiKey, card) {
       const meta = kpiMeta(kpiKey);
       const resolvedCard = card || document.querySelector(`[data-ld-kpi="${kpiKey}"]`);
 
@@ -1120,18 +1218,34 @@
         searchEl.value = '';
         searchEl.placeholder = 'Buscar cliente, ejecutivo, canal, VIN…';
       }
+      if (statusEl) statusEl.textContent = 'Cargando…';
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div class="ops-orders-drawer__empty">
+            <span class="material-symbols-outlined">progress_activity</span>
+            <p>Cargando detalle del KPI…</p>
+          </div>`;
+      }
 
-      sourceRows = rowsForKpi(kpiKey).slice();
-      updateFilterChip();
       placeNearKpi(resolvedCard);
       setExpanded(true);
-      renderList('');
       panel.classList.add('ops-orders-drawer--open');
       panel.setAttribute('aria-hidden', 'false');
       backdrop.classList.add('ops-orders-backdrop--visible');
       backdrop.setAttribute('aria-hidden', 'false');
       document.body.classList.add('ops-orders-drawer-open');
       renderKpis();
+
+      try {
+        sourceRows = (await fetchKpiDetalle(kpiKey)).slice();
+      } catch (err) {
+        console.warn('[Leads KPI detalle]', err);
+        sourceRows = rowsForKpi(kpiKey).slice();
+        if (metaEl) metaEl.textContent = err.message || 'Detalle parcial (preview)';
+      }
+
+      updateFilterChip();
+      renderList('');
       renderTable();
       window.setTimeout(() => searchEl?.focus({ preventScroll: true }), 180);
     }
@@ -1163,8 +1277,22 @@
       panel,
       refresh() {
         if (!panel.classList.contains('ops-orders-drawer--open') || !currentMeta.kpi) return;
-        sourceRows = rowsForKpi(currentMeta.kpi).slice();
-        renderList(searchEl?.value || '');
+        const key = currentMeta.kpi;
+        if (Array.isArray(state.kpiDetalleCache[key])) {
+          sourceRows = state.kpiDetalleCache[key].slice();
+          renderList(searchEl?.value || '');
+          return;
+        }
+        fetchKpiDetalle(key)
+          .then((rows) => {
+            if (state.openKpi !== key) return;
+            sourceRows = rows.slice();
+            renderList(searchEl?.value || '');
+          })
+          .catch(() => {
+            sourceRows = rowsForKpi(key).slice();
+            renderList(searchEl?.value || '');
+          });
       },
     };
     return leadsDrawerUi;
@@ -1305,6 +1433,8 @@
     state.fechaFin = fechaFin;
     state.search = '';
     if (els.search) els.search.value = '';
+    state.kpiDetalleCache = {};
+    state.kpiDetalleMeta = {};
     closeProspectFloat();
     closeKpiDetail();
 

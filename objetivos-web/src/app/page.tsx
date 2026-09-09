@@ -1293,9 +1293,7 @@ export default function Home() {
           />
           <MetricCard
             title="Contratos GMF"
-            target={
-              (gmfSeminuevos?.meta as number | null) ?? month.gmfSeminuevosTarget ?? null
-            }
+            target={month.gmfSeminuevosTarget ?? (gmfSeminuevos?.meta as number | null) ?? null}
             result={gmfSemiReal || null}
             icon={<CircleDollarSign />}
             tone="amber"

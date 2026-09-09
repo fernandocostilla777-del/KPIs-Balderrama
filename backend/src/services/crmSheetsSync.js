@@ -1,13 +1,19 @@
 /**
- * Scheduler de sincronización del Google Sheet CRM (leads, solicitudes, tráfico).
- * Corre a las 9:00, 12:00 y 18:00 (hora de México) mientras el backend esté activo.
- * Al terminar, publica el snapshot de Objetivos Web en la nube.
+ * Scheduler de sincronización del Google Sheet CRM (leads, solicitudes, tráfico, F&I…).
+ * Corre a las 9:00, 12:00, 18:00 y 20:10 (hora de México) mientras el backend esté activo.
+ * La corrida 20:10 es la carga completa de fuentes para Objetivos Web + publicación a la nube.
  */
-const { syncCrmSheets } = require('../../scripts/sync-crm-sheets');
+const { syncCrmSheets, ALL_ETLS } = require('../../scripts/sync-crm-sheets');
 const crmCiclos = require('./crmCiclosService');
 
 const MAX_TIMER_MS = 12 * 60 * 60 * 1000;
-const DEFAULT_HOURS = [9, 12, 18];
+/** Horas enteras legacy + cierre Objetivos Web a las 20:10. */
+const DEFAULT_SLOTS = [
+  { hour: 9, minute: 0 },
+  { hour: 12, minute: 0 },
+  { hour: 18, minute: 0 },
+  { hour: 20, minute: 10 },
+];
 const DEFAULT_TZ = 'America/Mexico_City';
 
 const state = {
@@ -19,9 +25,10 @@ const state = {
   lastError: null,
   lastResult: null,
   nextRunAt: null,
+  nextSlot: null,
   timer: null,
   runOnStart: false,
-  clockHours: DEFAULT_HOURS,
+  clockSlots: DEFAULT_SLOTS.map((s) => ({ ...s })),
   timeZone: DEFAULT_TZ,
 };
 
@@ -34,13 +41,50 @@ function getTimeZone() {
   return String(process.env.CRM_SHEETS_SYNC_TZ || DEFAULT_TZ).trim() || DEFAULT_TZ;
 }
 
-function getClockHours() {
-  const raw = String(process.env.CRM_SHEETS_SYNC_AT || '9,12,18');
-  const hours = raw
-    .split(/[,;\s]+/)
-    .map((part) => Number(part))
-    .filter((hour) => Number.isInteger(hour) && hour >= 0 && hour <= 23);
-  return hours.length ? [...new Set(hours)].sort((a, b) => a - b) : [...DEFAULT_HOURS];
+/**
+ * Acepta "9,12,18,20:10" o "9:00,12:00,18:00,20:10".
+ * Hora sola ⇒ :00. Duplicados se eliminan.
+ */
+function parseClockSlots(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return DEFAULT_SLOTS.map((s) => ({ ...s }));
+
+  const slots = [];
+  for (const part of text.split(/[,;\s]+/).filter(Boolean)) {
+    const m = part.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+    if (!m) continue;
+    const hour = Number(m[1]);
+    const minute = m[2] != null ? Number(m[2]) : 0;
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) continue;
+    slots.push({ hour, minute });
+  }
+
+  if (!slots.length) return DEFAULT_SLOTS.map((s) => ({ ...s }));
+
+  const key = (s) => `${s.hour}:${s.minute}`;
+  const unique = [];
+  const seen = new Set();
+  for (const s of slots.sort((a, b) => a.hour - b.hour || a.minute - b.minute)) {
+    const k = key(s);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push(s);
+  }
+  return unique;
+}
+
+function getClockSlots() {
+  return parseClockSlots(process.env.CRM_SHEETS_SYNC_AT || '9,12,18,20:10');
+}
+
+function formatSlot(slot) {
+  return `${String(slot.hour).padStart(2, '0')}:${String(slot.minute).padStart(2, '0')}`;
+}
+
+/** Cierre diario de Objetivos Web: todas las hojas CRM + push a cloud. */
+function isObjetivosFullSlot(slot) {
+  return Boolean(slot && slot.hour === 20 && slot.minute === 10);
 }
 
 function zonedParts(date, timeZone) {
@@ -98,26 +142,42 @@ function zonedLocalToUtcMs({ year, month, day, hour, minute = 0, second = 0 }, t
   return guess;
 }
 
-function nextRunMs(now = new Date()) {
+function nextRun(now = new Date()) {
   const timeZone = getTimeZone();
-  const hours = getClockHours();
+  const slots = getClockSlots();
   const parts = zonedParts(now, timeZone);
   const nowMs = now.getTime();
   let best = null;
+  let bestSlot = null;
   for (const add of [0, 1]) {
     const day = addCalendarDays(parts, add);
-    for (const hour of hours) {
-      const ms = zonedLocalToUtcMs({ ...day, hour, minute: 0, second: 0 }, timeZone);
-      if (ms > nowMs + 2000 && (best == null || ms < best)) best = ms;
+    for (const slot of slots) {
+      const ms = zonedLocalToUtcMs(
+        { ...day, hour: slot.hour, minute: slot.minute, second: 0 },
+        timeZone,
+      );
+      if (ms > nowMs + 2000 && (best == null || ms < best)) {
+        best = ms;
+        bestSlot = slot;
+      }
     }
   }
-  return best || nowMs + 60 * 60 * 1000;
+  return {
+    ms: best || nowMs + 60 * 60 * 1000,
+    slot: bestSlot,
+  };
+}
+
+function nextRunMs(now = new Date()) {
+  return nextRun(now).ms;
 }
 
 function getStatus() {
   return {
     enabled: state.enabled,
-    clockHours: state.clockHours,
+    clockSlots: state.clockSlots.map(formatSlot),
+    /** Compat: solo horas (sin minutos). */
+    clockHours: [...new Set(state.clockSlots.map((s) => s.hour))],
     timeZone: state.timeZone,
     running: state.running,
     lastStartedAt: state.lastStartedAt,
@@ -126,6 +186,8 @@ function getStatus() {
     lastError: state.lastError,
     lastResult: state.lastResult,
     nextRunAt: state.nextRunAt,
+    nextSlot: state.nextSlot ? formatSlot(state.nextSlot) : null,
+    objetivosFullAt: '20:10',
   };
 }
 
@@ -145,7 +207,10 @@ async function pushObjetivosToCloud() {
   });
 }
 
-async function runSync({ reason = 'manual', skipCloud = false, etls } = {}) {
+/**
+ * @param {{ reason?: string, skipCloud?: boolean, etls?: string[], fullObjetivos?: boolean }} opts
+ */
+async function runSync({ reason = 'manual', skipCloud = false, etls, fullObjetivos = false } = {}) {
   if (state.running) {
     return { ok: false, skipped: true, reason: 'Ya hay una sincronización en curso' };
   }
@@ -153,12 +218,17 @@ async function runSync({ reason = 'manual', skipCloud = false, etls } = {}) {
   state.running = true;
   state.lastStartedAt = new Date().toISOString();
   state.lastError = null;
-  console.log(`[crm-sheets-sync] Inicio (${reason}) ${state.lastStartedAt}`);
+  const useFull = fullObjetivos || reason.includes('20:10') || reason.includes('objetivos-full');
+  const etlList = useFull ? undefined : etls;
+  console.log(
+    `[crm-sheets-sync] Inicio (${reason})${useFull ? ' · FULL Objetivos Web' : ''} ${state.lastStartedAt}`,
+  );
 
   try {
     if (typeof crmCiclos.releaseDb === 'function') crmCiclos.releaseDb();
 
-    const result = await syncCrmSheets({ quiet: false, etls });
+    // Full = todos los ETL del sheet (leads, solicitudes, tráfico, F&I, pagos GMF, CSI…).
+    const result = await syncCrmSheets({ quiet: false, etls: etlList });
 
     if (typeof crmCiclos.releaseDb === 'function') crmCiclos.releaseDb();
 
@@ -173,7 +243,13 @@ async function runSync({ reason = 'manual', skipCloud = false, etls } = {}) {
     }
 
     state.lastOk = true;
-    state.lastResult = { ...result, reason, cloud };
+    state.lastResult = {
+      ...result,
+      reason,
+      fullObjetivos: useFull,
+      etls: useFull ? ALL_ETLS : (etlList || ALL_ETLS),
+      cloud,
+    };
     state.lastFinishedAt = new Date().toISOString();
     console.log(`[crm-sheets-sync] OK ${state.lastFinishedAt}`);
     return { ok: true, ...state.lastResult };
@@ -193,22 +269,31 @@ async function runSync({ reason = 'manual', skipCloud = false, etls } = {}) {
 
 function scheduleNext() {
   if (state.timer) clearTimeout(state.timer);
-  const targetMs = nextRunMs();
-  const delay = Math.min(Math.max(1000, targetMs - Date.now()), MAX_TIMER_MS);
+  const upcoming = nextRun();
+  const delay = Math.min(Math.max(1000, upcoming.ms - Date.now()), MAX_TIMER_MS);
+  state.nextRunAt = new Date(upcoming.ms).toISOString();
+  state.nextSlot = upcoming.slot || null;
+  const scheduledSlot = upcoming.slot ? { ...upcoming.slot } : null;
+  const scheduledMs = upcoming.ms;
   state.timer = setTimeout(async () => {
-    const remaining = nextRunMs() - Date.now();
+    const remaining = scheduledMs - Date.now();
     if (remaining <= 60_000) {
-      await runSync({ reason: 'schedule' });
+      const slot = scheduledSlot;
+      const label = slot ? formatSlot(slot) : 'schedule';
+      const full = isObjetivosFullSlot(slot);
+      await runSync({
+        reason: full ? `schedule-${label}-objetivos-full` : `schedule-${label}`,
+        fullObjetivos: full,
+      });
     }
     if (state.enabled) scheduleNext();
   }, delay);
   if (typeof state.timer.unref === 'function') state.timer.unref();
-  state.nextRunAt = new Date(targetMs).toISOString();
 }
 
 function startScheduler() {
   state.enabled = isEnabled();
-  state.clockHours = getClockHours();
+  state.clockSlots = getClockSlots();
   state.timeZone = getTimeZone();
   state.runOnStart = String(process.env.CRM_SHEETS_SYNC_ON_START || 'true').toLowerCase() !== 'false';
 
@@ -217,10 +302,11 @@ function startScheduler() {
     return getStatus();
   }
 
-  const hoursLabel = state.clockHours.map((h) => `${String(h).padStart(2, '0')}:00`).join(', ');
+  const slotsLabel = state.clockSlots.map(formatSlot).join(', ');
   console.log(
-    `[crm-sheets-sync] Programado a las ${hoursLabel} (${state.timeZone})`
-    + (state.runOnStart ? ' · también al arrancar' : '')
+    `[crm-sheets-sync] Programado a las ${slotsLabel} (${state.timeZone})`
+    + ' · 20:10 = carga completa Objetivos Web'
+    + (state.runOnStart ? ' · también al arrancar' : ''),
   );
 
   if (state.runOnStart) {
@@ -228,7 +314,7 @@ function startScheduler() {
       runSync({ reason: 'startup' }).finally(() => {
         if (state.enabled) scheduleNext();
       });
-    }, 15_000).unref?.();
+    }, 8_000);
   } else {
     scheduleNext();
   }
@@ -236,18 +322,11 @@ function startScheduler() {
   return getStatus();
 }
 
-function stopScheduler() {
-  if (state.timer) {
-    clearTimeout(state.timer);
-    state.timer = null;
-  }
-  state.enabled = false;
-  state.nextRunAt = null;
-}
-
 module.exports = {
   startScheduler,
-  stopScheduler,
   runSync,
   getStatus,
+  nextRunMs,
+  parseClockSlots,
+  ALL_ETLS,
 };

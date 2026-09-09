@@ -138,14 +138,8 @@ function defaultSeeds() {
       essentialsAnnualPct: 30,
       essentialsMultiAnnualPct: 23,
       usedVehiclesPoints: 5,
-      tacNuevosTarget: 28,
-      gmfSeminuevosTarget: 10,
-      bdc: { ...BDC_DEFAULT },
-      daily: buildSeptemberDaily(),
-      products: cloneProducts(),
-    },
-  };
-}
+      tacNuevosTarget: 25,
+      gmfSeminuevosTarget: 9,
 
 function isPlausibleMonth(month) {
   if (!month || typeof month !== 'object') return false;
@@ -200,6 +194,26 @@ function ensureDefaults(store) {
     // Repara meses ya guardados sin curva diaria (rompe el calendario).
     if (!Array.isArray(current.daily) || current.daily.length === 0) {
       store.months[id] = { ...current, daily: seed.daily };
+      changed = true;
+    }
+    // Repara metas SEMINUEVOS mal parseadas (p. ej. TAC=75 = Entregas BDC).
+    const next = store.months[id];
+    if (
+      seed.tacNuevosTarget != null
+      && Number(next.tacNuevosTarget) !== Number(seed.tacNuevosTarget)
+    ) {
+      store.months[id] = { ...next, tacNuevosTarget: seed.tacNuevosTarget };
+      changed = true;
+    }
+    const fixed = store.months[id];
+    if (
+      seed.gmfSeminuevosTarget != null
+      && (
+        fixed.gmfSeminuevosTarget == null
+        || Number(fixed.gmfSeminuevosTarget) !== Number(seed.gmfSeminuevosTarget)
+      )
+    ) {
+      store.months[id] = { ...fixed, gmfSeminuevosTarget: seed.gmfSeminuevosTarget };
       changed = true;
     }
   }

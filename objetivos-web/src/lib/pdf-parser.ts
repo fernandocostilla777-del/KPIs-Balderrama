@@ -43,7 +43,14 @@ function firstMatch(text: string, pattern: RegExp): string | null {
 
 /** Bloque 6. OBJETIVO SEMINUEVOS — TAC Nuevos y Contratos GMF (seminuevos). */
 function extractSeminuevosBlock(text: string): string {
+  // En PDFs GM el orden de extracción suele ser: números → Contratos GMF → … → TAC Nuevos → 6. OBJETIVO SEMINUEVOS
   return (
+    text.match(
+      /(\d{1,3})\s+(\d{1,3})\s+Contratos\s+GMF[\s\S]{0,800}?TAC\s*Nuevos[\s\S]{0,400}?OBJETIVO\s+SEMINEU[\s\S]{0,200}?(?=OBJETIVO\s+ACCESOR|OBJETIVO\s+OnStar|TOTAL\s+OnStar|8\.\s*OBJETIVO|$)/i,
+    )?.[0] ||
+    text.match(
+      /TAC\s*Nuevos[\s\S]{0,500}?OBJETIVO\s+SEMINEU[\s\S]{0,400}?(?=OBJETIVO\s+ACCESOR|OBJETIVO\s+OnStar|TOTAL\s+OnStar|$)/i,
+    )?.[0] ||
     text.match(
       /6\.\s*OBJETIVO\s+SEMINEU[\s\S]{0,800}?(?=5\.\s*OBJETIVO\s+ACCESOR|7\.\s*OBJETIVO\s+OnStar|OBJETIVO\s+ACCESOR|OBJETIVO\s+OnStar|TOTAL\s+OnStar|$)/i,
     )?.[0] ||
@@ -55,20 +62,53 @@ function extractSeminuevosBlock(text: string): string {
 }
 
 function parseTacNuevosTarget(semiBlock: string): number | null {
-  return (
+  // Número después de la etiqueta (preferido)
+  const after =
     numberAfter(semiBlock, /TAC\s*Nuevos?\s*:?\s*([\d,]+)/i) ||
-    numberAfter(semiBlock, /([\d,]+)\s*TAC\s*Nuevos?/i)
+    numberAfter(semiBlock, /TAC\s*Nuevos?\s*[\r\n]+\s*([\d,]+)/i);
+  if (after != null) return after;
+
+  // Cluster PDF: "TAC  ·  GMF" cerca de Contratos GMF + TAC Nuevos + OBJETIVO SEMINUEVOS
+  // Primer número del par = TAC (p. ej. 25), no confundir con Entregas BDC.
+  const cluster = semiBlock.match(
+    /(\d{1,3})\s+(\d{1,3})\s+Contratos\s+GMF[\s\S]{0,800}?TAC\s*Nuevos/i,
   );
+  if (cluster) {
+    const tac = Number(cluster[1].replace(/,/g, ""));
+    if (Number.isFinite(tac) && tac > 0 && tac < 200) return tac;
+  }
+
+  // Número antes de la etiqueta — rechazar si viene de Entregas BDC (p. ej. "75 TAC Nuevos")
+  const before = semiBlock.match(/([\d,]+)\s{0,30}TAC\s*Nuevos?/i);
+  if (before) {
+    const idx = before.index ?? 0;
+    const ctx = semiBlock.slice(Math.max(0, idx - 48), idx + before[0].length);
+    if (/Entregas\s+BDC|BDC\s+\d|%\s*\d+/i.test(ctx)) return null;
+    const value = Number(before[1].replace(/,/g, ""));
+    if (Number.isFinite(value) && value > 0 && value < 200) return value;
+  }
+  return null;
 }
 
 /** En el PDF la meta de seminuevos aparece como "Contratos GMF" (sin sufijo). */
 function parseGmfSeminuevosTarget(semiBlock: string): number | null {
-  return (
+  // Preferir número explícito junto a la etiqueta (misma línea / siguiente).
+  const after =
     numberAfter(semiBlock, /Contratos\s+GMF\s+Seminuevos?\s*:?\s*([\d,]+)/i) ||
-    numberAfter(semiBlock, /([\d,]+)\s*Contratos\s+GMF\s+Seminuevos?/i) ||
     numberAfter(semiBlock, /Contratos\s+GMF\s*:?\s*([\d,]+)/i) ||
-    numberAfter(semiBlock, /([\d,]+)\s*Contratos\s+GMF/i)
-  );
+    numberAfter(semiBlock, /Contratos\s+GMF\s*[\r\n]+\s*([\d,]+)/i);
+  if (after != null && after < 200) return after;
+
+  // No usar el 2º número del cluster "25 23 Contratos GMF": en sept el GMF real es otro (p. ej. 9).
+  const before = semiBlock.match(/([\d,]+)\s{0,30}Contratos\s+GMF(?!\s+Nuevos)/i);
+  if (before) {
+    const idx = before.index ?? 0;
+    const ctx = semiBlock.slice(Math.max(0, idx - 48), idx + before[0].length);
+    if (/volumen de contratos|Penetraci[oó]n|Scorecard|BDC/i.test(ctx)) return null;
+    const value = Number(before[1].replace(/,/g, ""));
+    return Number.isFinite(value) && value > 0 && value < 200 ? value : null;
+  }
+  return null;
 }
 
 function isoDate(day: string, month: string, year: string): string {

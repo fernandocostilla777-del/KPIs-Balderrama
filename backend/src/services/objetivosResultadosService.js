@@ -172,10 +172,42 @@ function getPlantillaMetas({ fechaInicio, fechaFin } = {}) {
   const esAgosto2026 = start
     && start.getFullYear() === 2026
     && start.getMonth() === 7;
+  const monthId = start
+    ? `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`
+    : null;
+
+  const metas = { ...METAS_AGOSTO_2026 };
+  let fromStore = null;
+  try {
+    const monthlyObjectives = require('./monthlyObjectivesStore');
+    fromStore = monthId ? monthlyObjectives.getMonth(monthId) : null;
+  } catch {
+    fromStore = null;
+  }
+
+  if (fromStore) {
+    if (fromStore.tacNuevosTarget != null) metas.tacNuevos = Number(fromStore.tacNuevosTarget);
+    if (fromStore.gmfSeminuevosTarget != null) {
+      metas.contratosGmfSeminuevos = Number(fromStore.gmfSeminuevosTarget);
+    }
+    if (fromStore.gmfContractsTarget != null) metas.contratosGmf = Number(fromStore.gmfContractsTarget);
+    if (fromStore.gmfPenetrationTarget != null) {
+      metas.penetracionGmfPct = Number(fromStore.gmfPenetrationTarget);
+    }
+    if (fromStore.usedVehiclesPoints != null) {
+      metas.usedVehiclesPoints = Number(fromStore.usedVehiclesPoints);
+    }
+    if (fromStore.volumeReference != null) metas.volumenReferencia = Number(fromStore.volumeReference);
+    if (fromStore.invoicesTarget != null) metas.facturasAFacturar = Number(fromStore.invoicesTarget);
+    if (Array.isArray(fromStore.products) && fromStore.products.length) {
+      metas.lineasProducto = fromStore.products;
+    }
+  }
+
   return {
-    plantillaId: 'agosto-2026-pdf',
-    aplicadaAlPeriodo: Boolean(esAgosto2026),
-    ...METAS_AGOSTO_2026,
+    plantillaId: fromStore?.id || (esAgosto2026 ? 'agosto-2026-pdf' : monthId) || 'plantilla',
+    aplicadaAlPeriodo: Boolean(fromStore) || Boolean(esAgosto2026),
+    ...metas,
   };
 }
 

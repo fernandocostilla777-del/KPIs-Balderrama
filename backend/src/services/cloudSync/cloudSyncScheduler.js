@@ -119,11 +119,11 @@ async function syncAuthUsers({ reason = 'manual' } = {}) {
  */
 async function refreshCrmSheetsForObjetivos() {
   const sheetsSync = require('../crmSheetsSync');
-  console.log('[cloud-sync] Actualizando tráfico y solicitudes desde Google Sheets');
+  console.log('[cloud-sync] Carga completa CRM (todas las fuentes de Objetivos Web)');
   return sheetsSync.runSync({
-    reason: 'cloud-sync',
+    reason: 'cloud-sync-objetivos-full',
     skipCloud: true,
-    etls: ['etl-crm-solicitudes.js', 'etl-crm-trafico-piso.js'],
+    fullObjetivos: true,
   });
 }
 

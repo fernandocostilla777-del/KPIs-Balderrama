@@ -134,14 +134,8 @@ function defaultSeeds() {
       essentialsAnnualPct: 30,
       essentialsMultiAnnualPct: 23,
       usedVehiclesPoints: 5,
-      tacNuevosTarget: 28,
-      gmfSeminuevosTarget: 10,
-      bdc: { ...BDC_DEFAULT },
-      daily: buildSeptemberDaily(),
-      products: cloneProducts(),
-    },
-  ];
-}
+      tacNuevosTarget: 25,
+      gmfSeminuevosTarget: 9,
 
 function isPlausibleMonth(month) {
   if (!month || typeof month !== 'object') return false;
@@ -177,14 +171,38 @@ async function ensureTable() {
     );
   }
 
-  // Repara filas ya creadas sin curva diaria (rompe el calendario).
+  // Repara filas ya creadas sin curva diaria (rompe el calendario)
+  // y metas SEMINUEVOS mal parseadas (TAC=75 de Entregas BDC, etc.).
   const existing = await query(`SELECT id, payload FROM monthly_objectives`);
   const byId = Object.fromEntries(seeds.map((seed) => [seed.id, seed]));
   for (const row of existing.rows || []) {
     const seed = byId[row.id];
+    if (!seed) continue;
     const daily = row.payload?.daily;
-    if (seed && (!Array.isArray(daily) || daily.length === 0) && seed.daily.length > 0) {
-      const repaired = { ...row.payload, daily: seed.daily };
+    let repaired = { ...row.payload };
+    let dirty = false;
+    if ((!Array.isArray(daily) || daily.length === 0) && seed.daily.length > 0) {
+      repaired = { ...repaired, daily: seed.daily };
+      dirty = true;
+    }
+    if (
+      seed.tacNuevosTarget != null
+      && Number(repaired.tacNuevosTarget) !== Number(seed.tacNuevosTarget)
+    ) {
+      repaired = { ...repaired, tacNuevosTarget: seed.tacNuevosTarget };
+      dirty = true;
+    }
+    if (
+      seed.gmfSeminuevosTarget != null
+      && (
+        repaired.gmfSeminuevosTarget == null
+        || Number(repaired.gmfSeminuevosTarget) !== Number(seed.gmfSeminuevosTarget)
+      )
+    ) {
+      repaired = { ...repaired, gmfSeminuevosTarget: seed.gmfSeminuevosTarget };
+      dirty = true;
+    }
+    if (dirty) {
       await query(
         `UPDATE monthly_objectives
          SET payload = $2::jsonb, updated_at = NOW()

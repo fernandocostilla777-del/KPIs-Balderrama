@@ -112,7 +112,7 @@ async function syncCrmSheets({ quiet = false, etls: onlyEtls } = {}) {
   };
 }
 
-module.exports = { syncCrmSheets, SHEETS_URL, XLSX_PATH };
+module.exports = { syncCrmSheets, SHEETS_URL, XLSX_PATH, ALL_ETLS };
 
 if (require.main === module) {
   syncCrmSheets()

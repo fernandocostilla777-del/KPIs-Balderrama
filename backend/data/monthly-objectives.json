@@ -1,0 +1,847 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-09T17:24:46.408Z",
+  "months": {
+    "2026-08": {
+      "id": "2026-08",
+      "label": "Agosto 2026",
+      "distribuidor": "323 Automotriz Balderrama Puebla",
+      "month": 8,
+      "year": 2026,
+      "importedAt": "2026-08-14T00:00:00.000Z",
+      "sourceFile": "Agosto 2026.pdf",
+      "volumeReference": 142,
+      "marketShareTarget": 15.6,
+      "estimatedIndustry": 908,
+      "invoicesTarget": 143,
+      "deliveriesTarget": 142,
+      "invoiceDeadline": "24/08/2026",
+      "carryOverInitial": 0,
+      "carryOverFinal": 1,
+      "applicationsTarget": 429,
+      "gmfContractsTarget": 99,
+      "gmfPenetrationTarget": 70,
+      "salesPerAdvisor": 5,
+      "accessoriesTarget": 269800,
+      "onstarTarget": 12,
+      "essentialsAnnualPct": 30,
+      "essentialsMultiAnnualPct": 23,
+      "usedVehiclesPoints": 5,
+      "tacNuevosTarget": 25,
+      "gmfSeminuevosTarget": 10,
+      "bdc": {
+        "contacts": 1420,
+        "appointmentsScheduled": 355,
+        "appointmentsConfirmed": 284,
+        "appointmentsCompleted": 213,
+        "deliveries": 85
+      },
+      "daily": [
+        {
+          "fecha": "2026-08-01",
+          "trafico": 18,
+          "solicitudes": 14,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "fecha": "2026-08-02",
+          "trafico": 37,
+          "solicitudes": 28,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "fecha": "2026-08-03",
+          "trafico": 55,
+          "solicitudes": 42,
+          "facturas": 3,
+          "entregas": 2
+        },
+        {
+          "fecha": "2026-08-04",
+          "trafico": 74,
+          "solicitudes": 55,
+          "facturas": 6,
+          "entregas": 5
+        },
+        {
+          "fecha": "2026-08-05",
+          "trafico": 92,
+          "solicitudes": 69,
+          "facturas": 9,
+          "entregas": 7
+        },
+        {
+          "fecha": "2026-08-06",
+          "trafico": 111,
+          "solicitudes": 83,
+          "facturas": 12,
+          "entregas": 11
+        },
+        {
+          "fecha": "2026-08-07",
+          "trafico": 129,
+          "solicitudes": 97,
+          "facturas": 17,
+          "entregas": 15
+        },
+        {
+          "fecha": "2026-08-08",
+          "trafico": 148,
+          "solicitudes": 111,
+          "facturas": 19,
+          "entregas": 18
+        },
+        {
+          "fecha": "2026-08-09",
+          "trafico": 166,
+          "solicitudes": 125,
+          "facturas": 19,
+          "entregas": 18
+        },
+        {
+          "fecha": "2026-08-10",
+          "trafico": 185,
+          "solicitudes": 138,
+          "facturas": 24,
+          "entregas": 22
+        },
+        {
+          "fecha": "2026-08-11",
+          "trafico": 203,
+          "solicitudes": 152,
+          "facturas": 29,
+          "entregas": 27
+        },
+        {
+          "fecha": "2026-08-12",
+          "trafico": 221,
+          "solicitudes": 166,
+          "facturas": 34,
+          "entregas": 31
+        },
+        {
+          "fecha": "2026-08-13",
+          "trafico": 240,
+          "solicitudes": 180,
+          "facturas": 40,
+          "entregas": 35
+        },
+        {
+          "fecha": "2026-08-14",
+          "trafico": 258,
+          "solicitudes": 194,
+          "facturas": 45,
+          "entregas": 40
+        },
+        {
+          "fecha": "2026-08-15",
+          "trafico": 277,
+          "solicitudes": 208,
+          "facturas": 48,
+          "entregas": 44
+        },
+        {
+          "fecha": "2026-08-16",
+          "trafico": 295,
+          "solicitudes": 221,
+          "facturas": 48,
+          "entregas": 44
+        },
+        {
+          "fecha": "2026-08-17",
+          "trafico": 314,
+          "solicitudes": 235,
+          "facturas": 53,
+          "entregas": 48
+        },
+        {
+          "fecha": "2026-08-18",
+          "trafico": 332,
+          "solicitudes": 249,
+          "facturas": 60,
+          "entregas": 54
+        },
+        {
+          "fecha": "2026-08-19",
+          "trafico": 351,
+          "solicitudes": 263,
+          "facturas": 66,
+          "entregas": 59
+        },
+        {
+          "fecha": "2026-08-20",
+          "trafico": 369,
+          "solicitudes": 277,
+          "facturas": 72,
+          "entregas": 64
+        },
+        {
+          "fecha": "2026-08-21",
+          "trafico": 387,
+          "solicitudes": 291,
+          "facturas": 79,
+          "entregas": 69
+        },
+        {
+          "fecha": "2026-08-22",
+          "trafico": 406,
+          "solicitudes": 304,
+          "facturas": 82,
+          "entregas": 74
+        },
+        {
+          "fecha": "2026-08-23",
+          "trafico": 424,
+          "solicitudes": 318,
+          "facturas": 82,
+          "entregas": 74
+        },
+        {
+          "fecha": "2026-08-24",
+          "trafico": 443,
+          "solicitudes": 332,
+          "facturas": 88,
+          "entregas": 80
+        },
+        {
+          "fecha": "2026-08-25",
+          "trafico": 461,
+          "solicitudes": 346,
+          "facturas": 95,
+          "entregas": 86
+        },
+        {
+          "fecha": "2026-08-26",
+          "trafico": 480,
+          "solicitudes": 360,
+          "facturas": 102,
+          "entregas": 93
+        },
+        {
+          "fecha": "2026-08-27",
+          "trafico": 498,
+          "solicitudes": 374,
+          "facturas": 110,
+          "entregas": 101
+        },
+        {
+          "fecha": "2026-08-28",
+          "trafico": 517,
+          "solicitudes": 387,
+          "facturas": 119,
+          "entregas": 109
+        },
+        {
+          "fecha": "2026-08-29",
+          "trafico": 535,
+          "solicitudes": 401,
+          "facturas": 125,
+          "entregas": 117
+        },
+        {
+          "fecha": "2026-08-30",
+          "trafico": 554,
+          "solicitudes": 415,
+          "facturas": 125,
+          "entregas": 117
+        },
+        {
+          "fecha": "2026-08-31",
+          "trafico": 572,
+          "solicitudes": 429,
+          "facturas": 143,
+          "entregas": 142
+        }
+      ],
+      "products": [
+        {
+          "linea": "Aveo HB",
+          "familia": "Pasajeros",
+          "trafico": 124,
+          "solicitudes": 93,
+          "facturas": 31,
+          "entregas": 30
+        },
+        {
+          "linea": "Aveo NB",
+          "familia": "Pasajeros",
+          "trafico": 88,
+          "solicitudes": 66,
+          "facturas": 22,
+          "entregas": 22
+        },
+        {
+          "linea": "Onix",
+          "familia": "Pasajeros",
+          "trafico": 52,
+          "solicitudes": 39,
+          "facturas": 13,
+          "entregas": 13
+        },
+        {
+          "linea": "Tracker",
+          "familia": "SUV's",
+          "trafico": 12,
+          "solicitudes": 9,
+          "facturas": 3,
+          "entregas": 3
+        },
+        {
+          "linea": "Trax",
+          "familia": "SUV's",
+          "trafico": 20,
+          "solicitudes": 15,
+          "facturas": 5,
+          "entregas": 5
+        },
+        {
+          "linea": "Captiva",
+          "familia": "SUV's",
+          "trafico": 36,
+          "solicitudes": 27,
+          "facturas": 9,
+          "entregas": 9
+        },
+        {
+          "linea": "Groove",
+          "familia": "SUV's",
+          "trafico": 64,
+          "solicitudes": 48,
+          "facturas": 16,
+          "entregas": 16
+        },
+        {
+          "linea": "Traverse",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Tahoe",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Suburban",
+          "familia": "SUV's",
+          "trafico": 8,
+          "solicitudes": 6,
+          "facturas": 2,
+          "entregas": 2
+        },
+        {
+          "linea": "Blazer EV",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Spark EUV",
+          "familia": "SUV's",
+          "trafico": 16,
+          "solicitudes": 12,
+          "facturas": 4,
+          "entregas": 4
+        },
+        {
+          "linea": "Captiva PHEV SUV",
+          "familia": "SUV's",
+          "trafico": 28,
+          "solicitudes": 21,
+          "facturas": 7,
+          "entregas": 7
+        },
+        {
+          "linea": "Colorado",
+          "familia": "Pick up's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Silverado / Cheyenne Crew Cab",
+          "familia": "Pick up's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "S10 MAX Chassis Cab",
+          "familia": "Pick up's",
+          "trafico": 20,
+          "solicitudes": 15,
+          "facturas": 5,
+          "entregas": 5
+        },
+        {
+          "linea": "S10 MAX Crew Cab",
+          "familia": "Pick up's",
+          "trafico": 24,
+          "solicitudes": 18,
+          "facturas": 6,
+          "entregas": 6
+        },
+        {
+          "linea": "S10 MAX Regular Cab",
+          "familia": "Pick up's",
+          "trafico": 12,
+          "solicitudes": 9,
+          "facturas": 3,
+          "entregas": 3
+        },
+        {
+          "linea": "Montana",
+          "familia": "Pick up's",
+          "trafico": 8,
+          "solicitudes": 6,
+          "facturas": 2,
+          "entregas": 2
+        },
+        {
+          "linea": "Tornado Van",
+          "familia": "Van's",
+          "trafico": 36,
+          "solicitudes": 27,
+          "facturas": 9,
+          "entregas": 9
+        },
+        {
+          "linea": "Express Max",
+          "familia": "Van's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        }
+      ]
+    },
+    "2026-09": {
+      "id": "2026-09",
+      "label": "Septiembre 2026",
+      "distribuidor": "323 AUTOMOTRIZ BALDERRAMA PUEBLA",
+      "month": 9,
+      "year": 2026,
+      "importedAt": "2026-09-04T22:43:07.295Z",
+      "sourceFile": "Septiembre 2026.pdf",
+      "volumeReference": 125,
+      "marketShareTarget": 15.8,
+      "estimatedIndustry": 789,
+      "invoicesTarget": 126,
+      "deliveriesTarget": 125,
+      "invoiceDeadline": "23/09/2026",
+      "carryOverInitial": 10,
+      "carryOverFinal": 11,
+      "applicationsTarget": 378,
+      "gmfContractsTarget": 88,
+      "gmfPenetrationTarget": 70,
+      "salesPerAdvisor": 5,
+      "accessoriesTarget": 237500,
+      "onstarTarget": 9,
+      "essentialsAnnualPct": 30,
+      "essentialsMultiAnnualPct": 23,
+      "usedVehiclesPoints": 5,
+      "tacNuevosTarget": 25,
+      "gmfSeminuevosTarget": 9,
+      "bdc": {
+        "contacts": 1253,
+        "appointmentsScheduled": 313,
+        "appointmentsConfirmed": 251,
+        "appointmentsCompleted": 188,
+        "deliveries": 75
+      },
+      "daily": [
+        {
+          "fecha": "2026-09-01",
+          "trafico": 17,
+          "solicitudes": 13,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "fecha": "2026-09-02",
+          "trafico": 34,
+          "solicitudes": 25,
+          "facturas": 3,
+          "entregas": 3
+        },
+        {
+          "fecha": "2026-09-03",
+          "trafico": 50,
+          "solicitudes": 38,
+          "facturas": 7,
+          "entregas": 6
+        },
+        {
+          "fecha": "2026-09-04",
+          "trafico": 67,
+          "solicitudes": 50,
+          "facturas": 11,
+          "entregas": 10
+        },
+        {
+          "fecha": "2026-09-05",
+          "trafico": 84,
+          "solicitudes": 63,
+          "facturas": 12,
+          "entregas": 12
+        },
+        {
+          "fecha": "2026-09-06",
+          "trafico": 101,
+          "solicitudes": 76,
+          "facturas": 12,
+          "entregas": 12
+        },
+        {
+          "fecha": "2026-09-07",
+          "trafico": 118,
+          "solicitudes": 88,
+          "facturas": 17,
+          "entregas": 16
+        },
+        {
+          "fecha": "2026-09-08",
+          "trafico": 134,
+          "solicitudes": 101,
+          "facturas": 21,
+          "entregas": 20
+        },
+        {
+          "fecha": "2026-09-09",
+          "trafico": 151,
+          "solicitudes": 113,
+          "facturas": 26,
+          "entregas": 25
+        },
+        {
+          "fecha": "2026-09-10",
+          "trafico": 168,
+          "solicitudes": 126,
+          "facturas": 31,
+          "entregas": 29
+        },
+        {
+          "fecha": "2026-09-11",
+          "trafico": 185,
+          "solicitudes": 139,
+          "facturas": 36,
+          "entregas": 33
+        },
+        {
+          "fecha": "2026-09-12",
+          "trafico": 202,
+          "solicitudes": 151,
+          "facturas": 38,
+          "entregas": 36
+        },
+        {
+          "fecha": "2026-09-13",
+          "trafico": 218,
+          "solicitudes": 164,
+          "facturas": 38,
+          "entregas": 36
+        },
+        {
+          "fecha": "2026-09-14",
+          "trafico": 235,
+          "solicitudes": 176,
+          "facturas": 43,
+          "entregas": 40
+        },
+        {
+          "fecha": "2026-09-15",
+          "trafico": 252,
+          "solicitudes": 189,
+          "facturas": 47,
+          "entregas": 43
+        },
+        {
+          "fecha": "2026-09-16",
+          "trafico": 269,
+          "solicitudes": 202,
+          "facturas": 47,
+          "entregas": 43
+        },
+        {
+          "fecha": "2026-09-17",
+          "trafico": 286,
+          "solicitudes": 214,
+          "facturas": 52,
+          "entregas": 47
+        },
+        {
+          "fecha": "2026-09-18",
+          "trafico": 302,
+          "solicitudes": 227,
+          "facturas": 58,
+          "entregas": 52
+        },
+        {
+          "fecha": "2026-09-19",
+          "trafico": 319,
+          "solicitudes": 239,
+          "facturas": 60,
+          "entregas": 55
+        },
+        {
+          "fecha": "2026-09-20",
+          "trafico": 336,
+          "solicitudes": 252,
+          "facturas": 60,
+          "entregas": 55
+        },
+        {
+          "fecha": "2026-09-21",
+          "trafico": 353,
+          "solicitudes": 265,
+          "facturas": 66,
+          "entregas": 60
+        },
+        {
+          "fecha": "2026-09-22",
+          "trafico": 370,
+          "solicitudes": 277,
+          "facturas": 72,
+          "entregas": 65
+        },
+        {
+          "fecha": "2026-09-23",
+          "trafico": 386,
+          "solicitudes": 290,
+          "facturas": 78,
+          "entregas": 70
+        },
+        {
+          "fecha": "2026-09-24",
+          "trafico": 403,
+          "solicitudes": 302,
+          "facturas": 83,
+          "entregas": 75
+        },
+        {
+          "fecha": "2026-09-25",
+          "trafico": 420,
+          "solicitudes": 315,
+          "facturas": 90,
+          "entregas": 81
+        },
+        {
+          "fecha": "2026-09-26",
+          "trafico": 437,
+          "solicitudes": 328,
+          "facturas": 93,
+          "entregas": 85
+        },
+        {
+          "fecha": "2026-09-27",
+          "trafico": 454,
+          "solicitudes": 340,
+          "facturas": 93,
+          "entregas": 85
+        },
+        {
+          "fecha": "2026-09-28",
+          "trafico": 470,
+          "solicitudes": 353,
+          "facturas": 99,
+          "entregas": 91
+        },
+        {
+          "fecha": "2026-09-29",
+          "trafico": 487,
+          "solicitudes": 365,
+          "facturas": 108,
+          "entregas": 100
+        },
+        {
+          "fecha": "2026-09-30",
+          "trafico": 504,
+          "solicitudes": 378,
+          "facturas": 126,
+          "entregas": 125
+        }
+      ],
+      "products": [
+        {
+          "linea": "Aveo HB",
+          "familia": "Pasajeros",
+          "trafico": 108,
+          "solicitudes": 81,
+          "facturas": 27,
+          "entregas": 26
+        },
+        {
+          "linea": "Aveo NB",
+          "familia": "Pasajeros",
+          "trafico": 64,
+          "solicitudes": 48,
+          "facturas": 16,
+          "entregas": 16
+        },
+        {
+          "linea": "Onix",
+          "familia": "Pasajeros",
+          "trafico": 44,
+          "solicitudes": 33,
+          "facturas": 11,
+          "entregas": 11
+        },
+        {
+          "linea": "Tracker",
+          "familia": "SUV's",
+          "trafico": 8,
+          "solicitudes": 6,
+          "facturas": 2,
+          "entregas": 2
+        },
+        {
+          "linea": "Trax",
+          "familia": "SUV's",
+          "trafico": 16,
+          "solicitudes": 12,
+          "facturas": 4,
+          "entregas": 4
+        },
+        {
+          "linea": "Captiva",
+          "familia": "SUV's",
+          "trafico": 48,
+          "solicitudes": 36,
+          "facturas": 12,
+          "entregas": 12
+        },
+        {
+          "linea": "Groove",
+          "familia": "SUV's",
+          "trafico": 52,
+          "solicitudes": 39,
+          "facturas": 13,
+          "entregas": 13
+        },
+        {
+          "linea": "Traverse",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Tahoe",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Suburban",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Blazer EV",
+          "familia": "SUV's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Spark EUV",
+          "familia": "SUV's",
+          "trafico": 12,
+          "solicitudes": 9,
+          "facturas": 3,
+          "entregas": 3
+        },
+        {
+          "linea": "Captiva PHEV SUV",
+          "familia": "SUV's",
+          "trafico": 28,
+          "solicitudes": 21,
+          "facturas": 7,
+          "entregas": 7
+        },
+        {
+          "linea": "Colorado",
+          "familia": "Pick up's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Silverado / Cheyenne Crew Cab",
+          "familia": "Pick up's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "S10 MAX Chassis Cab",
+          "familia": "Pick up's",
+          "trafico": 16,
+          "solicitudes": 12,
+          "facturas": 4,
+          "entregas": 4
+        },
+        {
+          "linea": "S10 MAX Crew Cab",
+          "familia": "Pick up's",
+          "trafico": 32,
+          "solicitudes": 24,
+          "facturas": 8,
+          "entregas": 8
+        },
+        {
+          "linea": "S10 MAX Regular Cab",
+          "familia": "Pick up's",
+          "trafico": 12,
+          "solicitudes": 9,
+          "facturas": 3,
+          "entregas": 3
+        },
+        {
+          "linea": "Montana",
+          "familia": "Pick up's",
+          "trafico": 4,
+          "solicitudes": 3,
+          "facturas": 1,
+          "entregas": 1
+        },
+        {
+          "linea": "Tornado Van",
+          "familia": "Van's",
+          "trafico": 28,
+          "solicitudes": 21,
+          "facturas": 7,
+          "entregas": 7
+        },
+        {
+          "linea": "Express Max",
+          "familia": "Van's",
+          "trafico": 8,
+          "solicitudes": 6,
+          "facturas": 2,
+          "entregas": 2
+        }
+      ]
+    }
+  }
+}

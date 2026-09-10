@@ -48,7 +48,7 @@ function getTimeZone() {
 }
 
 /**
- * Acepta "9,12,18,19:50,20:10" o "9:00,12:00,18:00,19:50,20:10".
+ * Acepta "10,16,18,19:50" o "10:00,16:00,18:00,19:50".
  * Hora sola ⇒ :00. Duplicados se eliminan.
  */
 function parseClockSlots(raw) {
@@ -227,7 +227,6 @@ async function runSync({ reason = 'manual', skipCloud = false, etls, fullObjetiv
   state.lastError = null;
   const useFull = fullObjetivos
     || reason.includes('19:50')
-    || reason.includes('20:10')
     || reason.includes('objetivos-full');
   const etlList = useFull ? undefined : etls;
   console.log(

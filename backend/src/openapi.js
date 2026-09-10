@@ -448,7 +448,7 @@ function buildOpenApiSpec({ port = 3000, lanIp = null } = {}) {
       '/api/crm/sheets-sync/status': {
         get: secured({
           tags: ['Google Sheets CRM'],
-          summary: 'Consultar estado de sincronización (9:00, 12:00, 18:00, 19:50 y 20:10, hora de México)',
+          summary: 'Consultar estado de sincronización (10:00, 16:00, 18:00 y 19:50, hora de México)',
         }),
       },
       '/api/crm/sheets-sync/run': {

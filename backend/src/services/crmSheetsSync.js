@@ -7,7 +7,7 @@ const { syncCrmSheets, ALL_ETLS } = require('../../scripts/sync-crm-sheets');
 const crmCiclos = require('./crmCiclosService');
 
 const MAX_TIMER_MS = 12 * 60 * 60 * 1000;
-/** Horas enteras legacy + cargas Objetivos Web a las 19:50 y 20:10. */
+/** Sync diarios + cierre Objetivos Web a las 19:50. */
 const DEFAULT_SLOTS = [
   { hour: 10, minute: 0 },
   { hour: 16, minute: 0 },

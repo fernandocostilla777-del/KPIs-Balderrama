@@ -33,6 +33,7 @@ import { downloadElementPdf } from "@/lib/export-pdf";
 import { extractPdfText, parseObjectivesText } from "@/lib/pdf-parser";
 import { applyBdcCatalog, applyProductCatalog } from "@/lib/seed";
 import { loadMonths, monthRange, saveMonth } from "@/lib/monthly-store";
+import { runSheetsSync } from "@/lib/sheets-sync";
 import { allocateSolicitudesPorModelo } from "@/lib/solicitudes-por-modelo";
 import type {
   BdcResult,
@@ -473,29 +474,22 @@ export default function Home() {
     setSyncingCrm(true);
     setMessage("Sincronizando contratos CRM…");
     try {
-      const response = await fetch("/backend-api/crm/sheets-sync/run", {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: authHeaders({ "Content-Type": "application/json" }),
+      await runSheetsSync({
+        fullObjetivos: false,
+        onProgress: setMessage,
       });
-      const payload = await response.json().catch(() => ({}));
-      if (response.status === 401) {
-        clearSession();
-        setUser(null);
-        throw new Error("Sesión expirada. Vuelve a iniciar sesión.");
-      }
-      if (response.status === 409 && payload.skipped) {
-        setMessage(payload.reason || "Sync CRM ya en curso o desactivada.");
-        return;
-      }
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || payload.message || `Sync CRM: ${response.status}`);
-      }
       setMessage("Contratos CRM actualizados. Recargando resultados…");
       await fetchResults(selected, { silent: true });
       setMessage("Contratos GMF actualizados.");
     } catch (error) {
+      const err = error as Error & { status?: number; skipped?: boolean };
+      if (err.status === 401) {
+        setUser(null);
+      }
+      if (err.skipped) {
+        setMessage(err.message);
+        return;
+      }
       setMessage(error instanceof Error ? error.message : "No se pudo sincronizar CRM.");
     } finally {
       syncingCrmRef.current = false;
@@ -515,29 +509,10 @@ export default function Home() {
     setSyncingAll(true);
     setMessage("Actualizando toda la información (CRM completo)…");
     try {
-      const response = await fetch("/backend-api/crm/sheets-sync/run", {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ fullObjetivos: true }),
+      const payload = await runSheetsSync({
+        fullObjetivos: true,
+        onProgress: setMessage,
       });
-      const payload = await response.json().catch(() => ({}));
-      if (response.status === 401) {
-        clearSession();
-        setUser(null);
-        throw new Error("Sesión expirada. Vuelve a iniciar sesión.");
-      }
-      if (response.status === 403) {
-        throw new Error(payload.error || "Sin permiso para actualización completa.");
-      }
-      if (response.status === 409 && payload.skipped) {
-        setMessage(payload.reason || "Ya hay una sincronización en curso.");
-        return;
-      }
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || payload.message || `Actualización: ${response.status}`);
-      }
 
       setMessage("Fuentes actualizadas. Recargando meses y resultados…");
       const stored = await loadMonths();
@@ -552,9 +527,17 @@ export default function Home() {
       setMessage(
         cloudOk
           ? "Información actualizada: CRM completo y resultados del mes."
-          : `CRM actualizado localmente. Aviso nube: ${payload.cloud?.error || "no publicada"}.`,
+          : `CRM actualizado en oficina. Aviso nube: ${payload.cloud?.error || "no publicada"}.`,
       );
     } catch (error) {
+      const err = error as Error & { status?: number; skipped?: boolean };
+      if (err.status === 401) {
+        setUser(null);
+      }
+      if (err.skipped) {
+        setMessage(err.message);
+        return;
+      }
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar la información.");
     } finally {
       syncingAllRef.current = false;

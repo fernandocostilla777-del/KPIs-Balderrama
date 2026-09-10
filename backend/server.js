@@ -142,6 +142,12 @@ const server = app.listen(PORT, HOST, () => {
   } catch (err) {
     console.error('[sofia-live] No se pudo iniciar el scheduler:', err.message);
   }
+  try {
+    const { startPoller: startOfficeCommands } = require('./src/services/officeCommandPoller');
+    startOfficeCommands();
+  } catch (err) {
+    console.error('[office-commands] No se pudo iniciar el poller:', err.message);
+  }
 });
 
 server.on('error', (err) => {

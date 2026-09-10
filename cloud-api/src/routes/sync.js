@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireApiKey } = require('../middleware/apiKey');
 const { ingestSyncPayload, getSyncStatus, getHistory } = require('../services/syncIngest');
+const officeCommands = require('../services/officeCommandsStore');
 
 const router = express.Router();
 
@@ -37,6 +38,40 @@ router.post('/ingest', requireApiKey, async (req, res, next) => {
     res.status(201).json({ ok: true, ...result });
   } catch (err) {
     next(err);
+  }
+});
+
+/** Backend de oficina: reclama el siguiente comando pendiente. */
+router.get('/office-commands/next', requireApiKey, async (req, res, next) => {
+  try {
+    const rawTypes = String(req.query.types || req.query.type || '').trim();
+    const types = rawTypes
+      ? rawTypes.split(',').map((t) => t.trim()).filter(Boolean)
+      : undefined;
+    const command = await officeCommands.claimNext({ types });
+    if (!command) return res.json({ ok: true, command: null });
+    return res.json({ ok: true, command });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/** Backend de oficina: reporta resultado del comando. */
+router.post('/office-commands/:id/complete', requireApiKey, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const ok = body.ok !== false;
+    const completed = await officeCommands.completeCommand(req.params.id, {
+      ok,
+      result: body.result || null,
+      error: body.error || null,
+    });
+    if (!completed) {
+      return res.status(404).json({ ok: false, error: 'Comando no encontrado o ya finalizado' });
+    }
+    return res.json({ ok: true, command: completed });
+  } catch (err) {
+    return next(err);
   }
 });
 

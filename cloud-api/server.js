@@ -35,6 +35,7 @@ const defaultOrigins = [
   'http://localhost:3002',
   'http://127.0.0.1:3002',
   'https://objetivos-web-production.up.railway.app',
+  'https://objetivos.automotrizbalderrama.com',
   'http://localhost',
   'https://localhost',
   'capacitor://localhost',
@@ -95,6 +96,8 @@ async function ensureSchema() {
   await ensureCrmCiclosTable();
   await ensureCrmTables();
   await ensureIemcFinancieroTables();
+  const { ensureTable: ensureOfficeCommands } = require('./src/services/officeCommandsStore');
+  await ensureOfficeCommands();
 }
 
 ensureSchema()

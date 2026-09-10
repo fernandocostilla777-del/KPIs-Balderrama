@@ -103,8 +103,8 @@ async function pollOnce() {
     }
   } catch (err) {
     state.lastError = err.message || String(err);
-    // Silenciar errores intermitentes de red; el siguiente poll reintenta.
-    if (!/ECONNREFUSED|ETIMEDOUT|fetch failed|ENOTFOUND/i.test(state.lastError)) {
+    // Silenciar errores intermitentes de red / deploys; el siguiente poll reintenta.
+    if (!/ECONNREFUSED|ETIMEDOUT|fetch failed|ENOTFOUND|Not Found|404/i.test(state.lastError)) {
       console.warn('[office-commands] Poll:', state.lastError);
     }
   } finally {

@@ -8,6 +8,7 @@
   const MIX_KEYS = new Set(['facturasGmf', 'gmfDispTimbrar', 'penGmf', 'gmfSofia', 'noGmfSofia']);
   const ONSTAR_KEYS = new Set(['onstarTech']);
   const PVA_KEYS = new Set(['conPva', 'pvaGap', 'pvaGarantia', 'pvaAccesorios', 'pvaOnstar', 'pvaMant']);
+  const SEGURO_KEYS = new Set(['seguroGratis', 'seguroSubsecuente']);
   const PVA_SERIES_KEY = {
     conPva: 'conPva',
     pvaGap: 'gap',
@@ -24,6 +25,7 @@
     pvaTrimestreYtd: null,
     pvaTrimestresOpciones: [],
     pvaQuarterKey: null,
+    pendingSeguroCompanyFilter: null,
     sofiaRegistros: [],
     facturasGmfRegistros: [],
     facturaNotesByDocto: {},
@@ -45,6 +47,22 @@
   let mixDrawerUi = null;
   let facturaDetailUi = null;
   let contratoDetailUi = null;
+  let kpiSeguroCharts = { seguroGratis: null, seguroSubsecuente: null };
+
+  const SEGURO_COLORS = {
+    CHUBB: '#2563eb',
+    GNP: '#ea580c',
+    QUALITAS: '#7c3aed',
+    HDI: '#16a34a',
+    OTROS: '#64748b',
+    OTRO: '#94a3b8',
+    'Sin compañía': '#cbd5e1',
+  };
+
+  function seguroColor(label) {
+    const key = String(label || '').trim().toUpperCase();
+    return SEGURO_COLORS[key] || SEGURO_COLORS[label] || '#64748b';
+  }
 
   function money(n) {
     if (n == null || !Number.isFinite(Number(n))) return '—';
@@ -330,8 +348,153 @@
     </div>`;
   }
 
-  function kpiGroup(title, cards) {
-    return `<div class="kpi-group"><h4 class="kpi-group-title">${title}</h4><div class="kpi-grid">${cards.join('')}</div></div>`;
+  function seguroCls(label) {
+    const key = String(label || '').trim().toUpperCase();
+    if (key === 'CHUBB') return 'chubb';
+    if (key === 'GNP') return 'gnp';
+    if (key === 'HDI') return 'hdi';
+    if (key === 'QUALITAS') return 'qualitas';
+    return 'other';
+  }
+
+  function kpiSeguroChartCard(title, opsKey, cls, block) {
+    const items = (block?.porCompania || []).map((x) => ({
+      label: x.label,
+      count: Number(x.count) || 0,
+      pct: x.pct,
+    }));
+    const total = Number(block?.contratos) || items.reduce((s, x) => s + x.count, 0);
+    const chips = [
+      `<button type="button" class="fi-seguro-stat fi-seguro-stat--total"
+        data-fi-seguro-stat="${escapeHtml(opsKey)}" data-fi-seguro-company=""
+        title="Ver todos">
+        <span class="fi-seguro-stat__label">Total</span>
+        <span class="fi-seguro-stat__value">${num(total)}</span>
+        <span class="fi-seguro-stat__pct">${pct(block?.penetracionPct)}</span>
+      </button>`,
+      ...items.map((x) => `
+        <button type="button" class="fi-seguro-stat fi-seguro-stat--${seguroCls(x.label)}"
+          data-fi-seguro-stat="${escapeHtml(opsKey)}"
+          data-fi-seguro-company="${escapeHtml(x.label)}"
+          title="Filtrar ${escapeHtml(x.label)}">
+          <span class="fi-seguro-stat__swatch" aria-hidden="true"></span>
+          <span class="fi-seguro-stat__label">${escapeHtml(x.label)}</span>
+          <span class="fi-seguro-stat__value">${num(x.count)}</span>
+          <span class="fi-seguro-stat__pct">${x.pct != null ? `${Number(x.pct).toFixed(1)}%` : '—'}</span>
+        </button>`),
+    ].join('');
+
+    return `<div class="kpi-card kpi-card--${cls || 'blue'} kpi-card--clickable kpi-card--seguro-chart"
+      data-fi-kpi="${escapeHtml(opsKey)}"
+      role="button" tabindex="0"
+      title="Clic para ver detalle · clic en barra o tarjeta para filtrar compañía">
+      <div class="kpi-card-head fi-seguro-kpi-head">
+        <span class="kpi-title">${escapeHtml(title)}</span>
+        <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
+      </div>
+      <div class="fi-seguro-stat-grid" data-fi-seguro-stats="${escapeHtml(opsKey)}">
+        ${chips}
+      </div>
+      <div class="fi-seguro-kpi-chart">
+        <canvas data-fi-seguro-kpi-chart="${escapeHtml(opsKey)}" aria-label="${escapeHtml(title)} por compañía"></canvas>
+      </div>
+      <div class="kpi-accent"></div>
+    </div>`;
+  }
+
+  function kpiGroup(title, cards, gridClass = '') {
+    const gridCls = gridClass ? ` kpi-grid ${gridClass}` : ' kpi-grid';
+    return `<div class="kpi-group"><h4 class="kpi-group-title">${title}</h4><div class="${gridCls.trim()}">${cards.join('')}</div></div>`;
+  }
+
+  function destroyKpiSeguroCharts() {
+    for (const key of Object.keys(kpiSeguroCharts)) {
+      if (kpiSeguroCharts[key]) {
+        try { kpiSeguroCharts[key].destroy(); } catch { /* ignore */ }
+        kpiSeguroCharts[key] = null;
+      }
+    }
+  }
+
+  function paintSeguroKpiCharts() {
+    destroyKpiSeguroCharts();
+    if (typeof Chart === 'undefined' || !els.kpiRoot) return;
+
+    const paintOne = (opsKey) => {
+      const canvas = els.kpiRoot.querySelector(`[data-fi-seguro-kpi-chart="${opsKey}"]`);
+      if (!canvas) return;
+      canvas.addEventListener('click', (e) => e.stopPropagation());
+      const block = state.data?.summary?.[opsKey];
+      const items = (block?.porCompania || []).map((x) => ({
+        label: x.label,
+        value: x.count,
+      }));
+      if (!items.length) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+      const labels = items.map((x) => x.label);
+      const values = items.map((x) => x.value);
+      const colors = labels.map((lbl) => seguroColor(lbl));
+
+      kpiSeguroCharts[opsKey] = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderColor: colors,
+            borderWidth: 1,
+            borderRadius: 5,
+            maxBarThickness: 22,
+          }],
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          onClick: (evt, elements) => {
+            evt.native?.stopPropagation?.();
+            if (!elements?.length) return;
+            const label = labels[elements[0].index];
+            if (!label) return;
+            state.pendingSeguroCompanyFilter = label;
+            const card = els.kpiRoot?.querySelector(`[data-fi-kpi="${opsKey}"]`);
+            openKpiDetail(opsKey, card);
+          },
+          plugins: {
+            legend: { display: false },
+            datalabels: { display: false },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const v = Number(ctx.raw || 0);
+                  const total = values.reduce((a, b) => a + Number(b || 0), 0);
+                  const p = total ? Math.round((v / total) * 1000) / 10 : 0;
+                  return ` ${v.toLocaleString('es-MX')} · ${p}%`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { size: 10 } },
+              grid: { color: 'rgba(148, 163, 184, 0.2)' },
+            },
+            y: {
+              grid: { display: false },
+              ticks: { font: { size: 11, weight: '600' } },
+            },
+          },
+        },
+      });
+    };
+
+    paintOne('seguroGratis');
+    paintOne('seguroSubsecuente');
   }
 
   function mixKpiGroupHtml(mix) {
@@ -435,6 +598,10 @@
         return list.filter((c) => c.pvas?.some((p) => p.key === 'onstar'));
       case 'pvaMant':
         return list.filter((c) => c.pvas?.some((p) => p.key === 'mantenimiento'));
+      case 'seguroGratis':
+        return list.filter((c) => c.hasSeguroGratis || c.seguroGratis);
+      case 'seguroSubsecuente':
+        return list.filter((c) => c.hasSeguroSubsecuente || c.seguroSubsecuente);
       case 'solicitudes':
         return (sol?.muestra || []).map((r) => ({
           _kind: 'solicitud',
@@ -513,6 +680,26 @@
       pvaAccesorios: { title: 'Accesorios', hint: 'Contratos con accesorios' },
       pvaOnstar: { title: 'OnStar', hint: 'Contratos con OnStar' },
       pvaMant: { title: 'Mantenimientos', hint: 'Contratos con mantenimiento integrado' },
+      seguroGratis: {
+        title: 'Seguro gratis',
+        hint: (() => {
+          const sg = state.data?.summary?.seguroGratis || {};
+          const comps = (sg.porCompania || []).slice(0, 4).map((c) => `${c.label} ${c.count}`).join(' · ');
+          return comps
+            ? `Unidades con seguro gratis (col. AE) · ${comps}`
+            : 'Unidades con seguro gratis (col. AE) y compañía aseguradora';
+        })(),
+      },
+      seguroSubsecuente: {
+        title: 'Seguro subsecuente',
+        hint: (() => {
+          const ss = state.data?.summary?.seguroSubsecuente || {};
+          const comps = (ss.porCompania || []).slice(0, 4).map((c) => `${c.label} ${c.count}`).join(' · ');
+          return comps
+            ? `Compañía de seguro subsecuente (col. AF) · ${comps}`
+            : 'Compañía de seguro subsecuente (col. AF)';
+        })(),
+      },
       solicitudes: { title: 'Solicitudes F&I', hint: 'Solicitudes del periodo' },
       aprobadas: { title: 'Solicitudes aprobadas', hint: 'Estatus contiene APROBADA' },
     };
@@ -553,6 +740,8 @@
       pvaAccesorios: 'build',
       pvaOnstar: 'sensors',
       pvaMant: 'car_repair',
+      seguroGratis: 'verified_user',
+      seguroSubsecuente: 'policy',
       solicitudes: 'request_quote',
       aprobadas: 'check_circle',
     };
@@ -569,6 +758,16 @@
 
   function isPvaKpi(key) {
     return PVA_KEYS.has(key);
+  }
+
+  function isSeguroKpi(key) {
+    return SEGURO_KEYS.has(key);
+  }
+
+  function topCompaniaSub(block) {
+    const top = (block?.porCompania || [])[0];
+    if (!top?.label) return 'Clic para ver detalle';
+    return `top ${top.label} · ${pct(block.penetracionPct)}`;
   }
 
   function downloadMixCsv(rows, title) {
@@ -592,9 +791,12 @@
 
   function downloadCrmCsv(rows, title) {
     const isOnstar = String(title || '').toLowerCase().includes('onstar') || state.openKpi === 'onstarTech';
+    const isSeguro = isSeguroKpi(state.openKpi);
     const headers = isOnstar
       ? ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'OnStar', 'Plazo OnStar', 'Monto OnStar', 'GerenteFI']
-      : ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'Factura', 'Tipo', 'Especial', 'Plan', 'Plazo', 'Enganche', 'Monto', 'PVAs'];
+      : isSeguro
+        ? ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'Factura', 'Seguro gratis', 'Seguro subsecuente', 'Tipo', 'Plan', 'Plazo', 'Monto']
+        : ['Fecha', 'Cliente', 'Asesor', 'Unidad', 'VIN', 'Contrato', 'Factura', 'Tipo', 'Especial', 'Plan', 'Plazo', 'Enganche', 'Monto', 'PVAs', 'Seguro gratis', 'Seguro subsecuente'];
     const lines = [headers.join(',')];
     for (const r of rows || []) {
       const vals = isOnstar
@@ -602,11 +804,17 @@
           r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato,
           r.hasOnstarContrato ? 'SI' : 'NO', r.plazoOnstar, r.onstarMonto, r.gerenteFi || r.fi,
         ]
-        : [
-          r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura,
-          r.tipoCompra, r.especial, r.plan, r.plazoMeses, r.engancheMonto, r.montoFinanciar,
-          (r.pvas || []).map((p) => p.label).join(' | '),
-        ];
+        : isSeguro
+          ? [
+            r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura,
+            r.seguroGratis, r.seguroSubsecuente, r.tipoCompra, r.plan, r.plazoMeses, r.montoFinanciar,
+          ]
+          : [
+            r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura,
+            r.tipoCompra, r.especial, r.plan, r.plazoMeses, r.engancheMonto, r.montoFinanciar,
+            (r.pvas || []).map((p) => p.label).join(' | '),
+            r.seguroGratis, r.seguroSubsecuente,
+          ];
       lines.push(vals.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -691,6 +899,27 @@
             <canvas data-fi-pva-ytd-chart aria-label="Gráfica YTD PVA trimestre"></canvas>
           </div>
         </div>
+        <div class="fi-seguro-chart-panel hidden" data-fi-seguro-chart-panel>
+          <div class="fi-seguro-chart-panel__head">
+            <h5>Compañías de seguros</h5>
+            <span class="fi-seguro-chart-panel__meta" data-fi-seguro-chart-meta></span>
+          </div>
+          <div class="fi-seguro-chart-panel__charts">
+            <div class="fi-seguro-chart-panel__block">
+              <h6 data-fi-seguro-gratis-title>Seguro gratis</h6>
+              <div class="fi-seguro-chart-panel__chart">
+                <canvas data-fi-seguro-gratis-chart aria-label="Barras horizontal seguro gratis por compañía"></canvas>
+              </div>
+            </div>
+            <div class="fi-seguro-chart-panel__block">
+              <h6 data-fi-seguro-sub-title>Seguro subsecuente</h6>
+              <div class="fi-seguro-chart-panel__chart">
+                <canvas data-fi-seguro-sub-chart aria-label="Barras horizontal seguro subsecuente por compañía"></canvas>
+              </div>
+            </div>
+          </div>
+          <p class="fi-seguro-chart-panel__hint">Clic en una barra para filtrar por compañía</p>
+        </div>
       </div>
     `;
 
@@ -715,6 +944,12 @@
     const pvaYtdCanvas = panel.querySelector('[data-fi-pva-ytd-chart]');
     const pvaYtdQuarter = panel.querySelector('[data-fi-pva-ytd-quarter]');
     const pvaYtdWidth = panel.querySelector('[data-fi-pva-ytd-width]');
+    const seguroPanel = panel.querySelector('[data-fi-seguro-chart-panel]');
+    const seguroMeta = panel.querySelector('[data-fi-seguro-chart-meta]');
+    const seguroGratisTitle = panel.querySelector('[data-fi-seguro-gratis-title]');
+    const seguroSubTitle = panel.querySelector('[data-fi-seguro-sub-title]');
+    const seguroGratisCanvas = panel.querySelector('[data-fi-seguro-gratis-chart]');
+    const seguroSubCanvas = panel.querySelector('[data-fi-seguro-sub-chart]');
 
     let expanded = false;
     let activeFilter = null;
@@ -723,6 +958,8 @@
     let currentMeta = { kpi: '', title: 'Penetración GMF', hint: '', icon: 'account_balance' };
     let lastCard = null;
     let pvaYtdChart = null;
+    let seguroGratisChart = null;
+    let seguroSubChart = null;
     const PVA_WIDTH_KEY = 'fiPvaChartWidth';
     const PVA_WIDTHS = new Set(['sm', 'md', 'lg', 'xl']);
 
@@ -758,6 +995,7 @@
       plan: 'Plan',
       plazo: 'Plazo',
       onstar: 'OnStar',
+      compania: 'Compañía',
     };
 
     function placeNearKpi(card) {
@@ -825,6 +1063,15 @@
             ? Boolean(r.hasOnstarContrato)
             : !r.hasOnstarContrato;
         }
+        if (activeFilter.dim === 'compania') {
+          if (currentMeta.kpi === 'seguroGratis') {
+            return String(r.seguroGratis || 'Sin compañía') === activeFilter.value;
+          }
+          if (currentMeta.kpi === 'seguroSubsecuente') {
+            return String(r.seguroSubsecuente || 'Sin compañía') === activeFilter.value;
+          }
+          return String(r.seguroGratis || r.seguroSubsecuente || 'Sin compañía') === activeFilter.value;
+        }
         return true;
       }
       if (activeFilter.dim === 'tipo') return tipoOf(r) === activeFilter.value;
@@ -845,12 +1092,14 @@
       else activeFilter = { dim, value, label: label || value };
       updateFilterChip();
       renderList(searchEl?.value || '');
+      if (isSeguroKpi(currentMeta.kpi)) renderSeguroCharts(currentMeta.kpi);
     }
 
     function clearFilter() {
       activeFilter = null;
       updateFilterChip();
       renderList(searchEl?.value || '');
+      if (isSeguroKpi(currentMeta.kpi)) renderSeguroCharts(currentMeta.kpi);
     }
 
     function renderSummary(rows) {
@@ -919,6 +1168,30 @@
             ${block('Por unidad', 'tipo', porUnidad)}
             ${block('Por gerente F&I', 'gerente', porGerente)}
             ${block('Por asesor', 'asesor', porAsesor)}
+          `;
+          return;
+        }
+
+        if (isSeguroKpi(currentMeta.kpi)) {
+          const isGratis = currentMeta.kpi === 'seguroGratis';
+          const porCompania = countByField(
+            rows,
+            (r) => (isGratis ? r.seguroGratis : r.seguroSubsecuente) || 'Sin compañía',
+          );
+          const blockLabel = isGratis ? 'Seguro gratis' : 'Seguro subsecuente';
+          summaryEl.innerHTML = `
+            <div class="ops-orders-drawer__group">
+              <h5>Resumen</h5>
+              <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${num(rows.length)}</span></div>
+              <div class="ops-orders-drawer__row"><span class="lbl">Compañías</span><span class="val">${num(porCompania.length)}</span></div>
+              <p class="ops-orders-drawer__hint">${escapeHtml(isGratis
+                ? 'Columna AE · seguro gratis (vigencia 12 meses) y compañía'
+                : 'Columna AF · seguro subsecuente y compañía')}</p>
+              <p class="ops-orders-drawer__hint">Las compañías se muestran en el gráfico de barras.</p>
+            </div>
+            ${block('Por gerente F&I', 'gerente', porGerente)}
+            ${block('Por asesor', 'asesor', porAsesor)}
+            ${block('Por tipo', 'tipo', porTipo)}
           `;
           return;
         }
@@ -1023,6 +1296,7 @@
             ? [r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura, r.plan, r.tipoCompra, r.especial, r.plazoMeses,
               r.estatus, r.financiera, r.respuestaFinanciera, r.biometrico, r.idCrm, r.noSolicitud,
               r.gerenteFi, r.fi, r.afi, r.plazoOnstar, r.onstarMonto,
+              r.seguroGratis, r.seguroSubsecuente,
               r.hasOnstarContrato ? 'con onstar' : 'sin onstar',
               ...(r.pvas || []).map((p) => p.label)]
             : [r.VTE_FECHDOCTO, r.FECHA_PERIODO, r.SOF_Factura, r.VTE_DOCTO, r.SOF_VIN, r.VTE_SERIE,
@@ -1122,17 +1396,28 @@
 
             const pva = (r.pvas || []).map((p) => p.label).join(', ') || 'Sin PVA';
             const isOnstar = isOnstarKpi(currentMeta.kpi) || r._kind === 'onstarTech';
+            const isSeguro = isSeguroKpi(currentMeta.kpi);
             const tipoLabel = String(r.tipoCompra || '').trim() || null;
             const especialLabel = String(r.especial || '').trim() || null;
             const tag = isOnstar
               ? (r.hasOnstarContrato ? 'Con OnStar' : 'Sin OnStar')
-              : (tipoLabel || especialLabel || r.plan || 'Contrato');
+              : isSeguro
+                ? (currentMeta.kpi === 'seguroGratis'
+                  ? (r.seguroGratis || 'Sin compañía')
+                  : (r.seguroSubsecuente || 'Sin compañía'))
+                : (tipoLabel || especialLabel || r.plan || 'Contrato');
             const onstarFacts = isOnstar
               ? `<div class="ops-orders-drawer__facts">
                   <span class="fi-list-chip ${r.hasOnstarContrato ? 'fi-list-chip--ok' : 'fi-list-chip--warn'}">${r.hasOnstarContrato ? 'Contrato OnStar' : 'Sin contrato'}</span>
                   <span>${r.plazoOnstar ? `Plazo ${escapeHtml(String(r.plazoOnstar))}` : 'Sin plazo OnStar'}</span>
                   <span>${r.onstarMonto != null && Number(r.onstarMonto) > 0 ? money(r.onstarMonto) : 'Sin monto'}</span>
                 </div>`
+              : isSeguro
+                ? `<div class="ops-orders-drawer__facts">
+                    <span class="fi-list-chip ${r.seguroGratis ? 'fi-list-chip--ok' : 'fi-list-chip--warn'}">Gratis: ${escapeHtml(dash(r.seguroGratis || 'Sin'))}</span>
+                    <span class="fi-list-chip">Subsecuente: ${escapeHtml(dash(r.seguroSubsecuente || 'Sin'))}</span>
+                    <span>${escapeHtml(dash(r.unidad))}</span>
+                  </div>`
               : `<div class="ops-orders-drawer__facts">
                   <span>${escapeHtml(dash(r.unidad))}</span>
                   <span>${r.plazoMeses != null ? `${num(r.plazoMeses)} mes` : '—'}</span>
@@ -1167,7 +1452,7 @@
                   <span>${escapeHtml(especialLabel || 'Sin especial')}</span>
                   <span>${escapeHtml(dash(r.plan))}</span>
                 </div>`}
-                <p class="ops-orders-drawer__sub">${escapeHtml(isOnstar ? (r.contrato || pva) : pva)} · Clic para ver detalle</p>
+                <p class="ops-orders-drawer__sub">${escapeHtml(isOnstar ? (r.contrato || pva) : (isSeguro ? `Gratis ${dash(r.seguroGratis)} · Subsecuente ${dash(r.seguroSubsecuente)}` : pva))} · Clic para ver detalle</p>
                 <span class="ops-orders-drawer__open-hint">
                   <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
                   Abrir detalle
@@ -1234,6 +1519,133 @@
       }
       if (pvaYtdPanel) pvaYtdPanel.classList.add('hidden');
       mainEl?.classList.remove('ops-orders-drawer__main--with-pva');
+    }
+
+    function destroySeguroCharts() {
+      if (seguroGratisChart) {
+        try { seguroGratisChart.destroy(); } catch { /* ignore */ }
+        seguroGratisChart = null;
+      }
+      if (seguroSubChart) {
+        try { seguroSubChart.destroy(); } catch { /* ignore */ }
+        seguroSubChart = null;
+      }
+      if (seguroPanel) seguroPanel.classList.add('hidden');
+      mainEl?.classList.remove('ops-orders-drawer__main--with-seguro');
+    }
+
+    function buildHorizontalSeguroChart(canvas, items, { activeLabel, onBarClick } = {}) {
+      if (!canvas || typeof Chart === 'undefined') return null;
+      const labels = items.map((x) => x.label);
+      const values = items.map((x) => x.value);
+      const colors = labels.map((lbl) => {
+        const base = seguroColor(lbl);
+        if (activeLabel && lbl === activeLabel) return base;
+        if (activeLabel) return `${base}99`;
+        return base;
+      });
+      return new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Unidades',
+            data: values,
+            backgroundColor: colors,
+            borderColor: colors.map((c) => String(c).replace(/99$/, '')),
+            borderWidth: 1,
+            borderRadius: 5,
+            maxBarThickness: 28,
+          }],
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          onClick: (_evt, elements) => {
+            if (!elements?.length || typeof onBarClick !== 'function') return;
+            const idx = elements[0].index;
+            const label = labels[idx];
+            if (label) onBarClick(label);
+          },
+          plugins: {
+            legend: { display: false },
+            datalabels: { display: false },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const v = Number(ctx.raw || 0);
+                  const total = values.reduce((a, b) => a + Number(b || 0), 0);
+                  const p = total ? Math.round((v / total) * 1000) / 10 : 0;
+                  return ` ${v.toLocaleString('es-MX')} · ${p}%`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { size: 10 } },
+              grid: { color: 'rgba(148, 163, 184, 0.22)' },
+            },
+            y: {
+              grid: { display: false },
+              ticks: { font: { size: 11, weight: '600' } },
+            },
+          },
+        },
+      });
+    }
+
+    function renderSeguroCharts(kpiKey) {
+      destroySeguroCharts();
+      if (!isSeguroKpi(kpiKey) || !seguroPanel) return;
+
+      mainEl?.classList.add('ops-orders-drawer__main--with-seguro');
+      seguroPanel.classList.remove('hidden');
+
+      const gratisRows = (contracts() || []).filter((c) => c.hasSeguroGratis || c.seguroGratis);
+      const subRows = (contracts() || []).filter((c) => c.hasSeguroSubsecuente || c.seguroSubsecuente);
+      const gratisItems = countByField(gratisRows, (r) => r.seguroGratis || 'Sin compañía');
+      const subItems = countByField(subRows, (r) => r.seguroSubsecuente || 'Sin compañía');
+
+      if (seguroGratisTitle) {
+        seguroGratisTitle.textContent = 'Seguro gratis';
+        seguroGratisTitle.classList.toggle('is-active', kpiKey === 'seguroGratis');
+      }
+      if (seguroSubTitle) {
+        seguroSubTitle.textContent = 'Seguro subsecuente';
+        seguroSubTitle.classList.toggle('is-active', kpiKey === 'seguroSubsecuente');
+      }
+      if (seguroMeta) {
+        seguroMeta.textContent = 'Comparativo por compañía';
+      }
+
+      if (typeof Chart === 'undefined') {
+        if (seguroMeta) seguroMeta.textContent = 'Chart.js no disponible';
+        return;
+      }
+
+      const activeCompania = activeFilter?.dim === 'compania' ? activeFilter.value : null;
+      const focusCompany = (targetKpi, label) => {
+        if (currentMeta.kpi !== targetKpi) {
+          state.pendingSeguroCompanyFilter = label;
+          const card = els.kpiRoot?.querySelector(`[data-fi-kpi="${targetKpi}"]`);
+          openKpiDetail(targetKpi, card);
+          return;
+        }
+        setFilter('compania', label, label);
+        renderSeguroCharts(currentMeta.kpi);
+      };
+
+      seguroGratisChart = buildHorizontalSeguroChart(seguroGratisCanvas, gratisItems, {
+        activeLabel: kpiKey === 'seguroGratis' ? activeCompania : null,
+        onBarClick: (label) => focusCompany('seguroGratis', label),
+      });
+      seguroSubChart = buildHorizontalSeguroChart(seguroSubCanvas, subItems, {
+        activeLabel: kpiKey === 'seguroSubsecuente' ? activeCompania : null,
+        onBarClick: (label) => focusCompany('seguroSubsecuente', label),
+      });
     }
 
     function fillPvaQuarterSelect(ytd) {
@@ -1370,6 +1782,7 @@
     function close() {
       closeFacturaDetail();
       destroyPvaYtdChart();
+      destroySeguroCharts();
       panel.classList.remove('ops-orders-drawer--open');
       panel.setAttribute('aria-hidden', 'true');
       backdrop.classList.remove('ops-orders-backdrop--visible');
@@ -1383,6 +1796,7 @@
       activeFilter = null;
       lastCard = null;
       state.openKpi = null;
+      state.pendingSeguroCompanyFilter = null;
       els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
     }
 
@@ -1404,7 +1818,9 @@
             ? 'Buscar cliente, solicitud, financiera, respuesta, CRM...'
             : (isOnstarKpi(currentMeta.kpi)
               ? 'Buscar VIN, unidad, cliente, plazo OnStar...'
-              : 'Buscar cliente, VIN, asesor, contrato, PVA...'));
+              : (isSeguroKpi(currentMeta.kpi)
+                ? 'Buscar compañía, cliente, VIN, asesor...'
+                : 'Buscar cliente, VIN, asesor, contrato, PVA...')));
       }
 
       sourceRows = (rows || []).slice();
@@ -1415,6 +1831,12 @@
       setExpanded(true);
       renderList('');
       renderPvaYtdChart(currentMeta.kpi);
+      renderSeguroCharts(currentMeta.kpi);
+      if (state.pendingSeguroCompanyFilter && isSeguroKpi(currentMeta.kpi)) {
+        const label = state.pendingSeguroCompanyFilter;
+        state.pendingSeguroCompanyFilter = null;
+        setFilter('compania', label, label);
+      }
       panel.classList.add('ops-orders-drawer--open');
       panel.setAttribute('aria-hidden', 'false');
       backdrop.classList.add('ops-orders-backdrop--visible');
@@ -2045,6 +2467,7 @@
             <h3>Otros</h3>
           </div>
           ${row('Seguro gratis', r.seguroGratis)}
+          ${row('Seguro subsecuente', r.seguroSubsecuente)}
           ${row('Robo parcial', r.roboParcial)}
         </section>
       `;
@@ -2161,9 +2584,15 @@
         kpiCard('OnStar', num(pva.onstar?.contratos || 0), pct(pva.onstar?.penetracionPct), 'slate', 'pvaOnstar'),
         kpiCard('Mantenimientos', num(pva.mantenimiento?.contratos || 0), pct(pva.mantenimiento?.penetracionPct), 'rose', 'pvaMant'),
       ]),
+      kpiGroup('Seguros', [
+        kpiSeguroChartCard('Seguro gratis', 'seguroGratis', 'green', s.seguroGratis),
+        kpiSeguroChartCard('Seguro subsecuente', 'seguroSubsecuente', 'blue', s.seguroSubsecuente),
+      ], 'kpi-grid--seguro'),
     ].join('');
 
     bindKpiCards();
+    bindSeguroStatCards();
+    paintSeguroKpiCharts();
     restoreOpenKpi();
   }
 
@@ -2193,6 +2622,21 @@
           ev.preventDefault();
           activate();
         }
+      });
+    });
+  }
+
+  function bindSeguroStatCards() {
+    els.kpiRoot?.querySelectorAll('[data-fi-seguro-stat]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const opsKey = btn.getAttribute('data-fi-seguro-stat');
+        const company = String(btn.getAttribute('data-fi-seguro-company') || '').trim();
+        if (!opsKey) return;
+        state.pendingSeguroCompanyFilter = company || null;
+        const card = els.kpiRoot?.querySelector(`[data-fi-kpi="${opsKey}"]`);
+        openKpiDetail(opsKey, card);
       });
     });
   }
@@ -2230,7 +2674,8 @@
     return rows.filter((r) => {
       const hay = [
         r.fecha, r.cliente, r.asesor, r.unidad, r.vin, r.contrato, r.factura,
-        r.plan, r.tipoCompra, r.plazoMeses, ...(r.pvas || []).map((p) => p.label),
+        r.plan, r.tipoCompra, r.plazoMeses, r.seguroGratis, r.seguroSubsecuente,
+        ...(r.pvas || []).map((p) => p.label),
       ].join(' ').toLowerCase();
       return hay.includes(q);
     });
@@ -2246,7 +2691,7 @@
       meta.classList.toggle('hidden', !state.search && list.length === (rows || contracts()).length);
     }
     if (!list.length) {
-      body.innerHTML = '<tr><td colspan="9" class="empty-row">Sin unidades en financiamiento para este filtro.</td></tr>';
+      body.innerHTML = '<tr><td colspan="11" class="empty-row">Sin unidades en financiamiento para este filtro.</td></tr>';
       return;
     }
     body.innerHTML = list.map((r) => {
@@ -2259,6 +2704,8 @@
         <td class="mono">${escapeHtml(dash(r.vin))}</td>
         <td>${escapeHtml(dash(r.contrato))}</td>
         <td>${escapeHtml(dash(r.tipoCompra || r.plan))}${pva !== '—' ? `<div class="fi-pva-tags">${escapeHtml(pva)}</div>` : ''}</td>
+        <td>${escapeHtml(dash(r.seguroGratis))}</td>
+        <td>${escapeHtml(dash(r.seguroSubsecuente))}</td>
         <td class="cell-num">${r.plazoMeses != null ? num(r.plazoMeses) : '—'}</td>
         <td class="cell-num">${r.montoFinanciar != null ? money(r.montoFinanciar) : '—'}</td>
       </tr>`;

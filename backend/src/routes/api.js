@@ -703,10 +703,22 @@ router.get('/crm/sheets-sync/status', (_req, res, next) => {
   }
 });
 
-router.post('/crm/sheets-sync/run', async (_req, res, next) => {
+router.post('/crm/sheets-sync/run', requireSession, async (req, res, next) => {
   try {
     const sheetsSync = require('../services/crmSheetsSync');
-    const result = await sheetsSync.runSync({ reason: 'api' });
+    const body = req.body || {};
+    const fullObjetivos = body.fullObjetivos === true
+      || ['1', 'true', 'yes', 'full'].includes(String(req.query?.full || '').toLowerCase());
+    if (fullObjetivos && isAuthEnabled() && !canManageUsers(req.session?.role)) {
+      return res.status(403).json({
+        error: 'Solo Administración puede forzar la actualización completa de Objetivos Web.',
+      });
+    }
+    const result = await sheetsSync.runSync({
+      reason: fullObjetivos ? 'api-objetivos-full' : 'api',
+      fullObjetivos,
+      skipCloud: body.skipCloud === true,
+    });
     res.status(result.ok ? 200 : (result.skipped ? 409 : 500)).json(result);
   } catch (err) {
     next(err);

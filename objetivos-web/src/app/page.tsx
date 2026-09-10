@@ -239,9 +239,11 @@ function AppHeader({
   user,
   onMonth,
   onUpload,
+  onSyncAll,
   onDownload,
   onLogout,
   loadingPdf,
+  syncingAll,
   downloadingPdf,
 }: {
   month: MonthlyGoals;
@@ -249,9 +251,11 @@ function AppHeader({
   user: AuthUser;
   onMonth: (id: string) => void;
   onUpload: (file: File) => void;
+  onSyncAll: () => void;
   onDownload: () => void;
   onLogout: () => void;
   loadingPdf: boolean;
+  syncingAll: boolean;
   downloadingPdf: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -286,10 +290,22 @@ function AppHeader({
           <ChevronDown size={15} />
         </label>
         {admin ? (
-          <button className="upload-button" onClick={() => fileRef.current?.click()} disabled={loadingPdf}>
-            <UploadCloud size={17} />
-            {loadingPdf ? "Leyendo PDF…" : "Cargar PDF mensual"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="sync-all-button"
+              onClick={onSyncAll}
+              disabled={syncingAll || loadingPdf}
+              title="Sincroniza CRM completo y refresca resultados del mes"
+            >
+              <RefreshCw size={17} className={syncingAll ? "spin" : undefined} />
+              {syncingAll ? "Actualizando…" : "Actualizar información"}
+            </button>
+            <button className="upload-button" onClick={() => fileRef.current?.click()} disabled={loadingPdf || syncingAll}>
+              <UploadCloud size={17} />
+              {loadingPdf ? "Leyendo PDF…" : "Cargar PDF mensual"}
+            </button>
+          </>
         ) : (
           <button
             type="button"
@@ -331,10 +347,12 @@ export default function Home() {
   const [results, setResults] = useState<ResultsPayload | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
   const [syncingCrm, setSyncingCrm] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const syncingCrmRef = useRef(false);
+  const syncingAllRef = useRef(false);
   const [calendarMetric, setCalendarMetric] = useState<CalendarMetric>("entregas");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
@@ -450,7 +468,7 @@ export default function Home() {
   /** Sync CRM (contratos) + refrescar resultados. Accion oculta en el icono $ de Contratos GMF. */
   const syncCrmContractsNow = useCallback(async () => {
     const selected = monthRef.current;
-    if (!selected || syncingCrmRef.current) return;
+    if (!selected || syncingCrmRef.current || syncingAllRef.current) return;
     syncingCrmRef.current = true;
     setSyncingCrm(true);
     setMessage("Sincronizando contratos CRM…");
@@ -484,6 +502,65 @@ export default function Home() {
       setSyncingCrm(false);
     }
   }, [fetchResults]);
+
+  /** Actualización completa (admin): todos los ETL CRM + publicar objetivos + refrescar mes. */
+  const syncAllInformationNow = useCallback(async () => {
+    if (!isAdministrator(user)) {
+      setMessage("Solo el administrador puede actualizar toda la información.");
+      return;
+    }
+    const selected = monthRef.current;
+    if (!selected || syncingAllRef.current || syncingCrmRef.current) return;
+    syncingAllRef.current = true;
+    setSyncingAll(true);
+    setMessage("Actualizando toda la información (CRM completo)…");
+    try {
+      const response = await fetch("/backend-api/crm/sheets-sync/run", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ fullObjetivos: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        clearSession();
+        setUser(null);
+        throw new Error("Sesión expirada. Vuelve a iniciar sesión.");
+      }
+      if (response.status === 403) {
+        throw new Error(payload.error || "Sin permiso para actualización completa.");
+      }
+      if (response.status === 409 && payload.skipped) {
+        setMessage(payload.reason || "Ya hay una sincronización en curso.");
+        return;
+      }
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || payload.message || `Actualización: ${response.status}`);
+      }
+
+      setMessage("Fuentes actualizadas. Recargando meses y resultados…");
+      const stored = await loadMonths();
+      setMonths(stored);
+      const next = stored.find((item) => item.id === selected.id) || selected;
+      if (next.id !== selected.id) setActiveId(next.id);
+      await fetchResults(next, { silent: true });
+
+      const cloudOk = payload.cloud == null
+        || payload.cloud?.skipped
+        || payload.cloud?.ok !== false;
+      setMessage(
+        cloudOk
+          ? "Información actualizada: CRM completo y resultados del mes."
+          : `CRM actualizado localmente. Aviso nube: ${payload.cloud?.error || "no publicada"}.`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la información.");
+    } finally {
+      syncingAllRef.current = false;
+      setSyncingAll(false);
+    }
+  }, [fetchResults, user]);
 
   useEffect(() => {
     loadingResultsRef.current = loadingResults;
@@ -1031,9 +1108,11 @@ export default function Home() {
           setProductFamily("todas");
         }}
         onUpload={handleUpload}
+        onSyncAll={() => { void syncAllInformationNow(); }}
         onDownload={() => { void handleDownloadPdf(); }}
         onLogout={() => { void handleLogout(); }}
         loadingPdf={loadingPdf}
+        syncingAll={syncingAll}
         downloadingPdf={downloadingPdf}
       />
 

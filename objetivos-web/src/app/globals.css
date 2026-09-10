@@ -72,6 +72,7 @@ button {
 .month-select,
 .upload-button,
 .download-button,
+.sync-all-button,
 .source-badge,
 .notice {
   display: flex;
@@ -108,7 +109,8 @@ button {
 
 .month-select,
 .upload-button,
-.download-button {
+.download-button,
+.sync-all-button {
   min-height: 42px;
   gap: 8px;
   padding: 0 13px;
@@ -136,9 +138,21 @@ button {
 }
 
 .upload-button:disabled,
-.download-button:disabled {
+.download-button:disabled,
+.sync-all-button:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+
+.sync-all-button {
+  border-color: #0f4c81;
+  background: #0f4c81;
+  color: white;
+  font-weight: 700;
+}
+
+.sync-all-button:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 .download-button {
@@ -1477,7 +1491,8 @@ tbody tr:hover {
   .topbar__actions,
   .month-select,
   .upload-button,
-  .download-button {
+  .download-button,
+  .sync-all-button {
     width: 100%;
   }
 

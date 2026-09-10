@@ -1,20 +1,26 @@
 /**
  * Scheduler de sincronización del Google Sheet CRM (leads, solicitudes, tráfico, F&I…).
- * Corre a las 9:00, 12:00, 18:00 y 20:10 (hora de México) mientras el backend esté activo.
- * La corrida 20:10 es la carga completa de fuentes para Objetivos Web + publicación a la nube.
+ * Corre a las 9:00, 12:00, 18:00, 19:50 y 20:10 (hora de México) mientras el backend esté activo.
+ * Las corridas 19:50 y 20:10 son carga completa de fuentes para Objetivos Web + publicación a la nube.
  */
 const { syncCrmSheets, ALL_ETLS } = require('../../scripts/sync-crm-sheets');
 const crmCiclos = require('./crmCiclosService');
 
 const MAX_TIMER_MS = 12 * 60 * 60 * 1000;
-/** Horas enteras legacy + cierre Objetivos Web a las 20:10. */
+/** Horas enteras legacy + cargas Objetivos Web a las 19:50 y 20:10. */
 const DEFAULT_SLOTS = [
   { hour: 9, minute: 0 },
   { hour: 12, minute: 0 },
   { hour: 18, minute: 0 },
+  { hour: 19, minute: 50 },
   { hour: 20, minute: 10 },
 ];
 const DEFAULT_TZ = 'America/Mexico_City';
+const DEFAULT_SLOTS_LABEL = '9,12,18,19:50,20:10';
+const OBJETIVOS_FULL_SLOTS = [
+  { hour: 19, minute: 50 },
+  { hour: 20, minute: 10 },
+];
 
 const state = {
   enabled: true,
@@ -42,7 +48,7 @@ function getTimeZone() {
 }
 
 /**
- * Acepta "9,12,18,20:10" o "9:00,12:00,18:00,20:10".
+ * Acepta "9,12,18,19:50,20:10" o "9:00,12:00,18:00,19:50,20:10".
  * Hora sola ⇒ :00. Duplicados se eliminan.
  */
 function parseClockSlots(raw) {
@@ -75,7 +81,7 @@ function parseClockSlots(raw) {
 }
 
 function getClockSlots() {
-  return parseClockSlots(process.env.CRM_SHEETS_SYNC_AT || '9,12,18,20:10');
+  return parseClockSlots(process.env.CRM_SHEETS_SYNC_AT || DEFAULT_SLOTS_LABEL);
 }
 
 function formatSlot(slot) {
@@ -84,7 +90,8 @@ function formatSlot(slot) {
 
 /** Cierre diario de Objetivos Web: todas las hojas CRM + push a cloud. */
 function isObjetivosFullSlot(slot) {
-  return Boolean(slot && slot.hour === 20 && slot.minute === 10);
+  if (!slot) return false;
+  return OBJETIVOS_FULL_SLOTS.some((s) => s.hour === slot.hour && s.minute === slot.minute);
 }
 
 function zonedParts(date, timeZone) {
@@ -187,7 +194,7 @@ function getStatus() {
     lastResult: state.lastResult,
     nextRunAt: state.nextRunAt,
     nextSlot: state.nextSlot ? formatSlot(state.nextSlot) : null,
-    objetivosFullAt: '20:10',
+    objetivosFullAt: OBJETIVOS_FULL_SLOTS.map(formatSlot),
   };
 }
 
@@ -218,7 +225,10 @@ async function runSync({ reason = 'manual', skipCloud = false, etls, fullObjetiv
   state.running = true;
   state.lastStartedAt = new Date().toISOString();
   state.lastError = null;
-  const useFull = fullObjetivos || reason.includes('20:10') || reason.includes('objetivos-full');
+  const useFull = fullObjetivos
+    || reason.includes('19:50')
+    || reason.includes('20:10')
+    || reason.includes('objetivos-full');
   const etlList = useFull ? undefined : etls;
   console.log(
     `[crm-sheets-sync] Inicio (${reason})${useFull ? ' · FULL Objetivos Web' : ''} ${state.lastStartedAt}`,
@@ -303,9 +313,10 @@ function startScheduler() {
   }
 
   const slotsLabel = state.clockSlots.map(formatSlot).join(', ');
+  const fullLabel = OBJETIVOS_FULL_SLOTS.map(formatSlot).join(' y ');
   console.log(
     `[crm-sheets-sync] Programado a las ${slotsLabel} (${state.timeZone})`
-    + ' · 20:10 = carga completa Objetivos Web'
+    + ` · ${fullLabel} = carga completa Objetivos Web`
     + (state.runOnStart ? ' · también al arrancar' : ''),
   );
 

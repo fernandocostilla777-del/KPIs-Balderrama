@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=118" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=121" rel="stylesheet"/>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -561,17 +561,17 @@ Detalle
 <div class="kpi-detail-toolbar">
 <label class="kpi-detail-search" for="buscarFiPreview">
 <span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
-<input id="buscarFiPreview" type="search" placeholder="Buscar cliente, VIN, asesor, contrato, PVA..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
+<input id="buscarFiPreview" type="search" placeholder="Buscar cliente, VIN, asesor, contrato, PVA, seguro..." class="filter-input kpi-detail-search-input" autocomplete="off"/>
 </label>
 <span id="fiPreviewSearchMeta" class="kpi-detail-search-meta hidden"></span>
 </div>
 <div class="table-scroll kpi-detail-table-wrap">
 <table class="data-table">
 <thead><tr>
-<th>Fecha</th><th>Cliente</th><th>Asesor</th><th>Unidad</th><th>VIN</th><th>Contrato</th><th>Tipo / PVA</th><th class="cell-num">Plazo</th><th class="cell-num">Monto</th>
+<th>Fecha</th><th>Cliente</th><th>Asesor</th><th>Unidad</th><th>VIN</th><th>Contrato</th><th>Tipo / PVA</th><th>Seguro gratis</th><th>Seguro subsecuente</th><th class="cell-num">Plazo</th><th class="cell-num">Monto</th>
 </tr></thead>
 <tbody id="fiTableBody">
-<tr><td colspan="9" class="empty-row">Consulte un periodo para ver unidades en financiamiento.</td></tr>
+<tr><td colspan="11" class="empty-row">Consulte un periodo para ver unidades en financiamiento.</td></tr>
 </tbody>
 </table>
 </div>
@@ -1059,7 +1059,7 @@ Exportar CSV
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/financiamiento.js?v=47"></script>
+<script src="/js/financiamiento.js?v=53"></script>
 <script src="/js/leads.js?v=15"></script>
 <script src="/js/afluencia.js?v=18"></script>
 <script src="/js/comisiones.js?v=2"></script>

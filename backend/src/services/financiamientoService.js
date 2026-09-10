@@ -32,6 +32,16 @@ function pct(num, den) {
   return Math.round((Number(num || 0) / Number(den)) * 1000) / 10;
 }
 
+function cleanSeguroValor(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  const upper = text.toUpperCase();
+  if (upper === 'N/A' || upper === 'NA' || upper === 'NULL' || upper === '-' || upper === '—') {
+    return null;
+  }
+  return upper;
+}
+
 function inPeriod(fecha, fi, ff) {
   if (!fecha) return !fi && !ff;
   const f = toIsoDate(fecha);
@@ -84,6 +94,8 @@ function mapContract(row) {
   const plazoOnstar = row.plazo_onstar || null;
   const hasOnstarContrato = (Number(row.onstar_monto) || 0) > 0
     || Boolean(String(plazoOnstar || '').trim());
+  const seguroGratis = cleanSeguroValor(row.seguro_gratis);
+  const seguroSubsecuente = cleanSeguroValor(row.seguro_subsecuente);
 
   return {
     id: row.id ?? null,
@@ -114,7 +126,10 @@ function mapContract(row) {
     pvas,
     cantidadPvas: pvas.length,
     montoPvas: roundMoney(pvas.reduce((s, p) => s + Number(p.monto || 0), 0)),
-    seguroGratis: row.seguro_gratis || null,
+    seguroGratis,
+    seguroSubsecuente,
+    hasSeguroGratis: Boolean(seguroGratis),
+    hasSeguroSubsecuente: Boolean(seguroSubsecuente),
     roboParcial: row.robo_parcial || null,
   };
 }
@@ -771,6 +786,9 @@ function buildSummary(contracts, solicitudes) {
     };
   });
 
+  const conSeguroGratis = contracts.filter((c) => c.hasSeguroGratis);
+  const conSeguroSubsecuente = contracts.filter((c) => c.hasSeguroSubsecuente);
+
   return {
     contratos: contracts.length,
     unidades: vins.size,
@@ -789,6 +807,16 @@ function buildSummary(contracts, solicitudes) {
       ? Math.round((totalCantidadPvas / contracts.length) * 10) / 10
       : null,
     porTipoPva,
+    seguroGratis: {
+      contratos: conSeguroGratis.length,
+      penetracionPct: pct(conSeguroGratis.length, contracts.length),
+      porCompania: countMap(conSeguroGratis, (c) => c.seguroGratis || '(sin compañía)'),
+    },
+    seguroSubsecuente: {
+      contratos: conSeguroSubsecuente.length,
+      penetracionPct: pct(conSeguroSubsecuente.length, contracts.length),
+      porCompania: countMap(conSeguroSubsecuente, (c) => c.seguroSubsecuente || '(sin compañía)'),
+    },
     plazos: countMap(contracts.filter((c) => c.plazoMeses), (c) => `${c.plazoMeses} meses`),
     planes: countMap(contracts, (c) => c.plan || '(sin plan)').slice(0, 10),
     tiposCompra: countMap(contracts, (c) => c.tipoCompra || '(sin tipo)'),

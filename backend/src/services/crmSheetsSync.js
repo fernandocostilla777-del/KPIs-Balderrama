@@ -1,7 +1,7 @@
 /**
  * Scheduler de sincronización del Google Sheet CRM (leads, solicitudes, tráfico, F&I…).
- * Corre a las 9:00, 12:00, 18:00, 19:50 y 20:10 (hora de México) mientras el backend esté activo.
- * Las corridas 19:50 y 20:10 son carga completa de fuentes para Objetivos Web + publicación a la nube.
+ * Corre a las 10:00, 16:00, 18:00 y 19:50 (hora de México) mientras el backend esté activo.
+ * La corrida 19:50 es carga completa de fuentes para Objetivos Web + publicación a la nube.
  */
 const { syncCrmSheets, ALL_ETLS } = require('../../scripts/sync-crm-sheets');
 const crmCiclos = require('./crmCiclosService');
@@ -9,17 +9,15 @@ const crmCiclos = require('./crmCiclosService');
 const MAX_TIMER_MS = 12 * 60 * 60 * 1000;
 /** Horas enteras legacy + cargas Objetivos Web a las 19:50 y 20:10. */
 const DEFAULT_SLOTS = [
-  { hour: 9, minute: 0 },
-  { hour: 12, minute: 0 },
+  { hour: 10, minute: 0 },
+  { hour: 16, minute: 0 },
   { hour: 18, minute: 0 },
   { hour: 19, minute: 50 },
-  { hour: 20, minute: 10 },
 ];
 const DEFAULT_TZ = 'America/Mexico_City';
-const DEFAULT_SLOTS_LABEL = '9,12,18,19:50,20:10';
+const DEFAULT_SLOTS_LABEL = '10,16,18,19:50';
 const OBJETIVOS_FULL_SLOTS = [
   { hour: 19, minute: 50 },
-  { hour: 20, minute: 10 },
 ];
 
 const state = {

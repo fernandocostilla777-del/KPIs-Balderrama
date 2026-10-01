@@ -1097,11 +1097,306 @@
     },
   };
 
+  /* ── Buscador de indicadores (lupa, a un lado de mensajes) ── */
+  const KPI_NAV_CATALOG = [
+    { label: 'Total ventas', keys: 'total ventas unidades facturas', page: 'sales', href: '/sales.html', target: '#kpiTotal', tab: 'ventas', module: 'Ventas' },
+    { label: 'Ventas retail', keys: 'retail menudeo', page: 'sales', href: '/sales.html', target: '#kpiCardRetail', tab: 'ventas', module: 'Ventas' },
+    { label: 'Flotillas', keys: 'flotilla flotillas', page: 'sales', href: '/sales.html', target: '#kpiCardFlotillas', tab: 'ventas', module: 'Ventas' },
+    { label: 'Notificaciones entrega SOFIA', keys: 'sofia entregas c-1 notif', page: 'sales', href: '/sales.html', target: '#kpiCardEntregasSofia', tab: 'ventas', module: 'Ventas' },
+    { label: 'Carry over para facturar', keys: 'carry over apartadas', page: 'sales', href: '/sales.html', target: '#kpiCardCarryOver', tab: 'ventas', module: 'Ventas' },
+    { label: 'Cobertura', keys: 'cobertura sofia objetivo', page: 'sales', href: '/sales.html', target: '#kpiCardCobertura', tab: 'ventas', module: 'Ventas' },
+    { label: 'Avance facturas GMMX', keys: 'gmmx avance facturas objetivo retail', page: 'sales', href: '/sales.html', target: '#goalRetailPanel', tab: 'ventas', module: 'Ventas' },
+    { label: 'Avance entregas SOFIA', keys: 'sofia avance objetivo faltante c-1', page: 'sales', href: '/sales.html', target: '#goalSofiaPanel', tab: 'ventas', module: 'Ventas' },
+    { label: 'Ventas por departamento', keys: 'fuerza departamento vendedores', page: 'sales', href: '/sales.html', target: '#secVentasDepartamento', tab: 'ventas', module: 'Ventas' },
+    { label: 'Antigüedad de origen', keys: 'c-6.1 antiguedad captura crm', page: 'sales', href: '/sales.html', target: '#secAntiguedadOrigen', tab: 'ventas', module: 'Ventas' },
+    { label: 'Tipo de cliente', keys: 'c-6 primera compra recurrentes', page: 'sales', href: '/sales.html', target: '#secTipoCliente', tab: 'ventas', module: 'Ventas' },
+    { label: 'Variación Interanual de Ventas (YoY)', keys: 'yoy interanual', page: 'sales', href: '/sales.html', target: '#chartYtd', tab: 'ventas', module: 'Ventas' },
+    { label: 'Tomas a cuenta', keys: 'c-10 tomas usados seminuevos', page: 'sales', href: '/sales.html', target: '#sectionTomasACuenta', tab: 'ventas', module: 'Ventas' },
+    { label: 'Avance de tomas a cuenta', keys: 'c-10 c-10.1 cumplimiento participacion tac', page: 'sales', href: '/sales.html', target: '#acMountTomas', tab: 'ventas', module: 'Ventas' },
+    { label: 'Mix de entregas', keys: 'c-2 c-2.1 mix carline', page: 'sales', href: '/sales.html', target: '#secMixAutos', tab: 'ventas', module: 'Ventas' },
+    { label: 'Financiamiento / GMF', keys: 'c-5 penetracion gmf fi pva', page: 'sales', href: '/sales.html', target: '#secFinanciamiento', tab: 'financiamiento', module: 'Ventas' },
+    { label: 'Leads / oportunidades', keys: 'leads crm conversion', page: 'sales', href: '/sales.html', target: '#secLeads', tab: 'leads', module: 'Ventas' },
+    { label: 'Afluencia', keys: 'afluencia trafico marketing', page: 'sales', href: '/sales.html', target: '#secAfluencia', tab: 'afluencia', module: 'Ventas' },
+    { label: 'Comisiones', keys: 'comisiones asesores', page: 'sales', href: '/sales.html', target: '#secComisiones', tab: 'comisiones', module: 'Ventas' },
+    { label: 'Inventario', keys: 'stock disponible plan piso', page: 'inventory', href: '/inventory.html', target: null, module: 'Inventario' },
+    { label: 'Antigüedad / exposición C-3', keys: 'c-3 antiguedad exposicion inventario 60+', page: 'inventory', href: '/inventory.html', target: '#kpiAgeingAlerts', module: 'Inventario' },
+    { label: 'Cierre de vendidos', keys: 'cierre utilidad neta', page: 'inventory', href: '/inventory.html?tab=cierre', target: '#panelInventarioCierre', module: 'Inventario' },
+    { label: 'PostVenta', keys: 'taller postventa ordenes', page: 'post-sales', href: '/post-sales.html', target: null, module: 'PostVenta' },
+    { label: 'Cuadre HyP', keys: 'hyp cuadre', page: 'post-sales', href: '/post-sales.html', target: '#panelCuadreOrdenesHyp', module: 'PostVenta' },
+    { label: 'Contabilidad / EEFF', keys: 'balance eeff', page: 'contabilidad', href: '/contabilidad.html', target: null, module: 'Contabilidad' },
+    { label: 'Pronóstico', keys: 'forecast pronostico', page: 'forecast', href: '/forecast.html', target: null, module: 'Pronóstico' },
+    { label: 'Seguimiento 360', keys: 'crm 360 cliente', page: 'seguimiento', href: '/seguimiento.html', target: null, module: 'Seguimiento' },
+    { label: 'Resumen ejecutivo', keys: 'overview tablero resumen', page: 'overview', href: '/index.html', target: null, module: 'Resumen' },
+  ];
+
+  let kpiSearchOpen = false;
+  let kpiSearchBtn = null;
+
+  function normalizeSearch(v) {
+    return String(v || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  function currentPageId() {
+    return document.body.dataset.page || 'overview';
+  }
+
+  function collectDomKpis() {
+    const out = [];
+    const seen = new Set();
+    document.querySelectorAll('.kpi-title, .section-title, .goal-chart-title, [data-ac-kpi]').forEach((el) => {
+      let label = '';
+      let targetEl = el.closest('section, .section-panel, .kpi-card, .goal-chart-panel, .ac-mount, [id]') || el;
+      if (el.classList.contains('kpi-title') || el.classList.contains('section-title') || el.classList.contains('goal-chart-title')) {
+        label = (el.textContent || '').trim();
+      } else if (el.hasAttribute('data-ac-kpi')) {
+        const clave = el.getAttribute('data-ac-kpi');
+        const name = el.querySelector('.eeff-edo-kpi__label')?.textContent?.trim() || '';
+        label = name ? `${clave} · ${name}` : clave;
+        targetEl = el;
+      }
+      if (!label || label.length < 2) return;
+      const id = targetEl?.id ? `#${targetEl.id}` : null;
+      const key = `${id || ''}|${normalizeSearch(label)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({
+        label,
+        keys: label,
+        page: currentPageId(),
+        href: location.pathname,
+        target: id,
+        targetEl: id ? null : targetEl,
+        tab: null,
+        module: PAGE_LABELS[currentPageId()] || 'Esta página',
+        local: true,
+      });
+    });
+    return out;
+  }
+
+  function buildKpiSearchIndex() {
+    const page = currentPageId();
+    const catalog = KPI_NAV_CATALOG.map((item) => ({ ...item, local: item.page === page }));
+    const local = collectDomKpis();
+    const labels = new Set(local.map((i) => normalizeSearch(i.label)));
+    const merged = [...local];
+    catalog.forEach((item) => {
+      if (!labels.has(normalizeSearch(item.label))) merged.push(item);
+    });
+    return merged;
+  }
+
+  function filterKpiIndex(query, index) {
+    const q = normalizeSearch(query);
+    if (!q) {
+      return index
+        .slice()
+        .sort((a, b) => Number(b.local) - Number(a.local) || a.label.localeCompare(b.label, 'es'))
+        .slice(0, 12);
+    }
+    return index
+      .map((item) => {
+        const hay = normalizeSearch(`${item.label} ${item.keys || ''} ${item.module || ''}`);
+        let score = 0;
+        if (hay.includes(q)) score += 10;
+        q.split(/\s+/).filter(Boolean).forEach((token) => {
+          if (hay.includes(token)) score += 3;
+        });
+        if (normalizeSearch(item.label).startsWith(q)) score += 5;
+        if (item.local) score += 2;
+        return { item, score };
+      })
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score || a.item.label.localeCompare(b.item.label, 'es'))
+      .slice(0, 14)
+      .map((r) => r.item);
+  }
+
+  function highlightKpiTarget(el) {
+    if (!el) return;
+    el.classList.add('section-focus', 'kpi-search-hit');
+    window.setTimeout(() => el.classList.remove('kpi-search-hit'), 2200);
+  }
+
+  async function gotoKpiEntry(entry) {
+    if (!entry) return;
+    const page = currentPageId();
+    const pathOnly = String(entry.href || '').split('?')[0].replace(/\/$/, '') || location.pathname.replace(/\/$/, '');
+    const samePage = entry.page === page
+      || pathOnly === location.pathname.replace(/\/$/, '')
+      || (pathOnly === '/index.html' && (location.pathname === '/' || location.pathname.endsWith('/index.html')));
+
+    if (!samePage) {
+      const url = new URL(entry.href || '/', location.origin);
+      if (entry.tab) url.searchParams.set('tab', entry.tab);
+      if (entry.target) url.searchParams.set('goto', String(entry.target).replace(/^#/, ''));
+      location.href = `${url.pathname}${url.search}${url.hash || ''}`;
+      return;
+    }
+
+    if (entry.tab) {
+      const tabBtn = document.querySelector(`#salesMainTabs [data-sales-tab="${entry.tab}"]`);
+      if (tabBtn && !tabBtn.classList.contains('active')) {
+        tabBtn.click();
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+
+    let el = entry.targetEl || null;
+    if (!el && entry.target) el = document.querySelector(entry.target);
+    if (!el && entry.label) {
+      const titles = Array.from(document.querySelectorAll('.section-title, .kpi-title, .goal-chart-title'));
+      const hit = titles.find((t) => normalizeSearch(t.textContent) === normalizeSearch(entry.label));
+      el = hit?.closest('section, .section-panel, .kpi-card, .goal-chart-panel, .ac-mount') || hit;
+    }
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    highlightKpiTarget(el);
+  }
+
+  function closeKpiSearch() {
+    const panel = document.getElementById('kpiSearchPanel');
+    if (panel) panel.classList.add('hidden');
+    kpiSearchOpen = false;
+    kpiSearchBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderKpiSearchResults(listEl, items, query) {
+    if (!listEl) return;
+    if (!items.length) {
+      listEl.innerHTML = `<p class="kpi-search-empty">Sin coincidencias${query ? ` para “${esc(query)}”` : ''}.</p>`;
+      listEl._items = [];
+      return;
+    }
+    listEl.innerHTML = items.map((item, idx) => `
+      <button type="button" class="kpi-search-item" data-kpi-nav-idx="${idx}" role="option">
+        <span class="kpi-search-item__label">${esc(item.label)}</span>
+        <span class="kpi-search-item__meta">${esc(item.module || PAGE_LABELS[item.page] || '')}${item.local ? ' · aquí' : ''}</span>
+      </button>
+    `).join('');
+    listEl._items = items;
+  }
+
+  function openKpiSearch() {
+    const panel = document.getElementById('kpiSearchPanel');
+    const input = document.getElementById('kpiSearchInput');
+    const list = document.getElementById('kpiSearchList');
+    if (!panel || !input || !list) return;
+    panel.classList.remove('hidden');
+    kpiSearchOpen = true;
+    kpiSearchBtn?.setAttribute('aria-expanded', 'true');
+    renderKpiSearchResults(list, filterKpiIndex(input.value, buildKpiSearchIndex()), input.value);
+    input.focus();
+    input.select();
+  }
+
+  function ensureKpiSearchPanel(wrap) {
+    if (document.getElementById('kpiSearchPanel')) return;
+    const panel = document.createElement('div');
+    panel.id = 'kpiSearchPanel';
+    panel.className = 'kpi-search-panel hidden';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Buscar indicador');
+    panel.innerHTML = `
+      <div class="kpi-search-panel__head">
+        <span class="material-symbols-outlined" aria-hidden="true">search</span>
+        <input id="kpiSearchInput" class="kpi-search-input" type="search" placeholder="Buscar indicador o sección…" autocomplete="off" aria-controls="kpiSearchList"/>
+      </div>
+      <div id="kpiSearchList" class="kpi-search-list" role="listbox" aria-label="Resultados"></div>
+      <p class="kpi-search-hint">Enter para ir · Esc para cerrar · Ctrl+K</p>
+    `;
+    wrap.appendChild(panel);
+
+    const input = panel.querySelector('#kpiSearchInput');
+    const list = panel.querySelector('#kpiSearchList');
+
+    input.addEventListener('input', () => {
+      renderKpiSearchResults(list, filterKpiIndex(input.value, buildKpiSearchIndex()), input.value);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeKpiSearch();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const first = list._items?.[0];
+        if (first) {
+          closeKpiSearch();
+          gotoKpiEntry(first);
+        }
+      }
+    });
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-kpi-nav-idx]');
+      if (!btn) return;
+      const item = list._items?.[Number(btn.dataset.kpiNavIdx)];
+      if (!item) return;
+      closeKpiSearch();
+      gotoKpiEntry(item);
+    });
+    document.addEventListener('click', (e) => {
+      if (!kpiSearchOpen) return;
+      if (e.target.closest('#kpiSearchPanel') || e.target.closest('.top-bar-kpi-search-btn')) return;
+      closeKpiSearch();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && kpiSearchOpen) closeKpiSearch();
+      if ((e.ctrlKey || e.metaKey) && String(e.key || '').toLowerCase() === 'k') {
+        e.preventDefault();
+        if (kpiSearchOpen) closeKpiSearch();
+        else openKpiSearch();
+      }
+    });
+  }
+
+  function consumeGotoFromUrl() {
+    const params = new URLSearchParams(location.search);
+    const goto = params.get('goto');
+    const tab = params.get('tab');
+    if (!goto && !tab) return;
+
+    const run = async () => {
+      if (tab) {
+        const tabBtn = document.querySelector(`#salesMainTabs [data-sales-tab="${tab}"]`);
+        if (tabBtn) tabBtn.click();
+        await new Promise((r) => setTimeout(r, 220));
+      }
+      if (goto) {
+        await gotoKpiEntry({
+          page: currentPageId(),
+          href: location.pathname,
+          target: goto.startsWith('#') ? goto : `#${goto}`,
+          label: goto,
+        });
+        params.delete('goto');
+        const next = `${location.pathname}${params.toString() ? `?${params}` : ''}${location.hash || ''}`;
+        window.history.replaceState({}, '', next);
+      }
+    };
+    window.setTimeout(() => { run().catch(() => {}); }, 500);
+  }
+
   function ensureNotificationsCenter(trailing) {
     if (trailing.querySelector('.top-bar-notif-wrap')) return;
 
     const wrap = document.createElement('div');
     wrap.className = 'top-bar-notif-wrap';
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'avatar-glass top-bar-notif-btn top-bar-kpi-search-btn';
+    searchBtn.setAttribute('aria-label', 'Buscar indicador');
+    searchBtn.setAttribute('aria-expanded', 'false');
+    searchBtn.setAttribute('aria-haspopup', 'dialog');
+    searchBtn.setAttribute('aria-controls', 'kpiSearchPanel');
+    searchBtn.title = 'Buscar indicador (Ctrl+K)';
+    searchBtn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">search</span>';
 
     const mailBtn = document.createElement('button');
     mailBtn.type = 'button';
@@ -1130,11 +1425,15 @@
       <span class="top-bar-notif-dot" data-notif-dot hidden aria-hidden="true"></span>
     `;
 
+    wrap.appendChild(searchBtn);
     wrap.appendChild(mailBtn);
     wrap.appendChild(btn);
     trailing.appendChild(wrap);
+    kpiSearchBtn = searchBtn;
     msgBtn = mailBtn;
     notifBtn = btn;
+
+    ensureKpiSearchPanel(wrap);
 
     if (window.desktopApp?.onUpdateStatus) {
       window.desktopApp.onUpdateStatus(() => {
@@ -1147,17 +1446,74 @@
       });
     }
 
+    searchBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (kpiSearchOpen) closeKpiSearch();
+      else openKpiSearch();
+    });
     mailBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      closeKpiSearch();
       ensureAlertsPanel().toggle({ mode: 'mensajes', anchor: mailBtn });
     });
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
+      closeKpiSearch();
       ensureAlertsPanel().toggle({ mode: 'operativas', anchor: btn });
     });
 
     ensureAlertsPanel();
     startNotificationsPolling();
+    consumeGotoFromUrl();
+  }
+
+  window.KpiSearch = {
+    open: openKpiSearch,
+    close: closeKpiSearch,
+    goto: gotoKpiEntry,
+  };
+
+  function themeToggleHtml() {
+    const Theme = window.BalderramaTheme;
+    const pref = Theme?.getPreference?.() || 'system';
+    const prefs = Theme?.PREFS || ['system', 'light', 'dark'];
+    const labels = Theme?.LABELS || { system: 'Sistema', light: 'Claro', dark: 'Oscuro' };
+    const icons = Theme?.ICONS || { system: 'brightness_auto', light: 'light_mode', dark: 'dark_mode' };
+    const buttons = prefs.map((id) => `
+      <button type="button"
+        class="top-bar-theme-btn${pref === id ? ' is-active' : ''}"
+        data-theme-pref="${id}"
+        aria-pressed="${pref === id ? 'true' : 'false'}"
+        title="${esc(labels[id] || id)}">
+        <span class="material-symbols-outlined" aria-hidden="true">${icons[id] || 'contrast'}</span>
+        <span>${esc(labels[id] || id)}</span>
+      </button>
+    `).join('');
+    return `
+      <div class="top-bar-user-row top-bar-user-row--stack top-bar-theme-block">
+        <span class="top-bar-user-label">Apariencia</span>
+        <div class="top-bar-theme-toggle" role="group" aria-label="Tema de apariencia">
+          ${buttons}
+        </div>
+      </div>
+    `;
+  }
+
+  function bindThemeToggle(panel) {
+    const Theme = window.BalderramaTheme;
+    if (!Theme || !panel) return;
+    panel.querySelectorAll('[data-theme-pref]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const next = btn.getAttribute('data-theme-pref');
+        Theme.setPreference(next);
+        panel.querySelectorAll('[data-theme-pref]').forEach((el) => {
+          const on = el.getAttribute('data-theme-pref') === next;
+          el.classList.toggle('is-active', on);
+          el.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      });
+    });
   }
 
   function renderUserPanel(panel, session) {
@@ -1188,6 +1544,7 @@
           <span class="top-bar-user-label">Perfil</span>
           <span class="top-bar-user-value">${esc(session?.roleLabel || '—')}</span>
         </div>
+        ${themeToggleHtml()}
         <div class="top-bar-user-row top-bar-user-row--stack">
           <span class="top-bar-user-label">Módulos con acceso</span>
           <div class="top-bar-user-modules">
@@ -1203,6 +1560,8 @@
         Cerrar sesión
       </button>
     `;
+
+    bindThemeToggle(panel);
 
     panel.querySelector('[data-user-logout]')?.addEventListener('click', async () => {
       try {

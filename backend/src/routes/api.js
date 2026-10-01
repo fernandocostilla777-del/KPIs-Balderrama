@@ -30,6 +30,7 @@ const { canManageUsers } = require('../auth/roles');
 const { isAuthEnabled } = require('../auth/session');
 const { requireSession } = require('../auth/middleware');
 const objetivosResultadosRoutes = require('./objetivosResultados');
+const seguimiento360Routes = require('./seguimiento360');
 
 const router = express.Router();
 
@@ -39,6 +40,9 @@ router.get('/health', (_req, res) => {
 
 /** Resultados en formato de objetivos comerciales (PDF scorecard). */
 router.use('/objetivos-resultados', objetivosResultadosRoutes);
+
+/** Expediente y KPIs de Seguimiento 360 (CRM + DMS). */
+router.use('/seguimiento-360', seguimiento360Routes);
 
 router.get('/ventas/objetivos/historico', (_req, res) => {
   try {
@@ -670,6 +674,106 @@ router.get('/ventas/analisis-comercial', async (req, res, next) => {
 router.get('/forecast', async (req, res, next) => {
   try {
     res.json(await getForecast({ horizon: req.query.horizon }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Pronóstico › Presupuesto de la empresa (P&L presupuestal 2026, misma base que Contabilidad › EEFF)
+router.get('/forecast/presupuesto', async (req, res, next) => {
+  try {
+    const { getPresupuestoEmpresa } = require('../services/presupuestoEmpresaService');
+    const mesCorte = req.query.mesCorte != null && req.query.mesCorte !== '' ? Number(req.query.mesCorte) : undefined;
+    const fresh = ['1', 'true'].includes(String(req.query.fresh || '').toLowerCase());
+    res.json(await getPresupuestoEmpresa({ mesCorte, fresh }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Pronóstico › Generador de presupuesto próximos 12 meses
+function parsePresupuesto12mParams(req) {
+  const src = req.method === 'POST' ? (req.body || {}) : (req.query || {});
+  let supuestos = src.supuestos;
+  if (typeof supuestos === 'string') {
+    try { supuestos = JSON.parse(supuestos); } catch { supuestos = {}; }
+  }
+  return {
+    inicio: src.inicio,
+    mesesHistoria: src.mesesHistoria,
+    supuestos,
+    fresh: ['1', 'true', true].includes(src.fresh),
+  };
+}
+
+router.all('/forecast/presupuesto-12m', async (req, res, next) => {
+  if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: 'Método no permitido' });
+  try {
+    const { getPresupuesto12m } = require('../services/presupuestoGeneradorService');
+    res.json(await getPresupuesto12m(parsePresupuesto12mParams(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/forecast/presupuesto-12m/xlsx', async (req, res, next) => {
+  try {
+    const { getPresupuesto12m, buildXlsx } = require('../services/presupuestoGeneradorService');
+    const data = await getPresupuesto12m(parsePresupuesto12mParams(req));
+    if (!data.available) return res.status(400).json({ error: data.reason || 'Sin datos para generar el presupuesto.' });
+    const buffer = buildXlsx(data);
+    const name = `presupuesto-12m-${data.inicio}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/forecast/presupuesto-12m/escenarios', (_req, res, next) => {
+  try {
+    const { listEscenarios } = require('../services/presupuestoGeneradorService');
+    res.json({ escenarios: listEscenarios() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/forecast/presupuesto-12m/escenarios/:id', (req, res, next) => {
+  try {
+    const { getEscenario } = require('../services/presupuestoGeneradorService');
+    const esc = getEscenario(req.params.id);
+    if (!esc) return res.status(404).json({ error: 'Escenario no encontrado' });
+    res.json(esc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/forecast/presupuesto-12m/escenarios', (req, res, next) => {
+  try {
+    const { saveEscenario } = require('../services/presupuestoGeneradorService');
+    const body = req.body || {};
+    const saved = saveEscenario({
+      id: body.id,
+      nombre: body.nombre,
+      inicio: body.inicio,
+      mesesHistoria: body.mesesHistoria,
+      supuestos: body.supuestos,
+      usuario: req.session?.username || null,
+    });
+    res.json(saved);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/forecast/presupuesto-12m/escenarios/:id', (req, res, next) => {
+  try {
+    const { deleteEscenario } = require('../services/presupuestoGeneradorService');
+    if (!deleteEscenario(req.params.id)) return res.status(404).json({ error: 'Escenario no encontrado' });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

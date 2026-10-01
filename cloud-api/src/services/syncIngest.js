@@ -14,6 +14,7 @@ const VALID_DOMAINS = new Set([
   'auth',
   'personal',
   'objetivos',
+  'vendidos',
 ]);
 const VALID_SYNC_TYPES = new Set(['incremental', 'daily', 'monthly']);
 

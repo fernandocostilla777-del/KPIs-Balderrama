@@ -6,7 +6,8 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=98" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=145" rel="stylesheet"/>
+<script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -103,7 +104,6 @@
 <button type="button" class="contabilidad-tab" data-tab="catalogo" hidden aria-hidden="true">Catálogo de cuentas</button>
 <button type="button" class="contabilidad-tab active" data-tab="balance">Balance General</button>
 <button type="button" class="contabilidad-tab" data-tab="eeff">EEFF</button>
-<button type="button" class="contabilidad-tab" data-tab="analisis">Análisis financiero</button>
 </nav>
 
 <div id="panelContabilidadCatalogo" class="contabilidad-main-panel hidden" hidden aria-hidden="true">
@@ -301,6 +301,23 @@
 <aside id="afKpiFloat" class="bg-kpi-float hidden" role="dialog" aria-modal="true" aria-labelledby="afKpiFloatTitle"></aside>
 
 <div id="panelContabilidadEeff" class="contabilidad-main-panel hidden">
+
+<section class="eeff-edo-overview af-overview" id="afOverview" aria-label="CMI financiero Ventas nuevos" style="margin-bottom:16px">
+  <div class="section-head-row" style="margin-bottom:14px">
+    <div>
+      <h3 class="section-title">CMI financiero · Ventas nuevos</h3>
+      <p class="section-subtitle">6 bloques · F-1…F-7.1 · periodo <span id="afPeriodLabel">—</span></p>
+    </div>
+    <span id="afLoading" class="pe-mode-badge hidden">Cargando…</span>
+  </div>
+  <p id="afEmpty" class="liquidez-note hidden" aria-live="polite"></p>
+  <div class="eeff-edo-kpi-row af-kpi-row" id="afKpiPrimary"></div>
+  <div id="afKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+  <p class="eeff-edo-footnote" id="afFootnote">
+    <span class="material-symbols-outlined" aria-hidden="true">info</span>
+    Clic en un KPI para ver fórmula, numerador/denominador, componentes y meta · cifras en MXN
+  </p>
+</section>
 
 <nav class="eeff-tabs" id="eeffTabs" aria-label="Categorías EEFF">
 <button type="button" class="eeff-tab active" data-categoria="estadoFinanciero">Edo. Financiero</button>
@@ -567,47 +584,18 @@ Exportar CSV
 
 </div>
 
-<div id="panelContabilidadAnalisis" class="contabilidad-main-panel hidden">
-<section class="eeff-edo-overview af-overview" id="afOverview" aria-label="Análisis financiero IEMC">
-  <div class="section-head-row" style="margin-bottom:14px">
-    <div>
-      <h3 class="section-title">Análisis financiero · Ventas nuevos</h3>
-      <p class="section-subtitle">IEMC F-1…F-7.1 · periodo <span id="afPeriodLabel">—</span></p>
-    </div>
-    <span id="afLoading" class="pe-mode-badge hidden">Cargando…</span>
-  </div>
-  <p id="afEmpty" class="liquidez-note hidden" aria-live="polite"></p>
-  <div class="eeff-edo-kpi-row af-kpi-row" id="afKpiPrimary"></div>
-  <div id="afKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
-  <p class="eeff-edo-footnote" id="afFootnote">
-    <span class="material-symbols-outlined" aria-hidden="true">info</span>
-    Clic en un KPI para ver fórmula, numerador/denominador, componentes y meta · cifras en MXN
-  </p>
-</section>
-
-<section class="section-panel dashboard-section">
-  <h3 class="section-title">Lectura del marco</h3>
-  <p class="section-subtitle">F-1 venta económica · F-2/F-2.1 mix y brecha de margen · F-3/F-3.1 gasto operativo · F-4/F-4.1 F&amp;I · F-5 cobertura plan piso · F-6 crecimiento UOC · F-7/F-7.1 carga estructural</p>
-  <div class="af-legend">
-    <span class="af-kpi__status af-kpi__status--completo">Completo</span>
-    <span class="af-kpi__status af-kpi__status--parcial">Parcial (proxy o sin clasificación)</span>
-    <span class="af-kpi__status af-kpi__status--pendiente_meta">Falta meta</span>
-  </div>
-</section>
-</div>
-
 </div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=6"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=18"></script>
+<script src="/js/topbar.js?v=21"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/eeff.js?v=31"></script>
-<script src="/js/analisisFinanciero.js?v=3"></script>
-<script src="/js/contabilidad.js?v=72"></script>
+<script src="/js/analisisFinanciero.js?v=11"></script>
+<script src="/js/contabilidad.js?v=75"></script>
 </body>
 </html>

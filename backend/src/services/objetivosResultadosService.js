@@ -4,6 +4,7 @@
  */
 
 const { getVentas, getTomasACuenta } = require('./ventas');
+const { isFlotillaExcluidaSofia } = require('./sofia-entregas');
 const { getGoals } = require('./salesGoals');
 const { getFinanciamientoDashboard, loadSolicitudes } = require('./financiamientoService');
 const { getAfluenciaDashboard, classifyReconciliacion, isNuevos } = require('./afluenciaService');
@@ -1109,32 +1110,31 @@ async function fetchBdcFromCloud({ fechaInicio, fechaFin }) {
   const apiKey = String(process.env.CLOUD_SYNC_API_KEY || '').trim();
   if (!baseUrl || !apiKey) return null;
   const query = new URLSearchParams({ fechaInicio, fechaFin });
-  const response = await fetch(`${baseUrl}/api/crm/bdc?${query}`, {
-    headers: { 'X-API-Key': apiKey },
-  });
-  if (!response.ok) return null;
-  const payload = await response.json();
-  if (!payload?.real) return null;
-  return payload;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(`${baseUrl}/api/crm/bdc?${query}`, {
+      headers: { 'X-API-Key': apiKey },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    if (!payload?.real) return null;
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
- * Embudo BDC operativo en Railway (crm_ciclos). La SQLite local de Balderrama
- * Ciclos queda como respaldo histórico si la nube no responde o no tiene datos.
+ * Embudo BDC: citas preferentemente desde Railway (crm_ciclos).
+ * Contactos = ciclos del periodo ∪ leads con ejecutivo asignado (cartera EV en SQLite local).
  */
 async function resolveBdcEmbudo({ fechaInicio, fechaFin, metas }) {
   let cloud = null;
   let cloudErr = null;
   try {
     cloud = await fetchBdcFromCloud({ fechaInicio, fechaFin });
-    if (Number(cloud?.real?.contactos || 0) > 0) {
-      return {
-        ...cloud,
-        meta: metas,
-        fuente: cloud.fuente || 'crm_ciclos (Railway)',
-        nota: cloud.nota || 'Fuente operativa: CRM sincronizado en Railway.',
-      };
-    }
   } catch (err) {
     cloudErr = err.message;
   }
@@ -1142,16 +1142,60 @@ async function resolveBdcEmbudo({ fechaInicio, fechaFin, metas }) {
   let local = null;
   try {
     local = crmCiclos.getBdcEmbudo({ fechaInicio, fechaFin });
-    if (Number(local?.real?.contactos || 0) > 0) {
-      return {
-        ...local,
-        meta: metas,
-        fuente: 'crm_actividades (histórico local)',
-        nota: 'Respaldo histórico Balderrama Ciclos. La fuente operativa es Railway.',
-      };
-    }
   } catch (err) {
     local = { disponible: false, status: 'error', real: null, nota: err.message };
+  }
+
+  const cloudReal = cloud?.real || null;
+  const localReal = local?.real || null;
+  const ciclos = Number(cloudReal?.contactos || localReal?.contactosCiclos || 0);
+  const leadsAsignados = Number(localReal?.contactosLeadsAsignados || 0);
+  const overlap = Number(localReal?.contactosOverlap || 0);
+  const contactos = Math.max(0, ciclos + leadsAsignados - overlap);
+
+  const preferCloudCitas = Number(cloudReal?.citasAgendadas || 0) > 0
+    || Number(cloudReal?.contactos || 0) > 0;
+  const baseReal = preferCloudCitas ? cloudReal : localReal;
+
+  if (baseReal || contactos > 0) {
+    const real = {
+      ...(baseReal || {}),
+      contactos,
+      contactosCiclos: ciclos,
+      contactosLeadsAsignados: leadsAsignados,
+      contactosOverlap: overlap,
+      citasAgendadas: Number(baseReal?.citasAgendadas || 0),
+      citasConfirmadas: Number(baseReal?.citasConfirmadas || 0),
+      citasCumplidas: Number(baseReal?.citasCumplidas || 0),
+      entregasBdc: Number(baseReal?.entregasBdc || 0),
+    };
+    return {
+      disponible: contactos > 0 || Number(real.citasAgendadas || 0) > 0,
+      status: 'completo',
+      real,
+      meta: metas,
+      conversion: {
+        citasSobreContactosPct: (() => {
+          const p = Number(real.citasAgendadas);
+          const t = Number(real.contactos);
+          if (!Number.isFinite(p) || !Number.isFinite(t) || t <= 0) return null;
+          return Math.round((p / t) * 1000) / 10;
+        })(),
+        confirmadasSobreAgendadasPct: cloud?.conversion?.confirmadasSobreAgendadasPct
+          ?? local?.conversion?.confirmadasSobreAgendadasPct
+          ?? null,
+        cumplidasSobreConfirmadasPct: cloud?.conversion?.cumplidasSobreConfirmadasPct
+          ?? local?.conversion?.cumplidasSobreConfirmadasPct
+          ?? null,
+        entregasSobreCumplidasPct: cloud?.conversion?.entregasSobreCumplidasPct
+          ?? local?.conversion?.entregasSobreCumplidasPct
+          ?? null,
+      },
+      fuente: preferCloudCitas
+        ? 'crm_ciclos (Railway) + crm_leads EV asignados (local)'
+        : (local?.fuente || 'crm_actividades + crm_leads'),
+      nota: `Contactos = ciclos (${ciclos}) ∪ leads con ejecutivo asignado (${leadsAsignados}; solape ${overlap}).`,
+    };
   }
 
   if (cloud?.real) {
@@ -1282,13 +1326,13 @@ async function getDiarioResultados({
   };
 
   const facturasPorFecha = new Map();
-  for (const d of ventas.resumen?.porDia || []) {
-    const iso = mapDiaLabelToIso(d.label);
-    if (!iso) continue;
-    facturasPorFecha.set(iso, (facturasPorFecha.get(iso) || 0) + Number(d.count || d.value || 0));
-  }
+  // Misma población que el indicador "Unidades facturadas": incluye demos
+  // y excluye FLOT (y FLOTGMF cuyo contrato es flotilla).
   for (const factura of ventas.registros || []) {
+    if (isFlotillaExcluidaSofia(factura)) continue;
     const iso = mapDiaLabelToIso(factura.VTE_FECHDOCTO);
+    if (!iso) continue;
+    facturasPorFecha.set(iso, (facturasPorFecha.get(iso) || 0) + 1);
     addDetalle(iso, 'facturas', {
       documento: factura.VTE_DOCTO || null,
       cliente: factura.CLIENTE || null,
@@ -1387,7 +1431,7 @@ async function getDiarioResultados({
     formato: 'objetivos-resultados-v1',
     disponible: true,
     status: 'ok',
-    nota: 'Serie y detalle diario de tráfico, solicitudes, facturas DMS y entregas SOFIA.',
+    nota: 'Serie y detalle diario de tráfico, solicitudes, facturas DMS y entregas SOFIA. Facturas = indicador de unidades facturadas (incluye demos, excluye FLOT).',
     resultados: {
       serie,
       detallePorFecha,
@@ -1457,11 +1501,11 @@ async function getSeminuevosResultados({
   };
 }
 
-async function getObjetivosResultadosCompleto({ fechaInicio, fechaFin }) {
+async function getObjetivosResultadosCompleto({ fechaInicio, fechaFin, fresh = false } = {}) {
   requirePeriod(fechaInicio, fechaFin);
 
   // Una sola carga de ventas/tomas para no saturar DMS (antes: 3–4 llamadas en paralelo → hang ups).
-  const ventas = await getVentas({ fechaInicio, fechaFin });
+  const ventas = await getVentas({ fechaInicio, fechaFin, fresh });
   const tomasFromVentas = {
     total: ventas?.resumen?.totalTomasACuenta ?? null,
     montoTotal: ventas?.resumen?.montoTomasACuenta ?? null,

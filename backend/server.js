@@ -148,6 +148,24 @@ const server = app.listen(PORT, HOST, () => {
   } catch (err) {
     console.error('[office-commands] No se pudo iniciar el poller:', err.message);
   }
+  // Precalienta el presupuesto de la empresa (Pronóstico) para que la primera consulta sea inmediata.
+  if (process.env.PRESUPUESTO_WARMUP !== 'false') {
+    setTimeout(() => {
+      try {
+        const { getPresupuestoEmpresa } = require('./src/services/presupuestoEmpresaService');
+        const { getPresupuesto12m } = require('./src/services/presupuestoGeneradorService');
+        getPresupuestoEmpresa().then(
+          () => console.log('[presupuesto-empresa] caché precalentada'),
+          (err) => console.error('[presupuesto-empresa] warmup:', err.message),
+        ).then(() => getPresupuesto12m()).then(
+          () => console.log('[presupuesto-12m] histórico 36m precalentado'),
+          (err) => console.error('[presupuesto-12m] warmup:', err.message),
+        );
+      } catch (err) {
+        console.error('[presupuesto-empresa] warmup:', err.message);
+      }
+    }, 45 * 1000).unref();
+  }
 });
 
 server.on('error', (err) => {

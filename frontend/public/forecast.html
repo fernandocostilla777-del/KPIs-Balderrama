@@ -6,7 +6,8 @@
 <title>Pronóstico de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=88" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=149" rel="stylesheet"/>
+<script src="/js/theme.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="forecast">
@@ -15,9 +16,9 @@
 <main class="main-shell">
 <header class="top-bar">
 <div class="top-bar-actions">
-<span class="top-bar-title">Pronóstico de Ventas</span>
+<span class="top-bar-title" id="forecastTopTitle">Pronóstico</span>
 </div>
-<div class="top-bar-actions">
+<div class="top-bar-actions" id="forecastVentasControls">
 <label class="filter-label" style="margin:0">Horizonte</label>
 <select id="horizonSelect" class="filter-select">
 <option value="3">3 meses</option>
@@ -29,6 +30,14 @@
 </header>
 <div class="main-content custom-scrollbar">
 
+<nav class="contabilidad-tabs forecast-tabs" id="forecastTabs" aria-label="Secciones de pronóstico">
+<button type="button" class="contabilidad-tab active" data-tab="ventas">Pronóstico de ventas</button>
+<button type="button" class="contabilidad-tab" data-tab="presupuesto12m">Presupuesto próximos 12 meses</button>
+<button type="button" class="contabilidad-tab" data-tab="simulador">Simulador de presupuesto</button>
+<button type="button" class="contabilidad-tab" data-tab="presupuesto">Seguimiento PPTO 2026</button>
+</nav>
+
+<div id="panelForecastVentas" class="forecast-panel" data-panel="ventas">
 <section class="kpi-grid">
 <div class="kpi-card kpi-card--blue">
 <div class="kpi-card-head"><span class="kpi-title">Último mes real</span><span class="material-symbols-outlined kpi-icon">history</span></div>
@@ -101,16 +110,387 @@
 </table>
 </div>
 </details>
+</div><!-- /panelForecastVentas -->
+
+<!-- ====================== PRESUPUESTO PRÓXIMOS 12 MESES ====================== -->
+<div id="panelForecastPresupuesto12m" class="forecast-panel hidden" data-panel="presupuesto12m">
+<section class="section-panel dashboard-section ppto-empresa ppto-12m" id="ppto12m" aria-labelledby="ppto12mTitle">
+<div class="section-panel-head ppto-empresa__head">
+<div>
+<h3 class="section-title" id="ppto12mTitle">Presupuesto próximos 12 meses</h3>
+<p class="section-subtitle" id="ppto12mSubtitle">Generado a partir del histórico contable real (Contabilidad › EEFF) y supuestos ajustables por segmento</p>
+</div>
+<div class="ppto-empresa__controls">
+<label class="filter-label" for="ppto12mInicio" style="margin:0">Inicio</label>
+<input type="month" id="ppto12mInicio" class="filter-select" aria-label="Primer mes del presupuesto"/>
+<label class="filter-label" for="ppto12mMetodo" style="margin:0">Método</label>
+<select id="ppto12mMetodo" class="filter-select" aria-label="Método de proyección">
+<option value="estacional" selected>Estacional (últimos 12m × crecimiento)</option>
+<option value="regresion">Regresión (tendencia + estacionalidad)</option>
+</select>
+<button type="button" id="btnPpto12mGenerar" class="btn-glass btn-primary" title="Recalcular el presupuesto con los supuestos actuales">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">auto_awesome</span>
+Generar
+</button>
+<button type="button" id="btnPpto12mXlsx" class="btn-glass" title="Descargar Excel con presupuesto, segmentos, supuestos e histórico">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">download</span>
+Exportar Excel
+</button>
+</div>
+</div>
+<div class="ppto-12m__escenarios">
+<label class="filter-label" for="ppto12mEscenario" style="margin:0">Escenario</label>
+<select id="ppto12mEscenario" class="filter-select" aria-label="Escenario guardado"><option value="">— Sin guardar —</option></select>
+<button type="button" id="btnPpto12mGuardar" class="btn-glass" title="Guardar los supuestos actuales como escenario">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">save</span>
+Guardar
+</button>
+<button type="button" id="btnPpto12mGuardarComo" class="btn-glass" title="Guardar como un escenario nuevo">Guardar como…</button>
+<button type="button" id="btnPpto12mEliminar" class="btn-glass" title="Eliminar el escenario seleccionado">Eliminar</button>
+<button type="button" id="btnPpto12mReset" class="btn-glass" title="Volver a los supuestos derivados del histórico">Restablecer supuestos</button>
+</div>
+<div id="ppto12mAlert" class="comparativa-alert hidden" role="status"></div>
+<p class="ppto-empresa__status" id="ppto12mStatus">Selecciona la pestaña para generar el presupuesto…</p>
+
+<section class="kpi-grid ppto-empresa__kpis" id="ppto12mKpis" aria-label="KPIs presupuesto 12 meses"></section>
+
+<div class="section-panel table-panel ppto-empresa__block">
+<div class="section-panel-head" style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px">
+<div>
+<h4 class="section-title">Supuestos por segmento</h4>
+<p class="section-subtitle">Edita crecimiento de ventas, margen bruto objetivo y crecimiento de gastos; pulsa <strong>Generar</strong> para recalcular. Vacío = valor derivado del histórico.</p>
+</div>
+<div class="ppto-12m__globales">
+<label class="filter-label" style="margin:0">Crec. ventas global %<input type="number" step="0.1" id="ppto12mCrecVentas" class="filter-select ppto-12m__input" placeholder="derivado"/></label>
+<label class="filter-label" style="margin:0">Crec. gastos global %<input type="number" step="0.1" id="ppto12mCrecGastos" class="filter-select ppto-12m__input" placeholder="0"/></label>
+<label class="filter-label" style="margin:0">Crec. administración %<input type="number" step="0.1" id="ppto12mCrecAdmin" class="filter-select ppto-12m__input" placeholder="0"/></label>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare ppto-empresa__table ppto-12m__supuestos">
+<thead>
+<tr>
+<th>Segmento</th>
+<th class="cell-money">Ventas últ. 12m</th>
+<th class="cell-num">Crec. derivado %</th>
+<th class="cell-num">Crec. ventas %</th>
+<th class="cell-money">Ventas 12m PPTO</th>
+<th class="cell-num">Margen 12m %</th>
+<th class="cell-num">Margen objetivo %</th>
+<th class="cell-money">Gastos base (run-rate)</th>
+<th class="cell-num">Crec. gastos %</th>
+<th class="cell-money">Gastos 12m PPTO</th>
+</tr>
+</thead>
+<tbody id="ppto12mSupuestosTable"></tbody>
+</table>
+</div>
+</div>
+
+<div class="section-panel ppto-empresa__block">
+<div class="section-panel-head" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+<div>
+<h4 class="section-title">Histórico real y presupuesto</h4>
+<p class="section-subtitle" id="ppto12mChartSubtitle">Últimos 24 meses reales + 12 meses presupuestados</p>
+</div>
+<select id="ppto12mLineaChart" class="filter-select" aria-label="Línea a graficar">
+<option value="ventasTotales">Total ventas</option>
+<option value="utilidadBruta">Utilidad bruta</option>
+<option value="sumaGastos">Suma gastos</option>
+<option value="utilidadOperacion">Utilidad de operación</option>
+</select>
+</div>
+<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="ppto12mChart"></canvas></div></div>
+</div>
+
+<div class="section-panel table-panel ppto-empresa__block">
+<div class="section-panel-head">
+<h4 class="section-title">Estado de resultados presupuestado · 12 meses</h4>
+<p class="section-subtitle" id="ppto12mEdoSubtitle">Mismas líneas que Contabilidad › EEFF · comparación contra los últimos 12 meses reales</p>
+</div>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare data-table--sticky ppto-empresa__table ppto-12m__edo">
+<thead id="ppto12mEdoHead"></thead>
+<tbody id="ppto12mEdoTable"></tbody>
+</table>
+</div>
+</div>
+
+<div class="section-panel table-panel ppto-empresa__block">
+<h4 class="section-title">Detalle por segmento · 12 meses</h4>
+<p class="section-subtitle">Utilidad de operación por segmento antes de prorrateo de administración</p>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare ppto-empresa__table">
+<thead>
+<tr>
+<th>Segmento</th>
+<th class="cell-money">Ventas</th>
+<th class="cell-money">Costo</th>
+<th class="cell-money">Utilidad bruta</th>
+<th class="cell-num">Margen bruto %</th>
+<th class="cell-money">Gastos operación</th>
+<th class="cell-money">Utilidad operación</th>
+<th class="cell-num">Margen op. %</th>
+</tr>
+</thead>
+<tbody id="ppto12mSegmentosTable"></tbody>
+</table>
+</div>
+</div>
+
+<details class="section-panel ppto-empresa__block">
+<summary class="section-title" style="cursor:pointer">Metodología y fuentes</summary>
+<ul id="ppto12mMetodologia" class="kpi-subtitle" style="padding-left:18px;line-height:1.7;margin-top:10px"></ul>
+</details>
+</section>
+</div><!-- /panelForecastPresupuesto12m -->
+
+<!-- ====================== SIMULADOR DE PRESUPUESTO ====================== -->
+<div id="panelForecastSimulador" class="forecast-panel hidden" data-panel="simulador">
+<section class="section-panel dashboard-section ppto-empresa ppto-sim" id="pptoSim" aria-labelledby="pptoSimTitle">
+<div class="section-panel-head ppto-empresa__head">
+<div>
+<h3 class="section-title" id="pptoSimTitle">Simulador de presupuesto</h3>
+<p class="section-subtitle" id="pptoSimSubtitle">¿Qué pasa si…? Mueve las palancas y observa el impacto inmediato sobre la utilidad de operación de los próximos 12 meses</p>
+</div>
+<div class="ppto-empresa__controls">
+<button type="button" class="btn-glass" data-preset="pesimista" title="Ventas −10 %, margen −0.5 pts, gastos +3 %">Pesimista</button>
+<button type="button" class="btn-glass" data-preset="base" title="Sin cambios contra el presupuesto base">Base</button>
+<button type="button" class="btn-glass" data-preset="optimista" title="Ventas +8 %, margen +0.5 pts, gastos −3 %">Optimista</button>
+<button type="button" id="btnSimEquilibrio" class="btn-glass" title="Ajusta el crecimiento global de ventas hasta utilidad de operación = 0">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">balance</span>
+Punto de equilibrio
+</button>
+<button type="button" id="btnSimAplicar" class="btn-glass btn-primary" title="Llevar esta simulación como supuestos al generador de 12 meses (ahí puedes guardarla y exportarla)">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">input</span>
+Aplicar al presupuesto
+</button>
+</div>
+</div>
+<p id="pptoSimStatus" class="ppto-empresa__status">Cargando presupuesto base…</p>
+
+<div class="ppto-sim__globales" id="pptoSimGlobales">
+<div class="ppto-sim__lever"><label for="simGVentas">Ventas (todas)</label><input type="range" id="simGVentas" min="-30" max="30" step="0.1" value="0" data-unit="%"/><output for="simGVentas">0.0%</output></div>
+<div class="ppto-sim__lever"><label for="simGMargen">Margen bruto (todas)</label><input type="range" id="simGMargen" min="-5" max="5" step="0.1" value="0" data-unit="pts"/><output for="simGMargen">0.0 pts</output></div>
+<div class="ppto-sim__lever"><label for="simGGastos">Gastos de operación</label><input type="range" id="simGGastos" min="-30" max="30" step="0.1" value="0" data-unit="%"/><output for="simGGastos">0.0%</output></div>
+<div class="ppto-sim__lever"><label for="simGAdmin">Gastos de administración</label><input type="range" id="simGAdmin" min="-30" max="30" step="0.1" value="0" data-unit="%"/><output for="simGAdmin">0.0%</output></div>
+</div>
+
+<section class="kpi-grid ppto-empresa__kpis" id="pptoSimKpis" aria-label="KPIs simulación"></section>
+
+<div class="chart-grid ppto-empresa__block">
+<div class="section-panel">
+<h4 class="section-title">Utilidad de operación mensual · base vs simulada</h4>
+<div class="chart-card"><div class="chart-wrap"><canvas id="pptoSimChartMes"></canvas></div></div>
+</div>
+<div class="section-panel">
+<h4 class="section-title">¿De dónde viene el cambio?</h4>
+<p class="section-subtitle">Impacto en utilidad de operación por segmento (simulado − base)</p>
+<div class="chart-card"><div class="chart-wrap"><canvas id="pptoSimChartImpacto"></canvas></div></div>
+</div>
+</div>
+
+<div class="section-panel table-panel ppto-empresa__block">
+<h4 class="section-title">Palancas por segmento</h4>
+<p class="section-subtitle">Se suman a las palancas globales. Ventas y gastos en % sobre el presupuesto base; margen en puntos porcentuales.</p>
+<div class="table-scroll">
+<table class="data-table data-table--sticky ppto-empresa__table ppto-sim__table">
+<thead>
+<tr>
+<th>Segmento</th>
+<th class="cell-money">Ventas base</th>
+<th>Δ Ventas</th>
+<th>Δ Margen bruto</th>
+<th>Δ Gastos</th>
+<th class="cell-money">Ventas simuladas</th>
+<th class="cell-money">Utilidad op. base</th>
+<th class="cell-money">Utilidad op. simulada</th>
+<th class="cell-money">Impacto</th>
+</tr>
+</thead>
+<tbody id="pptoSimTable"></tbody>
+</table>
+</div>
+</div>
+
+<div class="section-panel table-panel ppto-empresa__block">
+<h4 class="section-title">Sensibilidad · ¿dónde conviene empujar?</h4>
+<p class="section-subtitle">Cuánto cambia la utilidad de operación 12m con un movimiento de 1 unidad en cada palanca (sobre el escenario simulado)</p>
+<div class="table-scroll">
+<table class="data-table ppto-empresa__table">
+<thead>
+<tr>
+<th>Segmento</th>
+<th class="cell-money">+1 % ventas</th>
+<th class="cell-money">+1 pt margen bruto</th>
+<th class="cell-money">−1 % gastos</th>
+<th>Palanca más potente</th>
+</tr>
+</thead>
+<tbody id="pptoSimSensTable"></tbody>
+</table>
+</div>
+</div>
+</section>
+</div><!-- /panelForecastSimulador -->
+
+<!-- ====================== SEGUIMIENTO PPTO 2026 ====================== -->
+<div id="panelForecastPresupuesto" class="forecast-panel hidden" data-panel="presupuesto">
+<section class="section-panel dashboard-section ppto-empresa" id="pptoEmpresa" aria-labelledby="pptoEmpresaTitle">
+<div class="section-panel-head ppto-empresa__head">
+<div>
+<h3 class="section-title" id="pptoEmpresaTitle">Presupuesto de la empresa 2026</h3>
+<p class="section-subtitle" id="pptoEmpresaSubtitle">Estado de resultados presupuestal · misma base que Contabilidad › EEFF</p>
+</div>
+<div class="ppto-empresa__controls">
+<label class="filter-label" for="pptoCorteSelect" style="margin:0">Corte contable</label>
+<select id="pptoCorteSelect" class="filter-select" aria-label="Último mes contable cerrado"></select>
+<button type="button" id="btnPptoActualizar" class="btn-glass" title="Recalcular con datos contables frescos">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">refresh</span>
+Actualizar
+</button>
+<button type="button" id="btnPptoCsv" class="btn-glass" title="Descargar CSV del estado de resultados presupuestal">
+<span class="material-symbols-outlined" style="font-size:18px;vertical-align:-3px">download</span>
+Exportar CSV
+</button>
+</div>
+</div>
+<div id="pptoEmpresaAlert" class="comparativa-alert hidden" role="status"></div>
+<p class="ppto-empresa__status" id="pptoEmpresaStatus">Cargando presupuesto…</p>
+
+<section class="kpi-grid ppto-empresa__kpis" id="pptoKpis" aria-label="KPIs presupuesto"></section>
+
+<div class="section-panel table-panel ppto-empresa__block">
+<div class="section-panel-head" style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px">
+<div>
+<h4 class="section-title">Estado de resultados · Real acumulado vs Presupuesto</h4>
+<p class="section-subtitle" id="pptoEdoSubtitle">Meses cerrados</p>
+</div>
+</div>
+<p class="comparativa-legend" aria-label="Leyenda">
+<span class="comparativa-legend__item"><span class="comparativa-legend__swatch comparativa-legend__swatch--pos"></span> Verde: favorable vs PPTO</span>
+<span class="comparativa-legend__item"><span class="comparativa-legend__swatch comparativa-legend__swatch--neg"></span> Rojo: desfavorable vs PPTO (costos y gastos se leen al revés)</span>
+<span class="comparativa-legend__item">Cierre proyectado = Real cerrado + PPTO de meses restantes</span>
+<span class="comparativa-legend__item">Tendencia = PPTO anual × cumplimiento YTD</span>
+</p>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare data-table--sticky ppto-empresa__table">
+<thead>
+<tr>
+<th>Concepto</th>
+<th class="cell-money">PPTO anual</th>
+<th class="cell-money">PPTO YTD</th>
+<th class="cell-money">Real YTD</th>
+<th class="cell-money">Variación $</th>
+<th class="cell-num">Var. %</th>
+<th class="cell-num">Cumpl. %</th>
+<th class="cell-money">PPTO restante</th>
+<th class="cell-money">Cierre proyectado</th>
+<th class="cell-num">Var. cierre %</th>
+<th class="cell-money">Tendencia</th>
+</tr>
+</thead>
+<tbody id="pptoEdoTable"></tbody>
+</table>
+</div>
+</div>
+
+<div class="chart-grid-2-1 ppto-empresa__block">
+<div class="section-panel">
+<div class="section-panel-head" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+<div>
+<h4 class="section-title">Calendario presupuestal · mes a mes</h4>
+<p class="section-subtitle" id="pptoMesSubtitle">PPTO vs Real por mes</p>
+</div>
+<select id="pptoLineaSelect" class="filter-select" aria-label="Línea a graficar"></select>
+</div>
+<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="pptoMesChart"></canvas></div></div>
+</div>
+<div class="section-panel table-panel">
+<h4 class="section-title" id="pptoMesTableTitle">Detalle mensual</h4>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare ppto-empresa__table">
+<thead>
+<tr>
+<th>Mes</th>
+<th class="cell-money">PPTO</th>
+<th class="cell-money">Real</th>
+<th class="cell-num">Cumpl. %</th>
+</tr>
+</thead>
+<tbody id="pptoMesTable"></tbody>
+<tfoot id="pptoMesFoot"></tfoot>
+</table>
+</div>
+</div>
+</div>
+
+<div class="chart-grid ppto-empresa__block">
+<div class="section-panel table-panel">
+<h4 class="section-title">Autos nuevos · por fuerza de venta</h4>
+<p class="section-subtitle">Ventas, utilidad bruta y utilidad de operación · Real YTD vs PPTO YTD</p>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare ppto-empresa__table">
+<thead>
+<tr>
+<th>Fuerza de venta</th>
+<th class="cell-money">Ventas real</th>
+<th class="cell-money">Ventas PPTO</th>
+<th class="cell-num">Cumpl. %</th>
+<th class="cell-money">UB real</th>
+<th class="cell-money">UB PPTO</th>
+<th class="cell-money">UO real</th>
+<th class="cell-money">UO PPTO</th>
+<th class="cell-money">Cierre ventas</th>
+</tr>
+</thead>
+<tbody id="pptoAutosTable"></tbody>
+</table>
+</div>
+</div>
+<div class="section-panel table-panel">
+<h4 class="section-title">PostVenta · por área</h4>
+<p class="section-subtitle">Servicio, Refacciones y HYP · Real YTD vs PPTO YTD</p>
+<div class="table-scroll">
+<table class="data-table data-table--eeff-compare ppto-empresa__table">
+<thead>
+<tr>
+<th>Área</th>
+<th class="cell-money">Ventas real</th>
+<th class="cell-money">Ventas PPTO</th>
+<th class="cell-num">Cumpl. %</th>
+<th class="cell-money">UB real</th>
+<th class="cell-money">UB PPTO</th>
+<th class="cell-money">UO real</th>
+<th class="cell-money">UO PPTO</th>
+<th class="cell-money">Cierre ventas</th>
+</tr>
+</thead>
+<tbody id="pptoPostventaTable"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<details class="section-panel ppto-empresa__block">
+<summary class="section-title" style="cursor:pointer">Metodología y fuentes</summary>
+<ul id="pptoMetodologia" class="kpi-subtitle" style="padding-left:18px;line-height:1.7;margin-top:10px"></ul>
+</details>
+</section>
+</div><!-- /panelForecastPresupuesto -->
 
 </div>
 </main>
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=18"></script>
+<script src="/js/topbar.js?v=21"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/forecast.js?v=3"></script>
+<script src="/js/forecast-presupuesto-12m.js?v=2"></script>
+<script src="/js/forecast-simulador.js?v=2"></script>
+<script src="/js/forecast-presupuesto.js?v=6"></script>
 </body>
 </html>

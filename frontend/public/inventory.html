@@ -6,7 +6,8 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=117" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=145" rel="stylesheet"/>
+<script src="/js/theme.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="dashboard-body" data-page="inventory">
@@ -113,10 +114,13 @@
 <p class="kpi-subtitle">Desde fecha de remisión</p>
 <div class="kpi-accent"></div>
 </div>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiAgeingAlerts" data-autos-kpi="ageing" aria-expanded="false" title="Clic para ver antigüedad 60+">
-<div class="kpi-card-head"><span class="kpi-title">Antigüedad</span><span class="material-symbols-outlined kpi-icon">warning</span></div>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiAgeingAlerts" data-autos-kpi="ageing" aria-expanded="false" title="C-3 · Unidades FIS 60+ y % sobre disponibles">
+<div class="kpi-card-head">
+  <span class="kpi-title">Antigüedad <span class="kpi-cmi-badge">C-3</span></span>
+  <span class="material-symbols-outlined kpi-icon">warning</span>
+</div>
 <div id="sAlerts" class="kpi-value">—</div>
-<p id="sAlertsSub" class="kpi-subtitle">Físico · 60+ días</p>
+<p id="sAlertsSub" class="kpi-subtitle">Físico 60+ · % del disponible</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
 </button>
@@ -954,10 +958,11 @@
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=8"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=18"></script>
+<script src="/js/topbar.js?v=21"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/inventory.js?v=87"></script>
+<script src="/js/analisisComercial.js?v=20"></script>
+<script src="/js/inventory.js?v=90"></script>
 </body>
 </html>

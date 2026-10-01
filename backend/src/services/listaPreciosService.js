@@ -172,9 +172,16 @@ function invalidatePlansCache() {
 
 function extractPaqueteFromTipoAuto(tipoAuto) {
   const t = String(tipoAuto || '');
-  const m = t.match(/PAQ\s*["']?\s*([A-Z0-9])\s*["']?/i)
+  const m = t.match(/PAQ(?:UETE)?\s*[."']?\s*["']?\s*([A-Z0-9])\s*["']?/i)
+    || t.match(/["']PAQ["']\s*([A-Z0-9])/i)
     || t.match(/\bPAQUETE\s*["']?\s*([A-Z0-9])/i);
-  return m ? m[1].toUpperCase() : null;
+  if (m) return m[1].toUpperCase();
+  // Fallback: letra suelta al final (p. ej. S10 … "C")
+  const parts = t.toUpperCase().replace(/["'`]/g, ' ').split(/[\s/_\-,.]+/).filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (/^[A-Z]$/.test(parts[i])) return parts[i];
+  }
+  return null;
 }
 
 function scoreVersionMatch(tipoAuto, planVersion) {

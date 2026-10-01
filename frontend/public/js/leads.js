@@ -38,22 +38,40 @@
     const fromDetalle = detalle().find((r) => String(r.idCrm || '').trim() === id);
     if (fromDetalle) return fromDetalle;
     const fromCaducar = (state.data?.campanasCaducarAlertas || []).find((r) => String(r.idCrm || '').trim() === id);
-    if (!fromCaducar) return null;
+    if (fromCaducar) {
+      return {
+        idCrm: fromCaducar.idCrm,
+        idOportunidad: fromCaducar.idOportunidad,
+        nombre: fromCaducar.nombre,
+        telefono: fromCaducar.telefono,
+        ejecutivo: fromCaducar.ejecutivo,
+        fuerzaVentas: fromCaducar.fuerzaVentas,
+        campana: fromCaducar.campana,
+        fechaEntrada: fromCaducar.fechaEntrada,
+        diasRestantes: fromCaducar.diasRestantes,
+        diasVividos: fromCaducar.diasVividos,
+        severidad: fromCaducar.severidad,
+        etapa: 'lead',
+        conCompra: false,
+        contactado: false,
+        cita: false,
+        cotizado: false,
+      };
+    }
+    const fromAlerta = (state.data?.alertasConversionCompras?.items || []).find((r) => String(r.idCrm || '').trim() === id);
+    if (!fromAlerta) return null;
     return {
-      idCrm: fromCaducar.idCrm,
-      idOportunidad: fromCaducar.idOportunidad,
-      nombre: fromCaducar.nombre,
-      telefono: fromCaducar.telefono,
-      ejecutivo: fromCaducar.ejecutivo,
-      fuerzaVentas: fromCaducar.fuerzaVentas,
-      campana: fromCaducar.campana,
-      fechaEntrada: fromCaducar.fechaEntrada,
-      diasRestantes: fromCaducar.diasRestantes,
-      diasVividos: fromCaducar.diasVividos,
-      severidad: fromCaducar.severidad,
-      etapa: 'lead',
-      conCompra: false,
-      contactado: false,
+      idCrm: fromAlerta.idCrm,
+      nombre: fromAlerta.nombreLead,
+      ejecutivo: fromAlerta.ejecutivo,
+      campana: fromAlerta.campana,
+      fechaEntrada: fromAlerta.fechaEntrada,
+      fechaCompra: fromAlerta.fechaCompra,
+      vin: fromAlerta.vin,
+      severidad: fromAlerta.severidad,
+      etapa: 'compra',
+      conCompra: true,
+      contactado: true,
       cita: false,
       cotizado: false,
     };
@@ -311,9 +329,21 @@
     const s = summary();
     const map = {
       leads: {
-        title: 'Leads / oportunidades',
-        hint: `${num(s.leads)} leads · ${num(s.oportunidades)} IDs CRM · ${num(s.conEjecutivo)} con ejecutivo`,
+        title: 'Leads únicos',
+        hint: `${num(s.leadsUnicos ?? s.leads)} únicos · ${num(s.leadsDuplicados)} duplicados · ${num(s.leadsTotales || ((s.leadsUnicos ?? s.leads) + (s.leadsDuplicados || 0)))} totales · ${num(s.oportunidades)} IDs CRM`,
         icon: 'diversity_3',
+        filter: () => true,
+      },
+      leadsUnicos: {
+        title: 'Leads únicos',
+        hint: `${num(s.leadsUnicos ?? s.leads)} sin Resultado=DUPLICADO (col. AB) · base del embudo`,
+        icon: 'person',
+        filter: () => true,
+      },
+      leadsDuplicados: {
+        title: 'Duplicados',
+        hint: `${num(s.leadsDuplicados)} marcados como DUPLICADO · ${pct(s.pctDuplicados)} del bruto · no entran al embudo`,
+        icon: 'content_copy',
         filter: () => true,
       },
       contactados: {
@@ -335,16 +365,26 @@
         filter: (r) => Boolean(r.cotizado),
       },
       compras: {
-        title: 'Compras (VIN)',
-        hint: `${num(s.compras)} con VIN · conversión ${pct(s.conversionCompraPct)}. La compra puede ser posterior al periodo.`,
+        title: 'Compras',
+        hint: `${num(s.compras)} con VIN ≤90d desde fecha_entrada · conversión ${pct(s.conversionCompraPct)} (cuenta en el mes de origen)`,
         icon: 'sell',
         filter: (r) => Boolean(r.conCompra),
       },
+      seguimientoSinCompra: {
+        title: 'En seguimiento',
+        hint: `${num(s.seguimientoSinCompra)} vivos ≤${num(s.seguimientoVidaDias || 90)}d · seguimiento / prueba de manejo / solicitud de crédito · sin compra`,
+        icon: 'track_changes',
+        filter: (r) => !r.conCompra && (
+          /SEGUIMIENTO/i.test(String(r.resultado || ''))
+          || Boolean(r.conPruebaManejo)
+          || Boolean(r.conSolicitud)
+        ),
+      },
       sinCompra: {
         title: 'Sin compra',
-        hint: `${num(s.sinCompra)} leads de la cohorte aún sin VIN vinculado`,
+        hint: `${num(s.sinCompra)} oportunidades perdidas / descartadas / desistidas de la cohorte`,
         icon: 'hourglass_empty',
-        filter: (r) => !r.conCompra,
+        filter: (r) => /DESCART|DESIST|PERDIDO|NO CONTESTA|NO EXISTE|EQUIVOCADO|FUERA AREA|NO PIDIO|CUELGA/i.test(String(r.resultado || '')),
       },
       convCompra: {
         title: 'Lead → compra',
@@ -588,12 +628,14 @@
       <div class="kpi-group">
         <h4 class="kpi-group-title">Embudo de conversión</h4>
         <div class="kpi-grid" id="ldKpiGrid">
-          ${kpiCard('leads', 'Leads', num(s.leads), `${num(s.oportunidades)} oportunidades CRM`, 'blue', 'diversity_3')}
+          ${kpiCard('leadsUnicos', 'Leads únicos', num(s.leadsUnicos ?? s.leads), `${num(s.leadsTotales || ((s.leadsUnicos ?? s.leads) + (s.leadsDuplicados || 0)))} totales en periodo`, 'blue', 'person')}
+          ${kpiCard('leadsDuplicados', 'Duplicados', num(s.leadsDuplicados), `${pct(s.pctDuplicados)} del bruto`, 'rose', 'content_copy')}
           ${kpiCard('contactados', 'Contactados', num(s.contactados), pct(s.conversionContactoPct) + ' del total', 'slate', 'call')}
           ${kpiCard('citas', 'Citas', num(s.citas), pct(s.conversionCitaPct) + ' del total', 'amber', 'event')}
           ${kpiCard('cotizados', 'Cotizados', num(s.cotizados), pct(s.conversionCotizacionPct) + ' del total', 'violet', 'request_quote')}
-          ${kpiCard('compras', 'Compras (VIN)', num(s.compras), pct(s.conversionCompraPct) + ' conversión', 'green', 'sell')}
-          ${kpiCard('sinCompra', 'Sin compra', num(s.sinCompra), 'Oportunidades abiertas / perdidas', 'rose', 'hourglass_empty')}
+          ${kpiCard('compras', 'Compras', num(s.compras), pct(s.conversionCompraPct) + ' · origen ≤90d', 'green', 'sell')}
+          ${kpiCard('seguimientoSinCompra', 'En seguimiento', num(s.seguimientoSinCompra), `seguimiento · PM · solicitud · ≤${num(s.seguimientoVidaDias || 90)}d`, 'amber', 'track_changes')}
+          ${kpiCard('sinCompra', 'Sin compra', num(s.sinCompra), 'Oportunidades perdidas', 'rose', 'hourglass_empty')}
         </div>
       </div>
       <div class="kpi-group" style="margin-top:14px">
@@ -818,6 +860,277 @@
           <th class="cell-num">${pct(tot.conversionPct)}</th>
         </tr>`;
     }
+  }
+
+  function renderCampanaTipoTable(bodyEl, footEl, rows, tot) {
+    if (!bodyEl) return;
+    const periodLeads = Number(summary().leads || 0);
+    const visible = periodLeads === 0 ? [] : (rows || []).filter((r) => Number(r.total || 0) > 0);
+    if (!visible.length) {
+      bodyEl.innerHTML = `<tr class="empty-row"><td colspan="4">${
+        periodLeads === 0 ? 'Sin leads en este periodo.' : 'Sin campañas con volumen en el periodo.'
+      }</td></tr>`;
+      if (footEl) footEl.innerHTML = '';
+      return;
+    }
+    bodyEl.innerHTML = visible.map((r) => `
+      <tr>
+        <td><strong>${escapeHtml(r.campana)}</strong></td>
+        <td class="cell-num">${num(r.total)}</td>
+        <td class="cell-num">${num(r.vendidos)}</td>
+        <td class="cell-num">${pct(r.conversionPct)}</td>
+      </tr>
+    `).join('');
+    if (footEl && tot) {
+      footEl.innerHTML = `
+        <tr>
+          <th>Total</th>
+          <th class="cell-num">${num(tot.total)}</th>
+          <th class="cell-num">${num(tot.vendidos)}</th>
+          <th class="cell-num">${pct(tot.conversionPct)}</th>
+        </tr>`;
+    }
+  }
+
+  let convMesChart = null;
+
+  const MES_LABELS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+  function mesLabelCorto(mesKey) {
+    const m = String(mesKey || '');
+    const mm = Number(m.slice(5, 7));
+    if (mm >= 1 && mm <= 12) return MES_LABELS_ES[mm - 1];
+    return m || '—';
+  }
+
+  function destroyConvMesChart() {
+    if (convMesChart) {
+      try { convMesChart.destroy(); } catch { /* ignore */ }
+      convMesChart = null;
+    }
+  }
+
+  function renderConvMesChart(rows) {
+    const canvas = els.convMesChart || document.getElementById('ldConvMesChart');
+    if (!canvas) return;
+    destroyConvMesChart();
+    if (typeof Chart === 'undefined') return;
+
+    const labels = rows.map((r) => mesLabelCorto(r.mes));
+    const leads = rows.map((r) => Number(r.total || 0));
+    const convertidos = rows.map((r) => Number(r.convertidos || 0));
+    const convPct = rows.map((r) => Number(r.conversionPct || 0));
+
+    convMesChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Leads reactivas',
+            data: leads,
+            backgroundColor: 'rgba(37, 99, 235, 0.45)',
+            borderColor: '#2563eb',
+            borderWidth: 1,
+            borderRadius: 5,
+            yAxisID: 'y',
+            order: 2,
+          },
+          {
+            type: 'bar',
+            label: 'Convertidos',
+            data: convertidos,
+            backgroundColor: 'rgba(16, 185, 129, 0.55)',
+            borderColor: '#059669',
+            borderWidth: 1,
+            borderRadius: 5,
+            yAxisID: 'y',
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: '% Conv',
+            data: convPct,
+            borderColor: '#be123c',
+            backgroundColor: 'rgba(190, 18, 60, 0.12)',
+            borderWidth: 2.5,
+            pointRadius: 3.5,
+            pointHoverRadius: 5,
+            tension: 0.25,
+            yAxisID: 'y1',
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: { boxWidth: 10, font: { size: 11 } },
+          },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const v = Number(ctx.parsed.y);
+                if (ctx.dataset.yAxisID === 'y1') {
+                  return `${ctx.dataset.label}: ${Number.isFinite(v) ? `${v.toFixed(2)}%` : '—'}`;
+                }
+                return `${ctx.dataset.label}: ${Number.isFinite(v) ? v.toLocaleString('es-MX') : '—'}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 11 } },
+          },
+          y: {
+            beginAtZero: true,
+            position: 'left',
+            ticks: { precision: 0, font: { size: 11 } },
+            grid: { color: 'rgba(148, 163, 184, 0.25)' },
+            title: { display: true, text: 'Volumen', font: { size: 11 } },
+          },
+          y1: {
+            beginAtZero: true,
+            position: 'right',
+            grid: { drawOnChartArea: false },
+            ticks: {
+              font: { size: 11 },
+              callback: (v) => `${v}%`,
+            },
+            title: { display: true, text: '% Conv', font: { size: 11 } },
+          },
+        },
+      },
+    });
+  }
+
+  function renderOnePagerKpis(rootEl, tot, label) {
+    if (!rootEl) return;
+    const t = tot || { total: 0, vendidos: 0, conversionPct: 0 };
+    rootEl.innerHTML = `
+      ${kpiCard(`op-${label}-leads`, 'Total leads', num(t.total), label, 'blue', 'campaign')}
+      ${kpiCard(`op-${label}-conv`, 'Convertidos', num(t.vendidos), 'compra ≤90d desde entrada', 'green', 'sell')}
+      ${kpiCard(`op-${label}-pct`, '% Conversión', pct(t.conversionPct), 'convertidos / leads', 'violet', 'percent')}
+    `;
+  }
+
+  function renderOnePagerLeads() {
+    const reactivas = state.data?.campanasReactivas || (state.data?.campanasConversion || []).filter((r) => (r.tipo || 'reactiva') === 'reactiva');
+    const proactivas = state.data?.campanasProactivas || (state.data?.campanasConversion || []).filter((r) => r.tipo === 'proactiva');
+    const totR = state.data?.campanasReactivasTotales || null;
+    const totP = state.data?.campanasProactivasTotales || null;
+    const porMes = state.data?.conversionPorMes || [];
+    const porVeh = state.data?.conversionPorVehiculo || [];
+    const periodLeads = Number(summary().leads || 0);
+
+    renderOnePagerKpis(els.kpiReactivas, totR, 'reactivas');
+    renderOnePagerKpis(els.kpiProactivas, totP, 'proactivas');
+    renderCampanaTipoTable(els.reactivaCampBody, els.reactivaCampFoot, reactivas, totR);
+    renderCampanaTipoTable(els.proactivaCampBody, els.proactivaCampFoot, proactivas, totP);
+
+    if (els.onePagerResumen) {
+      if (periodLeads === 0) {
+        els.onePagerResumen.textContent = 'Sin leads en el periodo · elija un rango con cobertura CRM';
+      } else {
+        els.onePagerResumen.textContent =
+          `Reactivas ${num(totR?.total)} leads · ${pct(totR?.conversionPct)} conv · Proactivas ${num(totP?.total)} leads · ${pct(totP?.conversionPct)} conv`;
+      }
+    }
+
+    if (els.convMesBody) {
+      const meta = els.convMesMeta || document.getElementById('ldConvMesMeta');
+      const anio = state.data?.conversionPorMesMeta?.anio
+        || (porMes[0]?.anio)
+        || Number(String(state.fechaFin || state.fechaInicio || '').slice(0, 4))
+        || null;
+      if (meta) {
+        meta.textContent = anio
+          ? `Año ${anio} · solo campañas reactivas`
+          : 'Solo campañas reactivas · año calendario';
+      }
+
+      const rows = porMes.length ? porMes : [];
+      els.convMesBody.innerHTML = rows.length
+        ? rows.map((r) => `
+          <tr>
+            <td><strong>${escapeHtml(mesLabelCorto(r.mes))} ${escapeHtml(String(r.mes || '').slice(0, 4))}</strong></td>
+            <td class="cell-num">${num(r.total)}</td>
+            <td class="cell-num">${num(r.convertidos)}</td>
+            <td class="cell-num">${pct(r.conversionPct)}</td>
+          </tr>`).join('')
+        : `<tr class="empty-row"><td colspan="4">Sin datos mensuales.</td></tr>`;
+      renderConvMesChart(rows);
+    } else {
+      destroyConvMesChart();
+    }
+
+    if (els.convVehiculoBody) {
+      const rows = periodLeads === 0 ? [] : porVeh.filter((r) => Number(r.total || 0) > 0).slice(0, 25);
+      els.convVehiculoBody.innerHTML = rows.length
+        ? rows.map((r) => `
+          <tr>
+            <td><strong>${escapeHtml(r.vehiculo)}</strong></td>
+            <td class="cell-num">${num(r.total)}</td>
+            <td class="cell-num">${num(r.convertidos)}</td>
+            <td class="cell-num">${pct(r.conversionPct)}</td>
+          </tr>`).join('')
+        : `<tr class="empty-row"><td colspan="4">${periodLeads === 0 ? 'Sin leads en este periodo.' : 'Sin datos por vehículo.'}</td></tr>`;
+    }
+  }
+
+  function renderAlertasConversion() {
+    const body = els.alertasConvBody || document.getElementById('ldAlertasConversionBody');
+    const meta = els.alertasConvMeta || document.getElementById('ldAlertasConversionMeta');
+    if (!body) return;
+
+    const block = state.data?.alertasConversionCompras || null;
+    const items = block?.items || [];
+    const periodLeads = Number(summary().leads || 0);
+
+    if (meta) {
+      if (block && periodLeads > 0) {
+        const crit = items.filter((r) => r.severidad === 'critical').length;
+        meta.textContent = `${num(block.total)} alertas · mostrando ${num(block.mostrados)}${crit ? ` · ${num(crit)} críticas` : ''}`;
+      } else {
+        meta.textContent = '';
+      }
+    }
+
+    if (!periodLeads || !items.length) {
+      body.innerHTML = `<p class="section-subtitle" style="margin:0">${
+        periodLeads === 0 ? 'Consulte un periodo.' : 'Sin alertas de conversión.'
+      }</p>`;
+      return;
+    }
+
+    body.innerHTML = items.map((r) => {
+      const sev = r.severidad === 'critical' ? 'critical' : 'warning';
+      const sevLabel = sev === 'critical' ? 'Crítico' : 'Alerta';
+      const id = String(r.idCrm || '').trim();
+      return `
+        <article class="ld-caducar-item ld-caducar-item--${sev}${id ? ' ld-caducar-item--clickable' : ''}"
+          ${id ? `data-ld-prospect-id="${escapeHtml(id)}" role="button" tabindex="0" title="Ver perfil del prospecto"` : ''}>
+          <div class="ld-caducar-item__top">
+            <strong class="ld-caducar-item__name">${escapeHtml(r.nombreLead || '—')}</strong>
+            <span class="ld-caducar-item__days">${escapeHtml(formatDate(r.fechaCompra))}</span>
+          </div>
+          <p class="ld-caducar-item__campana">${escapeHtml(r.nombreCompra || '—')}</p>
+          <div class="ld-caducar-item__meta">
+            <span class="ld-badge ld-badge--warn">${sevLabel}</span>
+            <span>${escapeHtml(r.campana || 'Sin campaña')}</span>
+            <span>${escapeHtml(r.vin || '—')}</span>
+            <span>ID ${escapeHtml(id || '—')}</span>
+          </div>
+        </article>`;
+    }).join('');
   }
 
   function etapaBadge(etapa, conCompra) {
@@ -1337,6 +1650,8 @@
     els.tableBody?.addEventListener('keydown', openFromEvent);
     els.caducarBody?.addEventListener('click', openFromEvent);
     els.caducarBody?.addEventListener('keydown', openFromEvent);
+    els.alertasConvBody?.addEventListener('click', openFromEvent);
+    els.alertasConvBody?.addEventListener('keydown', openFromEvent);
   }
 
   function updateSubtitle() {
@@ -1345,19 +1660,19 @@
     const ff = state.fechaFin || '—';
     const s = summary();
     els.subtitle.textContent = s.leads != null
-      ? `Cohorte ${fi} → ${ff} · ${num(s.leads)} leads (sin duplicados) · conversión a compra ${pct(s.conversionCompraPct)}`
-      : 'Seguimiento de conversión de oportunidades a ventas (VIN vinculado en CRM · sin duplicados de columna AD).';
+      ? `Cohorte ${fi} → ${ff} · ${num(s.leadsUnicos ?? s.leads)} únicos · ${num(s.leadsDuplicados)} duplicados · ${num(s.leadsTotales || ((s.leadsUnicos ?? s.leads) + (s.leadsDuplicados || 0)))} totales · conversión a compra ${pct(s.conversionCompraPct)}`
+      : 'Seguimiento de conversión de oportunidades a ventas (VIN vinculado en CRM · sin duplicados de columna AB).';
   }
 
   function renderAll() {
     updateSubtitle();
     renderPeriodoVacio();
     renderKpis();
-    renderFunnel();
     renderCampanasCaducar();
-    renderCampanasConversion();
+    renderAlertasConversion();
     renderFuerzaVentas();
     renderGroups();
+    renderOnePagerLeads();
     renderTable();
     if (leadsDrawerUi?.panel?.classList.contains('ops-orders-drawer--open') && state.openKpi) {
       leadsDrawerUi.refresh();
@@ -1372,16 +1687,25 @@
     els.btnCerrarDetail = document.getElementById('btnCerrarLdDetail');
     els.subtitle = document.getElementById('ldSubtitle');
     els.periodoVacio = document.getElementById('ldPeriodoVacio');
-    els.funnel = document.getElementById('ldFunnel');
     els.caducarBody = document.getElementById('ldCampanasCaducarBody');
     els.caducarMeta = document.getElementById('ldCampanasCaducarMeta');
-    els.campanasConvBody = document.getElementById('ldCampanasConvBody');
-    els.campanasConvFoot = document.getElementById('ldCampanasConvFoot');
-    els.campanasConvResumen = document.getElementById('ldCampanasConvResumen');
-    els.campanasConvNota = document.getElementById('ldCampanasConvNota');
+    els.alertasConv = document.getElementById('ldAlertasConversion');
+    els.alertasConvMeta = document.getElementById('ldAlertasConversionMeta');
+    els.alertasConvBody = document.getElementById('ldAlertasConversionBody');
     els.fuerzaBody = document.getElementById('ldFuerzaBody');
     els.fuerzaFoot = document.getElementById('ldFuerzaFoot');
     els.fuerzaResumen = document.getElementById('ldFuerzaResumen');
+    els.kpiReactivas = document.getElementById('ldKpiReactivas');
+    els.kpiProactivas = document.getElementById('ldKpiProactivas');
+    els.reactivaCampBody = document.getElementById('ldReactivaCampBody');
+    els.reactivaCampFoot = document.getElementById('ldReactivaCampFoot');
+    els.proactivaCampBody = document.getElementById('ldProactivaCampBody');
+    els.proactivaCampFoot = document.getElementById('ldProactivaCampFoot');
+    els.convMesBody = document.getElementById('ldConvMesBody');
+    els.convMesMeta = document.getElementById('ldConvMesMeta');
+    els.convMesChart = document.getElementById('ldConvMesChart');
+    els.convVehiculoBody = document.getElementById('ldConvVehiculoBody');
+    els.onePagerResumen = document.getElementById('ldOnePagerResumen');
     els.groupsBody = document.getElementById('ldGroupsBody');
     els.tableBody = document.getElementById('ldTableBody');
     els.search = document.getElementById('buscarLdPreview');

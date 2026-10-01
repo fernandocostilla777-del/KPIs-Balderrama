@@ -350,8 +350,8 @@ function autosKpiMeta(kpiId) {
   }
   if (kpiId === 'ageing') {
     return {
-      title: 'Antigüedad',
-      hint: 'Unidades en Físico (FIS) con 60 o más días desde remisión',
+      title: 'Antigüedad (C-3)',
+      hint: 'C-3 · Exposición: unidades FIS con 60+ días ÷ inventario disponible × 100. Detalle operativo del stock envejecido.',
       scopeLabel: 'antigüedad',
       icon: 'warning',
       card: () => document.getElementById('kpiAgeingAlerts'),
@@ -781,6 +781,7 @@ function ensureAutosKpiDrawer() {
     const apartadas = rows.filter((r) => r.isApartada || r.situacion === 'SEP').length;
     const libres = rows.filter((r) => r.situacion === 'FIS' || r.situacion === 'DIS').length;
     const isDemos = currentMeta.kpi === 'demos';
+    const isAgeing = currentMeta.kpi === 'ageing';
     const demosConPruebas = isDemos
       ? rows.filter((r) => Number(r.pruebasManejo || 0) > 0).length
       : 0;
@@ -791,6 +792,17 @@ function ensureAutosKpiDrawer() {
       ? Math.round(
         rows.reduce((s, r) => s + (Number(r.daysAsDemo ?? r.daysInStock) || 0), 0) / rows.length,
       )
+      : 0;
+    const availableTotal = Number(
+      lastInventorySummary?.available
+      ?? inventoryRows.filter((r) => r.situacion === 'DIS' || r.situacion === 'FIS' || r.situacion === 'SEP').length
+      ?? 0,
+    );
+    const exposicionPct = isAgeing && availableTotal > 0
+      ? Math.round((rows.length / availableTotal) * 1000) / 10
+      : null;
+    const avgDaysAgeing = isAgeing && rows.length
+      ? Math.round(rows.reduce((s, r) => s + (Number(r.daysInStock) || 0), 0) / rows.length)
       : 0;
 
     const situacionBlock = `
@@ -812,8 +824,13 @@ function ensureAutosKpiDrawer() {
 
     summaryEl.innerHTML = `
       <div class="ops-orders-drawer__group">
-        <h5>Resumen</h5>
-        <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+        <h5>${isAgeing ? 'C-3 · Exposición' : 'Resumen'}</h5>
+        <div class="ops-orders-drawer__row"><span class="lbl">${isAgeing ? 'Unidades 60+' : 'Unidades'}</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+        ${isAgeing ? `
+          <div class="ops-orders-drawer__row"><span class="lbl">Disponible</span><span class="val">${availableTotal.toLocaleString('es-MX')}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Exposición C-3</span><span class="val">${exposicionPct == null ? '—' : `${exposicionPct}%`}</span></div>
+          <div class="ops-orders-drawer__row"><span class="lbl">Días prom.</span><span class="val">${avgDaysAgeing.toLocaleString('es-MX')}</span></div>
+        ` : ''}
         ${isDemos ? `
           <div class="ops-orders-drawer__row"><span class="lbl">Prom. días demo</span><span class="val">${avgDaysDemo.toLocaleString('es-MX')}</span></div>
           <div class="ops-orders-drawer__row"><span class="lbl">Con pruebas</span><span class="val">${demosConPruebas.toLocaleString('es-MX')}</span></div>
@@ -2703,9 +2720,27 @@ async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
         `${fmt.number(s.conPrevias ?? inventoryRows.filter((r) => Number(r.previas || 0) > 0).length)} con previas`
       );
       setText('sDays', `${s.avgDaysAvailable} días`);
-      setText('sAlerts', fmt.number(s.ageingAlertsCount ?? s.urgentAlerts ?? 0));
-      setText('sAlertsSub', `Físico · Plan Piso ${fmt.currency(s.ageingAlertsPlanPisoTotal || 0)}`);
-      setText('urgentBadge', `${s.ageingAlertsCount || 0} FÍSICO`);
+      {
+        const ageingN = Number(s.ageingAlertsCount ?? s.urgentAlerts ?? 0);
+        const availableN = Number(s.available || 0);
+        const exposicionPct = availableN > 0
+          ? Math.round((ageingN / availableN) * 1000) / 10
+          : null;
+        setText('sAlerts', fmt.number(ageingN));
+        const pisoTxt = `Plan piso ${fmt.currency(s.ageingAlertsPlanPisoTotal || 0)}`;
+        setText(
+          'sAlertsSub',
+          exposicionPct == null
+            ? `Físico 60+ · ${pisoTxt}`
+            : `C-3 · ${exposicionPct}% del disponible · ${pisoTxt}`,
+        );
+        const ageingCard = document.getElementById('kpiAgeingAlerts');
+        if (ageingCard) {
+          ageingCard.classList.toggle('kpi-card--warn', exposicionPct != null && exposicionPct >= 15 && exposicionPct < 30);
+          ageingCard.classList.toggle('kpi-card--critical', exposicionPct != null && exposicionPct >= 30);
+        }
+        setText('urgentBadge', `${ageingN} FÍSICO`);
+      }
       setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
       renderAlerts(data.stockAlerts || [], s.ageingAlertsPlanPisoTotal || 0);
       renderTable(filterRows(getInventorySearchTerm()), { searchTerm: getInventorySearchTerm() });
@@ -4794,6 +4829,10 @@ async function refreshInventoryPageQuiet() {
       loadVendidosAnalisis({ quiet: true }),
       loadEntregasSinPreviasMes({ quiet: true }),
     ];
+    const range = currentVendidosRange();
+    if (window.AnalisisComercial?.load && range.fechaInicio && range.fechaFin) {
+      jobs.push(window.AnalisisComercial.load(range.fechaInicio, range.fechaFin));
+    }
     if (inventoryScope === 'postventa') jobs.push(loadInventoryPostventa({ force: true }));
     await Promise.all(jobs);
   } finally {
@@ -4908,6 +4947,9 @@ Dashboard.initDateFilter?.({
       loadVendidosAnalisis({ quiet: false }),
       loadEntregasSinPreviasMes({ quiet: false }),
       inventoryScope === 'postventa' ? loadInventoryPostventa({ force: true }) : Promise.resolve(),
+      (window.AnalisisComercial?.load && fi && ff)
+        ? window.AnalisisComercial.load(fi, ff)
+        : Promise.resolve(),
     ]);
   },
   getInitialRange: (fromUrl) => {

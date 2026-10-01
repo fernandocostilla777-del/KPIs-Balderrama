@@ -9,7 +9,7 @@ const AI_DATA_MODEL = `
 - **ADE_VTAFI**: factura de venta (documento tipo 'A', status 'I').
   - VTE_SERIE → unidad vendida
   - VTE_FECHDOCTO → fecha de venta (formato dd/mm/yyyy en consultas)
-  - VTE_FORMAPAGO → forma de pago / canal (FLOT/FLOTGMF = flotilla)
+  - VTE_FORMAPAGO → forma de pago / canal (FLOT = flotilla; FLOTGMF = flotilla solo si el contrato CRM es flotilla, si no cuenta como menudeo GMF)
 - **SER_VEHICULO**: unidad física.
   - VEH_NUMSERIE = VTE_SERIE
   - VEH_TIPOAUTO → nombre comercial del modelo (ej. AVEO, ONIX, CAVALIER)

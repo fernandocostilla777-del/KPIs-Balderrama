@@ -66,6 +66,7 @@ const BRANCH_VENTAS_ROWS = {
   suauto: 'VENTAS AUTOS SuAuto SERDAN',
   cholula: 'VENTAS AUTOS CHOLULA',
   zacatelco: 'VENTAS AUTOS ZACATELCO',
+  casa: 'VENTAS AUTOS BDC-CASA SERDAN',
 };
 
 module.exports = {

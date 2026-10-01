@@ -9,6 +9,8 @@ const mobileRoutes = require('./src/routes/mobile');
 const personalRoutes = require('./src/routes/personal');
 const objetivosResultadosRoutes = require('./src/routes/objetivosResultados');
 const crmRoutes = require('./src/routes/crm');
+const seguimiento360Routes = require('./src/routes/seguimiento360');
+const inventoryRoutes = require('./src/routes/inventory');
 const desktopUpdatesRoutes = require('./src/routes/desktopUpdates');
 const iemcFinancieroRoutes = require('./src/routes/iemcFinanciero');
 const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
@@ -68,6 +70,8 @@ app.use('/api/mobile', mobileRoutes);
 app.use('/api/personal', personalRoutes);
 app.use('/api/objetivos-resultados', objetivosResultadosRoutes);
 app.use('/api/crm', crmRoutes);
+app.use('/api/seguimiento-360', seguimiento360Routes);
+app.use('/api/inventory', inventoryRoutes);
 app.use('/api/iemc-financiero', iemcFinancieroRoutes);
 app.use('/desktop-updates', desktopUpdatesRoutes);
 

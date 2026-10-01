@@ -30,14 +30,14 @@ const ROLE_DEFAULTS = {
     label: 'Gerencia Comercial',
     pages: ['overview', 'sales', 'forecast', 'inventory', 'lista-precios', 'seguimiento'],
     homePath: '/',
-    apiPrefixes: ['/overview', '/ventas', '/forecast', '/inventory', '/lista-precios', '/crm', '/objetivos-resultados', '/ai', '/health'],
+    apiPrefixes: ['/overview', '/ventas', '/forecast', '/inventory', '/lista-precios', '/crm', '/seguimiento-360', '/objetivos-resultados', '/ai', '/health'],
   },
   vendedor: {
     id: 'vendedor',
     label: 'Vendedor',
     pages: ['sales', 'lista-precios', 'seguimiento'],
     homePath: '/seguimiento.html',
-    apiPrefixes: ['/ventas', '/lista-precios', '/crm', '/objetivos-resultados', '/ai', '/health'],
+    apiPrefixes: ['/ventas', '/lista-precios', '/crm', '/seguimiento-360', '/objetivos-resultados', '/ai', '/health'],
   },
   contabilidad: {
     id: 'contabilidad',
@@ -51,7 +51,7 @@ const ROLE_DEFAULTS = {
     label: 'Mercadotecnia (MTK)',
     pages: ['overview', 'sales', 'seguimiento'],
     homePath: '/',
-    apiPrefixes: ['/overview', '/ventas', '/crm', '/objetivos-resultados', '/ai', '/health'],
+    apiPrefixes: ['/overview', '/ventas', '/crm', '/seguimiento-360', '/objetivos-resultados', '/ai', '/health'],
   },
   gestion_inventario: {
     id: 'gestion_inventario',

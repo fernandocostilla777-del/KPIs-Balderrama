@@ -1424,6 +1424,407 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.section-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 18px;
+}
+
+.section-switch button {
+  border: 1px solid #dbe3ef;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.section-switch button.is-active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.vin-panel__note {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.vin-panel__search {
+  display: block;
+  margin: 12px 0 14px;
+}
+
+.vin-panel__search input {
+  width: min(420px, 100%);
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #dbe3ef;
+  font: inherit;
+}
+
+.vin-track {
+  display: flex;
+  align-items: center;
+  min-width: 150px;
+}
+
+.vin-track__item {
+  display: flex;
+  align-items: center;
+}
+
+.vin-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  box-shadow: inset 0 0 0 1.5px #cbd5e1;
+}
+
+.vin-dot.is-done {
+  background: #16a34a;
+  box-shadow: none;
+}
+
+.vin-dot.is-now {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.vin-bar {
+  width: 16px;
+  height: 2px;
+  background: #e2e8f0;
+}
+
+.vin-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.vin-kpis article {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #e8edf5;
+  background: #f8fafc;
+}
+
+.vin-kpis span {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.vin-kpis strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+  color: #0f172a;
+}
+
+.vin-kpis small {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.vin-panel__meta {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.vin-days-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  text-align: center;
+}
+
+.vin-days-cell strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.vin-stock-table th:nth-child(3),
+.vin-stock-table td:nth-child(3),
+.vin-stock-table th:nth-child(6),
+.vin-stock-table td:nth-child(6),
+.vin-stock-table th:nth-child(7),
+.vin-stock-table td:nth-child(7) {
+  text-align: center;
+}
+
+.vin-stock-table td:nth-child(6) .vin-piso-btn,
+.vin-stock-table td:nth-child(7) .vin-piso-btn {
+  width: 100%;
+  justify-items: center;
+  text-align: center;
+}
+
+.vin-piso-btn {
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  display: grid;
+  justify-items: inherit;
+  gap: 2px;
+  text-align: inherit;
+}
+
+.vin-piso-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.vin-flag-btn {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.vin-flag-btn:hover {
+  filter: brightness(0.96);
+  outline: 2px solid #86efac;
+  outline-offset: 1px;
+}
+
+.vin-flag {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.vin-flag--cumple { color: #166534; background: #dcfce7; }
+.vin-flag--pendiente { color: #1e3a8a; background: #dbeafe; }
+.vin-flag--alerta { color: #9f1239; background: #ffe4e6; }
+.vin-flag--sindato,
+.vin-flag--na { color: #475569; background: #e2e8f0; }
+.vin-flag--disponible { color: #166534; background: #dcfce7; }
+.vin-flag--apartada { color: #9a3412; background: #ffedd5; }
+.vin-flag--otra { color: #334155; background: #e2e8f0; }
+
+.vin-panel__note--tight {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.table-wrap--cierre {
+  overflow-x: auto;
+}
+
+.vin-cierre-table {
+  min-width: 1180px;
+  font-size: 12px;
+}
+
+.vin-cierre-table th,
+.vin-cierre-table td {
+  vertical-align: top;
+}
+
+.vin-cierre-table .vin-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.vin-cierre-table .vin-panel__meta {
+  display: block;
+  margin-top: 2px;
+}
+
+.vin-cierre-table tr.is-neta-neg {
+  background: #fff1f2;
+}
+
+.vin-retencion.is-neg { color: #9f1239; }
+.vin-retencion.is-warn { color: #9a3412; }
+.vin-retencion.is-ok { color: #166534; }
+
+.vin-summary-card--cierre {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.vin-summary-card--cierre .vin-previa-list strong {
+  color: #1e3a8a;
+}
+
+.vin-summary-card--previa {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.vin-summary-card--gastos {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.vin-summary-card.is-focus {
+  box-shadow: 0 0 0 2px #f59e0b;
+}
+
+.vin-previa-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.vin-previa-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.vin-previa-list strong {
+  font-size: 13px;
+  color: #14532d;
+}
+
+.vin-summary-card--gastos .vin-previa-list strong {
+  color: #9a3412;
+}
+
+.vin-previa-list span {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+  text-align: right;
+}
+
+.vin-float .day-drawer__body {
+  padding: 14px 16px 18px;
+  gap: 10px;
+}
+
+.vin-summary-card {
+  margin: 0;
+}
+
+.vin-summary-card--apartado {
+  border-color: #fdba74;
+  background: #fff7ed;
+}
+
+.vin-summary-card--peps {
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+
+.vin-peps-colors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.vin-peps-colors .vin-summary-value {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.vin-summary-value {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.vin-summary-hint {
+  margin: 4px 2px 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.vin-unit-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vin-unit-cell .vin-unit-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.vin-peps-inline {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.vin-float-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vin-float-title-row h2 {
+  margin: 0;
+}
+
+.vin-float-title-row .vin-peps-inline {
+  margin-top: 0;
+}
+
+.vin-unit-btn {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vin-unit-btn:hover strong {
+  color: #1d4ed8;
+}
+
+.vin-panel tbody tr.is-selected td {
+  background: #eff6ff;
+}
+
+@media (max-width: 900px) {
+  .vin-kpis { grid-template-columns: 1fr 1fr; }
+}
+
 @media (max-width: 1150px) {
   .overview-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -1,6 +1,6 @@
 const { getVentas } = require('../ventas');
 const { getOverview } = require('../overviewService');
-const { getInventory } = require('../inventoryService');
+const { getInventory, getVendidosAnalisis } = require('../inventoryService');
 const { getInventoryPostventa } = require('../inventoryPostventaService');
 const { getContabilidad } = require('../contabilidadService');
 const { getPostSales } = require('../postSalesService');
@@ -41,6 +41,28 @@ function mapInventarioNuevosRecords(rows) {
       data: { ...data, tipo: 'autos_nuevos' },
     };
   });
+}
+
+function mapInventarioAgeingRecords(rows) {
+  return (rows || []).map((row) => {
+    const data = serializeRow(row);
+    const vin = String(data.vin || data.serie || '').trim().toUpperCase();
+    return {
+      id: `ageing|${vin}`,
+      data: { ...data, tipo: 'ageing_slow' },
+    };
+  }).filter((record) => record.id !== 'ageing|');
+}
+
+function mapVendidosRecords(rows) {
+  return (rows || []).map((row) => {
+    const data = serializeRow(row);
+    const vin = String(data.vin || '').trim().toUpperCase();
+    return {
+      id: `${data.factura || ''}|${vin}`,
+      data,
+    };
+  }).filter((record) => record.id !== '|');
 }
 
 function mapInventarioPostventaRecords(invPost) {
@@ -161,9 +183,12 @@ async function collectInventario({ periodKey, fechaInicio, fechaFin, syncType = 
     getInventory({ planPisoPeriod: range.periodKey }),
     getInventoryPostventa(),
   ]);
+  const ageingRecords = mapInventarioAgeingRecords(nuevos.ageingSlowTable || []);
+  const postventaRecords = mapInventarioPostventaRecords(postventa);
   const records = [
     ...mapInventarioNuevosRecords(nuevos.inventoryTable || []),
-    ...mapInventarioPostventaRecords(postventa),
+    ...ageingRecords,
+    ...postventaRecords,
   ];
   return {
     domain: 'inventario',
@@ -174,9 +199,31 @@ async function collectInventario({ periodKey, fechaInicio, fechaFin, syncType = 
     records,
     meta: {
       autosNuevos: (nuevos.inventoryTable || []).length,
-      postventaLineas: records.length - (nuevos.inventoryTable || []).length,
+      ageingLineas: ageingRecords.length,
+      postventaLineas: postventaRecords.length,
       summaryNuevos: nuevos.summary || null,
       overviewPostventa: postventa.overview || null,
+    },
+  };
+}
+
+/** Vendidos del periodo con costo, gastos y plan piso (Expediente del VIN en Objetivos Web). */
+async function collectVendidos({ periodKey, fechaInicio, fechaFin, syncType = 'incremental' } = {}) {
+  const range = resolveRange({ periodKey, fechaInicio, fechaFin });
+  const data = await getVendidosAnalisis({
+    fechaInicio: range.fechaInicio,
+    fechaFin: range.fechaFin,
+  });
+  return {
+    domain: 'vendidos',
+    syncType,
+    periodKey: range.periodKey,
+    periodStart: range.fechaInicio,
+    periodEnd: range.fechaFin,
+    records: mapVendidosRecords(data.vendidosTable || []),
+    meta: {
+      summary: data.summary || null,
+      comisionEvMesPrev: data.comisionEvMesPrev || null,
     },
   };
 }
@@ -283,6 +330,7 @@ async function collectObjetivos({ periodKey, fechaInicio, fechaFin, syncType = '
   const data = await getObjetivosResultadosCompleto({
     fechaInicio: range.fechaInicio,
     fechaFin: range.fechaFin,
+    fresh: true,
   });
   return {
     domain: 'objetivos',
@@ -320,6 +368,7 @@ const COLLECTORS = {
   overview: collectOverview,
   ventas: collectVentas,
   inventario: collectInventario,
+  vendidos: collectVendidos,
   contabilidad: collectContabilidad,
   postventa: collectPostventa,
   forecast: collectForecast,
@@ -339,6 +388,7 @@ module.exports = {
   collectOverview,
   collectVentas,
   collectInventario,
+  collectVendidos,
   collectContabilidad,
   collectPostventa,
   collectForecast,

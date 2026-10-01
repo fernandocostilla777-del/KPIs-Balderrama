@@ -118,6 +118,9 @@ export type BdcResult = {
   nota?: string;
   real?: {
     contactos: number | null;
+    contactosCiclos?: number | null;
+    contactosLeadsAsignados?: number | null;
+    contactosOverlap?: number | null;
     citasAgendadas: number | null;
     citasConfirmadas: number | null;
     citasCumplidas: number | null;

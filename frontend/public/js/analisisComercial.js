@@ -1,10 +1,27 @@
 /**
- * Ventas · Análisis comercial CMI (C-1…C-12.1)
- * Clic en KPI → panel flotante con desglose.
+ * CMI Comercial (C-1…C-12.1) — montado por sección del dashboard
+ * (Ventas / Financiamiento / Inventario), no en un tab único.
  */
 (function initAnalisisComercial() {
   let acData = null;
   let activeClave = null;
+  let lastPeriod = null;
+  let chartAntiguedad = null;
+  let chartTipoCliente = null;
+
+  const ANTIGUEDAD_BUCKETS = [
+    { key: '0-30', label: '0–30 días', color: '#059669' },
+    { key: '31-90', label: '31–90 días', color: '#2563eb' },
+    { key: '91-180', label: '91–180 días', color: '#d97706' },
+    { key: '>180', label: '>180 días', color: '#e11d48' },
+    { key: 'sin', label: 'Sin clasificar', color: '#94a3b8' },
+  ];
+
+  const TIPO_CLIENTE_SLICES = [
+    { key: 'primeraCompra', label: '1ª compra', color: '#2563eb' },
+    { key: 'recurrente', label: 'Recurrentes', color: '#059669' },
+    { key: 'sinClasificar', label: 'Sin clasificar', color: '#94a3b8' },
+  ];
 
   const KPI_ICONS = {
     'C-1': 'local_shipping',
@@ -26,6 +43,44 @@
     'C-12': 'sensors',
     'C-12.1': 'wifi_tethering',
   };
+
+  /** Textos de negocio (UI); la clave CMI se mantiene como referencia en la ficha. */
+  const KPI_UI = {
+    'C-10': {
+      label: 'Cumplimiento vs meta',
+      sub: 'Tomas del periodo contra el objetivo de TAC',
+    },
+    'C-10.1': {
+      label: 'Participación en entregas',
+      sub: 'Qué porcentaje de entregas llevó toma a cuenta',
+    },
+  };
+
+  /** Dónde vive cada bloque en el dashboard */
+  const MOUNTS = [
+    // PENDIENTE: C-4 / C-7 / C-8 (CMI · mercado y fuerza) — fichas ocultas de momento.
+    // Al reactivar: restaurar #acMountVentasCore en sales.html y este mount:
+    // { id: 'acMountVentasCore', claves: ['C-4', 'C-7', 'C-8'], title: 'CMI · mercado y fuerza' },
+    // C-2 / C-2.1 se visualizan en #mixSummary (sección Mix de entregas), no como fichas genéricas.
+    {
+      id: 'acMountTomas',
+      claves: ['C-10', 'C-10.1'],
+      title: 'Avance de tomas a cuenta',
+    },
+    // C-3 vive en el KPI «Antigüedad» de Inventario (#kpiAgeingAlerts).
+    // C-5 ya vive como «Penetración GMF». C-11/C-11.1/C-12/C-12.1 (accesorios/OnStar):
+    // sección #acMountFi retirada de sales.html; backend conserva el cálculo.
+  ];
+
+  function formatPeriodLabel(fechaInicio, fechaFin) {
+    const fmt = (iso) => {
+      const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return iso || '—';
+      return `${m[3]}/${m[2]}/${m[1]}`;
+    };
+    if (!fechaInicio || !fechaFin) return '—';
+    return `${fmt(fechaInicio)} – ${fmt(fechaFin)}`;
+  }
 
   function escHtml(value) {
     return String(value ?? '')
@@ -66,17 +121,9 @@
     return 'slate';
   }
 
-  function sortKpis(kpis) {
-    return [...(kpis || [])].sort((a, b) => {
-      const parse = (clave) => {
-        const m = String(clave || '').match(/^C-(\d+)(?:\.(\d+))?$/i);
-        if (!m) return [999, 0];
-        return [Number(m[1]), Number(m[2] || 0)];
-      };
-      const [am, asub] = parse(a.clave);
-      const [bm, bsub] = parse(b.clave);
-      return am - bm || asub - bsub;
-    });
+  function sortByClaves(kpis, claves) {
+    const map = new Map((kpis || []).map((k) => [k.clave, k]));
+    return claves.map((c) => map.get(c)).filter(Boolean);
   }
 
   function formatDetalleValue(key, value) {
@@ -107,15 +154,18 @@
     const tone = kpi.tone || 'slate';
     const isOpen = activeClave === kpi.clave;
     const disabled = kpi.disponible === false && kpi.valor == null;
+    const ui = KPI_UI[kpi.clave] || {};
+    const label = ui.label || kpi.nombre || kpi.clave;
+    const sub = ui.sub || kpi.descripcion || '';
     return `<button type="button" class="eeff-edo-kpi eeff-edo-kpi--${tone} eeff-edo-kpi--interactive af-kpi${isOpen ? ' is-open is-selected' : ''}${disabled ? ' is-muted' : ''}"
-      data-ac-kpi="${escHtml(kpi.clave)}" aria-pressed="${isOpen}" title="Ver detalle del KPI">
+      data-ac-kpi="${escHtml(kpi.clave)}" aria-pressed="${isOpen}" title="Ver detalle">
       <div class="eeff-edo-kpi__head">
         <span class="eeff-edo-kpi__clave">${escHtml(kpi.clave)}</span>
         <span class="af-kpi__status af-kpi__status--${escHtml(kpi.status || 'parcial')}">${statusLabel(kpi.status)}</span>
       </div>
-      <div class="eeff-edo-kpi__label">${escHtml(kpi.nombre)}</div>
+      <div class="eeff-edo-kpi__label">${escHtml(label)}</div>
       <div class="eeff-edo-kpi__value">${formatDisplay(kpi)}</div>
-      <p class="eeff-edo-kpi__sub">${escHtml(kpi.descripcion || '')}</p>
+      <p class="eeff-edo-kpi__sub">${escHtml(sub)}</p>
       <span class="af-kpi__hint">Clic para detalle</span>
     </button>`;
   }
@@ -180,7 +230,7 @@
       backdrop.classList.add('hidden');
       backdrop.setAttribute('aria-hidden', 'true');
     }
-    renderGrid();
+    renderMounts();
   }
 
   function renderDetail(kpi) {
@@ -227,7 +277,7 @@
             <span class="material-symbols-outlined">${icon}</span>
           </div>
           <div>
-            <p class="bg-kpi-float__eyebrow">Análisis comercial · ${escHtml(kpi.clave)}</p>
+            <p class="bg-kpi-float__eyebrow">CMI comercial · ${escHtml(kpi.clave)}</p>
             <h3 class="bg-kpi-float__title" id="acKpiFloatTitle">${escHtml(kpi.nombre)}</h3>
             <p class="bg-kpi-float__value">${formatDisplay(kpi)}</p>
             <p class="bg-kpi-float__hint">${escHtml(kpi.descripcion || '')}</p>
@@ -247,17 +297,269 @@
     backdrop.setAttribute('aria-hidden', 'false');
   }
 
-  function renderGrid() {
-    const primary = document.getElementById('acKpiPrimary');
-    if (!primary || !acData?.kpis) return;
-    primary.innerHTML = sortKpis(acData.kpis).map(renderKpiCard).join('');
-    const r = acData.resumen || {};
-    const foot = document.getElementById('acFootnote');
-    if (foot) {
-      foot.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">info</span>
-        Manual CMI v3 · C-1…C-12.1 · ${r.completos || 0} completos · ${r.parciales || 0} parciales ·
-        ${(r.noDisponibles || 0)} sin fuente · clic en KPI para desglose`;
+  function destroyAntiguedadChart() {
+    if (chartAntiguedad) {
+      chartAntiguedad.destroy();
+      chartAntiguedad = null;
     }
+  }
+
+  function destroyTipoClienteChart() {
+    if (chartTipoCliente) {
+      chartTipoCliente.destroy();
+      chartTipoCliente = null;
+    }
+  }
+
+  function renderAntiguedadChart() {
+    const canvas = document.getElementById('chartAntiguedadOrigen');
+    const empty = document.getElementById('acAntiguedadEmpty');
+    const meta = document.getElementById('acAntiguedadMeta');
+    const periodEl = document.getElementById('acAntiguedadPeriod');
+    if (!canvas) return;
+
+    if (periodEl && lastPeriod) {
+      periodEl.textContent = formatPeriodLabel(lastPeriod.fechaInicio, lastPeriod.fechaFin);
+    }
+
+    const kpi = (acData?.kpis || []).find((k) => k.clave === 'C-6.1');
+    const d = kpi?.detalle || {};
+    const counts = ANTIGUEDAD_BUCKETS.map((b) => {
+      if (b.key === '0-30') return Number(d.rango_0_30) || 0;
+      if (b.key === '31-90') return Number(d.rango_31_90) || 0;
+      if (b.key === '91-180') return Number(d.rango_91_180) || 0;
+      if (b.key === '>180') return Number(d.rango_mas_180) || 0;
+      return Number(d.noClasificables) || 0;
+    });
+    const clasificables = Number(d.clasificables) || counts.slice(0, 4).reduce((s, n) => s + n, 0);
+    const totalSofia = Number(d.totalEntregasSofia) || (clasificables + (Number(d.noClasificables) || 0));
+    const total = counts.reduce((s, n) => s + n, 0);
+
+    if (!kpi || totalSofia <= 0 || typeof Chart === 'undefined') {
+      destroyAntiguedadChart();
+      if (empty) {
+        empty.classList.remove('hidden');
+        empty.textContent = !acData
+          ? 'Consulte un periodo para ver la distribución.'
+          : (kpi?.nota || 'Sin entregas SOFIA en el periodo para clasificar antigüedad.');
+      }
+      if (meta) meta.textContent = '';
+      return;
+    }
+
+    empty?.classList.add('hidden');
+    if (meta) {
+      const cob = d.coberturaPct != null ? Math.round(Number(d.coberturaPct)) : null;
+      const huecos = [];
+      if (d.sinIdCrm) huecos.push(`${fmtNum(d.sinIdCrm)} sin vínculo CRM`);
+      if (d.sinCaptura) huecos.push(`${fmtNum(d.sinCaptura)} sin fecha de captura`);
+      const base = `${fmtNum(clasificables)} de ${fmtNum(totalSofia)} entregas con fecha de captura`
+        + (cob != null ? ` (${cob}% del total)` : '');
+      meta.textContent = huecos.length
+        ? `${base} · pendientes: ${huecos.join(', ')}`
+        : base;
+    }
+
+    destroyAntiguedadChart();
+    chartAntiguedad = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: ANTIGUEDAD_BUCKETS.map((b) => b.label),
+        datasets: [{
+          label: 'Entregas SOFIA',
+          data: counts,
+          backgroundColor: ANTIGUEDAD_BUCKETS.map((b) => b.color),
+          borderRadius: 6,
+          maxBarThickness: 48,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const n = Number(ctx.raw) || 0;
+                const pctTotal = totalSofia ? ((n / totalSofia) * 100).toFixed(1) : '0.0';
+                const isSin = ctx.dataIndex === 4;
+                if (isSin) return ` ${n} sin captura CRM (${pctTotal}% de entregas SOFIA)`;
+                const pctClas = clasificables ? ((n / clasificables) * 100).toFixed(1) : '0.0';
+                return ` ${n} · ${pctClas}% de clasificables · ${pctTotal}% de SOFIA`;
+              },
+            },
+          },
+          datalabels: typeof ChartDataLabels !== 'undefined'
+            ? {
+              display: true,
+              anchor: 'end',
+              align: 'top',
+              offset: 2,
+              clamp: true,
+              formatter(value, ctx) {
+                const n = Number(value) || 0;
+                if (!n || !totalSofia) return '';
+                const pct = Math.round((n / totalSofia) * 1000) / 10;
+                return `${pct}%`;
+              },
+              color: '#1e293b',
+              font: { family: 'Inter, Segoe UI, sans-serif', weight: '700', size: 12 },
+            }
+            : { display: false },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: '#64748b', font: { size: 11 } },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0, color: '#64748b' },
+            grid: { color: 'rgba(148,163,184,0.25)' },
+            suggestedMax: Math.max(...counts, 1) * 1.18,
+          },
+        },
+        layout: { padding: { top: 28, right: 8, bottom: 0, left: 0 } },
+      },
+      plugins: typeof ChartDataLabels !== 'undefined' ? [ChartDataLabels] : [],
+    });
+  }
+
+  function renderTipoClienteChart() {
+    const canvas = document.getElementById('chartTipoCliente');
+    const empty = document.getElementById('acTipoClienteEmpty');
+    const meta = document.getElementById('acTipoClienteMeta');
+    const periodEl = document.getElementById('acTipoClientePeriod');
+    if (!canvas) return;
+
+    if (periodEl && lastPeriod) {
+      periodEl.textContent = formatPeriodLabel(lastPeriod.fechaInicio, lastPeriod.fechaFin);
+    }
+
+    const kpi = (acData?.kpis || []).find((k) => k.clave === 'C-6');
+    const d = kpi?.detalle || {};
+    const slices = TIPO_CLIENTE_SLICES.map((s) => ({
+      ...s,
+      value: Number(d[s.key]) || 0,
+    })).filter((s) => s.value > 0);
+    const total = slices.reduce((sum, s) => sum + s.value, 0);
+
+    if (!kpi || total <= 0 || typeof Chart === 'undefined') {
+      destroyTipoClienteChart();
+      if (empty) {
+        empty.classList.remove('hidden');
+        empty.textContent = !acData
+          ? 'Consulte un periodo para ver la composición.'
+          : (kpi?.nota || 'Sin entregas clasificables por tipo de cliente en el periodo.');
+      }
+      if (meta) meta.textContent = '';
+      return;
+    }
+
+    empty?.classList.add('hidden');
+    if (meta) {
+      const primera = d.pctPrimeraCompra != null ? Math.round(Number(d.pctPrimeraCompra)) : null;
+      const recurrente = d.pctRecurrente != null ? Math.round(Number(d.pctRecurrente)) : null;
+      const cob = d.coberturaPct != null ? Math.round(Number(d.coberturaPct)) : null;
+      const parts = [`${fmtNum(total)} entregas clasificadas`];
+      if (primera != null) parts.push(`${primera}% primera compra`);
+      if (recurrente != null) parts.push(`${recurrente}% recurrentes`);
+      if (cob != null) parts.push(`clasificadas ${cob}% del total SOFIA`);
+      meta.textContent = parts.join(' · ');
+    }
+
+    destroyTipoClienteChart();
+    chartTipoCliente = new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: slices.map((s) => s.label),
+        datasets: [{
+          data: slices.map((s) => s.value),
+          backgroundColor: slices.map((s) => s.color),
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverOffset: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '58%',
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: {
+              color: '#64748b',
+              boxWidth: 12,
+              padding: 14,
+              font: { family: 'Inter, Segoe UI, sans-serif', size: 12, weight: '600' },
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const n = Number(ctx.raw) || 0;
+                const pct = total ? ((n / total) * 100).toFixed(1) : '0.0';
+                return ` ${ctx.label}: ${n} (${pct}%)`;
+              },
+            },
+          },
+          datalabels: typeof ChartDataLabels !== 'undefined'
+            ? {
+              display: true,
+              color: '#ffffff',
+              font: { family: 'Inter, Segoe UI, sans-serif', weight: '700', size: 12 },
+              textStrokeColor: 'rgba(15,23,42,0.35)',
+              textStrokeWidth: 2,
+              formatter(value) {
+                const n = Number(value) || 0;
+                if (!n || !total) return '';
+                const pct = Math.round((n / total) * 1000) / 10;
+                return pct >= 6 ? `${pct}%` : '';
+              },
+            }
+            : { display: false },
+        },
+      },
+      plugins: typeof ChartDataLabels !== 'undefined' ? [ChartDataLabels] : [],
+    });
+  }
+
+  function renderMounts() {
+    MOUNTS.forEach((mount) => {
+      const el = document.getElementById(mount.id);
+      if (!el) return;
+      const row = el.querySelector('[data-ac-row]');
+      const empty = el.querySelector('[data-ac-empty]');
+      const loading = el.querySelector('[data-ac-loading]');
+      loading?.classList.add('hidden');
+
+      if (!acData?.kpis) {
+        if (row) row.innerHTML = '';
+        if (empty) {
+          empty.classList.remove('hidden');
+          empty.textContent = lastPeriod
+            ? 'No se pudo cargar CMI para el periodo.'
+            : 'Consulte un periodo para ver los KPI CMI.';
+        }
+        return;
+      }
+
+      const subset = sortByClaves(acData.kpis, mount.claves);
+      if (row) row.innerHTML = subset.map(renderKpiCard).join('');
+      empty?.classList.add('hidden');
+    });
+    renderAntiguedadChart();
+    renderTipoClienteChart();
+  }
+
+  function setLoading(on) {
+    MOUNTS.forEach((mount) => {
+      const el = document.getElementById(mount.id);
+      el?.querySelector('[data-ac-loading]')?.classList.toggle('hidden', !on);
+    });
   }
 
   function openKpi(clave) {
@@ -268,51 +570,109 @@
       return;
     }
     activeClave = clave;
-    renderGrid();
+    renderMounts();
     renderDetail(kpi);
   }
 
-  function bindGridClicks() {
-    document.getElementById('acOverview')?.addEventListener('click', (event) => {
+  function ensureFloatHost() {
+    if (document.getElementById('acKpiFloat')) return;
+    const backdrop = document.createElement('div');
+    backdrop.id = 'acKpiFloatBackdrop';
+    backdrop.className = 'bg-kpi-float-backdrop hidden';
+    backdrop.setAttribute('aria-hidden', 'true');
+    const panel = document.createElement('aside');
+    panel.id = 'acKpiFloat';
+    panel.className = 'bg-kpi-float hidden';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-labelledby', 'acKpiFloatTitle');
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+  }
+
+  function bindClicks() {
+    ensureFloatHost();
+    document.addEventListener('click', (event) => {
       const btn = event.target.closest('[data-ac-kpi]');
-      if (!btn) return;
-      openKpi(btn.getAttribute('data-ac-kpi'));
-    });
-    document.getElementById('acKpiFloatBackdrop')?.addEventListener('click', closeDetail);
-    document.getElementById('acKpiFloat')?.addEventListener('click', (event) => {
+      if (btn) {
+        openKpi(btn.getAttribute('data-ac-kpi'));
+        return;
+      }
       if (event.target.closest('[data-ac-close-detail]')) closeDetail();
+      if (event.target.id === 'acKpiFloatBackdrop') closeDetail();
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && activeClave) closeDetail();
     });
   }
 
-  async function load(fechaInicio, fechaFin) {
-    const loading = document.getElementById('acLoading');
-    const empty = document.getElementById('acEmpty');
-    loading?.classList.remove('hidden');
-    empty?.classList.add('hidden');
+  async function load(fechaInicio, fechaFin, opts = {}) {
+    if (!fechaInicio || !fechaFin) return null;
+    const force = Boolean(opts.force);
+    const samePeriod = lastPeriod
+      && lastPeriod.fechaInicio === fechaInicio
+      && lastPeriod.fechaFin === fechaFin;
+
+    if (!force && samePeriod && acData) {
+      renderMounts();
+      MOUNTS.forEach((mount) => {
+        const el = document.getElementById(mount.id);
+        const label = el?.querySelector('[data-ac-period]');
+        if (label) label.textContent = formatPeriodLabel(fechaInicio, fechaFin);
+      });
+      return acData;
+    }
+
+    lastPeriod = { fechaInicio, fechaFin };
+    setLoading(true);
     try {
       const qs = new URLSearchParams({ fechaInicio, fechaFin });
       acData = await Dashboard.api(`/ventas/analisis-comercial?${qs}`);
       closeDetail();
-      renderGrid();
-      const sub = document.getElementById('acPeriodLabel');
-      if (sub) sub.textContent = `${fechaInicio} → ${fechaFin}`;
+      renderMounts();
+      MOUNTS.forEach((mount) => {
+        const el = document.getElementById(mount.id);
+        const label = el?.querySelector('[data-ac-period]');
+        if (label) label.textContent = formatPeriodLabel(fechaInicio, fechaFin);
+      });
+      return acData;
     } catch (err) {
       acData = null;
       closeDetail();
-      const primary = document.getElementById('acKpiPrimary');
-      if (primary) primary.innerHTML = '';
-      if (empty) {
-        empty.classList.remove('hidden');
-        empty.textContent = err.message || 'No se pudo cargar el análisis comercial.';
-      }
+      renderMounts();
+      MOUNTS.forEach((mount) => {
+        const empty = document.getElementById(mount.id)?.querySelector('[data-ac-empty]');
+        if (empty) {
+          empty.classList.remove('hidden');
+          empty.textContent = err.message || 'No se pudo cargar los indicadores.';
+        }
+      });
+      return null;
     } finally {
-      loading?.classList.add('hidden');
+      setLoading(false);
     }
   }
 
-  bindGridClicks();
-  window.AnalisisComercial = { load, closeDetail };
+  function hasCache(fechaInicio, fechaFin) {
+    return Boolean(
+      acData
+      && lastPeriod
+      && lastPeriod.fechaInicio === fechaInicio
+      && lastPeriod.fechaFin === fechaFin
+    );
+  }
+
+  bindClicks();
+  window.AnalisisComercial = {
+    load,
+    hasCache,
+    closeDetail,
+    renderMounts,
+    getKpi(clave) {
+      return (acData?.kpis || []).find((k) => k.clave === clave) || null;
+    },
+    getData() {
+      return acData;
+    },
+  };
 })();

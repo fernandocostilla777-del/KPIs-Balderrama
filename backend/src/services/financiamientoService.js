@@ -79,8 +79,17 @@ function rowDate(row) {
 }
 
 function mapContract(row) {
+  const onstarMonto = roundMoney(Number(row.onstar_monto));
+  const plazoOnstar = row.plazo_onstar || null;
+  const hasOnstarContrato = (Number(row.onstar_monto) || 0) > 0
+    || Boolean(String(plazoOnstar || '').trim());
+
   const pvas = PVA_DEFS
-    .filter((def) => Number(row[def.col] || 0) > 0)
+    .filter((def) => {
+      // OnStar: cuenta monto > 0 o plazo capturado (mismo criterio que hasOnstarContrato).
+      if (def.key === 'onstar') return hasOnstarContrato;
+      return Number(row[def.col] || 0) > 0;
+    })
     .map((def) => ({
       key: def.key,
       label: def.label,
@@ -90,10 +99,6 @@ function mapContract(row) {
   const plan2 = row.plan_2 || null;
   const especial = row.especial || null;
   const modalidad = classifyModalidad({ plan_2: plan2, especial });
-  const onstarMonto = roundMoney(Number(row.onstar_monto));
-  const plazoOnstar = row.plazo_onstar || null;
-  const hasOnstarContrato = (Number(row.onstar_monto) || 0) > 0
-    || Boolean(String(plazoOnstar || '').trim());
   const seguroGratis = cleanSeguroValor(row.seguro_gratis);
   const seguroSubsecuente = cleanSeguroValor(row.seguro_subsecuente);
 
@@ -268,9 +273,10 @@ function buildPvaTrimestreYtd(contracts = [], refOrQuarter = new Date()) {
     byMonth[mk].contratos += 1;
     if (Number(c.cantidadPvas || 0) > 0) byMonth[mk].conPva += 1;
     for (const def of PVA_DEFS) {
-      if ((c.pvas || []).some((p) => p.key === def.key)) {
-        byMonth[mk][def.key] += 1;
-      }
+      const has = def.key === 'onstar'
+        ? Boolean(c.hasOnstarContrato)
+        : (c.pvas || []).some((p) => p.key === def.key);
+      if (has) byMonth[mk][def.key] += 1;
     }
   }
 
@@ -646,8 +652,14 @@ function loadSolicitudes(fechaInicio, fechaFin) {
   const empty = {
     total: 0,
     aprobadas: 0,
+    rechazadas: 0,
     conCompra: 0,
+    aprobadasConContrato: 0,
+    aprobadasNoCompradas: 0,
     tasaAprobacionPct: null,
+    tasaRechazoPct: null,
+    tasaConversionContratoPct: null,
+    tasaNoCompraPct: null,
     porEstatus: [],
     porFinanciera: [],
     porCarline: [],
@@ -672,10 +684,19 @@ function loadSolicitudes(fechaInicio, fechaFin) {
       FROM crm_solicitudes
     `).all().filter((r) => inPeriod(r.fecha_solicitud, fechaInicio, fechaFin));
 
-    const aprobadas = rows.filter((r) => String(r.estatus || '').toUpperCase().includes('APROBADA')).length;
-    const conCompra = rows.filter((r) =>
-      r.fecha_compra || String(r.estatus || '').toUpperCase().includes('FACT')
-    ).length;
+    const isAprobada = (r) => String(r.estatus || '').toUpperCase().includes('APROBADA');
+    const isRechazada = (r) => String(r.estatus || '').toUpperCase().includes('RECHAZADA');
+    const tieneContrato = (r) => {
+      const est = String(r.estatus || '').toUpperCase();
+      return !!(r.num_contrato || r.fecha_compra || est.includes('FACT'));
+    };
+
+    const aprobadasRows = rows.filter(isAprobada);
+    const aprobadas = aprobadasRows.length;
+    const rechazadas = rows.filter(isRechazada).length;
+    const conCompra = rows.filter(tieneContrato).length;
+    const aprobadasConContrato = aprobadasRows.filter(tieneContrato).length;
+    const aprobadasNoCompradas = Math.max(0, aprobadas - aprobadasConContrato);
 
     const byCarline = new Map();
     for (const r of rows) {
@@ -685,14 +706,19 @@ function loadSolicitudes(fechaInicio, fechaFin) {
           carline,
           total: 0,
           aprobadas: 0,
+          rechazadas: 0,
           conCompra: 0,
+          aprobadasConContrato: 0,
           muestraUnidad: null,
         });
       }
       const bucket = byCarline.get(carline);
       bucket.total += 1;
-      if (String(r.estatus || '').toUpperCase().includes('APROBADA')) bucket.aprobadas += 1;
-      if (r.fecha_compra || String(r.estatus || '').toUpperCase().includes('FACT')) bucket.conCompra += 1;
+      const aprob = isAprobada(r);
+      if (aprob) bucket.aprobadas += 1;
+      if (isRechazada(r)) bucket.rechazadas += 1;
+      if (tieneContrato(r)) bucket.conCompra += 1;
+      if (aprob && tieneContrato(r)) bucket.aprobadasConContrato += 1;
       if (!bucket.muestraUnidad && r.unidad_paquete) {
         bucket.muestraUnidad = String(r.unidad_paquete).trim();
       }
@@ -712,8 +738,14 @@ function loadSolicitudes(fechaInicio, fechaFin) {
     return {
       total: rows.length,
       aprobadas,
+      rechazadas,
       conCompra,
+      aprobadasConContrato,
+      aprobadasNoCompradas,
       tasaAprobacionPct: pct(aprobadas, rows.length),
+      tasaRechazoPct: pct(rechazadas, rows.length),
+      tasaConversionContratoPct: pct(aprobadasConContrato, aprobadas),
+      tasaNoCompraPct: pct(aprobadasNoCompradas, aprobadas),
       porEstatus: countMap(rows, (r) => r.estatus || '(sin estatus)'),
       porFinanciera: countMap(rows, (r) => r.financiera || '(sin financiera)').slice(0, 10),
       porCarline,
@@ -728,6 +760,7 @@ function loadSolicitudes(fechaInicio, fechaFin) {
         respuestaFinanciera: r.respuesta_financiera || null,
         biometrico: r.biometrico != null ? String(r.biometrico).trim() : null,
         contrato: r.num_contrato || null,
+        fechaCompra: toIsoDate(r.fecha_compra) || r.fecha_compra || null,
         enganche: Number(r.enganche) || null,
         fi: r.fi || null,
         afi: r.afi || null,
@@ -741,19 +774,35 @@ function loadSolicitudes(fechaInicio, fechaFin) {
   }
 }
 
-/** Flotilla en col. AO (especial). Se resta de Nuevos porque suelen venir como NUEVO en AN. */
+/** Flotilla en col. AO (especial). Prioridad sobre tipo_compra AN. */
 function isFlotillaContract(c) {
   return String(c?.especial || '').toUpperCase().includes('FLOTILLA');
 }
 
-/** Seminuevo en col. AN (tipo_compra). */
+/** Seminuevo en col. AN (tipo_compra), excluyendo flotillas de AO. */
 function isSeminuevoContract(c) {
-  return String(c?.tipoCompra || '').trim().toUpperCase() === 'SEMINUEVO';
+  return !isFlotillaContract(c)
+    && String(c?.tipoCompra || '').trim().toUpperCase() === 'SEMINUEVO';
 }
 
 /** Nuevo en col. AN (tipo_compra), excluyendo flotillas de AO. */
 function isNuevoContract(c) {
-  return String(c?.tipoCompra || '').trim().toUpperCase() === 'NUEVO' && !isFlotillaContract(c);
+  return !isFlotillaContract(c)
+    && String(c?.tipoCompra || '').trim().toUpperCase() === 'NUEVO';
+}
+
+/** Demo en col. AN (tipo_compra), excluyendo flotillas de AO. */
+function isDemoContract(c) {
+  return !isFlotillaContract(c)
+    && String(c?.tipoCompra || '').trim().toUpperCase() === 'DEMO';
+}
+
+/** Cualquier contrato fuera de Nuevo / Seminuevo / Flotilla / Demo. */
+function isOtroVolumenContract(c) {
+  return !isFlotillaContract(c)
+    && !isNuevoContract(c)
+    && !isSeminuevoContract(c)
+    && !isDemoContract(c);
 }
 
 function buildSummary(contracts, solicitudes) {
@@ -765,15 +814,20 @@ function buildSummary(contracts, solicitudes) {
   const contratosNuevos = contracts.filter(isNuevoContract);
   const contratosSeminuevos = contracts.filter(isSeminuevoContract);
   const contratosFlotilla = contracts.filter(isFlotillaContract);
-  const contratosDemo = contracts.filter((c) => String(c?.tipoCompra || '').trim().toUpperCase() === 'DEMO');
+  const contratosDemo = contracts.filter(isDemoContract);
+  const contratosOtros = contracts.filter(isOtroVolumenContract);
 
   const conPva = contracts.filter((c) => c.cantidadPvas > 0);
   const montoTotalPvas = contracts.reduce((s, c) => s + Number(c.montoPvas || 0), 0);
   const totalCantidadPvas = contracts.reduce((s, c) => s + Number(c.cantidadPvas || 0), 0);
 
   const porTipoPva = PVA_DEFS.map((def) => {
-    const con = contracts.filter((c) => c.pvas.some((p) => p.key === def.key));
+    const con = contracts.filter((c) => {
+      if (def.key === 'onstar') return Boolean(c.hasOnstarContrato);
+      return (c.pvas || []).some((p) => p.key === def.key);
+    });
     const monto = con.reduce((s, c) => {
+      if (def.key === 'onstar') return s + Number(c.onstarMonto || 0);
       const hit = c.pvas.find((p) => p.key === def.key);
       return s + Number(hit?.monto || 0);
     }, 0);
@@ -788,6 +842,10 @@ function buildSummary(contracts, solicitudes) {
 
   const conSeguroGratis = contracts.filter((c) => c.hasSeguroGratis);
   const conSeguroSubsecuente = contracts.filter((c) => c.hasSeguroSubsecuente);
+  const seminuevosSinSeguroGratis = contracts.filter(
+    (c) => isSeminuevoContract(c) && !c.hasSeguroGratis,
+  ).length;
+  const elegiblesSeguroGratis = Math.max(0, contracts.length - seminuevosSinSeguroGratis);
 
   return {
     contratos: contracts.length,
@@ -796,6 +854,7 @@ function buildSummary(contracts, solicitudes) {
     unidadesSeminuevos: contratosSeminuevos.length,
     unidadesFlotilla: contratosFlotilla.length,
     unidadesDemo: contratosDemo.length,
+    unidadesOtros: contratosOtros.length,
     montoFinanciarTotal: roundMoney(montos.reduce((s, n) => s + n, 0)) || 0,
     montoFinanciarPromedio: roundMoney(avg(montos)),
     enganchePromedio: roundMoney(avg(enganches)),
@@ -809,7 +868,9 @@ function buildSummary(contracts, solicitudes) {
     porTipoPva,
     seguroGratis: {
       contratos: conSeguroGratis.length,
-      penetracionPct: pct(conSeguroGratis.length, contracts.length),
+      penetracionPct: pct(conSeguroGratis.length, elegiblesSeguroGratis),
+      elegibles: elegiblesSeguroGratis,
+      seminuevosSinSeguro: seminuevosSinSeguroGratis,
       porCompania: countMap(conSeguroGratis, (c) => c.seguroGratis || '(sin compañía)'),
     },
     seguroSubsecuente: {
@@ -828,8 +889,17 @@ function buildSummary(contracts, solicitudes) {
     solicitudes: {
       total: solicitudes.total,
       aprobadas: solicitudes.aprobadas,
+      rechazadas: solicitudes.rechazadas,
       conCompra: solicitudes.conCompra,
+      aprobadasConContrato: solicitudes.aprobadasConContrato,
+      aprobadasNoCompradas: solicitudes.aprobadasNoCompradas,
       tasaAprobacionPct: solicitudes.tasaAprobacionPct,
+      tasaRechazoPct: solicitudes.tasaRechazoPct,
+      tasaConversionContratoPct: solicitudes.tasaConversionContratoPct,
+      tasaNoCompraPct: solicitudes.tasaNoCompraPct,
+      porEstatus: solicitudes.porEstatus,
+      porFinanciera: solicitudes.porFinanciera,
+      porCarline: solicitudes.porCarline,
     },
   };
 }
@@ -1201,6 +1271,8 @@ module.exports = {
   isFlotillaContract,
   isSeminuevoContract,
   isNuevoContract,
+  isDemoContract,
+  isOtroVolumenContract,
   classifyModalidad,
   PVA_DEFS,
 };

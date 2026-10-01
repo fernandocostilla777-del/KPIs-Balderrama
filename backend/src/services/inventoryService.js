@@ -100,8 +100,23 @@ function normalizeMatchKey(value) {
 }
 
 function extractPaqueteLetter(tipoAuto) {
-  const parts = String(tipoAuto || '').toUpperCase().split(/\s+/).filter(Boolean);
-  return parts.find((p) => /^[A-Z]$/.test(p)) || '';
+  const text = String(tipoAuto || '').toUpperCase().trim();
+  if (!text) return '';
+  // DMS real: PAQ "B" | PAQ."A" | "PAQ" A | PAQUETE B | … "C"
+  const tagged = text.match(
+    /(?:PAQ(?:UETE)?|PKG|MOD(?:ELO)?)\s*[."'`]?\s*["'`]?\s*([A-Z])\b/,
+  );
+  if (tagged) return tagged[1];
+  const parts = text
+    .replace(/["'`]/g, ' ')
+    .split(/[\s/_\-,.]+/)
+    .filter(Boolean)
+    .filter((p) => !/^(MY)?20\d{2}$/.test(p) && !/^\d+$/.test(p));
+  // Última letra suelta (evita la "S" de S 10; prioriza el paquete al final).
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (/^[A-Z]$/.test(parts[i])) return parts[i];
+  }
+  return '';
 }
 
 function roundMoney(n) {
@@ -830,6 +845,140 @@ function personName(row) {
   ].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
 }
 
+function parsePreviasDetalle(raw) {
+  return String(raw || '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [orden = '', fecha = '', status = ''] = part.split('·');
+      return {
+        orden: String(orden || '').trim(),
+        fecha: String(fecha || '').trim(),
+        status: String(status || '').trim().toUpperCase(),
+      };
+    })
+    .filter((item) => item.orden);
+}
+
+function formatPreviaFecha(value) {
+  if (value == null || value === '') return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // dd/mm/yyyy típico DMS
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) {
+    return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  }
+  return s.slice(0, 10);
+}
+
+/**
+ * Previas solo para las series pedidas (evita escanear todo SER_ORDEN con FOR XML).
+ * Ensambla el detalle en Node → compatible SQL Server 2008 R2 y mucho más estable.
+ */
+async function loadPreviasBySeries(seriesList) {
+  const series = [...new Set(
+    (seriesList || [])
+      .map((s) => String(s || '').trim().toUpperCase())
+      .filter((s) => s.length >= 5),
+  )];
+  const out = new Map();
+  if (!series.length) return out;
+
+  const CHUNK = 100;
+  for (let i = 0; i < series.length; i += CHUNK) {
+    const chunk = series.slice(i, i + CHUNK);
+    const params = {};
+    const placeholders = chunk.map((s, idx) => {
+      const key = `s${idx}`;
+      params[key] = s;
+      return `@${key}`;
+    }).join(', ');
+
+    let rows = [];
+    try {
+      rows = await query(`
+        SELECT
+          UPPER(LTRIM(RTRIM(ORE_NUMSERIE))) AS SERIE,
+          LTRIM(RTRIM(ORE_IDORDEN)) AS ORDEN,
+          ORE_FECHAORD AS FECHA,
+          LTRIM(RTRIM(ISNULL(ORE_STATUS, ''))) AS STATUS
+        FROM SER_ORDEN
+        WHERE LEFT(LTRIM(RTRIM(ORE_IDORDEN)), 1) = 'S'
+          AND ORE_STATUS <> 'C'
+          AND ORE_NUMSERIE IS NOT NULL
+          AND LTRIM(RTRIM(ORE_NUMSERIE)) <> ''
+          AND UPPER(LTRIM(RTRIM(ORE_NUMSERIE))) IN (${placeholders})
+        ORDER BY ORE_NUMSERIE, ORE_FECHAORD, ORE_IDORDEN
+      `, params);
+    } catch (err) {
+      console.warn('[inventory] previas por serie:', err.message);
+      continue;
+    }
+
+    for (const row of rows || []) {
+      const serie = String(row.SERIE || '').trim().toUpperCase();
+      if (!serie) continue;
+      if (!out.has(serie)) out.set(serie, { count: 0, detalle: [] });
+      const bucket = out.get(serie);
+      const item = {
+        orden: String(row.ORDEN || '').trim(),
+        fecha: formatPreviaFecha(row.FECHA),
+        status: String(row.STATUS || '').trim().toUpperCase(),
+      };
+      if (!item.orden) continue;
+      bucket.detalle.push(item);
+      bucket.count += 1;
+    }
+  }
+  return out;
+}
+
+function applyPreviasToUnits(units, previasMap) {
+  for (const unit of units) {
+    const key = String(unit.serie || unit.vin || '').trim().toUpperCase();
+    const hit = key ? previasMap.get(key) : null;
+    if (!hit) continue;
+    unit.previas = hit.count;
+    unit.previasDetalle = hit.detalle;
+  }
+  return units;
+}
+
+/** Cache corto: objetivos-web + dashboard pegan /inventory a la vez. */
+let inventoryCache = { key: null, at: 0, payload: null };
+const INVENTORY_CACHE_MS = 45_000;
+
+function invalidateInventoryCache() {
+  inventoryCache = { key: null, at: 0, payload: null };
+}
+
+/** Subconsulta legacy (ya no se usa en getInventory/vendidos; se deja por si hay callers externos). */
+const PREVIAS_POR_SERIE_SQL = `
+  SELECT
+    ser.SERIE,
+    (
+      SELECT COUNT(*)
+      FROM SER_ORDEN o
+      WHERE LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) = 'S'
+        AND o.ORE_STATUS <> 'C'
+        AND UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) = ser.SERIE
+    ) AS PREVIAS,
+    CAST(NULL AS NVARCHAR(MAX)) AS PREVIAS_DETALLE
+  FROM (
+    SELECT DISTINCT UPPER(LTRIM(RTRIM(ORE_NUMSERIE))) AS SERIE
+    FROM SER_ORDEN
+    WHERE LEFT(LTRIM(RTRIM(ORE_IDORDEN)), 1) = 'S'
+      AND ORE_STATUS <> 'C'
+      AND ORE_NUMSERIE IS NOT NULL
+      AND LTRIM(RTRIM(ORE_NUMSERIE)) <> ''
+  ) ser
+`;
+
 function mapRow(row) {
   const situacion = String(row.VEH_SITUACION || '').trim().toUpperCase();
   const remisionDate = parseRemisionDate(row.VEH_FECREMISION);
@@ -839,6 +988,9 @@ function mapRow(row) {
   const fechaApartado = String(row.VEH_FECHSEP || '').trim();
   const daysApartado = isApartada ? daysSinceRemision(row.VEH_FECHSEP) : null;
   const apartadoPor = isApartada ? (personName(row) || String(row.VEH_CVEUSU || '').trim() || 'Sin dato') : '';
+  const previasDetalle = parsePreviasDetalle(
+    row.PREVIAS_DETALLE ?? row.previas_detalle ?? row.previasDetalle,
+  );
   return {
     tipoAuto: String(row.VEH_TIPOAUTO || '').trim(),
     familia: String(row.UNC_FAMILIA || '').trim(),
@@ -862,7 +1014,8 @@ function mapRow(row) {
     daysApartado,
     apartadoPor,
     usuarioApartado: String(row.VEH_CVEUSU || '').trim(),
-    previas: Number(row.PREVIAS || 0) || 0,
+    previas: Number(row.PREVIAS || 0) || previasDetalle.length || 0,
+    previasDetalle,
     precio: Number(row.PRECIO_LISTA || row.VEH_VENTA || 0) || 0,
     miCosto: Number(row.VEH_COSTO1 || 0) || 0,
     bonificacion: Number(row.VEH_REBATE || 0) || 0,
@@ -928,6 +1081,16 @@ function enrichUnitsWithPruebasManejo(units) {
 }
 
 async function getInventory({ planPisoPeriod = 'all' } = {}) {
+  const cacheKey = String(planPisoPeriod || 'all');
+  const now = Date.now();
+  if (
+    inventoryCache.payload
+    && inventoryCache.key === cacheKey
+    && (now - inventoryCache.at) < INVENTORY_CACHE_MS
+  ) {
+    return inventoryCache.payload;
+  }
+
   const rows = await query(`
     SELECT
       SER_VEHICULO.VEH_TIPOAUTO,
@@ -953,7 +1116,8 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       LTRIM(RTRIM(ISNULL(ap.PER_MATERNO, ''))) AS APAR_MATERNO,
       ISNULL(rem.IMPORTE_REMISION, 0) AS IMPORTE_REMISION,
       ISNULL(rem.GASTOS_REMISION, 0) AS GASTOS_REMISION,
-      ISNULL(prev.PREVIAS, 0) AS PREVIAS,
+      0 AS PREVIAS,
+      '' AS PREVIAS_DETALLE,
       ISNULL(UNI_CATALOGO.UNC_PrecListaPub, ISNULL(UNI_CATALOGO.UNC_PRECLISTA, 0)) AS PRECIO_LISTA,
       ISNULL(SER_VEHICULO.VEH_VENTA, 0) AS VEH_VENTA,
       ISNULL(SER_VEHICULO.VEH_COSTO1, 0) AS VEH_COSTO1,
@@ -980,17 +1144,6 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       FROM UNI_VEHDETA vd
       GROUP BY vd.VHD_NOSERIE
     ) rem ON rem.VHD_NOSERIE = SER_VEHICULO.VEH_NUMSERIE
-    LEFT JOIN (
-      SELECT
-        UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE))) AS SERIE,
-        COUNT(*) AS PREVIAS
-      FROM SER_ORDEN o
-      WHERE LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) = 'S'
-        AND o.ORE_STATUS <> 'C'
-        AND o.ORE_NUMSERIE IS NOT NULL
-        AND LTRIM(RTRIM(o.ORE_NUMSERIE)) <> ''
-      GROUP BY UPPER(LTRIM(RTRIM(o.ORE_NUMSERIE)))
-    ) prev ON prev.SERIE = UPPER(LTRIM(RTRIM(SER_VEHICULO.VEH_NUMSERIE)))
     LEFT JOIN PER_PERSONAS ap
       ON NULLIF(LTRIM(RTRIM(SER_VEHICULO.VEH_PERAPAR)), '') IS NOT NULL
       AND ISNUMERIC(LTRIM(RTRIM(SER_VEHICULO.VEH_PERAPAR))) = 1
@@ -1013,6 +1166,8 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
   `);
 
   const units = enrichUnitsWithPruebasManejo(rows.map(mapRow));
+  const previasMap = await loadPreviasBySeries(units.map((u) => u.serie));
+  applyPreviasToUnits(units, previasMap);
   const utilidadHistorica = await loadUtilidadHistoricaPorVersion();
   const availableSituations = new Set(['DIS', 'FIS', 'SEP']);
   const available = units.filter((u) => availableSituations.has(u.situacion));
@@ -1102,7 +1257,7 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
   const demosConPruebas = demos.filter((u) => Number(u.pruebasManejo || 0) > 0).length;
   const demosPruebasTotal = demos.reduce((s, u) => s + (Number(u.pruebasManejo) || 0), 0);
 
-  return {
+  const payload = {
     summary: {
       totalUnits: units.length,
       available: available.length,
@@ -1135,6 +1290,8 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     inventoryTable,
     planPisoTable,
   };
+  inventoryCache = { key: cacheKey, at: Date.now(), payload };
+  return payload;
 }
 
 function parseDateInput(value) {
@@ -1509,7 +1666,9 @@ async function getVendidosAnalisis({ fechaInicio, fechaFin } = {}) {
       ISNULL(apn.IMPORTE, 0) AS notaCargoAplicada,
       LTRIM(RTRIM(ISNULL(apn.FOLIO, ''))) AS notaCargoFolioAplicada,
       ISNULL(ncPago.IMPORTE, 0) AS notaCreditoPago,
-      LTRIM(RTRIM(ISNULL(ncPago.FOLIO, ''))) AS notaCreditoFolioPago
+      LTRIM(RTRIM(ISNULL(ncPago.FOLIO, ''))) AS notaCreditoFolioPago,
+      0 AS PREVIAS,
+      '' AS PREVIAS_DETALLE
     FROM ventas v
     INNER JOIN SER_VEHICULO veh
       ON veh.VEH_NUMSERIE = v.VTE_SERIE
@@ -1611,12 +1770,13 @@ async function getVendidosAnalisis({ fechaInicio, fechaFin } = {}) {
 
   const prevMonth = previousCalendarMonth(fechaInicio);
   const vinsList = unique.map((r) => r.vin);
-  const [prevByVendedor, leasingVins, ingresosFiByVin] = await Promise.all([
+  const [prevByVendedor, leasingVins, ingresosFiByVin, previasMap] = await Promise.all([
     prevMonth
       ? loadVentasPreviasPorVendedor(prevMonth.fechaInicio, prevMonth.fechaFin)
       : Promise.resolve(new Map()),
     Promise.resolve(loadLeasingVinSet(vinsList)),
     Promise.resolve(loadIngresosFinanciamientoByVin(vinsList)),
+    loadPreviasBySeries(vinsList),
   ]);
 
   const table = [];
@@ -1666,6 +1826,7 @@ async function getVendidosAnalisis({ fechaInicio, fechaFin } = {}) {
       ? null
       : roundMoney(utilidad - (comisionEv.importe || 0) - extras - planPiso);
     const fi = ingresosFiByVin.get(normalizeVinKey(row.vin)) || null;
+    const previasHit = previasMap.get(String(row.vin || '').trim().toUpperCase());
 
     table.push({
       carline: row.carline || 'Sin familia',
@@ -1677,6 +1838,7 @@ async function getVendidosAnalisis({ fechaInicio, fechaFin } = {}) {
       fechaVenta: formatIsoDate(ventaDate),
       fechaRemision: formatIsoDate(remisionDate),
       daysInStock: days,
+      importeRemision: Number(row.importeRemision || 0) || 0,
       precio: subtotal || null,
       isan: Number(row.isan || 0) || 0,
       costo,
@@ -1720,6 +1882,8 @@ async function getVendidosAnalisis({ fechaInicio, fechaFin } = {}) {
       ingresoFinanciamientoDetalle: fi ? (fi.byConcepto || []) : [],
       utilidadNeta,
       daysChargeable: piso.daysChargeable || 0,
+      previas: previasHit?.count || 0,
+      previasDetalle: previasHit?.detalle || [],
     });
   }
 
@@ -1783,4 +1947,5 @@ module.exports = {
   getVendidosAnalisis,
   vinSuffix8,
   loadPruebasManejoCountByVin8,
+  invalidateInventoryCache,
 };

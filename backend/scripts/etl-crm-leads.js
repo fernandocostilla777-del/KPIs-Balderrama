@@ -35,15 +35,9 @@ function clean(v) {
   return s || null;
 }
 
-/** Duplicados en sheet Acumulado: columna AD (y marcas en resultado/contacto/estación). */
+/** Duplicados en sheet Acumulado: columna AB "Resultado" = DUPLICADO. */
 function isDuplicadoLead(row) {
-  const markers = [
-    row[COL.enlaceDirecto],
-    row[COL.resultado],
-    row[COL.contacto],
-    row[COL.estacion],
-  ];
-  return markers.some((v) => String(v || '').trim().toUpperCase() === 'DUPLICADO');
+  return String(row[COL.resultado] || '').trim().toUpperCase() === 'DUPLICADO';
 }
 
 // Índices de columna del sheet "Acumulado" (hay encabezados duplicados; se mapea por posición)
@@ -67,10 +61,10 @@ const COL = {
   mes: 22,
   fechaEntrada: 23,
   estacion: 24,
-  contacto: 26,
-  resultado: 27,
-  comentario: 28,
-  enlaceDirecto: 29, // columna AD — puede ser SI / NO / DUPLICADO / N/A
+  contacto: 26, // AA
+  resultado: 27, // AB — DUPLICADO marca leads duplicados
+  comentario: 28, // AC
+  enlaceDirecto: 29, // AD
   intentosContacto: 31,
   canalContacto: 32,
   asignacion: 33,
@@ -159,7 +153,7 @@ function run() {
 
   let total = 0;
   let conIdCrm = 0;
-  let omitidosDuplicado = 0;
+  let marcadosDuplicado = 0;
   const insertMany = db.transaction((data) => {
     for (const r of data) insert.run(r);
   });
@@ -169,11 +163,9 @@ function run() {
     const r = rows[i];
     if (!r || r.every((c) => c == null || String(c).trim() === '')) continue;
 
-    // No cargar duplicados (columna AD / resultado / contacto / estación = DUPLICADO)
-    if (isDuplicadoLead(r)) {
-      omitidosDuplicado += 1;
-      continue;
-    }
+    // Columna AB (Resultado) = DUPLICADO → se carga marcado, fuera del embudo.
+    const esDuplicado = isDuplicadoLead(r) ? 1 : 0;
+    if (esDuplicado) marcadosDuplicado += 1;
 
     const idCrm = clean(r[COL.idCrm]);
     if (idCrm) conIdCrm++;
@@ -203,7 +195,7 @@ function run() {
       clean(r[COL.resultado]),
       clean(r[COL.comentario]),
       clean(r[COL.enlaceDirecto]),
-      0,
+      esDuplicado,
       clean(r[COL.intentosContacto]),
       clean(r[COL.canalContacto]),
       clean(r[COL.asignacion]),
@@ -240,7 +232,8 @@ function run() {
   console.log('\nCarga completa → tabla crm_leads en', DB_PATH);
   console.table([{
     leads: total,
-    omitidosDuplicado,
+    marcadosDuplicado,
+    unicos: total - marcadosDuplicado,
     conIdCrm,
     sinIdCrm: total - conIdCrm,
     idsCruzanConCiclos: cruzan,

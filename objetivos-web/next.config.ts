@@ -4,6 +4,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
   },
+  // objetivos-resultados / inventario DMS pueden superar 30s; sin esto el proxy corta → HTTP 500 vacío
+  experimental: {
+    proxyTimeout: 300_000,
+  },
   async rewrites() {
     const backend = process.env.DASHBOARD_API_URL || "http://127.0.0.1:3000";
     return [

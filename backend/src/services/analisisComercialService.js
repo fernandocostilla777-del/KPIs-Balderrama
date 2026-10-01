@@ -329,12 +329,19 @@ async function getAnalisisComercial({ fechaInicio, fechaFin } = {}) {
       disponible: (tipoCliente?.antiguedad?.clasificables || 0) > 0,
       formula: 'Días = Entrega − Captura CRM · % por rango sobre clasificables',
       nota: (tipoCliente?.antiguedad?.noClasificables)
-        ? `${tipoCliente.antiguedad.noClasificables} sin fecha de captura CRM vinculada al VIN; cobertura ${tipoCliente.antiguedad.coberturaPct ?? '—'}%.`
+        ? `${tipoCliente.antiguedad.clasificables || 0} de ${tipoCliente.total || entregas} entregas SOFIA (C-1) con captura CRM`
+          + (tipoCliente.antiguedad.sinIdCrm ? ` · ${tipoCliente.antiguedad.sinIdCrm} sin vínculo CRM` : '')
+          + (tipoCliente.antiguedad.sinCaptura ? ` · ${tipoCliente.antiguedad.sinCaptura} sin captura` : '')
+          + `; cobertura ${tipoCliente.antiguedad.coberturaPct ?? '—'}%. No compara vs facturas DMS.`
         : 'Antigüedad del ciclo del VIN entregado (no del primer contacto histórico).',
       detalle: {
         clasificables: tipoCliente?.antiguedad?.clasificables ?? null,
         noClasificables: tipoCliente?.antiguedad?.noClasificables ?? null,
         coberturaPct: tipoCliente?.antiguedad?.coberturaPct ?? null,
+        totalEntregasSofia: tipoCliente?.total ?? entregas,
+        sinIdCrm: tipoCliente?.antiguedad?.sinIdCrm ?? null,
+        sinCaptura: tipoCliente?.antiguedad?.sinCaptura ?? null,
+        diasNegativos: tipoCliente?.antiguedad?.diasNegativos ?? null,
         rango_0_30: tipoCliente?.antiguedad?.rangos?.['0-30'] ?? null,
         rango_31_90: tipoCliente?.antiguedad?.rangos?.['31-90'] ?? null,
         rango_91_180: tipoCliente?.antiguedad?.rangos?.['91-180'] ?? null,
@@ -343,6 +350,11 @@ async function getAnalisisComercial({ fechaInicio, fechaFin } = {}) {
         pct_31_90: tipoCliente?.antiguedad?.pctRangos?.['31-90'] ?? null,
         pct_91_180: tipoCliente?.antiguedad?.pctRangos?.['91-180'] ?? null,
         pct_mas_180: tipoCliente?.antiguedad?.pctRangos?.['>180'] ?? null,
+        pctTotal_0_30: tipoCliente?.antiguedad?.pctSobreTotal?.['0-30'] ?? null,
+        pctTotal_31_90: tipoCliente?.antiguedad?.pctSobreTotal?.['31-90'] ?? null,
+        pctTotal_91_180: tipoCliente?.antiguedad?.pctSobreTotal?.['91-180'] ?? null,
+        pctTotal_mas_180: tipoCliente?.antiguedad?.pctSobreTotal?.['>180'] ?? null,
+        pctTotal_sinClasificar: tipoCliente?.antiguedad?.pctSobreTotal?.sinClasificar ?? null,
       },
     }),
     kpiBase({

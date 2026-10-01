@@ -10,7 +10,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const https = require('https');
 const http = require('http');
 
@@ -65,18 +65,27 @@ function downloadFile(url, destPath, redirectsLeft = 5) {
   });
 }
 
+/** ETL en proceso hijo sin bloquear el event loop del backend (spawnSync congelaba :3000). */
 function runEtl(scriptName, xlsxPath) {
   const scriptPath = path.join(SCRIPTS_DIR, scriptName);
-  const result = spawnSync(process.execPath, [scriptPath, xlsxPath], {
-    cwd: path.join(__dirname, '..'),
-    encoding: 'utf8',
-    maxBuffer: 20 * 1024 * 1024,
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, xlsxPath], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stderr = '';
+    child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      process.stderr.write(chunk);
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`Falló ${scriptName} (exit ${code})${stderr ? `: ${stderr.slice(0, 200)}` : ''}`));
+    });
   });
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  if (result.status !== 0) {
-    throw new Error(`Falló ${scriptName} (exit ${result.status})`);
-  }
 }
 
 const ALL_ETLS = [
@@ -98,7 +107,7 @@ async function syncCrmSheets({ quiet = false, etls: onlyEtls } = {}) {
   const etls = Array.isArray(onlyEtls) && onlyEtls.length ? onlyEtls : ALL_ETLS;
   for (const script of etls) {
     if (!quiet) console.log(`[crm-sheets] Ejecutando ${script}...`);
-    runEtl(script, XLSX_PATH);
+    await runEtl(script, XLSX_PATH);
   }
 
   const finishedAt = new Date().toISOString();

@@ -612,9 +612,14 @@ function buildClienteClv({
   };
 
   const ventas = [];
+  const facturasVistas = new Set();
   for (const u of unidadesSql || []) {
     for (const f of u.facturasVentaSql || []) {
       if (!inDateRange(f.fechaFactura, fechaInicio, fechaFin)) continue;
+      const facturaKey = String(f.facturaVenta || '').trim().toUpperCase()
+        || `${normalizeVin(f.serie || u.vin)}|${toIsoDate(f.fechaFactura)}`;
+      if (facturasVistas.has(facturaKey)) continue;
+      facturasVistas.add(facturaKey);
       const utilidad = f.utilidad != null ? Number(f.utilidad) : null;
       const aporte = utilidad != null ? utilidad : 0;
       composicion.ventaVehiculo += aporte;
@@ -1214,9 +1219,15 @@ async function enrichByVins(vins, {
           ON veh.VEH_NUMSERIE = v.VTE_SERIE
           AND veh.VEH_NOINVENTA > 0
         LEFT JOIN PER_PERSONAS c ON c.PER_IDPERSONA = v.VTE_IDCLIENTE
-        LEFT JOIN UNI_TEMLIBROVENTAS lv
-          ON lv.VTE_DOCTO = v.VTE_DOCTO
-          AND lv.VTE_ORGSTATUS = 'I'
+        OUTER APPLY (
+          SELECT TOP 1
+            lv.SUBTOTAL, lv.COSTO, lv.pen_costo1, lv.BONIFICACION,
+            lv.PARTICIPACION, lv.VEH_MISELANEOS, lv.VTE_DOCTO
+          FROM UNI_TEMLIBROVENTAS lv
+          WHERE lv.VTE_DOCTO = v.VTE_DOCTO
+            AND lv.VTE_ORGSTATUS = 'I'
+          ORDER BY ISNULL(lv.SUBTOTAL, 0) DESC
+        ) lv
         WHERE v.VTE_TIPODOCTO = 'A'
           AND v.VTE_STATUS = 'I'
           AND (${matchSql('v.VTE_SERIE')})
@@ -1281,7 +1292,12 @@ async function enrichByVins(vins, {
       };
     });
 
-    const ventasCalculadas = ventasRows.map((row) => {
+    const ventasVistas = new Set();
+    const ventasCalculadas = [];
+    for (const row of ventasRows) {
+      const facturaKey = `${String(row.facturaVenta || '').trim().toUpperCase()}|${normalizeVin(row.serie)}`;
+      if (ventasVistas.has(facturaKey)) continue;
+      ventasVistas.add(facturaKey);
       const ventaSubtotal = Number(row.ventaSubtotal || 0);
       const costoNeto = Number(row.costoNeto || 0);
       const gastos = Number(row.gastos || 0);
@@ -1289,14 +1305,14 @@ async function enrichByVins(vins, {
       const utilidad = (tieneLibro || costoNeto > 0)
         ? Math.round((ventaSubtotal - costoNeto - gastos) * 100) / 100
         : null;
-      return {
+      ventasCalculadas.push({
         ...row,
         ventaSubtotal,
         costoNeto,
         gastos,
         utilidad,
-      };
-    });
+      });
+    }
 
     const unidades = list.map((vin) => {
       const facturasVentaSql = ventasCalculadas.filter((r) => matchCrmVinToSerie(vin, r.serie));
@@ -1493,6 +1509,61 @@ function monthsElapsed(fromDate, toDate = new Date()) {
   return Math.max(0, months);
 }
 
+/** Unidad vigente: la venta más reciente en el DMS, no la única compra que trae el CRM. */
+function pickUnidadActual(unidades = []) {
+  const vendidas = unidades.filter((u) => u.ventaEnDistribuidor || u.facturaVenta || u.fechaFactura);
+  const pool = vendidas.length ? vendidas : unidades;
+  return [...pool].sort((a, b) => {
+    const fecha = String(b.fechaFactura || '').localeCompare(String(a.fechaFactura || ''));
+    if (fecha) return fecha;
+    return String(b.ultimaVisita || '').localeCompare(String(a.ultimaVisita || ''));
+  })[0] || null;
+}
+
+function fechaContratoIso(contrato) {
+  return String(validHistoricalDate(
+    contrato?.fecha_compra_valida,
+    contrato?.fecha_compra,
+    contrato?.fecha_timbrado,
+    contrato?.fecha,
+  ) || '');
+}
+
+/**
+ * El CRM solo marca compra cuando el ciclo trae VIN. Las demás facturas del
+ * mismo cliente viven en el DMS: se agregan aquí para que historial, tabla y
+ * timeline cuenten la misma lista.
+ */
+function mergeComprasDesdeDms(compras = [], unidades = []) {
+  const list = [...compras];
+  for (const unidad of unidades) {
+    if (!unidad.ventaEnDistribuidor && !unidad.facturaVenta) continue;
+    const serie = normalizeVin(unidad.serie);
+    if (!serie) continue;
+    const previa = list.find((c) => matchCrmVinToSerie(c.vin, serie));
+    if (previa) {
+      if (!previa.numFactura && unidad.facturaVenta) previa.numFactura = unidad.facturaVenta;
+      if (!previa.fechaFactura && unidad.fechaFactura) previa.fechaFactura = unidad.fechaFactura;
+      if (!previa.modeloSql && unidad.modelo) previa.modeloSql = unidad.modelo;
+      if (!previa.producto && unidad.modelo) previa.producto = unidad.modelo;
+      continue;
+    }
+    list.push({
+      vin: serie,
+      numFactura: unidad.facturaVenta || null,
+      facturadoA: null,
+      producto: unidad.modelo || null,
+      modeloSql: unidad.modelo || null,
+      fechaFactura: unidad.fechaFactura || null,
+      fechaEntrega: null,
+      vendedor: null,
+      idCiclo: null,
+      origen: 'dms',
+    });
+  }
+  return list.sort((a, b) => String(a.fechaFactura || '').localeCompare(String(b.fechaFactura || '')));
+}
+
 function buildCliente360({
   compras = [],
   contratos = [],
@@ -1503,24 +1574,35 @@ function buildCliente360({
   pruebas = [],
   quejasCsi = null,
 } = {}) {
-  const compraActual = [...compras].sort((a, b) =>
+  const unidadActual = pickUnidadActual(unidades);
+  const vinUnidad = normalizeVin(unidadActual?.serie);
+  const compraDeUnidad = vinUnidad
+    ? [...compras]
+      .filter((c) => matchCrmVinToSerie(c.vin, vinUnidad))
+      .sort((a, b) => String(b.fechaEntrega || b.fechaFactura || '').localeCompare(
+        String(a.fechaEntrega || a.fechaFactura || '')
+      ))[0] || null
+    : null;
+  const contratoDeUnidad = vinUnidad
+    ? [...contratos]
+      .filter((c) => matchCrmVinToSerie(c.vin, vinUnidad))
+      .sort((a, b) => fechaContratoIso(b).localeCompare(fechaContratoIso(a)))[0] || null
+    : null;
+  const compraActual = compraDeUnidad || [...compras].sort((a, b) =>
     String(b.fechaEntrega || b.fechaFactura || '').localeCompare(
       String(a.fechaEntrega || a.fechaFactura || '')
     ))[0] || null;
-  const contratoActual = [...contratos].sort((a, b) =>
-    String(validHistoricalDate(b.fecha_compra_valida, b.fecha_compra, b.fecha_timbrado, b.fecha) || '').localeCompare(
-      String(validHistoricalDate(a.fecha_compra_valida, a.fecha_compra, a.fecha_timbrado, a.fecha) || '')
-    ))[0] || null;
-  const vinActual = normalizeVin(contratoActual?.vin || compraActual?.vin);
-  const unidadActual = unidades.find((u) => matchCrmVinToSerie(vinActual, u.serie))
-    || [...unidades].sort((a, b) =>
-      String(b.fechaFactura || b.ultimaVisita || '').localeCompare(
-        String(a.fechaFactura || a.ultimaVisita || '')
-      ))[0]
-    || null;
+  const contratoActual = contratoDeUnidad || (vinUnidad ? null : [...contratos].sort((a, b) =>
+    fechaContratoIso(b).localeCompare(fechaContratoIso(a))
+  )[0]) || null;
+  const vinActual = vinUnidad || normalizeVin(contratoActual?.vin || compraActual?.vin);
 
   const ordenesValidas = ordenes.filter((o) => String(o.status || '').trim().toUpperCase() !== 'C');
-  const ordenesOrdenadas = [...ordenesValidas].sort((a, b) =>
+  const ordenesDeUnidad = vinActual
+    ? ordenesValidas.filter((o) => matchCrmVinToSerie(vinActual, o.serie))
+    : [];
+  const ordenesParaFicha = ordenesDeUnidad.length ? ordenesDeUnidad : ordenesValidas;
+  const ordenesOrdenadas = [...ordenesParaFicha].sort((a, b) =>
     String(toIsoDate(b.ingreso || b.cierre) || '').localeCompare(
       String(toIsoDate(a.ingreso || a.cierre) || '')
     ));
@@ -1652,15 +1734,13 @@ function buildCliente360({
   return {
     consolidado: {
       fechaUltimaCompra: toIsoDate(
-        validHistoricalDate(
-          contratoActual?.fecha_compra_valida,
-          contratoActual?.fecha_compra,
-          contratoActual?.fecha_timbrado,
-          contratoActual?.fecha
-        ) || compraActual?.fechaEntrega || compraActual?.fechaFactura
+        unidadActual?.fechaFactura
+        || fechaContratoIso(contratoActual)
+        || compraActual?.fechaEntrega
+        || compraActual?.fechaFactura
       ),
-      modeloActual: contratoActual?.unidad || compraActual?.modeloSql || compraActual?.producto
-        || unidadActual?.modelo || null,
+      modeloActual: unidadActual?.modelo || contratoActual?.unidad
+        || compraActual?.modeloSql || compraActual?.producto || null,
       anModelo: unidadActual?.anModelo || null,
       vinActual: vinActual || unidadActual?.serie || null,
       numeroContrato: contratoActual?.no_contrato || contratoActual?.contrato || null,
@@ -1683,15 +1763,27 @@ function buildCliente360({
       quejasPosventa: Number(quejasCsi?.totalPosventa || 0),
       quejasVentas: Number(quejasCsi?.totalVentas || 0),
       quejasAreaPrincipal: quejasCsi?.areaPrincipal || null,
-      historialCompras: new Set([
-        ...compras.map((c) => normalizeVin(c.vin)),
-        ...contratos.map((c) => normalizeVin(c.vin)),
-      ].filter(Boolean)).size,
+      historialCompras: (() => {
+        const vins = new Set();
+        const add = (vin) => {
+          const key = normalizeVin(vin);
+          if (!key) return;
+          if ([...vins].some((prev) => matchCrmVinToSerie(prev, key))) return;
+          vins.add(key);
+        };
+        compras.forEach((c) => add(c.vin));
+        contratos.forEach((c) => add(c.vin));
+        unidades.forEach((u) => {
+          if (u.ventaEnDistribuidor || u.facturaVenta) add(u.serie);
+        });
+        return vins.size;
+      })(),
       metodologia: {
         mensualidades: 'Meses transcurridos desde la compra, limitados al plazo; no confirma pagos reales.',
         saldo: 'Monto financiado amortizado linealmente; no incluye intereses, pagos anticipados ni mora.',
         valorUnidad: 'Monto financiado más enganche al contratar; no es un avalúo comercial actual.',
-        kilometraje: 'Último kilometraje disponible en una orden de taller.',
+        kilometraje: 'Último kilometraje de la unidad vigente, tomado de su orden de taller más reciente.',
+        unidadActual: 'Unidad vigente = factura de venta más reciente en el DMS del mismo cliente.',
         quejas: 'CSI Posventa (orden) + CSI Ventas (serie/VIN). Área inferida del texto de la incidencia.',
       },
     },
@@ -1820,6 +1912,10 @@ async function getContactHistory(idContacto, {
       ...vinsLead,
       ...unidadesDms.unidades.map((unidad) => unidad.serie),
     ]);
+    const comprasAlt = mergeComprasDesdeDms(
+      vinsLead.map((vin) => ({ vin })),
+      unidadesDms.unidades,
+    );
     const fechasAlt = [
       ...leads.map((l) => l.fecha_entrada),
       ...solicitudes.map((s) => s.fecha_solicitud),
@@ -1835,7 +1931,7 @@ async function getContactHistory(idContacto, {
       ],
     });
     const cliente360 = buildCliente360({
-      compras: vinsLead.map((vin) => ({ vin })),
+      compras: comprasAlt,
       contratos: contratosFinanciamiento,
       unidades: unidadesDms.unidades,
       ordenes: ordenesServicio,
@@ -1855,14 +1951,14 @@ async function getContactHistory(idContacto, {
       resumen: {
         totalActividades: 0,
         totalCiclos: 0,
-        totalCompras: vinsLead.length,
+        totalCompras: comprasAlt.length,
         totalLeads: leads.length,
         totalSolicitudes: solicitudes.length,
         totalPruebasManejo: pruebasManejo.length,
         totalContratosFinanciamiento: contratosFinanciamiento.length,
         totalPvas: contratosFinanciamiento.reduce((sum, contrato) => sum + contrato.pvas.length, 0),
         realizoPruebaManejo: pruebasManejo.length > 0,
-        pruebaManejoConCompra: pruebasManejo.length > 0 && vinsLead.length > 0,
+        pruebaManejoConCompra: pruebasManejo.length > 0 && comprasAlt.length > 0,
         totalUnidadesDistribuidor: unidadesDms.unidades.length,
         totalOrdenesServicio: ordenesServicio.length,
         totalQuejas: quejasCsi.total,
@@ -1874,7 +1970,7 @@ async function getContactHistory(idContacto, {
         ultimaActividad: fechasAlt[fechasAlt.length - 1] || null,
       },
       ciclos: [],
-      compras: vinsLead.map((vin) => ({ vin })),
+      compras: comprasAlt,
       leads,
       solicitudes,
       pruebasManejo,
@@ -2009,15 +2105,18 @@ async function getContactHistory(idContacto, {
     0
   );
 
-  // Adjuntar cruce SQL a cada compra CRM
+  // Adjuntar cruce SQL a cada compra. El CRM solo trae el VIN del ciclo;
+  // las demás facturas del mismo cliente se suman desde el DMS.
+  const comprasCliente = mergeComprasDesdeDms(compras, unidadesDms.unidades);
   const unidadesSql = [...(sqlEnrich.unidades || []), ...(sqlAdicional.unidades || [])];
   const contratosFinanciamiento = getFinanciamientoByVins(d, [
     ...vins,
     ...unidadesDms.unidades.map((unidad) => unidad.serie),
   ]);
   const sqlByVin = new Map(unidadesSql.map((u) => [u.vin, u]));
-  for (const compra of compras) {
-    const enr = sqlByVin.get(compra.vin);
+  for (const compra of comprasCliente) {
+    const enr = sqlByVin.get(compra.vin)
+      || unidadesSql.find((u) => matchCrmVinToSerie(compra.vin, u.vin) || matchCrmVinToSerie(compra.vin, u.serieSql));
     compra.serieSql = enr?.serieSql || null;
     compra.facturaVentaSql = enr?.facturasVentaSql?.[0]?.facturaVenta || null;
     compra.facturasVentaSql = enr?.facturasVentaSql || [];
@@ -2025,7 +2124,8 @@ async function getContactHistory(idContacto, {
     compra.ordenesServicio = (enr?.ordenesServicio || []).filter(
       (orden) => !ordenIdsCliente.size || ordenIdsCliente.has(String(orden.orden))
     );
-    compra.totalOrdenes = compra.ordenesServicio.length;
+    compra.totalOrdenes = compra.ordenesServicio.length
+      || Number(unidadesDms.unidades.find((u) => matchCrmVinToSerie(compra.vin, u.serie))?.ordenes || 0);
     compra.financiamiento = contratosFinanciamiento.find(
       (contrato) => matchCrmVinToSerie(compra.vin, contrato.vin)
     ) || null;
@@ -2040,7 +2140,7 @@ async function getContactHistory(idContacto, {
     ],
   });
   const cliente360 = buildCliente360({
-    compras,
+    compras: comprasCliente,
     contratos: contratosFinanciamiento,
     unidades: unidadesDms.unidades,
     ordenes: ordenesServicio,
@@ -2060,14 +2160,14 @@ async function getContactHistory(idContacto, {
     resumen: {
       totalActividades: rows.length,
       totalCiclos: ciclos.length,
-      totalCompras: compras.length, // VINs distintos (col T)
+      totalCompras: comprasCliente.length,
       totalLeads: leads.length,
       totalSolicitudes: solicitudes.length,
       totalPruebasManejo: pruebasManejo.length,
       totalContratosFinanciamiento: contratosFinanciamiento.length,
       totalPvas: contratosFinanciamiento.reduce((sum, contrato) => sum + contrato.pvas.length, 0),
       realizoPruebaManejo: pruebasManejo.length > 0,
-      pruebaManejoConCompra: pruebasManejo.length > 0 && compras.length > 0,
+      pruebaManejoConCompra: pruebasManejo.length > 0 && comprasCliente.length > 0,
       totalUnidadesDistribuidor: unidadesDms.unidades.length,
       totalOrdenesServicio: ordenesServicio.length,
       totalQuejas: quejasCsi.total,
@@ -2086,7 +2186,7 @@ async function getContactHistory(idContacto, {
       }, {}),
     },
     ciclos,
-    compras,
+    compras: comprasCliente,
     leads,
     solicitudes,
     pruebasManejo,
@@ -2122,19 +2222,63 @@ let vinIndexCache = null;
 function getVinIndex() {
   if (vinIndexCache) return vinIndexCache;
   const d = getDb();
-  const rows = d.prepare(`
+  const byVin = new Map();
+  const lengths = new Set();
+  const add = (vinRaw, idRaw) => {
+    const vin = normalizeVin(vinRaw);
+    const id = idRaw != null ? String(idRaw).trim() : '';
+    if (!vin || vin.length < 5 || !id) return;
+    if (!byVin.has(vin)) byVin.set(vin, id);
+    lengths.add(vin.length);
+  };
+  for (const r of d.prepare(`
     SELECT DISTINCT upper(trim(vin)) AS vin, id_contacto
     FROM crm_actividades
     WHERE vin IS NOT NULL AND length(trim(vin)) >= 5
-  `).all();
-  const byVin = new Map();
-  const lengths = new Set();
-  for (const r of rows) {
-    if (!byVin.has(r.vin)) byVin.set(r.vin, r.id_contacto);
-    lengths.add(r.vin.length);
+  `).all()) {
+    add(r.vin, r.id_contacto);
+  }
+  if (hasLeadsTable(d)) {
+    for (const r of d.prepare(`
+      SELECT DISTINCT upper(trim(vin_comprado)) AS vin, id_crm
+      FROM crm_leads
+      WHERE vin_comprado IS NOT NULL AND length(trim(vin_comprado)) >= 5 AND id_crm IS NOT NULL
+    `).all()) {
+      add(r.vin, r.id_crm);
+    }
   }
   vinIndexCache = { byVin, lengths: [...lengths].sort((a, b) => b - a) };
   return vinIndexCache;
+}
+
+let facturaIndexCache = null;
+function getFacturaIndex() {
+  if (facturaIndexCache) return facturaIndexCache;
+  const d = getDb();
+  const map = new Map();
+  const add = (facturaRaw, idRaw) => {
+    const factura = String(facturaRaw || '').trim().toUpperCase();
+    const id = idRaw != null ? String(idRaw).trim() : '';
+    if (!factura || !id) return;
+    if (!map.has(factura)) map.set(factura, new Set());
+    map.get(factura).add(id);
+  };
+  for (const r of d.prepare(`
+    SELECT DISTINCT upper(trim(num_factura)) AS factura, id_contacto
+    FROM crm_actividades
+    WHERE num_factura IS NOT NULL AND trim(num_factura) <> '' AND id_contacto IS NOT NULL
+  `).all()) {
+    add(r.factura, r.id_contacto);
+  }
+  facturaIndexCache = map;
+  return map;
+}
+
+function resolveIdCrmByFactura(factura) {
+  const key = String(factura || '').trim().toUpperCase();
+  if (!key) return null;
+  const ids = getFacturaIndex().get(key);
+  return ids && ids.size === 1 ? [...ids][0] : null;
 }
 
 /** Resolver ID CRM a partir de una serie completa del DMS (match exacto o por sufijo). */
@@ -2169,6 +2313,123 @@ function normalizeNombre(v) {
     .trim()
     .toUpperCase();
   return s.length >= 8 ? s : null;
+}
+
+function nombreTokens(v) {
+  return String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 1);
+}
+
+function nombreSimilitud(a, b) {
+  const ta = new Set(nombreTokens(a));
+  const tb = new Set(nombreTokens(b));
+  if (!ta.size || !tb.size) return 0;
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter += 1;
+  const union = new Set([...ta, ...tb]).size || 1;
+  return inter / union;
+}
+
+function esNombreLeadSospechoso(nombre) {
+  const n = String(nombre || '').trim();
+  if (!n) return true;
+  return /AN[OÓ]NIMO|SIN\s*NOMBRE|PRUEBA|TEST\b|DEMO\b|XXXX|N\/A|NO\s*NAME|CLIENTE\s*GENERICO|CLIENTE\s*GEN[EÉ]RICO/i.test(n);
+}
+
+/**
+ * Compras de la cohorte donde el nombre del lead no coincide con el del comprador (VIN),
+ * o el lead es anónimo/genérico — típico de reclasificación para forzar conversión.
+ */
+function buildAlertasConversionCompras(d, { whereSql, params, compraSql, limit = 40 }) {
+  const max = Math.min(80, Math.max(10, Number(limit) || 40));
+  const rows = d.prepare(`
+    SELECT
+      id_crm AS idCrm,
+      nombre AS nombreLead,
+      fecha_entrada AS fechaEntrada,
+      campana,
+      ejecutivo_asignado AS ejecutivo,
+      resultado,
+      (
+        SELECT a.nombre_contacto FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      ) AS nombreCompra,
+      (
+        SELECT a.vin FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      ) AS vin,
+      COALESCE(
+        NULLIF(trim(fecha_factura), ''),
+        (
+          SELECT COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus)
+          FROM crm_actividades a
+          WHERE a.id_contacto = crm_leads.id_crm
+            AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+          ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+          LIMIT 1
+        )
+      ) AS fechaCompra
+    FROM crm_leads
+    ${whereSql}
+      AND (${compraSql}) = 1
+    ORDER BY fecha_entrada DESC
+    LIMIT 2000
+  `).all(...params);
+
+  const alertas = [];
+  for (const r of rows) {
+    const nombreLead = String(r.nombreLead || '').trim() || '(sin nombre)';
+    const nombreCompra = String(r.nombreCompra || '').trim() || null;
+    const anonimo = esNombreLeadSospechoso(nombreLead);
+    const sim = nombreCompra ? nombreSimilitud(nombreLead, nombreCompra) : 0;
+    const desfaseNombre = !!(nombreCompra && sim < 0.34);
+    if (!anonimo && !desfaseNombre) continue;
+
+    const motivos = [];
+    if (anonimo) motivos.push('Lead anónimo / genérico');
+    if (desfaseNombre) motivos.push('Nombre del lead ≠ comprador del VIN');
+
+    alertas.push({
+      idCrm: r.idCrm ? String(r.idCrm) : null,
+      nombreLead,
+      nombreCompra,
+      vin: r.vin ? String(r.vin).trim().toUpperCase() : null,
+      fechaEntrada: r.fechaEntrada ? String(r.fechaEntrada).slice(0, 10) : null,
+      fechaCompra: r.fechaCompra ? String(r.fechaCompra).slice(0, 10) : null,
+      campana: String(r.campana || '').trim() || null,
+      ejecutivo: String(r.ejecutivo || '').trim() || null,
+      similitudPct: Math.round(sim * 100),
+      anonimo,
+      desfaseNombre,
+      motivos,
+      severidad: anonimo && desfaseNombre ? 'critical' : 'warning',
+    });
+  }
+
+  alertas.sort((a, b) => {
+    const sev = (a.severidad === 'critical' ? 0 : 1) - (b.severidad === 'critical' ? 0 : 1);
+    if (sev !== 0) return sev;
+    return String(b.fechaCompra || '').localeCompare(String(a.fechaCompra || ''));
+  });
+
+  return {
+    total: alertas.length,
+    mostrados: Math.min(max, alertas.length),
+    texto: 'Compras de la cohorte donde el nombre del lead no coincide con el comprador del VIN, o el lead es anónimo/genérico (posible reclasificación para conversión).',
+    items: alertas.slice(0, max),
+  };
 }
 
 function normalizeTelefono(v) {
@@ -2545,24 +2806,25 @@ const COMPRA_LEAD_SQL = `
   ) THEN 1 ELSE 0 END
 `;
 
-/** Excluye leads marcados DUPLICADO (Google Sheets col. AD / resultado / contacto / estación). */
+/** Compra atribuible al lead: VIN + fecha de compra ≥ entrada y dentro de vida útil. */
+function getCompraLeadAtribuibleSql(dias = 90) {
+  return buildCompraLeadDentroVidaSql(dias);
+}
+
+/** Excluye leads marcados DUPLICADO en columna AB (Resultado) / flag es_duplicado. */
 let leadNotDuplicateSqlCache = null;
+let leadIsDuplicateSqlCache = null;
 
 function getLeadNotDuplicateSql() {
   if (leadNotDuplicateSqlCache) return leadNotDuplicateSqlCache;
   const parts = [
     `upper(trim(COALESCE(resultado, ''))) <> 'DUPLICADO'`,
-    `upper(trim(COALESCE(contacto, ''))) <> 'DUPLICADO'`,
-    `upper(trim(COALESCE(estacion, ''))) <> 'DUPLICADO'`,
   ];
   try {
     const d = getDb();
     const cols = new Set(
       d.prepare('PRAGMA table_info(crm_leads)').all().map((c) => c.name),
     );
-    if (cols.has('enlace_directo')) {
-      parts.push(`upper(trim(COALESCE(enlace_directo, ''))) <> 'DUPLICADO'`);
-    }
     if (cols.has('es_duplicado')) {
       parts.push('COALESCE(es_duplicado, 0) = 0');
     }
@@ -2573,11 +2835,134 @@ function getLeadNotDuplicateSql() {
   return leadNotDuplicateSqlCache;
 }
 
-function clearLeadNotDuplicateSqlCache() {
-  leadNotDuplicateSqlCache = null;
+/** Marca positiva de duplicado (columna AB Resultado = DUPLICADO). */
+function getLeadIsDuplicateSql() {
+  if (leadIsDuplicateSqlCache) return leadIsDuplicateSqlCache;
+  const parts = [
+    `upper(trim(COALESCE(resultado, ''))) = 'DUPLICADO'`,
+  ];
+  try {
+    const d = getDb();
+    const cols = new Set(
+      d.prepare('PRAGMA table_info(crm_leads)').all().map((c) => c.name),
+    );
+    if (cols.has('es_duplicado')) {
+      parts.push('COALESCE(es_duplicado, 0) = 1');
+    }
+  } catch {
+    /* tabla aún no disponible */
+  }
+  leadIsDuplicateSqlCache = `(${parts.join(' OR ')})`;
+  return leadIsDuplicateSqlCache;
 }
 
-/** Fecha de compra asociada al lead (factura lead o ciclo CRM con VIN). */
+function clearLeadNotDuplicateSqlCache() {
+  leadNotDuplicateSqlCache = null;
+  leadIsDuplicateSqlCache = null;
+}
+
+/** Resultados de contacto que se consideran descartados / no recuperables. */
+const LEAD_DESCARTADO_RESULTADOS = [
+  '# NO EXISTE',
+  '# EQUIVOCADO',
+  'FUERA AREA SERVICIO',
+  'FUERA ÁREA SERVICIO',
+  'NO PIDIO INFORMES',
+  'NO PIDIÓ INFORMES',
+  'CUELGA LLAMADA',
+  'DESCARTADO',
+  'DESISTIO',
+  'DESISTIÓ',
+  'PERDIDO',
+];
+
+function getLeadDescartadoSql() {
+  const escaped = LEAD_DESCARTADO_RESULTADOS
+    .map((v) => `'${String(v).replace(/'/g, "''")}'`)
+    .join(', ');
+  return `(
+    upper(trim(COALESCE(resultado, ''))) IN (${escaped})
+    OR upper(trim(COALESCE(resultado, ''))) LIKE '%DESCART%'
+    OR upper(trim(COALESCE(resultado, ''))) LIKE '%DESIST%'
+  )`;
+}
+
+/** Lead a monitorear: en seguimiento, o con prueba de manejo / solicitud de crédito; sin compra y no descartado. */
+function getLeadSeguimientoSinCompraSql() {
+  const engagement = [
+    `upper(trim(COALESCE(resultado, ''))) LIKE '%SEGUIMIENTO%'`,
+  ];
+  try {
+    const d = getDb();
+    if (hasPruebasManejoTable(d)) {
+      engagement.push(`EXISTS (
+        SELECT 1 FROM crm_pruebas_manejo p
+        WHERE p.id_crm IS NOT NULL AND trim(p.id_crm) <> ''
+          AND p.id_crm = crm_leads.id_crm
+          AND (
+            p.fecha IS NULL OR trim(p.fecha) = ''
+            OR julianday(substr(p.fecha, 1, 10)) >= julianday(crm_leads.fecha_entrada)
+          )
+      )`);
+    }
+    if (hasSolicitudesTable(d)) {
+      engagement.push(`EXISTS (
+        SELECT 1 FROM crm_solicitudes s
+        WHERE s.id_crm IS NOT NULL AND trim(s.id_crm) <> ''
+          AND s.id_crm = crm_leads.id_crm
+          AND (
+            COALESCE(s.fecha_solicitud, s.fecha_compra, s.fecha_firma) IS NULL
+            OR trim(COALESCE(s.fecha_solicitud, s.fecha_compra, s.fecha_firma)) = ''
+            OR julianday(substr(COALESCE(s.fecha_solicitud, s.fecha_compra, s.fecha_firma), 1, 10))
+              >= julianday(crm_leads.fecha_entrada)
+          )
+      )`);
+    }
+  } catch {
+    /* tablas aún no disponibles */
+  }
+  return `(
+    (${COMPRA_LEAD_SQL}) = 0
+    AND NOT ${getLeadDescartadoSql()}
+    AND (${engagement.join('\n    OR ')})
+  )`;
+}
+
+/** Resta/suma días a una fecha ISO yyyy-mm-dd. */
+function shiftIsoDays(iso, days) {
+  const raw = String(iso || '').slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCDate(d.getUTCDate() + Number(days || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Pipeline a monitorear para cierre: únicos sin compra, con vida activa
+ * (fecha_entrada en [hasta - vidaDías, hasta]) y con señal de avance:
+ * resultado en seguimiento, prueba de manejo o solicitud de crédito.
+ */
+function buildSeguimientoVidaActivaQuery({ notDupSql, hasta, vidaDias = null }) {
+  const { LEAD_VIDA_DIAS } = require('../config/campanasConversion');
+  const vida = Math.max(1, Number(vidaDias) || LEAD_VIDA_DIAS || 90);
+  const refHasta = String(hasta || formatIsoDate(new Date())).slice(0, 10);
+  const desdeVida = shiftIsoDays(refHasta, -vida) || refHasta;
+  const where = [
+    notDupSql,
+    `fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''`,
+    'substr(fecha_entrada, 1, 10) >= ?',
+    'substr(fecha_entrada, 1, 10) <= ?',
+    getLeadSeguimientoSinCompraSql(),
+  ];
+  return {
+    whereSql: `WHERE ${where.join(' AND ')}`,
+    params: [desdeVida, refHasta],
+    desdeVida,
+    refHasta,
+    vidaDias: vida,
+  };
+}
 const FECHA_COMPRA_LEAD_SQL = `
   COALESCE(
     NULLIF(trim(crm_leads.fecha_factura), ''),
@@ -2722,8 +3107,9 @@ function aggregateFuerzaVentas(rows = []) {
 }
 
 /** Filtro SQL adicional por KPI del embudo de leads (misma lógica que summary). */
-function leadKpiExtraWhere(kpi) {
+function leadKpiExtraWhere(kpi, { compraSql = null } = {}) {
   const key = String(kpi || '').trim();
+  const compra = compraSql || COMPRA_LEAD_SQL;
   const cotizadoSql = `(cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0'))`;
   switch (key) {
     case 'contactados':
@@ -2734,14 +3120,21 @@ function leadKpiExtraWhere(kpi) {
       return cotizadoSql;
     case 'compras':
     case 'convCompra':
-      return `(${COMPRA_LEAD_SQL}) = 1`;
+      return `(${compra}) = 1`;
     case 'sinCompra':
-      return `(${COMPRA_LEAD_SQL}) = 0`;
+      return getLeadDescartadoSql();
     case 'convCitaCompra':
-      return `cita_programada = 'SI' AND (${COMPRA_LEAD_SQL}) = 1`;
+      return `cita_programada = 'SI' AND (${compra}) = 1`;
     case 'convContactoCompra':
-      return `contacto = 'SI' AND (${COMPRA_LEAD_SQL}) = 1`;
+      return `contacto = 'SI' AND (${compra}) = 1`;
+    case 'seguimientoSinCompra':
+    case 'enSeguimiento':
+      return getLeadSeguimientoSinCompraSql();
     case 'leads':
+    case 'leadsUnicos':
+      return null;
+    case 'leadsDuplicados':
+      return null;
     default:
       return null;
   }
@@ -2769,6 +3162,8 @@ function mapLeadDetalleRow(r) {
     autoInteres: String(r.autoInteres || '').trim() || null,
     resultado: String(r.resultado || '').trim() || null,
     conCompra,
+    conPruebaManejo: Number(r.conPruebaManejo || 0) === 1,
+    conSolicitud: Number(r.conSolicitud || 0) === 1,
     vin,
     fechaFactura: r.fechaFactura || null,
     estatusCompra: String(r.estatusCompra || '').trim() || null,
@@ -2783,6 +3178,30 @@ function mapLeadDetalleRow(r) {
 
 function queryLeadsDetalleRows(d, { whereSql, params, limit }) {
   const max = Math.min(20000, Math.max(1, Number(limit) || 400));
+  const pruebaSql = hasPruebasManejoTable(d)
+    ? `EXISTS (
+        SELECT 1 FROM crm_pruebas_manejo p
+        WHERE p.id_crm = crm_leads.id_crm
+          AND p.id_crm IS NOT NULL AND trim(p.id_crm) <> ''
+          AND (
+            p.fecha IS NULL OR trim(p.fecha) = ''
+            OR julianday(substr(p.fecha, 1, 10)) >= julianday(crm_leads.fecha_entrada)
+          )
+      )`
+    : '0';
+  const solSql = hasSolicitudesTable(d)
+    ? `EXISTS (
+        SELECT 1 FROM crm_solicitudes s
+        WHERE s.id_crm = crm_leads.id_crm
+          AND s.id_crm IS NOT NULL AND trim(s.id_crm) <> ''
+          AND (
+            COALESCE(s.fecha_solicitud, s.fecha_compra, s.fecha_firma) IS NULL
+            OR trim(COALESCE(s.fecha_solicitud, s.fecha_compra, s.fecha_firma)) = ''
+            OR julianday(substr(COALESCE(s.fecha_solicitud, s.fecha_compra, s.fecha_firma), 1, 10))
+              >= julianday(crm_leads.fecha_entrada)
+          )
+      )`
+    : '0';
   const rows = d.prepare(`
     SELECT
       id_crm AS idCrm,
@@ -2806,6 +3225,8 @@ function queryLeadsDetalleRows(d, { whereSql, params, limit }) {
       fecha_factura AS fechaFactura,
       estatus_compra AS estatusCompra,
       ${COMPRA_LEAD_SQL} AS conCompra,
+      CASE WHEN (${pruebaSql}) THEN 1 ELSE 0 END AS conPruebaManejo,
+      CASE WHEN (${solSql}) THEN 1 ELSE 0 END AS conSolicitud,
       (
         SELECT a.vin FROM crm_actividades a
         WHERE a.id_contacto = crm_leads.id_crm
@@ -2840,8 +3261,49 @@ function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads'
   }
 
   const rango = resolveCrmPeriod({ desde: fechaInicio || null, hasta: fechaFin || null });
+  const kpiKey = String(kpi || 'leads').trim();
   const notDupSql = getLeadNotDuplicateSql();
-  const where = [notDupSql];
+  const dupSql = getLeadIsDuplicateSql();
+
+  // En seguimiento: ventana de vida 90d al cierre del periodo (no cohorte del mes).
+  if (kpiKey === 'seguimientoSinCompra' || kpiKey === 'enSeguimiento') {
+    const vidaQ = buildSeguimientoVidaActivaQuery({
+      notDupSql,
+      hasta: rango.hasta,
+    });
+    const total = Number(
+      d.prepare(`SELECT COUNT(*) AS n FROM crm_leads ${vidaQ.whereSql}`).get(...vidaQ.params)?.n || 0,
+    );
+    const max = Math.min(20000, Math.max(50, Number(limit) || 5000));
+    const detalle = queryLeadsDetalleRows(d, {
+      whereSql: vidaQ.whereSql,
+      params: vidaQ.params,
+      limit: max,
+    });
+    return {
+      filtros: {
+        fechaInicio: rango.desde,
+        fechaFin: rango.hasta,
+        periodo: rango.periodo,
+        kpi: kpiKey || 'leads',
+        ventanaVidaDesde: vidaQ.desdeVida,
+        ventanaVidaHasta: vidaQ.refHasta,
+        vidaDias: vidaQ.vidaDias,
+      },
+      total,
+      returned: detalle.length,
+      limited: detalle.length < total,
+      limit: max,
+      detalle,
+    };
+  }
+
+  const where = [];
+  if (kpiKey === 'leadsDuplicados') {
+    where.push(dupSql);
+  } else {
+    where.push(notDupSql);
+  }
   const params = [];
   if (rango.desde) {
     where.push('substr(fecha_entrada, 1, 10) >= ?');
@@ -2851,7 +3313,9 @@ function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads'
     where.push('substr(fecha_entrada, 1, 10) <= ?');
     params.push(String(rango.hasta).slice(0, 10));
   }
-  const extra = leadKpiExtraWhere(kpi);
+  const extra = leadKpiExtraWhere(kpiKey, {
+    compraSql: getCompraLeadAtribuibleSql(require('../config/campanasConversion').LEAD_VIDA_DIAS),
+  });
   if (extra) where.push(`(${extra})`);
   const whereSql = `WHERE ${where.join(' AND ')}`;
 
@@ -2864,7 +3328,7 @@ function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads'
       fechaInicio: rango.desde,
       fechaFin: rango.hasta,
       periodo: rango.periodo,
-      kpi: String(kpi || 'leads'),
+      kpi: kpiKey || 'leads',
     },
     total,
     returned: detalle.length,
@@ -2886,8 +3350,11 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   const desde = fechaInicio || null;
   const hasta = fechaFin || null;
   const rango = resolveCrmPeriod({ desde, hasta });
+  const { LEAD_VIDA_DIAS } = require('../config/campanasConversion');
+  const COMPRA_ATRIBUIBLE_SQL = getCompraLeadAtribuibleSql(LEAD_VIDA_DIAS);
 
   const notDupSql = getLeadNotDuplicateSql();
+  const dupSql = getLeadIsDuplicateSql();
   const coberturaRow = d.prepare(`
     SELECT
       MIN(substr(fecha_entrada, 1, 10)) AS minFechaEntrada,
@@ -2916,6 +3383,29 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   }
   const whereSql = `WHERE ${where.join(' AND ')}`;
 
+  const periodDateWhere = [];
+  const periodDateParams = [];
+  if (rango.desde) {
+    periodDateWhere.push('substr(fecha_entrada, 1, 10) >= ?');
+    periodDateParams.push(String(rango.desde).slice(0, 10));
+  }
+  if (rango.hasta) {
+    periodDateWhere.push('substr(fecha_entrada, 1, 10) <= ?');
+    periodDateParams.push(String(rango.hasta).slice(0, 10));
+  }
+  const periodDateSql = periodDateWhere.length
+    ? `WHERE ${periodDateWhere.join(' AND ')}`
+    : '';
+
+  const volumenDup = d.prepare(`
+    SELECT
+      COUNT(*) AS totalBruto,
+      SUM(CASE WHEN (${notDupSql}) THEN 1 ELSE 0 END) AS unicos,
+      SUM(CASE WHEN ${dupSql} THEN 1 ELSE 0 END) AS duplicados
+    FROM crm_leads
+    ${periodDateSql}
+  `).get(...periodDateParams);
+
   const totales = d.prepare(`
     SELECT
       COUNT(*) AS leads,
@@ -2924,22 +3414,48 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       SUM(CASE WHEN cita_programada = 'SI' THEN 1 ELSE 0 END) AS citas,
       SUM(CASE WHEN cita_asistida = 'SI' THEN 1 ELSE 0 END) AS citasAsistidas,
       SUM(CASE WHEN cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0') THEN 1 ELSE 0 END) AS cotizados,
-      SUM(${COMPRA_LEAD_SQL}) AS compras,
-      SUM(CASE WHEN ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '' THEN 1 ELSE 0 END) AS conEjecutivo
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS compras,
+      SUM(CASE WHEN ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '' THEN 1 ELSE 0 END) AS conEjecutivo,
+      SUM(CASE WHEN ${getLeadDescartadoSql()} THEN 1 ELSE 0 END) AS sinCompra
     FROM crm_leads
     ${whereSql}
   `).get(...params);
 
+  const seguimientoVidaQ = buildSeguimientoVidaActivaQuery({
+    notDupSql,
+    hasta: rango.hasta,
+  });
+  const seguimientoSinCompra = Number(
+    d.prepare(`SELECT COUNT(*) AS n FROM crm_leads ${seguimientoVidaQ.whereSql}`)
+      .get(...seguimientoVidaQ.params)?.n || 0,
+  );
+  const pipelineVivo = Number(
+    d.prepare(`
+      SELECT COUNT(*) AS n FROM crm_leads
+      WHERE (${notDupSql})
+        AND fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''
+        AND substr(fecha_entrada, 1, 10) >= ?
+        AND substr(fecha_entrada, 1, 10) <= ?
+    `).get(...seguimientoVidaQ.params)?.n || 0,
+  );
+
   const n = (k) => Number(totales?.[k] || 0);
   const leads = n('leads');
+  const leadsUnicos = Number(volumenDup?.unicos || leads);
+  const leadsDuplicados = Number(volumenDup?.duplicados || 0);
+  const leadsTotales = Number(volumenDup?.totalBruto || (leadsUnicos + leadsDuplicados));
   const contactados = n('contactados');
   const citas = n('citas');
   const cotizados = n('cotizados');
   const compras = n('compras');
+  const sinCompra = n('sinCompra');
   const pct = (num, den) => (den ? Math.round((num / den) * 10000) / 100 : 0);
 
   const summary = {
     leads,
+    leadsUnicos,
+    leadsDuplicados,
+    leadsTotales,
     oportunidades: n('oportunidades'),
     contactados,
     citas,
@@ -2947,21 +3463,31 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     cotizados,
     compras,
     conEjecutivo: n('conEjecutivo'),
-    sinCompra: Math.max(0, leads - compras),
+    seguimientoSinCompra,
+    pipelineVivo,
+    seguimientoVentanaDesde: seguimientoVidaQ.desdeVida,
+    seguimientoVentanaHasta: seguimientoVidaQ.refHasta,
+    seguimientoVidaDias: seguimientoVidaQ.vidaDias,
+    sinCompra,
     conversionContactoPct: pct(contactados, leads),
     conversionCitaPct: pct(citas, leads),
     conversionCotizacionPct: pct(cotizados, leads),
     conversionCompraPct: pct(compras, leads),
     conversionCitaACompraPct: pct(compras, citas),
     conversionContactoACompraPct: pct(compras, contactados),
+    pctDuplicados: pct(leadsDuplicados, leadsTotales),
+    pctSeguimientoSinCompra: pct(seguimientoSinCompra, pipelineVivo || seguimientoSinCompra),
   };
 
   const funnel = [
-    { key: 'leads', label: 'Leads / oportunidades', value: leads, pct: 100 },
+    { key: 'leadsUnicos', label: 'Leads únicos', value: leadsUnicos, pct: pct(leadsUnicos, leadsTotales || leadsUnicos) },
+    { key: 'leadsDuplicados', label: 'Duplicados', value: leadsDuplicados, pct: pct(leadsDuplicados, leadsTotales || 1) },
     { key: 'contactados', label: 'Contactados', value: contactados, pct: pct(contactados, leads) },
-    { key: 'citas', label: 'Cita programada', value: citas, pct: pct(citas, leads) },
+    { key: 'citas', label: 'Citas', value: citas, pct: pct(citas, leads) },
     { key: 'cotizados', label: 'Cotizados', value: cotizados, pct: pct(cotizados, leads) },
-    { key: 'compras', label: 'Compra (VIN)', value: compras, pct: pct(compras, leads) },
+    { key: 'compras', label: 'Compras', value: compras, pct: pct(compras, leads) },
+    { key: 'seguimientoSinCompra', label: 'En seguimiento', value: seguimientoSinCompra, pct: pct(seguimientoSinCompra, pipelineVivo || seguimientoSinCompra) },
+    { key: 'sinCompra', label: 'Sin compra', value: sinCompra, pct: pct(sinCompra, leads) },
   ];
 
   const groupQuery = (expr, maxGroups = 20) => d.prepare(`
@@ -2971,7 +3497,7 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
       SUM(CASE WHEN cita_programada = 'SI' THEN 1 ELSE 0 END) AS citas,
       SUM(CASE WHEN cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0') THEN 1 ELSE 0 END) AS cotizados,
-      SUM(${COMPRA_LEAD_SQL}) AS compras
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS compras
     FROM crm_leads
     ${whereSql}
     GROUP BY grupo
@@ -2998,7 +3524,7 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
       SUM(CASE WHEN cita_programada = 'SI' THEN 1 ELSE 0 END) AS citas,
       SUM(CASE WHEN cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0') THEN 1 ELSE 0 END) AS cotizados,
-      SUM(${COMPRA_LEAD_SQL}) AS compras
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS compras
     FROM crm_leads
     ${whereSql}
     GROUP BY grupo
@@ -3015,18 +3541,18 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
 
   const {
     CAMPANAS_CONVERSION,
-    LEAD_VIDA_DIAS,
     resolveCampanaConversionKey,
+    classifyCampanaConversion,
   } = require('../config/campanasConversion');
 
-  const COMPRA_LEAD_90D_SQL = buildCompraLeadDentroVidaSql(LEAD_VIDA_DIAS);
+  const COMPRA_LEAD_90D_SQL = COMPRA_ATRIBUIBLE_SQL;
 
   const campanaAggRows = d.prepare(`
     SELECT
       COALESCE(NULLIF(trim(campana), ''), '(sin campaña)') AS campana,
       COUNT(*) AS leads,
       SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
-      SUM(${COMPRA_LEAD_SQL}) AS compras,
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS compras,
       SUM(${COMPRA_LEAD_90D_SQL}) AS vendidos
     FROM crm_leads
     ${whereSql}
@@ -3037,19 +3563,35 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     CAMPANAS_CONVERSION.map((c) => [c.key, {
       key: c.key,
       campana: c.label,
+      tipo: c.tipo || 'reactiva',
       total: 0,
       contactados: 0,
       vendidos: 0,
       vendidosFueraVida: 0,
       conversionPct: 0,
       matchedNames: [],
+      dinamica: false,
     }])
   );
 
   for (const row of campanaAggRows) {
-    const key = resolveCampanaConversionKey(row.campana);
-    if (!key || !campanasMap[key]) continue;
-    const bucket = campanasMap[key];
+    const cls = classifyCampanaConversion(row.campana);
+    if (!cls.tipo || !cls.key) continue;
+    if (!campanasMap[cls.key]) {
+      campanasMap[cls.key] = {
+        key: cls.key,
+        campana: cls.label,
+        tipo: cls.tipo,
+        total: 0,
+        contactados: 0,
+        vendidos: 0,
+        vendidosFueraVida: 0,
+        conversionPct: 0,
+        matchedNames: [],
+        dinamica: !!cls.dinamica,
+      };
+    }
+    const bucket = campanasMap[cls.key];
     const compras = Number(row.compras || 0);
     const vendidos = Number(row.vendidos || 0);
     bucket.total += Number(row.leads || 0);
@@ -3061,24 +3603,116 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     }
   }
 
-  const campanasConversion = CAMPANAS_CONVERSION.map((c) => {
-    const b = campanasMap[c.key];
-    b.conversionPct = pct(b.vendidos, b.total);
-    return b;
-  });
+  const campanasConversion = Object.values(campanasMap)
+    .map((b) => {
+      b.conversionPct = pct(b.vendidos, b.total);
+      return b;
+    })
+    .filter((b) => Number(b.total || 0) > 0 || !b.dinamica)
+    .sort((a, b) => {
+      if (a.tipo !== b.tipo) return a.tipo === 'reactiva' ? -1 : 1;
+      return Number(b.total || 0) - Number(a.total || 0) || String(a.campana).localeCompare(String(b.campana));
+    });
 
-  const campanasConversionTotales = campanasConversion.reduce((acc, r) => {
-    acc.total += r.total;
-    acc.contactados += r.contactados;
-    acc.vendidos += r.vendidos;
-    acc.vendidosFueraVida += r.vendidosFueraVida;
+  const sumCampanas = (rows) => {
+    const acc = rows.reduce((a, r) => {
+      a.total += Number(r.total || 0);
+      a.contactados += Number(r.contactados || 0);
+      a.vendidos += Number(r.vendidos || 0);
+      a.vendidosFueraVida += Number(r.vendidosFueraVida || 0);
+      return a;
+    }, { total: 0, contactados: 0, vendidos: 0, vendidosFueraVida: 0 });
+    acc.conversionPct = pct(acc.vendidos, acc.total);
+    acc.vidaDias = LEAD_VIDA_DIAS;
     return acc;
-  }, { total: 0, contactados: 0, vendidos: 0, vendidosFueraVida: 0 });
-  campanasConversionTotales.conversionPct = pct(
-    campanasConversionTotales.vendidos,
-    campanasConversionTotales.total
-  );
-  campanasConversionTotales.vidaDias = LEAD_VIDA_DIAS;
+  };
+
+  const campanasReactivas = campanasConversion.filter((r) => r.tipo === 'reactiva');
+  const campanasProactivas = campanasConversion.filter((r) => r.tipo === 'proactiva');
+  const campanasConversionTotales = sumCampanas(campanasConversion);
+  const campanasReactivasTotales = sumCampanas(campanasReactivas);
+  const campanasProactivasTotales = sumCampanas(campanasProactivas);
+
+  const { normalizeVehiculoLead } = require('../config/campanasConversion');
+  const vehiculoAggRows = d.prepare(`
+    SELECT
+      COALESCE(NULLIF(trim(campana), ''), '(sin campaña)') AS campana,
+      COALESCE(NULLIF(trim(auto_interes), ''), '(sin vehículo)') AS autoInteres,
+      COUNT(*) AS leads,
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS convertidos
+    FROM crm_leads
+    ${whereSql}
+    GROUP BY campana, autoInteres
+  `).all(...params);
+
+  const vehiculoMap = new Map();
+  for (const row of vehiculoAggRows) {
+    const cls = classifyCampanaConversion(row.campana);
+    if (!cls.tipo) continue;
+    const vehiculo = normalizeVehiculoLead(row.autoInteres);
+    const cur = vehiculoMap.get(vehiculo) || { vehiculo, total: 0, convertidos: 0 };
+    cur.total += Number(row.leads || 0);
+    cur.convertidos += Number(row.convertidos || 0);
+    vehiculoMap.set(vehiculo, cur);
+  }
+  const conversionPorVehiculo = [...vehiculoMap.values()]
+    .map((r) => ({
+      ...r,
+      conversionPct: pct(r.convertidos, r.total),
+    }))
+    .sort((a, b) => b.total - a.total || b.convertidos - a.convertidos);
+
+  const yearRef = String(rango.hasta || rango.desde || formatIsoDate(new Date())).slice(0, 4);
+  const yearNum = /^\d{4}$/.test(yearRef) ? yearRef : String(new Date().getFullYear());
+  const yearDesde = `${yearNum}-01-01`;
+  const yearHasta = `${yearNum}-12-31`;
+  const mesCampanaRows = d.prepare(`
+    SELECT
+      substr(fecha_entrada, 1, 7) AS mes,
+      COALESCE(NULLIF(trim(campana), ''), '(sin campaña)') AS campana,
+      COUNT(*) AS total,
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS convertidos
+    FROM crm_leads
+    WHERE (${notDupSql})
+      AND fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''
+      AND substr(fecha_entrada, 1, 10) >= ?
+      AND substr(fecha_entrada, 1, 10) <= ?
+    GROUP BY substr(fecha_entrada, 1, 7), campana
+  `).all(yearDesde, yearHasta);
+
+  const mesBuckets = new Map();
+  for (let i = 1; i <= 12; i += 1) {
+    const mes = `${yearNum}-${String(i).padStart(2, '0')}`;
+    mesBuckets.set(mes, {
+      mes,
+      anio: Number(yearNum),
+      total: 0,
+      convertidos: 0,
+      conversionPct: 0,
+    });
+  }
+
+  for (const row of mesCampanaRows) {
+    const cls = classifyCampanaConversion(row.campana);
+    if (cls.tipo !== 'reactiva') continue;
+    const mes = String(row.mes || '');
+    const bucket = mesBuckets.get(mes);
+    if (!bucket) continue;
+    bucket.total += Number(row.total || 0);
+    bucket.convertidos += Number(row.convertidos || 0);
+  }
+
+  const conversionPorMes = [...mesBuckets.values()].map((b) => ({
+    ...b,
+    conversionPct: pct(b.convertidos, b.total),
+  }));
+  const conversionPorMesMeta = {
+    anio: Number(yearNum),
+    desde: yearDesde,
+    hasta: yearHasta,
+    alcance: 'campanas_reactivas',
+    texto: `Año ${yearNum} · solo campañas reactivas (excluye proactivas, AMDGM, ABP y CODE), compra ≤${LEAD_VIDA_DIAS}d`,
+  };
 
   const CADUCAR_ALERTA_DIAS = 14;
   const hoyIso = formatIsoDate(new Date());
@@ -3109,9 +3743,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
 
   const campanasCaducarAll = candidatosCaducar
     .map((r) => {
-      const key = resolveCampanaConversionKey(r.campana);
-      if (!key) return null;
-      const campanaCfg = CAMPANAS_CONVERSION.find((c) => c.key === key);
+      const cls = classifyCampanaConversion(r.campana);
+      if (!cls.tipo) return null;
       const diasVividos = Math.max(0, Number(r.diasVividos || 0));
       const diasRestantes = LEAD_VIDA_DIAS - diasVividos;
       if (diasRestantes < 0 || diasRestantes > CADUCAR_ALERTA_DIAS) return null;
@@ -3123,8 +3756,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
         idOportunidad: r.idOportunidad || null,
         nombre: String(r.nombre || '').trim() || '(Sin nombre)',
         telefono: String(r.telefono || '').trim() || null,
-        campana: campanaCfg?.label || String(r.campana || '').trim(),
-        campanaKey: key,
+        campana: cls.label || String(r.campana || '').trim(),
+        campanaKey: cls.key,
         ejecutivo: String(r.ejecutivo || '').trim() || 'Sin ejecutivo',
         fuerzaVentas: String(r.fuerzaVentas || '').trim() || null,
         fechaEntrada: String(r.fechaEntrada || '').slice(0, 10) || null,
@@ -3171,7 +3804,14 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   // KPIs poco densos: incluir detalle completo en el payload para que el drawer
   // no dependa de un segundo request ni del preview truncado.
   const buildKpiDetalle = (kpiKey, softLimit = 2000) => {
-    const extra = leadKpiExtraWhere(kpiKey);
+    if (kpiKey === 'seguimientoSinCompra' || kpiKey === 'enSeguimiento') {
+      return queryLeadsDetalleRows(d, {
+        whereSql: seguimientoVidaQ.whereSql,
+        params: seguimientoVidaQ.params,
+        limit: softLimit,
+      });
+    }
+    const extra = leadKpiExtraWhere(kpiKey, { compraSql: COMPRA_ATRIBUIBLE_SQL });
     const kpiWhere = extra ? `${whereSql} AND (${extra})` : whereSql;
     return queryLeadsDetalleRows(d, { whereSql: kpiWhere, params, limit: softLimit });
   };
@@ -3182,8 +3822,16 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     convCompra: null, // alias de compras; se resuelve en cliente
     convCitaCompra: buildKpiDetalle('convCitaCompra', 500),
     convContactoCompra: buildKpiDetalle('convContactoCompra', 500),
+    seguimientoSinCompra: buildKpiDetalle('seguimientoSinCompra', 2000),
   };
   detallePorKpi.convCompra = detallePorKpi.compras;
+
+  const alertasConversionCompras = buildAlertasConversionCompras(d, {
+    whereSql,
+    params,
+    compraSql: COMPRA_ATRIBUIBLE_SQL,
+    limit: 40,
+  });
 
   return {
     filtros: {
@@ -3192,14 +3840,18 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       periodo: rango.periodo,
     },
     fuente: 'crm_leads · crm_actividades (Balderrama Ciclos)',
-    reglaCompra: 'VIN en ciclo CRM del mismo ID CRM, o vin_comprado en el lead',
+    reglaCompra: `Serie/VIN en ciclo CRM del mismo ID CRM (o vin_comprado), con fecha de compra ≥ fecha_entrada y dentro de ${LEAD_VIDA_DIAS} días; la conversión se atribuye al mes de origen del lead`,
     cobertura,
     semantica: {
-      cohorte: 'El periodo filtra fecha_entrada del lead (oportunidad)',
-      compras: 'Compra vinculada por ID CRM; puede ocurrir después del periodo',
-      sinDuplicados: 'No se contabilizan leads marcados DUPLICADO en Google Sheets (columna AD / resultado / contacto / estación)',
+      cohorte: 'El periodo filtra fecha_entrada del lead (mes de origen de la oportunidad)',
+      compras: `Compra vinculada por ID CRM vía serie/VIN; cuenta en el mes de origen si la compra ocurre dentro de ${LEAD_VIDA_DIAS} días desde fecha_entrada`,
+      sinDuplicados: 'No se contabilizan en el embudo los leads con Resultado=DUPLICADO (columna AB del sheet Acumulado)',
+      seguimientoSinCompra: `Leads vivos (≤${seguimientoVidaQ.vidaDias}d al cierre: ${seguimientoVidaQ.desdeVida} → ${seguimientoVidaQ.refHasta}) sin compra y no descartados, con resultado en seguimiento y/o prueba de manejo y/o solicitud de crédito`,
+      sinCompra: 'Oportunidades perdidas de la cohorte: resultado descartado, desistido, perdido u equivalentes',
       campanasConversion: `Vendidos de campañas documentadas solo cuentan si la compra ocurre dentro de ${LEAD_VIDA_DIAS} días desde fecha_entrada; fuera de esa vida útil no suman a conversión aunque exista venta`,
       alertasCaducar: 'Las alertas de caducidad usan la misma cohorte por fecha_entrada del periodo, con vida restante ≤14 días de 90',
+      alertasConversionCompras: 'Compras con posible alteración: lead anónimo/genérico o nombre del lead distinto al comprador vinculado por VIN/ID CRM',
+      conversionPorMes: 'Serie ene–dic · solo reactivas (cualquier campaña no proactiva/ABP/CODE se agrega sola)',
       noEsVentasTotales: 'No equivale al total de facturas DMS del periodo',
     },
     campanasConversionRegla: {
@@ -3215,8 +3867,16 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     porFuerzaVentas,
     campanasConversion,
     campanasConversionTotales,
+    campanasReactivas,
+    campanasReactivasTotales,
+    campanasProactivas,
+    campanasProactivasTotales,
+    conversionPorVehiculo,
+    conversionPorMes,
+    conversionPorMesMeta,
     campanasCaducarAlertas,
     campanasCaducarResumen,
+    alertasConversionCompras,
     detalle,
     detalleMeta,
     detallePorKpi,
@@ -3487,6 +4147,146 @@ function personTokenKey(v) {
   return tokens.length ? tokens.sort().join(' ') : null;
 }
 
+function personTokens(v) {
+  const key = personTokenKey(v);
+  return key ? key.split(' ') : [];
+}
+
+/** Tokens en el orden original del nombre (ya en mayúsculas, sin acentos). */
+function orderedNameTokens(v) {
+  const s = String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  if (!s || s === 'NULL') return [];
+  return s.split(' ').filter(Boolean);
+}
+
+function hasLowercaseLetters(name) {
+  return /[a-záéíóúüñ]/.test(String(name || ''));
+}
+
+/**
+ * True si `name` parece forma APELLIDOS + NOMBRES respecto de `other`
+ * (p. ej. "SORIANO REYES DIANA PATRICIA" vs "Diana Soriano Reyes").
+ */
+function isSurnameFirstForm(name, other) {
+  const a = orderedNameTokens(name);
+  const b = orderedNameTokens(other);
+  if (a.length < 2 || b.length < 2) return false;
+  return a.slice(0, 2).join(' ') === b.slice(-2).join(' ');
+}
+
+/** Convierte "Nombre Apellido1 Apellido2" → "APELLIDO1 APELLIDO2 NOMBRE". */
+function toApellidosNombresUpper(name) {
+  const parts = orderedNameTokens(name);
+  if (parts.length <= 1) return parts.join(' ') || String(name || '').trim().toUpperCase();
+  if (parts.length === 2) return `${parts[1]} ${parts[0]}`;
+  if (parts.length === 3) return `${parts[1]} ${parts[2]} ${parts[0]}`;
+  return [...parts.slice(-2), ...parts.slice(0, -2)].join(' ');
+}
+
+/**
+ * Misma persona con distinto orden / nombre incompleto:
+ * "Diana Soriano Reyes" ≡ "SORIANO REYES DIANA PATRICIA"
+ * (el más corto debe tener ≥2 tokens y estar contenido en el más largo).
+ */
+function isSamePersonName(a, b) {
+  const ta = personTokens(a);
+  const tb = personTokens(b);
+  if (!ta.length || !tb.length) return false;
+  if (ta.length === tb.length) {
+    return ta.every((t, i) => t === tb[i]);
+  }
+  const [short, long] = ta.length < tb.length ? [ta, tb] : [tb, ta];
+  if (short.length < 2) return false;
+  const longSet = new Set(long);
+  return short.every((t) => longSet.has(t));
+}
+
+function preferVendedorDisplay(current, candidate) {
+  const cur = String(current || '').replace(/\s+/g, ' ').trim();
+  const next = String(candidate || '').replace(/\s+/g, ' ').trim();
+  if (!cur) return next;
+  if (!next) return cur;
+
+  const nextIsSf = isSurnameFirstForm(next, cur);
+  const curIsSf = isSurnameFirstForm(cur, next);
+  if (nextIsSf && !curIsSf) return next;
+  if (curIsSf && !nextIsSf) return cur;
+
+  const curTok = personTokens(cur).length;
+  const nextTok = personTokens(next).length;
+  if (nextTok !== curTok) return nextTok > curTok ? next : cur;
+
+  const curUp = !hasLowercaseLetters(cur);
+  const nextUp = !hasLowercaseLetters(next);
+  if (nextUp !== curUp) return nextUp ? next : cur;
+
+  if (next.length !== cur.length) return next.length > cur.length ? next : cur;
+  return cur;
+}
+
+/** Nombres de pila frecuentes: si el nombre empieza así, se reordena a APELLIDOS + NOMBRES. */
+const COMMON_GIVEN_NAMES = new Set([
+  'ADRIAN', 'ADRIANA', 'ALEJANDRA', 'ALEJANDRO', 'ALEX', 'ALEXA', 'ALEXANDER', 'ALFONSO',
+  'ALICIA', 'ANA', 'ANDREA', 'ANDRES', 'ANGEL', 'ANGELA', 'ANTONIO', 'ARMANDO',
+  'ARTURO', 'BEATRIZ', 'BENJAMIN', 'BRENDA', 'CARLA', 'CARLOS', 'CARMEN', 'CAROLINA',
+  'CECILIA', 'CELIA', 'CESAR', 'CHRISTIAN', 'CLAUDIA', 'CRISTIAN', 'CRISTINA', 'DANIEL',
+  'DANIELA', 'DAVID', 'DIANA', 'DIEGO', 'DULCE', 'EDUARDO', 'ELENA', 'ELIZABETH',
+  'EMILIO', 'ENRIQUE', 'ERICK', 'ERIKA', 'ERNESTO', 'ESTEBAN', 'ESTHER', 'EVA',
+  'FABIAN', 'FABIOLA', 'FELIPE', 'FERNANDO', 'FRANCISCO', 'GABRIEL', 'GABRIELA', 'GERARDO',
+  'GLORIA', 'GUADALUPE', 'GUILLERMO', 'GUSTAVO', 'HECTOR', 'HUGO', 'IRMA', 'ISAAC',
+  'ISABEL', 'IVAN', 'JAIME', 'JAVIER', 'JESUS', 'JOEL', 'JORGE', 'JOSE', 'JOSEFINA',
+  'JUAN', 'JULIA', 'JULIO', 'KARLA', 'KAREN', 'LAURA', 'LEONARDO', 'LETICIA', 'LILIANA',
+  'LORENA', 'LUCIA', 'LUIS', 'LUISA', 'MANUEL', 'MARCELA', 'MARCO', 'MARCOS', 'MARGARITA',
+  'MARIA', 'MARIANA', 'MARIO', 'MARTA', 'MARTIN', 'MAURICIO', 'MAYRA', 'MIGUEL', 'MIRIAM',
+  'MONICA', 'NANCY', 'NATALIA', 'NOEMI', 'NORMA', 'OCTAVIO', 'OLGA', 'OSCAR', 'PABLO',
+  'PATRICIA', 'PAULA', 'PAULO', 'PEDRO', 'RAFAEL', 'RAQUEL', 'RAUL', 'REBECA', 'RICARDO',
+  'ROBERTO', 'RODOLFO', 'RODRIGO', 'ROSA', 'ROSARIO', 'RUBEN', 'SALVADOR', 'SAMUEL',
+  'SANDRA', 'SANTIAGO', 'SARA', 'SAUL', 'SERGIO', 'SILVIA', 'SOFIA', 'SUSANA', 'TERESA',
+  'VALENTIN', 'VALERIA', 'VERONICA', 'VICENTE', 'VICTOR', 'VICTORIA', 'VIRGINIA', 'VIRIDIANA',
+  'XIMENA', 'YOLANDA', 'ABIGAIL', 'ALAN', 'ALONDRA', 'ITZEL', 'IVETTE', 'JAZMIN', 'JIMENA',
+  'KATIA', 'LIZBETH', 'MARLENE', 'MICHELLE', 'PAOLA', 'PERLA', 'REGINA', 'SEBASTIAN', 'YESENIA',
+]);
+
+function startsWithGivenName(name) {
+  const parts = orderedNameTokens(name);
+  return parts.length >= 2 && COMMON_GIVEN_NAMES.has(parts[0]);
+}
+
+/** Elige y normaliza la etiqueta visible: siempre APELLIDOS + NOMBRES en mayúsculas. */
+function formatVendedorApellidosNombres(candidates) {
+  const names = [...new Set(
+    (candidates || [])
+      .map((n) => String(n || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+  )];
+  if (!names.length) return null;
+
+  let best = names[0];
+  for (let i = 1; i < names.length; i += 1) {
+    best = preferVendedorDisplay(best, names[i]);
+  }
+
+  const surnameFirst = names.find((n) =>
+    names.some((o) => normalizeVendedorKey(o) !== normalizeVendedorKey(n) && isSurnameFirstForm(n, o))
+  );
+  if (surnameFirst) {
+    return normalizeVendedorKey(surnameFirst);
+  }
+
+  // Title case / "Nombre Apellidos" → reordenar.
+  if (hasLowercaseLetters(best) || startsWithGivenName(best)) {
+    return toApellidosNombresUpper(best);
+  }
+
+  return normalizeVendedorKey(best);
+}
+
 function chunkArray(arr, size) {
   const out = [];
   const n = Math.max(1, Number(size) || 40);
@@ -3526,8 +4326,9 @@ function vendedorDateClause(column, fechaInicio, fechaFin, params) {
   return parts.length ? ` AND ${parts.join(' AND ')}` : '';
 }
 
-function collectVendedorVins(d, { clientesIds, vendedorKey, fechaInicio, fechaFin }) {
+function collectVendedorVins(d, { clientesIds, vendedorKeys, fechaInicio, fechaFin }) {
   const vins = new Set();
+  const keys = [...new Set((vendedorKeys || []).map(normalizeVendedorKey).filter(Boolean))];
   const actDate = 'COALESCE(fecha_inicio_ciclo, fecha_factura, fecha_crea_actividad, fecha_entrega)';
   if (clientesIds.length) {
     const ph = clientesIds.map(() => '?').join(',');
@@ -3545,13 +4346,14 @@ function collectVendedorVins(d, { clientesIds, vendedorKey, fechaInicio, fechaFi
       if (vin) vins.add(vin);
     }
   }
-  {
-    const params = [vendedorKey];
+  if (keys.length) {
+    const ph = keys.map(() => '?').join(',');
+    const params = [...keys];
     const dateSql = vendedorDateClause(actDate, fechaInicio, fechaFin, params);
     const rows = d.prepare(`
       SELECT DISTINCT UPPER(TRIM(vin)) AS vin
       FROM crm_actividades
-      WHERE UPPER(TRIM(vendedor)) = ?
+      WHERE UPPER(TRIM(vendedor)) IN (${ph})
         AND vin IS NOT NULL AND TRIM(vin) <> ''
         ${dateSql}
     `).all(...params);
@@ -3565,14 +4367,16 @@ function collectVendedorVins(d, { clientesIds, vendedorKey, fechaInicio, fechaFi
 
 function buildFinanciamientoVendedorStats(d, {
   tokenKey,
+  vendedorNombre,
   vins,
   fechaInicio,
   fechaFin,
 }) {
-  if (!hasFinanciamientoTable(d) || !tokenKey) {
+  if (!hasFinanciamientoTable(d) || !(tokenKey || vendedorNombre)) {
     return {
       fuente: 'crm_financiamiento',
       contratos: 0,
+      vins: [],
       match: 'ninguno',
       montoFinanciarPromedio: null,
       montoFinanciarTotal: 0,
@@ -3609,12 +4413,19 @@ function buildFinanciamientoVendedorStats(d, {
     if (!inPeriod(fecha, fechaInicio, fechaFin)) continue;
     const asesorTok = personTokenKey(row.asesor);
     const vin = normalizeVin(row.vin);
-    if (asesorTok && asesorTok === tokenKey) byAsesor.push(row);
+    const sameAsesor = Boolean(
+      (vendedorNombre && isSamePersonName(row.asesor, vendedorNombre))
+      || (tokenKey && asesorTok && (asesorTok === tokenKey || isSamePersonName(row.asesor, tokenKey)))
+    );
+    if (sameAsesor) byAsesor.push(row);
     else if (vin && vinSet.has(vin)) byVin.push(row);
   }
 
   const match = byAsesor.length ? 'asesor' : (byVin.length ? 'vin_cartera' : 'ninguno');
   const contratos = byAsesor.length ? byAsesor : byVin;
+  const contratoVins = [...new Set(
+    contratos.map((c) => normalizeVin(c.vin)).filter(Boolean)
+  )];
 
   const montos = contratos.map((c) => Number(c.monto_financiar)).filter((n) => Number.isFinite(n) && n > 0);
   const enganches = contratos.map((c) => Number(c.enganche_monto)).filter((n) => Number.isFinite(n) && n > 0);
@@ -3686,6 +4497,7 @@ function buildFinanciamientoVendedorStats(d, {
     fuente: 'crm_financiamiento',
     match,
     contratos: contratos.length,
+    vins: contratoVins,
     montoFinanciarPromedio: roundMoney(avg(montos)),
     montoFinanciarTotal: roundMoney(montos.reduce((s, n) => s + n, 0)),
     enganchePromedio: roundMoney(avg(enganches)),
@@ -3708,10 +4520,15 @@ function buildFinanciamientoVendedorStats(d, {
   };
 }
 
-function buildLibroVentasCrmStats(d, { clientesIds, vendedorKey, fechaInicio, fechaFin }) {
+function buildLibroVentasCrmStats(d, { clientesIds, vendedorKeys, fechaInicio, fechaFin }) {
+  const keys = [...new Set((vendedorKeys || []).map(normalizeVendedorKey).filter(Boolean))];
+  if (!keys.length) {
+    return { fuente: 'crm_actividades', unidades: 0, clientes: 0, vins: 0, muestra: [] };
+  }
   const actDate = 'COALESCE(fecha_factura, fecha_entrega, fecha_inicio_ciclo, fecha_crea_actividad)';
-  const params = [vendedorKey];
+  const params = [...keys];
   const dateSql = vendedorDateClause(actDate, fechaInicio, fechaFin, params);
+  const ph = keys.map(() => '?').join(',');
   const rows = d.prepare(`
     SELECT
       CAST(id_contacto AS TEXT) AS id_crm,
@@ -3722,7 +4539,7 @@ function buildLibroVentasCrmStats(d, { clientesIds, vendedorKey, fechaInicio, fe
       producto_vendido AS modelo,
       facturado_a AS cliente
     FROM crm_actividades
-    WHERE UPPER(TRIM(vendedor)) = ?
+    WHERE UPPER(TRIM(vendedor)) IN (${ph})
       AND num_factura IS NOT NULL AND TRIM(num_factura) <> ''
       ${dateSql}
   `).all(...params);
@@ -3881,30 +4698,122 @@ async function queryTallerReturnByVins(vins) {
   return { vinsConOrden, ordenes, importe };
 }
 
+async function queryLibroVentasSqlByVendedor(vendedorNombre, fechaInicio, fechaFin) {
+  const nombre = String(vendedorNombre || '').replace(/\s+/g, ' ').trim();
+  if (!nombre) return [];
+  const params = { vendedor: nombre.toUpperCase() };
+  if (fechaInicio) params.fechaInicio = fechaInicio;
+  if (fechaFin) params.fechaFin = fechaFin;
+  const dateSql = [
+    fechaInicio ? 'AND CONVERT(DATE, v.VTE_FECHDOCTO, 103) >= @fechaInicio' : '',
+    fechaFin ? 'AND CONVERT(DATE, v.VTE_FECHDOCTO, 103) <= @fechaFin' : '',
+  ].filter(Boolean).join('\n');
+  try {
+    return await query(`
+      SELECT
+        UPPER(LTRIM(RTRIM(v.VTE_SERIE))) AS serie,
+        LTRIM(RTRIM(v.VTE_DOCTO)) AS factura,
+        v.VTE_FECHDOCTO AS fechaFactura,
+        LTRIM(RTRIM(v.VTE_FORMAPAGO)) AS formaPago,
+        LTRIM(RTRIM(veh.VEH_TIPOAUTO)) AS modelo,
+        veh.VEH_ANMODELO AS anModelo,
+        LTRIM(RTRIM(
+          ISNULL(B.PER_PATERNO, '') + ' ' + ISNULL(B.PER_MATERNO, '') + ' ' + ISNULL(B.PER_NOMRAZON, '')
+        )) AS vendedorLibro,
+        LTRIM(RTRIM(
+          ISNULL(A.PER_NOMRAZON, '') + ' ' + ISNULL(A.PER_PATERNO, '') + ' ' + ISNULL(A.PER_MATERNO, '')
+        )) AS cliente
+      FROM ADE_VTAFI v
+      INNER JOIN SER_VEHICULO veh
+        ON veh.VEH_NUMSERIE = v.VTE_SERIE
+        AND veh.VEH_NOINVENTA > 0
+      LEFT JOIN PER_PERSONAS A ON A.PER_IDPERSONA = v.VTE_IDCLIENTE
+      LEFT JOIN PER_PERSONAS B ON B.PER_IDPERSONA = veh.VEH_VENDEDOR
+      WHERE v.VTE_TIPODOCTO = 'A'
+        AND v.VTE_STATUS = 'I'
+        AND veh.VEH_SITUACION IN ('VEN')
+        AND UPPER(LTRIM(RTRIM(
+          ISNULL(B.PER_PATERNO, '') + ' ' + ISNULL(B.PER_MATERNO, '') + ' ' + ISNULL(B.PER_NOMRAZON, '')
+        ))) = @vendedor
+        ${dateSql}
+      ORDER BY CONVERT(DATE, v.VTE_FECHDOCTO, 103) DESC
+    `, params);
+  } catch (err) {
+    console.warn('[crm] libro ventas SQL por vendedor:', err.message);
+    return [];
+  }
+}
+
+function summarizeLibroSqlRows(ventasSql) {
+  const byDoc = new Map();
+  for (const row of ventasSql || []) {
+    const k = `${row.factura}|${row.serie}`;
+    if (!byDoc.has(k)) byDoc.set(k, row);
+  }
+  const unique = [...byDoc.values()];
+  const pagoMap = new Map();
+  for (const row of unique) {
+    const fp = String(row.formaPago || 'OTRO').trim() || 'OTRO';
+    pagoMap.set(fp, (pagoMap.get(fp) || 0) + 1);
+  }
+  return {
+    fuente: 'ADE_VTAFI',
+    unidades: unique.length,
+    porTipoPago: [...pagoMap.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count),
+    muestra: unique.slice(0, 15).map((v) => ({
+      fecha: v.fechaFactura || null,
+      factura: v.factura || null,
+      vin: v.serie || null,
+      modelo: v.modelo || null,
+      formaPago: v.formaPago || null,
+      cliente: v.cliente || null,
+      vendedorLibro: v.vendedorLibro || null,
+    })),
+    error: null,
+  };
+}
+
 async function buildVendedorComercialStats(d, {
   vendedorKey,
+  vendedorKeys,
   vendedorNombre,
   clientesIds,
   fechaInicio,
   fechaFin,
 }) {
-  const tokenKey = personTokenKey(vendedorNombre) || personTokenKey(vendedorKey);
-  const vins = collectVendedorVins(d, {
+  const aliases = [...new Set(
+    (vendedorKeys && vendedorKeys.length ? vendedorKeys : [vendedorKey])
+      .map(normalizeVendedorKey)
+      .filter(Boolean)
+  )];
+  const tokenKey = personTokenKey(vendedorNombre) || personTokenKey(aliases[0]);
+  const vinsCrm = collectVendedorVins(d, {
     clientesIds,
-    vendedorKey,
+    vendedorKeys: aliases,
     fechaInicio,
     fechaFin,
   });
 
   const financiamiento = buildFinanciamientoVendedorStats(d, {
     tokenKey,
-    vins,
+    vendedorNombre: vendedorNombre || aliases[0],
+    vins: vinsCrm,
     fechaInicio,
     fechaFin,
   });
+
+  // Unir VINs del CRM + contratos F&I del asesor: evita subcontar ventas
+  // cuando el CRM no trae VIN en el periodo pero sí hay contrato/factura.
+  const vins = [...new Set([
+    ...vinsCrm,
+    ...(financiamiento.vins || []),
+  ])];
+
   const libroCrm = buildLibroVentasCrmStats(d, {
     clientesIds,
-    vendedorKey,
+    vendedorKeys: aliases,
     fechaInicio,
     fechaFin,
   });
@@ -3921,44 +4830,15 @@ async function buildVendedorComercialStats(d, {
     error: null,
   };
 
-  const [libroResult, tallerResult] = await Promise.all([
-    queryLibroVentasSqlByVins(vins, fechaInicio, fechaFin)
-      .then((ventasSql) => {
-        const byDoc = new Map();
-        for (const row of ventasSql) {
-          const k = `${row.factura}|${row.serie}`;
-          if (!byDoc.has(k)) byDoc.set(k, row);
-        }
-        const unique = [...byDoc.values()];
-        const pagoMap = new Map();
-        for (const row of unique) {
-          const fp = String(row.formaPago || 'OTRO').trim() || 'OTRO';
-          pagoMap.set(fp, (pagoMap.get(fp) || 0) + 1);
-        }
-        return {
-          fuente: 'ADE_VTAFI',
-          unidades: unique.length,
-          porTipoPago: [...pagoMap.entries()]
-            .map(([label, count]) => ({ label, count }))
-            .sort((a, b) => b.count - a.count),
-          muestra: unique.slice(0, 15).map((v) => ({
-            fecha: v.fechaFactura || null,
-            factura: v.factura || null,
-            vin: v.serie || null,
-            modelo: v.modelo || null,
-            formaPago: v.formaPago || null,
-            cliente: v.cliente || null,
-            vendedorLibro: v.vendedorLibro || null,
-          })),
-          error: null,
-        };
-      })
-      .catch((err) => ({
-        unidades: 0,
-        porTipoPago: [],
-        muestra: [],
-        error: err.message,
-      })),
+  const [libroByVin, libroByVend, tallerResult] = await Promise.all([
+    queryLibroVentasSqlByVins(vins, fechaInicio, fechaFin).catch((err) => {
+      console.warn('[crm] libro por VIN:', err.message);
+      return [];
+    }),
+    queryLibroVentasSqlByVendedor(vendedorNombre || vendedorKey, fechaInicio, fechaFin).catch((err) => {
+      console.warn('[crm] libro por vendedor:', err.message);
+      return [];
+    }),
     queryTallerReturnByVins(vins).catch((err) => ({
       vinsConOrden: new Set(),
       ordenes: 0,
@@ -3967,7 +4847,11 @@ async function buildVendedorComercialStats(d, {
     })),
   ]);
 
-  libroSql = libroResult;
+  try {
+    libroSql = summarizeLibroSqlRows([...(libroByVin || []), ...(libroByVend || [])]);
+  } catch (err) {
+    libroSql = { unidades: 0, porTipoPago: [], muestra: [], error: err.message };
+  }
 
   if (tallerResult.error) {
     retorno.error = tallerResult.error;
@@ -4038,23 +4922,28 @@ function listVendedores({ q = '', limit = 250 } = {}) {
     if (!key) return;
     const display = String(nombre || '').replace(/\s+/g, ' ').trim();
     if (!map.has(key)) {
-      map.set(key, { vendedor: display, key, clientes: 0, fuentes: new Set() });
+      map.set(key, {
+        vendedor: display,
+        key,
+        clientes: 0,
+        fuentes: new Set(),
+        displays: new Set([display]),
+      });
     }
     const row = map.get(key);
-    if (display.length > row.vendedor.length) row.vendedor = display;
+    row.displays.add(display);
+    row.vendedor = preferVendedorDisplay(row.vendedor, display);
     row.clientes = Math.max(row.clientes, Number(clientes || 0));
     row.fuentes.add(fuente);
   };
 
-  const like = term ? `%${term}%` : null;
   const actSql = `
     SELECT TRIM(vendedor) AS nombre, COUNT(DISTINCT id_contacto) AS clientes
     FROM crm_actividades
     WHERE vendedor IS NOT NULL AND TRIM(vendedor) <> ''
-      ${like ? 'AND vendedor LIKE ?' : ''}
     GROUP BY UPPER(TRIM(vendedor))
   `;
-  for (const r of d.prepare(actSql).all(...(like ? [like] : []))) {
+  for (const r of d.prepare(actSql).all()) {
     bump(r.nombre, r.clientes, 'ciclos');
   }
 
@@ -4064,10 +4953,9 @@ function listVendedores({ q = '', limit = 250 } = {}) {
       FROM crm_leads
       WHERE ejecutivo_asignado IS NOT NULL AND TRIM(ejecutivo_asignado) <> ''
         AND id_crm IS NOT NULL
-        ${like ? 'AND ejecutivo_asignado LIKE ?' : ''}
       GROUP BY UPPER(TRIM(ejecutivo_asignado))
     `;
-    for (const r of d.prepare(leadSql).all(...(like ? [like] : []))) {
+    for (const r of d.prepare(leadSql).all()) {
       bump(r.nombre, r.clientes, 'leads');
     }
   }
@@ -4078,10 +4966,9 @@ function listVendedores({ q = '', limit = 250 } = {}) {
       FROM crm_pruebas_manejo
       WHERE ejecutivo_ventas IS NOT NULL AND TRIM(ejecutivo_ventas) <> ''
         AND id_crm IS NOT NULL
-        ${like ? 'AND ejecutivo_ventas LIKE ?' : ''}
       GROUP BY UPPER(TRIM(ejecutivo_ventas))
     `;
-    for (const r of d.prepare(pruebaSql).all(...(like ? [like] : []))) {
+    for (const r of d.prepare(pruebaSql).all()) {
       bump(r.nombre, r.clientes, 'pruebas');
     }
   }
@@ -4092,23 +4979,84 @@ function listVendedores({ q = '', limit = 250 } = {}) {
       FROM crm_solicitudes
       WHERE asesor IS NOT NULL AND TRIM(asesor) <> ''
         AND id_crm IS NOT NULL
-        ${like ? 'AND asesor LIKE ?' : ''}
       GROUP BY UPPER(TRIM(asesor))
     `;
-    for (const r of d.prepare(solSql).all(...(like ? [like] : []))) {
+    for (const r of d.prepare(solSql).all()) {
       bump(r.nombre, r.clientes, 'solicitudes');
     }
   }
 
-  return [...map.values()]
-    .map((r) => ({
-      vendedor: r.vendedor,
-      key: r.key,
-      clientes: r.clientes,
-      fuentes: [...r.fuentes],
-    }))
+  // Fusionar alias de la misma persona (orden distinto / nombre incompleto).
+  const clusters = [];
+  const sorted = [...map.values()].sort((a, b) => {
+    const tokDiff = personTokens(b.vendedor).length - personTokens(a.vendedor).length;
+    if (tokDiff) return tokDiff;
+    return b.clientes - a.clientes;
+  });
+  for (const row of sorted) {
+    const found = clusters.find((c) => isSamePersonName(c.vendedor, row.vendedor));
+    if (!found) {
+      clusters.push({
+        vendedor: row.vendedor,
+        key: row.key,
+        clientes: row.clientes,
+        fuentes: new Set(row.fuentes),
+        aliases: new Set([row.key]),
+        displays: new Set(row.displays || [row.vendedor]),
+      });
+      continue;
+    }
+    for (const dname of (row.displays || [row.vendedor])) found.displays.add(dname);
+    found.displays.add(row.vendedor);
+    found.vendedor = preferVendedorDisplay(found.vendedor, row.vendedor);
+    found.clientes = Math.max(found.clientes, row.clientes);
+    found.aliases.add(row.key);
+    for (const f of row.fuentes) found.fuentes.add(f);
+  }
+
+  const termUpper = term.toUpperCase();
+  return clusters
+    .map((r) => {
+      const aliases = [...r.aliases];
+      const display = formatVendedorApellidosNombres([...(r.displays || []), ...aliases])
+        || normalizeVendedorKey(r.vendedor);
+      return {
+        vendedor: display,
+        key: display,
+        aliases: [...new Set([display, ...aliases].filter(Boolean))],
+        clientes: r.clientes,
+        fuentes: [...r.fuentes],
+      };
+    })
+    .filter((r) => {
+      if (!termUpper) return true;
+      if (r.vendedor.toUpperCase().includes(termUpper)) return true;
+      if (r.key.includes(termUpper)) return true;
+      return (r.aliases || []).some((a) => String(a).includes(termUpper));
+    })
     .sort((a, b) => b.clientes - a.clientes || a.vendedor.localeCompare(b.vendedor, 'es'))
     .slice(0, max);
+}
+
+function resolveVendedorAliases(d, vendedorRaw) {
+  const rawKey = normalizeVendedorKey(vendedorRaw);
+  if (!rawKey) return { display: null, key: null, aliases: [] };
+
+  const catalog = listVendedores({ limit: 500 });
+  const hit = catalog.find((v) =>
+    v.key === rawKey
+    || (v.aliases || []).includes(rawKey)
+    || isSamePersonName(v.vendedor, vendedorRaw)
+  );
+
+  if (hit) {
+    const aliases = [...new Set([hit.key, ...(hit.aliases || [])].filter(Boolean))];
+    return { display: hit.vendedor, key: hit.key, aliases };
+  }
+
+  const display = resolveVendedorNombre(d, vendedorRaw) || String(vendedorRaw).replace(/\s+/g, ' ').trim();
+  const key = normalizeVendedorKey(display) || rawKey;
+  return { display, key, aliases: [key] };
 }
 
 function resolveVendedorNombre(d, vendedorRaw) {
@@ -4133,13 +5081,14 @@ function resolveVendedorNombre(d, vendedorRaw) {
     if (lead?.nombre) return String(lead.nombre).replace(/\s+/g, ' ').trim();
   }
 
-  // Búsqueda parcial si hay un único match
-  const candidates = listVendedores({ q: vendedorRaw, limit: 20 })
-    .filter((v) => v.key === key || v.key.includes(key) || key.includes(v.key));
+  // Misma persona con otro orden / incompleto
+  const candidates = listVendedores({ limit: 500 })
+    .filter((v) => v.key === key || (v.aliases || []).includes(key) || isSamePersonName(v.vendedor, vendedorRaw));
   if (candidates.length === 1) return candidates[0].vendedor;
   if (candidates.length > 1) {
     const exactKey = candidates.find((v) => v.key === key);
     if (exactKey) return exactKey.vendedor;
+    return preferVendedorDisplay(candidates[0].vendedor, candidates[1].vendedor);
   }
   return String(vendedorRaw || '').replace(/\s+/g, ' ').trim() || null;
 }
@@ -4155,9 +5104,13 @@ async function getVendedorResumen({
   limit = 300,
 } = {}) {
   const d = getDb();
-  const nombre = resolveVendedorNombre(d, vendedor);
-  const key = normalizeVendedorKey(nombre || vendedor);
-  if (!key) throw new Error('Indique un vendedor válido.');
+  const resolved = resolveVendedorAliases(d, vendedor);
+  const nombre = resolved.display || resolveVendedorNombre(d, vendedor);
+  const key = resolved.key || normalizeVendedorKey(nombre || vendedor);
+  const aliases = (resolved.aliases && resolved.aliases.length)
+    ? resolved.aliases
+    : (key ? [key] : []);
+  if (!key || !aliases.length) throw new Error('Indique un vendedor válido.');
 
   const max = Math.min(500, Math.max(1, Number(limit) || 300));
   const fi = fechaInicio ? String(fechaInicio) : null;
@@ -4166,57 +5119,58 @@ async function getVendedorResumen({
     throw new Error('La fecha inicial no puede ser posterior a la final.');
   }
 
+  const aliasPh = aliases.map(() => '?').join(',');
   const actDate = 'COALESCE(fecha_inicio_ciclo, fecha_factura, fecha_crea_actividad, fecha_entrega)';
   const clientUnions = [];
   const clientParams = [];
 
   {
-    const p = [key];
+    const p = [...aliases];
     const dateSql = vendedorDateClause(actDate, fi, ff, p);
     clientUnions.push(`
       SELECT CAST(id_contacto AS TEXT) AS id_crm
       FROM crm_actividades
       WHERE id_contacto IS NOT NULL
-        AND UPPER(TRIM(vendedor)) = ?
+        AND UPPER(TRIM(vendedor)) IN (${aliasPh})
         ${dateSql}
     `);
     clientParams.push(...p);
   }
 
   if (hasLeadsTable(d)) {
-    const p = [key];
+    const p = [...aliases];
     const dateSql = vendedorDateClause('fecha_entrada', fi, ff, p);
     clientUnions.push(`
       SELECT CAST(id_crm AS TEXT) AS id_crm
       FROM crm_leads
       WHERE id_crm IS NOT NULL
-        AND UPPER(TRIM(ejecutivo_asignado)) = ?
+        AND UPPER(TRIM(ejecutivo_asignado)) IN (${aliasPh})
         ${dateSql}
     `);
     clientParams.push(...p);
   }
 
   if (hasPruebasManejoTable(d)) {
-    const p = [key];
+    const p = [...aliases];
     const dateSql = vendedorDateClause('fecha', fi, ff, p);
     clientUnions.push(`
       SELECT CAST(id_crm AS TEXT) AS id_crm
       FROM crm_pruebas_manejo
       WHERE id_crm IS NOT NULL
-        AND UPPER(TRIM(ejecutivo_ventas)) = ?
+        AND UPPER(TRIM(ejecutivo_ventas)) IN (${aliasPh})
         ${dateSql}
     `);
     clientParams.push(...p);
   }
 
   if (hasSolicitudesTable(d)) {
-    const p = [key];
+    const p = [...aliases];
     const dateSql = vendedorDateClause('fecha_solicitud', fi, ff, p);
     clientUnions.push(`
       SELECT CAST(id_crm AS TEXT) AS id_crm
       FROM crm_solicitudes
       WHERE id_crm IS NOT NULL
-        AND UPPER(TRIM(asesor)) = ?
+        AND UPPER(TRIM(asesor)) IN (${aliasPh})
         ${dateSql}
     `);
     clientParams.push(...p);
@@ -4240,6 +5194,7 @@ async function getVendedorResumen({
   if (!clientesIds.length) {
     const comercial = await buildVendedorComercialStats(d, {
       vendedorKey: key,
+      vendedorKeys: aliases,
       vendedorNombre: nombre || key,
       clientesIds: [],
       fechaInicio: fi,
@@ -4248,6 +5203,7 @@ async function getVendedorResumen({
     return {
       vendedor: nombre || key,
       key,
+      aliases,
       periodo: { fechaInicio: fi, fechaFin: ff },
       totales,
       comercial,
@@ -4391,6 +5347,7 @@ async function getVendedorResumen({
 
   const comercial = await buildVendedorComercialStats(d, {
     vendedorKey: key,
+    vendedorKeys: aliases,
     vendedorNombre: nombre || key,
     clientesIds,
     fechaInicio: fi,
@@ -4420,6 +5377,7 @@ async function getVendedorResumen({
   return {
     vendedor: nombre || key,
     key,
+    aliases,
     periodo: { fechaInicio: fi, fechaFin: ff },
     totales,
     comercial,
@@ -4445,8 +5403,12 @@ function pctBdc(part, total) {
 }
 
 /**
- * Embudo BDC sobre crm_actividades (histórico local Balderrama Ciclos).
- * Respaldo cuando Railway no responde; la fuente operativa es crm_ciclos en la nube.
+ * Embudo BDC sobre crm_actividades + crm_leads (histórico local Balderrama Ciclos).
+ * Contactos = unión de:
+ *  - contactos con ciclo iniciado en el periodo
+ *  - leads no duplicados con ejecutivo de ventas asignado (cartera EV)
+ *    por fecha_asignacion (o fecha_entrada si no hay asignación)
+ * Respaldo cuando Railway no responde; la fuente operativa de citas sigue siendo crm_ciclos en la nube.
  */
 function getBdcEmbudo({ fechaInicio, fechaFin } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaInicio || '')
@@ -4458,21 +5420,80 @@ function getBdcEmbudo({ fechaInicio, fechaFin } = {}) {
   }
 
   const d = getDb();
-  const row = d.prepare(`
+  const hasLeads = hasLeadsTable(d);
+
+  const row = hasLeads
+    ? d.prepare(`
     WITH ciclos_periodo AS (
       SELECT *
       FROM crm_actividades
       WHERE substr(COALESCE(fecha_inicio_ciclo, ''), 1, 10) BETWEEN ? AND ?
         AND substr(COALESCE(fecha_inicio_ciclo, ''), 1, 10) GLOB '????-??-??'
     ),
-    contactos AS (
-      SELECT COUNT(DISTINCT id_contacto) AS total FROM ciclos_periodo
+    contactos_ciclo AS (
+      SELECT DISTINCT TRIM(id_contacto) AS id
+      FROM ciclos_periodo
+      WHERE TRIM(COALESCE(id_contacto, '')) <> ''
+    ),
+    citas AS (
+      SELECT * FROM ciclos_periodo WHERE UPPER(TRIM(tipo_actividad)) = 'CITA'
+    ),
+    leads_asignados AS (
+      SELECT DISTINCT TRIM(id_crm) AS id
+      FROM crm_leads
+      WHERE COALESCE(es_duplicado, 0) = 0
+        AND TRIM(COALESCE(ejecutivo_asignado, '')) <> ''
+        AND TRIM(COALESCE(id_crm, '')) <> ''
+        AND substr(
+          COALESCE(NULLIF(TRIM(fecha_asignacion), ''), fecha_entrada, ''),
+          1, 10
+        ) BETWEEN ? AND ?
+        AND substr(
+          COALESCE(NULLIF(TRIM(fecha_asignacion), ''), fecha_entrada, ''),
+          1, 10
+        ) GLOB '????-??-??'
+    )
+    SELECT
+      (SELECT COUNT(*) FROM contactos_ciclo) AS contactos_ciclos,
+      (SELECT COUNT(*) FROM leads_asignados) AS contactos_leads_asignados,
+      (
+        SELECT COUNT(*) FROM contactos_ciclo c
+        INNER JOIN leads_asignados l ON l.id = c.id
+      ) AS contactos_overlap,
+      (SELECT COUNT(*) FROM citas) AS citas_agendadas,
+      (SELECT COUNT(*) FROM citas WHERE TRIM(COALESCE(fecha_resp_actividad, '')) <> '') AS citas_confirmadas,
+      (SELECT COUNT(*) FROM citas WHERE
+         UPPER(COALESCE(resultado_actividad, '')) = 'PM OK'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CONFIRMA%ASISTENCIA%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CITA%CUMPLIDA%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CLIENTE%ASISTE%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CLIENTE%ACUDE%'
+         OR UPPER(COALESCE(resultado_actividad, '')) LIKE '%CONTACTO EN PISO%'
+      ) AS citas_cumplidas,
+      (SELECT COUNT(DISTINCT id_contacto) FROM ciclos_periodo
+         WHERE TRIM(COALESCE(fecha_entrega, '')) <> ''
+           AND substr(fecha_entrega, 1, 10) BETWEEN ? AND ?
+      ) AS entregas_bdc
+  `).get(fechaInicio, fechaFin, fechaInicio, fechaFin, fechaInicio, fechaFin)
+    : d.prepare(`
+    WITH ciclos_periodo AS (
+      SELECT *
+      FROM crm_actividades
+      WHERE substr(COALESCE(fecha_inicio_ciclo, ''), 1, 10) BETWEEN ? AND ?
+        AND substr(COALESCE(fecha_inicio_ciclo, ''), 1, 10) GLOB '????-??-??'
+    ),
+    contactos_ciclo AS (
+      SELECT DISTINCT TRIM(id_contacto) AS id
+      FROM ciclos_periodo
+      WHERE TRIM(COALESCE(id_contacto, '')) <> ''
     ),
     citas AS (
       SELECT * FROM ciclos_periodo WHERE UPPER(TRIM(tipo_actividad)) = 'CITA'
     )
     SELECT
-      (SELECT total FROM contactos) AS contactos,
+      (SELECT COUNT(*) FROM contactos_ciclo) AS contactos_ciclos,
+      0 AS contactos_leads_asignados,
+      0 AS contactos_overlap,
       (SELECT COUNT(*) FROM citas) AS citas_agendadas,
       (SELECT COUNT(*) FROM citas WHERE TRIM(COALESCE(fecha_resp_actividad, '')) <> '') AS citas_confirmadas,
       (SELECT COUNT(*) FROM citas WHERE
@@ -4489,8 +5510,16 @@ function getBdcEmbudo({ fechaInicio, fechaFin } = {}) {
       ) AS entregas_bdc
   `).get(fechaInicio, fechaFin, fechaInicio, fechaFin);
 
+  const ciclos = Number(row?.contactos_ciclos || 0);
+  const leadsAsignados = hasLeads ? Number(row?.contactos_leads_asignados || 0) : 0;
+  const overlap = hasLeads ? Number(row?.contactos_overlap || 0) : 0;
+  const contactos = Math.max(0, ciclos + leadsAsignados - overlap);
+
   const real = {
-    contactos: Number(row?.contactos || 0),
+    contactos,
+    contactosCiclos: ciclos,
+    contactosLeadsAsignados: leadsAsignados,
+    contactosOverlap: overlap,
     citasAgendadas: Number(row?.citas_agendadas || 0),
     citasConfirmadas: Number(row?.citas_confirmadas || 0),
     citasCumplidas: Number(row?.citas_cumplidas || 0),
@@ -4499,16 +5528,20 @@ function getBdcEmbudo({ fechaInicio, fechaFin } = {}) {
 
   return {
     disponible: real.contactos > 0,
-    status: real.contactos > 0 ? 'completo' : 'sin-periodo',
+    status: real.contactos > 0 ? 'completo' : 'sin-datos',
     real,
-    fuente: 'crm_actividades (local)',
+    fuente: hasLeads
+      ? 'crm_actividades + crm_leads (EV asignados)'
+      : 'crm_actividades (histórico local)',
     conversion: {
       citasSobreContactosPct: pctBdc(real.citasAgendadas, real.contactos),
       confirmadasSobreAgendadasPct: pctBdc(real.citasConfirmadas, real.citasAgendadas),
       cumplidasSobreConfirmadasPct: pctBdc(real.citasCumplidas, real.citasConfirmadas),
       entregasSobreCumplidasPct: pctBdc(real.entregasBdc, real.citasCumplidas),
     },
-    nota: 'Contactos únicos con ciclo iniciado en el periodo; las etapas posteriores se calculan con sus actividades CRM.',
+    nota: hasLeads
+      ? `Contactos = ciclos del periodo (${ciclos}) ∪ leads con ejecutivo asignado (${leadsAsignados}; solape ${overlap}).`
+      : 'Contactos = ciclos iniciados en el periodo. Sin tabla crm_leads para cartera EV.',
   };
 }
 
@@ -4740,6 +5773,43 @@ function countPriorPurchases(purchaseMap, currentVin, fechaEntrega) {
  *
  * @param {Array<object>} entregasSofia
  */
+async function loadPhonesByClient(clientIds = []) {
+  const ids = [...new Set(
+    (clientIds || [])
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0),
+  )];
+  const byClient = new Map();
+  if (!ids.length) return byClient;
+
+  const chunkSize = 400;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const placeholders = chunk.map((_, idx) => `@id${idx}`).join(',');
+    const params = {};
+    chunk.forEach((id, idx) => { params[`id${idx}`] = id; });
+    try {
+      const rows = await query(`
+        SELECT
+          PER_IDPERSONA AS idCliente,
+          LTRIM(RTRIM(PER_TELEFONO1)) AS telefono,
+          LTRIM(RTRIM(PER_TELCELULAR)) AS celular
+        FROM PER_PERSONAS
+        WHERE PER_IDPERSONA IN (${placeholders})
+      `, params);
+      for (const r of rows || []) {
+        byClient.set(String(r.idCliente), {
+          telefono: r.telefono || null,
+          celular: r.celular || null,
+        });
+      }
+    } catch (_) {
+      // Si falla el lookup de teléfonos, se sigue con VIN/nombre/factura.
+    }
+  }
+  return byClient;
+}
+
 async function classifyEntregasTipoCliente(entregasSofia = []) {
   const list = Array.isArray(entregasSofia) ? entregasSofia : [];
   const empty = {
@@ -4755,8 +5825,14 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
       clasificables: 0,
       noClasificables: list.length,
       coberturaPct: null,
+      sinIdCrm: list.length,
+      sinCaptura: 0,
+      diasNegativos: 0,
       rangos: { '0-30': 0, '31-90': 0, '91-180': 0, '>180': 0 },
       pctRangos: { '0-30': null, '31-90': null, '91-180': null, '>180': null },
+      pctSobreTotal: {
+        '0-30': null, '31-90': null, '91-180': null, '>180': null, sinClasificar: null,
+      },
     },
     fuente: 'Seguimiento 360 (CRM) + ADE_VTAFI',
     nota: null,
@@ -4781,7 +5857,10 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
   const captureIndex = buildCaptureDateByContactVin(d);
 
   const clientIds = list.map((e) => e.ID_CLIENTE ?? e.SOF_IDCliente ?? e.idCliente).filter((x) => x != null);
-  const dmsHist = await loadDmsPurchaseHistoryByClient(clientIds);
+  const [dmsHist, phonesByClient] = await Promise.all([
+    loadDmsPurchaseHistoryByClient(clientIds),
+    loadPhonesByClient(clientIds),
+  ]);
   const dmsByClient = dmsHist.byClient || new Map();
 
   let primeraCompra = 0;
@@ -4789,9 +5868,14 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
   let sinClasificar = 0;
   let matchCrm = 0;
   let matchDmsOnly = 0;
+  let matchByPhone = 0;
+  let matchByFactura = 0;
   const rangos = { '0-30': 0, '31-90': 0, '91-180': 0, '>180': 0 };
   let clasificables61 = 0;
   let noClasificables61 = 0;
+  let sinIdCrm61 = 0;
+  let sinCaptura61 = 0;
+  let diasNegativos61 = 0;
 
   for (const e of list) {
     const vin = normalizeVin(e.SOF_VIN || e.vin || e.SERIE || e.VTE_SERIE);
@@ -4799,9 +5883,26 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
       e.SOF_FechAct || e.FECHA_PERIODO || e.fechaEntrega || e.fecha || e.FECHA_FACTURA,
     );
     const idClienteDms = e.ID_CLIENTE ?? e.SOF_IDCliente ?? e.idCliente ?? null;
+    const factura = String(e.SOF_Factura || e.factura || e.VTE_DOCTO || '').trim();
 
     let idCrm = vin ? resolveIdCrmBySerie(vin) : null;
     if (!idCrm && e.CLIENTE) idCrm = resolveIdCrmByNombre(e.CLIENTE);
+    if (!idCrm && factura) {
+      const byFac = resolveIdCrmByFactura(factura);
+      if (byFac) {
+        idCrm = byFac;
+        matchByFactura += 1;
+      }
+    }
+    if (!idCrm && idClienteDms != null && phonesByClient.has(String(idClienteDms))) {
+      const phones = phonesByClient.get(String(idClienteDms));
+      const byTel = resolveIdCrmByTelefono(phones?.celular)
+        || resolveIdCrmByTelefono(phones?.telefono);
+      if (byTel) {
+        idCrm = byTel;
+        matchByPhone += 1;
+      }
+    }
 
     let prior = 0;
     let resolved = false;
@@ -4825,24 +5926,46 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
     if (!resolved) {
       sinClasificar += 1;
       noClasificables61 += 1;
+      sinIdCrm61 += 1;
       continue;
     }
 
     if (prior > 0) recurrente += 1;
     else primeraCompra += 1;
 
-    // C-6.1 solo con fecha de captura del ciclo/VIN en 360
+    // C-6.1 solo con fecha de captura del ciclo/VIN en 360 (no se inventa desde factura DMS).
     let captura = null;
     if (idCrm && fechaEntrega) {
       captura = findCaptureDate(captureIndex, idCrm, vin, fechaEntrega);
     }
-    const dias = captura && fechaEntrega ? daysBetweenIso(captura, fechaEntrega) : null;
+    if (!idCrm) {
+      noClasificables61 += 1;
+      sinIdCrm61 += 1;
+      continue;
+    }
+    if (!captura || !fechaEntrega) {
+      noClasificables61 += 1;
+      sinCaptura61 += 1;
+      continue;
+    }
+    const dias = daysBetweenIso(captura, fechaEntrega);
+    if (dias == null) {
+      noClasificables61 += 1;
+      sinCaptura61 += 1;
+      continue;
+    }
+    if (dias < 0) {
+      noClasificables61 += 1;
+      diasNegativos61 += 1;
+      continue;
+    }
     const rango = rangoAntiguedad(dias);
     if (rango) {
       clasificables61 += 1;
       rangos[rango] += 1;
     } else {
       noClasificables61 += 1;
+      sinCaptura61 += 1;
     }
   }
 
@@ -4862,6 +5985,11 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
     '>180': clasificables61 ? roundPct(rangos['>180'], clasificables61) : null,
   };
 
+  const huecos61 = [];
+  if (sinIdCrm61) huecos61.push(`${sinIdCrm61} sin vínculo CRM`);
+  if (sinCaptura61) huecos61.push(`${sinCaptura61} sin fecha de captura`);
+  if (diasNegativos61) huecos61.push(`${diasNegativos61} con días < 0`);
+
   return {
     disponible: clasificados > 0,
     total,
@@ -4873,19 +6001,35 @@ async function classifyEntregasTipoCliente(entregasSofia = []) {
     coberturaPct: total ? roundPct(clasificados, total) : null,
     matchCrm,
     matchDmsOnly,
+    matchByPhone,
+    matchByFactura,
     antiguedad: {
       clasificables: clasificables61,
       noClasificables: noClasificables61,
       coberturaPct: total ? roundPct(clasificables61, total) : null,
+      sinIdCrm: sinIdCrm61,
+      sinCaptura: sinCaptura61,
+      diasNegativos: diasNegativos61,
       rangos,
       pctRangos,
+      pctSobreTotal: {
+        '0-30': total ? roundPct(rangos['0-30'], total) : null,
+        '31-90': total ? roundPct(rangos['31-90'], total) : null,
+        '91-180': total ? roundPct(rangos['91-180'], total) : null,
+        '>180': total ? roundPct(rangos['>180'], total) : null,
+        sinClasificar: total ? roundPct(noClasificables61, total) : null,
+      },
     },
-    fuente: 'Seguimiento 360 (compras por VIN/ID CRM) + ADE_VTAFI; no usa PREVIAS de taller',
-    nota: sinClasificar
-      ? `${sinClasificar} entrega(s) sin match 360/DMS; C-6 se calcula sobre clasificadas (${clasificados}).`
-      : 'Universo conciliado con C-1 (Primera + Recurrente = Entregas).',
+    fuente: 'Seguimiento 360 (VIN/nombre/teléfono/factura) + ADE_VTAFI; no usa PREVIAS de taller',
+    nota: [
+      sinClasificar
+        ? `${sinClasificar} entrega(s) sin match 360/DMS; C-6 se calcula sobre clasificadas (${clasificados}).`
+        : 'Universo conciliado con C-1 (Primera + Recurrente = Entregas).',
+      `C-6.1: ${clasificables61} de ${total} entregas SOFIA (C-1) con captura CRM`
+        + (huecos61.length ? ` · ${huecos61.join(' · ')}` : '')
+        + '. No usa facturas DMS como universo.',
+    ].filter(Boolean).join(' '),
     error: dmsHist.error || null,
-    // aliases útiles para el panel
     pctPrimeraSobreClasificadas: pctPrimera,
     pctRecurrenteSobreClasificadas: pctRecurrente,
   };

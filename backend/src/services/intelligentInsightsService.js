@@ -626,6 +626,7 @@ function buildContabilidadInsights(payload = {}) {
   }
 
   pushAll(list, buildLiquidezInsights(payload));
+  pushAll(list, buildAnalisisFinancieroInsights(payload));
 
   return list;
 }
@@ -641,6 +642,312 @@ function moneyMx(n) {
 
 function pushAll(list, items) {
   for (const item of items || []) push(list, item);
+}
+
+/**
+ * Alertas IEMC F-1…F-7.1 (bloques fusionados del análisis financiero).
+ * kpiId = id del bloque en Contabilidad · Análisis financiero.
+ */
+function buildAnalisisFinancieroInsights(payload = {}) {
+  const af = payload.analisisFinanciero || null;
+  if (!af || !Array.isArray(af.kpis) || !af.kpis.length) return [];
+
+  const byClave = {};
+  for (const k of af.kpis) {
+    if (k?.clave) byClave[k.clave] = k;
+  }
+  const fi = af.periodo?.fechaInicio || payload.fechaInicio || null;
+  const ff = af.periodo?.fechaFin || payload.fechaFin || null;
+  const periodo = `${fi || '—'} → ${ff || '—'}`;
+  const pace = expectedPacePct(fi, ff);
+  const resumen = af.resumen || {};
+  const list = [];
+
+  const fmtPct = (n) => (n == null || !Number.isFinite(Number(n)) ? '—' : `${round1(n)}%`);
+
+  function severityFromPctHigherBetter(valor, { good = 100, warn = 90 } = {}) {
+    if (valor == null || !Number.isFinite(Number(valor))) return null;
+    const v = Number(valor);
+    if (v >= good) return 'info';
+    if (v >= warn) return 'warning';
+    return 'critical';
+  }
+
+  function severityFromPctLowerBetter(valor, { good = 25, warn = 35 } = {}) {
+    if (valor == null || !Number.isFinite(Number(valor))) return null;
+    const v = Number(valor);
+    if (v <= good) return 'info';
+    if (v <= warn) return 'warning';
+    return 'critical';
+  }
+
+  const f1 = byClave['F-1'];
+  if (f1 && f1.valor != null) {
+    const v = Number(f1.valor);
+    let severity = severityFromPctHigherBetter(v);
+    if (pace != null && v < pace - 15 && severity !== 'critical') {
+      severity = v < pace - 25 ? 'critical' : 'warning';
+    }
+    const mov = f1.meta ?? f1.denominador ?? resumen.objetivoEconomico;
+    const mvrPl = f1.numerador ?? resumen.ventaAPl;
+    push(list, {
+      id: 'af-f1-cumplimiento',
+      kpiId: 'afBlockVenta',
+      module: 'contabilidad',
+      severity,
+      title: severity === 'info'
+        ? 'F-1 en control: objetivo económico a PL lleno'
+        : (severity === 'critical'
+          ? 'F-1 crítico: rezago del monto a PL lleno'
+          : 'F-1 en alerta: cumplimiento económico bajo ritmo'),
+      summary: `F-1 ${fmtPct(v)} · Σ(UR×PL) ${moneyMx(mvrPl)} vs MOV ${moneyMx(mov)}`
+        + (pace != null ? ` · ritmo esperado ~${fmtPct(pace)}` : ''),
+      analysis: severity === 'info'
+        ? 'El volumen económico valuado a precio lleno (sin bonificación de crédito) está en línea con el mix objetivo.'
+        : 'F-1 mide Σ(UR×PL)÷Σ(UO×PL) a PL lleno guía. La factura con bono no entra aquí; un F-1 bajo es falta de volumen/mix a precio de lista, no el descuento del crédito.',
+      recommendations: severity === 'info'
+        ? ['Validar F-2 para confirmar que el margen aguanta el mix vendido.', 'Revisar avance comercial de unidades vs UO por carline.']
+        : [
+          'Priorizar carlines con mayor gap UO−UR en el mix (top líneas del MOV).',
+          'No compensar F-1 con más descuento: el bono se mide en F-2.',
+          pace != null ? `Alcanzar al menos el ritmo calendario (~${fmtPct(pace)}) antes de fin de mes.` : 'Acelerar facturación retail del mix comprometido.',
+        ],
+      metrics: { f1: v, mov, ventaAPl: mvrPl, pace, unidadesObjetivo: resumen.unidadesObjetivo, unidades: resumen.unidades },
+      valorControl: '≥100% = cumplimiento; 90–99% = atención; <90% = alerta',
+      chatPrompt: chatPrompt('Análisis financiero · F-1', 'Cumplimiento objetivo económico a PL lleno', [
+        `Periodo: ${periodo}`,
+        `F-1: ${fmtPct(v)}`,
+        `MOV Σ(UO×PL): ${moneyMx(mov)}`,
+        `Real Σ(UR×PL): ${moneyMx(mvrPl)}`,
+        `Unidades obj/real: ${resumen.unidadesObjetivo ?? '—'} / ${resumen.unidades ?? '—'}`,
+        pace != null ? `Ritmo calendario: ${fmtPct(pace)}` : null,
+        f1.nota || null,
+      ].filter(Boolean)),
+    });
+  }
+
+  const f2 = byClave['F-2'];
+  const f21 = byClave['F-2.1'];
+  if (f2 && f2.valor != null) {
+    const v = Number(f2.valor);
+    let severity = severityFromPctHigherBetter(v);
+    const efecto = f2.detalle?.efectoBonificacion ?? resumen.efectoBonificacion;
+    const brecha = f21?.valor;
+    if (efecto != null && Number(efecto) < -500000 && severity === 'info') severity = 'warning';
+    if (brecha != null && Number(brecha) < -1000000 && severity !== 'critical') {
+      severity = Number(brecha) < -3000000 ? 'critical' : 'warning';
+    }
+    push(list, {
+      id: 'af-f2-iemc',
+      kpiId: 'afBlockMargen',
+      module: 'contabilidad',
+      severity,
+      title: severity === 'info'
+        ? 'F-2 en control: margen del mix'
+        : (severity === 'critical' ? 'F-2 crítico: deterioro del margen IEMC' : 'F-2 en alerta: eficiencia de margen'),
+      summary: `IEMC ${fmtPct(v)}`
+        + (brecha != null ? ` · brecha UBA ${moneyMx(brecha)}` : '')
+        + (efecto != null ? ` · efecto bono/precio ${moneyMx(efecto)}` : ''),
+      analysis: severity === 'info'
+        ? 'El margen bruto real se alinea con el margen del mix objetivo. El efecto de bonificación vs PL se reporta aquí sin castigar F-1.'
+        : 'F-2 = margen bruto real ÷ margen objetivo del mix. Caídas suelen venir de bonificación de crédito, mix más barato o CF más alto. F-2.1 cuantifica la brecha de UBA en pesos.',
+      recommendations: severity === 'info'
+        ? ['Monitorear efecto bonificación vs PL en el desglose.', 'Cruzar con F-1: buen margen con bajo volumen aún es riesgo de mes.']
+        : [
+          'Auditar bonificaciones vs utilidad por VIN (F-2 captura el bono; F-1 no).',
+          'Revisar mix real vs UO: ¿se vendió más lo barato/costoso?',
+          'Contrastar CF de piso/vendidos vs remisión en líneas con mayor brecha UBA.',
+        ],
+      metrics: {
+        f2: v,
+        f21: brecha,
+        efectoBonificacion: efecto,
+        realizacionPrecioPct: f2.detalle?.realizacionPrecioPct,
+        margenBrutoReal: f2.detalle?.margenBrutoReal,
+        margenBrutoObjetivo: f2.detalle?.margenBrutoObjetivo,
+      },
+      valorControl: '≥100% = cumplimiento; 90–99% = atención; <90% = alerta',
+      chatPrompt: chatPrompt('Análisis financiero · F-2', 'Eficiencia del mix / margen IEMC', [
+        `Periodo: ${periodo}`,
+        `F-2 IEMC: ${fmtPct(v)}`,
+        f21 ? `F-2.1 brecha UBA: ${moneyMx(f21.valor)}` : null,
+        efecto != null ? `Efecto bonificación vs PL: ${moneyMx(efecto)}` : null,
+        f2.detalle?.realizacionPrecioPct != null ? `Realización precio: ${fmtPct(f2.detalle.realizacionPrecioPct)}` : null,
+        f2.nota || null,
+      ].filter(Boolean)),
+    });
+  }
+
+  const f3 = byClave['F-3'];
+  const f31 = byClave['F-3.1'];
+  if (f3 && f3.valor != null) {
+    const v = Number(f3.valor);
+    let severity = severityFromPctLowerBetter(v, { good: 25, warn: 35 });
+    const brechaGasto = f31?.valor;
+    if (brechaGasto != null && Number(brechaGasto) > 0 && severity === 'info') severity = 'warning';
+    if (brechaGasto != null && Number(brechaGasto) > 500000) severity = 'critical';
+    push(list, {
+      id: 'af-f3-gasto',
+      kpiId: 'afBlockGasto',
+      module: 'contabilidad',
+      severity,
+      title: severity === 'info'
+        ? 'F-3 en control: gasto operativo'
+        : (severity === 'critical' ? 'F-3 crítico: gasto operativo desproporcionado' : 'F-3 en alerta: eficiencia de gasto'),
+      summary: `Gasto/ventas ${fmtPct(v)}`
+        + (brechaGasto != null ? ` · brecha vs meta ${moneyMx(brechaGasto)}` : ''),
+      analysis: 'F-3 mide qué proporción de las ventas de autos nuevos absorbe el gasto operativo. Semáforo invertido: más bajo es mejor. F-3.1 es la brecha en pesos vs presupuesto/meta.',
+      recommendations: severity === 'info'
+        ? ['Mantener variables atadas al volumen.', 'Revisar F-7 si la estructura admin crece aunque F-3 se vea sano.']
+        : [
+          'Separar gasto fijo vs variable y ajustar variables al ritmo de facturación.',
+          'Revisar plan piso, comisiones y nómina dentro de 0700.',
+          'Si F-1 está bajo, el % de F-3 sube solo por denominador: atacar volumen y gasto.',
+        ],
+      metrics: { f3: v, f31: brechaGasto, gastoOperativo: f3.numerador, ventasAutos: f3.denominador },
+      valorControl: '≤25% = objetivo; 26–35% = atención; >35% = alerta',
+      chatPrompt: chatPrompt('Análisis financiero · F-3', 'Eficiencia del gasto operativo', [
+        `Periodo: ${periodo}`,
+        `F-3: ${fmtPct(v)}`,
+        f31 ? `F-3.1 brecha: ${moneyMx(f31.valor)}` : null,
+        f3.nota || null,
+      ].filter(Boolean)),
+    });
+  }
+
+  const f4 = byClave['F-4'];
+  const f41 = byClave['F-4.1'];
+  const f5 = byClave['F-5'];
+  if (f4 || f41 || f5) {
+    const scores = [];
+    if (f4?.valor != null) {
+      const v = Number(f4.valor);
+      scores.push(v >= 3 ? 0 : v >= 1.5 ? 1 : 2);
+    }
+    if (f5?.valor != null) {
+      const v = Number(f5.valor);
+      const meta = Number(f5.meta || 100);
+      scores.push(v >= meta ? 0 : v >= 70 ? 1 : 2);
+    }
+    if (f41?.valor != null && f41.meta != null) {
+      const pctMeta = (Number(f41.valor) / Number(f41.meta)) * 100;
+      scores.push(pctMeta >= 100 ? 0 : pctMeta >= 90 ? 1 : 2);
+    }
+    const worst = scores.length ? Math.max(...scores) : null;
+    if (worst != null) {
+      const severity = worst === 2 ? 'critical' : worst === 1 ? 'warning' : 'info';
+      push(list, {
+        id: 'af-fi-bloque',
+        kpiId: 'afBlockFi',
+        module: 'contabilidad',
+        severity,
+        title: severity === 'info'
+          ? 'F&I en control: aportación y cobertura'
+          : (severity === 'critical' ? 'F&I crítico: aportación o cobertura insuficientes' : 'F&I en alerta'),
+        summary: [
+          f4?.valor != null ? `F-4 aportación ${fmtPct(f4.valor)}` : null,
+          f41?.valor != null ? `PVR ${moneyMx(f41.valor)}` : null,
+          f5?.valor != null ? `F-5 cobertura piso ${fmtPct(f5.valor)}` : null,
+        ].filter(Boolean).join(' · '),
+        analysis: 'El bloque F&I une peso de ingresos 0800 (F-4), ingreso por unidad (F-4.1) y si F&I cubre intereses de plan piso (F-5).',
+        recommendations: severity === 'info'
+          ? ['Sostener penetración F&I en el mix crediticio.', 'Vigilar plan piso si el inventario crece.']
+          : [
+            'Subir penetración y ticket F&I (seguros, GAP, extendidas) sin castigar cierre.',
+            'Si F-5 está rojo: reducir días de piso o acelerar rotación además de empujar F&I.',
+            'Cruzar con fuerza de ventas: ¿quién coloca F&I y quién no?',
+          ],
+        metrics: {
+          f4: f4?.valor,
+          f41: f41?.valor,
+          metaPvr: f41?.meta,
+          f5: f5?.valor,
+          planPiso: resumen.planPiso,
+          ingresoFi: resumen.ingresoFi,
+        },
+        valorControl: 'F-4 ≥3%; F-5 ≥100% del plan piso; PVR ≥ meta',
+        chatPrompt: chatPrompt('Análisis financiero · F&I', 'Aportación F&I / PVR / cobertura plan piso', [
+          `Periodo: ${periodo}`,
+          f4 ? `F-4: ${fmtPct(f4.valor)}` : null,
+          f41 ? `F-4.1 PVR: ${moneyMx(f41.valor)}${f41.meta != null ? ` (meta ${moneyMx(f41.meta)})` : ''}` : null,
+          f5 ? `F-5 cobertura: ${fmtPct(f5.valor)}` : null,
+          `Plan piso: ${moneyMx(resumen.planPiso)}`,
+          `Ingreso F&I: ${moneyMx(resumen.ingresoFi)}`,
+        ].filter(Boolean)),
+      });
+    }
+  }
+
+  const f6 = byClave['F-6'];
+  if (f6 && f6.valor != null) {
+    const v = Number(f6.valor);
+    const severity = v >= 0 ? (v >= 5 ? 'info' : 'warning') : 'critical';
+    push(list, {
+      id: 'af-f6-uoc',
+      kpiId: 'afBlockResultado',
+      module: 'contabilidad',
+      severity,
+      title: severity === 'info'
+        ? 'F-6 en control: utilidad operativa creciendo'
+        : (severity === 'critical' ? 'F-6 crítico: contracción de utilidad operativa' : 'F-6 en alerta: crecimiento débil'),
+      summary: `Crecimiento UOC/EBIT ${fmtPct(v)} · UO ${moneyMx(f6.detalle?.utilidadOperacion ?? resumen.utilidadOperacion)}`,
+      analysis: 'F-6 sigue la variación de la utilidad de operación vs el comparable (proxy EEFF/EBIT).',
+      recommendations: severity === 'info'
+        ? ['Confirmar que el crecimiento viene de margen y no solo de volumen puntual.', 'Revisar F-3 y F-7 para que el gasto no coma el alza.']
+        : [
+          'Descomponer: volumen (F-1), margen (F-2) y gasto (F-3/F-7).',
+          'Atacar la mayor brecha en pesos (F-2.1 / F-3.1 / F-7.1).',
+          'Validar comparabilidad del periodo (estacionalidad / días hábiles).',
+        ],
+      metrics: { f6: v, utilidadOperacion: f6.detalle?.utilidadOperacion ?? resumen.utilidadOperacion },
+      valorControl: '≥0% = no contracción; ≥5% = crecimiento sano; <0% = alerta',
+      chatPrompt: chatPrompt('Análisis financiero · F-6', 'Crecimiento utilidad operativa', [
+        `Periodo: ${periodo}`,
+        `F-6: ${fmtPct(v)}`,
+        `Utilidad operación: ${moneyMx(f6.detalle?.utilidadOperacion ?? resumen.utilidadOperacion)}`,
+        f6.nota || null,
+      ].filter(Boolean)),
+    });
+  }
+
+  const f7 = byClave['F-7'];
+  const f71 = byClave['F-7.1'];
+  if (f7 && f7.valor != null) {
+    const v = Number(f7.valor);
+    let severity = severityFromPctLowerBetter(v, { good: 20, warn: 35 });
+    const brecha = f71?.valor;
+    if (brecha != null && Number(brecha) > 0 && severity === 'info') severity = 'warning';
+    if (brecha != null && Number(brecha) > 300000) severity = 'critical';
+    push(list, {
+      id: 'af-f7-estructura',
+      kpiId: 'afBlockEstructura',
+      module: 'contabilidad',
+      severity,
+      title: severity === 'info'
+        ? 'F-7 en control: carga estructural'
+        : (severity === 'critical' ? 'F-7 crítico: estructura absorbe demasiada capacidad' : 'F-7 en alerta: carga administrativa'),
+      summary: `Carga estructural ${fmtPct(v)}`
+        + (brecha != null ? ` · brecha vs ppto ${moneyMx(brecha)}` : ''),
+      analysis: 'F-7 = gastos de administración ÷ capacidad operativa (utilidad bruta − gasto operativo). Semáforo invertido.',
+      recommendations: severity === 'info'
+        ? ['Mantener admin acotada al presupuesto.', 'Vigilar que la capacidad (UB − gasto op.) no se erosione.']
+        : [
+          'Revisar partidas de admin vs presupuesto (F-7.1).',
+          'Primero recuperar capacidad vía margen (F-2) y gasto op. (F-3); luego recortar estructura si sigue alta.',
+          'Evitar prorrateos que oculten carga real de Ventas Nuevos.',
+        ],
+      metrics: { f7: v, f71: brecha, gastosAdmin: f7.numerador, capacidad: f7.denominador },
+      valorControl: '≤20% = objetivo; 21–35% = atención; >35% = alerta',
+      chatPrompt: chatPrompt('Análisis financiero · F-7', 'Carga estructural', [
+        `Periodo: ${periodo}`,
+        `F-7: ${fmtPct(v)}`,
+        f71 ? `F-7.1 brecha: ${moneyMx(f71.valor)}` : null,
+        f7.nota || null,
+      ].filter(Boolean)),
+    });
+  }
+
+  return list;
 }
 
 /**
@@ -2308,6 +2615,7 @@ module.exports = {
   buildVentasInsights,
   buildContabilidadInsights,
   buildLiquidezInsights,
+  buildAnalisisFinancieroInsights,
   buildOverviewInsights,
   buildInventoryInsights,
   buildForecastInsights,

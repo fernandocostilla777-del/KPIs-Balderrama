@@ -20,6 +20,7 @@ import {
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoginScreen } from "@/components/LoginScreen";
+import { VinSeguimiento } from "@/components/VinSeguimiento";
 import {
   authHeaders,
   clearSession,
@@ -278,9 +279,6 @@ function AppHeader({
           <Users size={15} />
           {user.username}
         </span>
-        {admin && (
-          <div className="source-badge"><FileText size={16} /> PDF procesado</div>
-        )}
         <label className="month-select">
           <CalendarDays size={17} />
           <select value={month.id} onChange={(event) => onMonth(event.target.value)}>
@@ -359,6 +357,7 @@ export default function Home() {
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [daySearch, setDaySearch] = useState("");
   const [productFamily, setProductFamily] = useState("todas");
+  const [section, setSection] = useState<"referencia" | "vin">("referencia");
   const [productCumplimiento, setProductCumplimiento] = useState<"todas" | "cumplidas" | "pendientes">("todas");
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
@@ -447,7 +446,13 @@ export default function Home() {
         );
       }
       if (!response.ok) {
-        throw new Error(payload.error || `API de resultados: ${response.status}`);
+        const detail = payload.error || payload.detail;
+        if (response.status === 502 || response.status === 504 || (!detail && response.status >= 500)) {
+          throw new Error(
+            "El backend local tardó demasiado o se cortó la conexión (:3000). Reintenta en unos segundos.",
+          );
+        }
+        throw new Error(detail || `API de resultados: ${response.status}`);
       }
       setResults(payload);
       if (!opts?.silent) setMessage(null);
@@ -867,7 +872,10 @@ export default function Home() {
   const bdcStages = [
     {
       label: "Contactos",
-      hint: "OBJETIVO BDC",
+      hint:
+        bdcReal?.contactosLeadsAsignados != null
+          ? `Ciclos ${formatValue(bdcReal.contactosCiclos ?? null)} ∪ leads EV ${formatValue(bdcReal.contactosLeadsAsignados)}`
+          : "OBJETIVO BDC · ciclos + leads asignados a EV",
       target: contactosMeta,
       real: contactosReal,
     },
@@ -1100,15 +1108,38 @@ export default function Home() {
       />
 
       <section className="content" id="dashboard-export">
-        {(message || loadingResults) && (
+        {section !== "vin" && (message || loadingResults) && (
           <div className={`notice ${message?.includes("Inicia sesión") ? "notice--warning" : ""}`}>
             {loadingResults ? <><RefreshCw size={16} className="spin" /> Consultando resultados…</> : message}
           </div>
         )}
 
         <div className="month-heading">
-          <h2>Referencia mensual</h2>
+          <h2>{section === "vin" ? "Expediente integral del VIN" : "Referencia mensual"}</h2>
         </div>
+        <div className="section-switch" role="tablist" aria-label="Sección">
+          <button
+            type="button"
+            className={section === "referencia" ? "is-active" : ""}
+            aria-pressed={section === "referencia"}
+            onClick={() => setSection("referencia")}
+          >
+            Referencia mensual
+          </button>
+          <button
+            type="button"
+            className={section === "vin" ? "is-active" : ""}
+            aria-pressed={section === "vin"}
+            onClick={() => setSection("vin")}
+          >
+            Expediente del VIN
+          </button>
+        </div>
+
+        {section === "vin" ? (
+          <VinSeguimiento year={month.year} month={month.month} />
+        ) : (
+        <>
 
         <section className="overview-grid">
           <MetricCard
@@ -1591,6 +1622,8 @@ export default function Home() {
             </table>
           </div>
         </section>
+        </>
+        )}
       </section>
 
       {dayPanelOpen && (

@@ -5,8 +5,7 @@ let bgKpiState = { items: [], activeId: null, fmt: null };
 function getMainTabFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const tab = params.get('tab');
-  if (tab === 'eeff') return 'eeff';
-  if (tab === 'analisis' || tab === 'analisis-financiero') return 'analisis';
+  if (tab === 'eeff' || tab === 'analisis' || tab === 'analisis-financiero') return 'eeff';
   if (tab === 'catalogo') return 'balance'; // catálogo oculto de momento
   if (tab === 'balance') return 'balance';
   return 'balance';
@@ -15,6 +14,8 @@ function getMainTabFromUrl() {
 function switchMainTab(tab) {
   // Catálogo de cuentas oculto temporalmente
   if (tab === 'catalogo') tab = 'balance';
+  // CMI financiero vive en EEFF (no en un tab aparte)
+  if (tab === 'analisis' || tab === 'analisis-financiero') tab = 'eeff';
   activeMainTab = tab;
   if (tab !== 'balance') closeBgKpiFloat();
   if (tab !== 'eeff') window.EeffSummary?.closeKpiFloat?.();
@@ -24,9 +25,8 @@ function switchMainTab(tab) {
   document.getElementById('panelContabilidadCatalogo')?.classList.toggle('hidden', tab !== 'catalogo');
   document.getElementById('panelContabilidadBalance')?.classList.toggle('hidden', tab !== 'balance');
   document.getElementById('panelContabilidadEeff')?.classList.toggle('hidden', tab !== 'eeff');
-  document.getElementById('panelContabilidadAnalisis')?.classList.toggle('hidden', tab !== 'analisis');
   const scopePill = document.getElementById('pillScope');
-  if (scopePill) scopePill.style.display = (tab === 'eeff' || tab === 'analisis') ? 'none' : '';
+  if (scopePill) scopePill.style.display = tab === 'eeff' ? 'none' : '';
 
   if (tab === 'eeff' && window.EeffSummary?.getComparativa2026DefaultRange) {
     const fi = document.getElementById('fechaInicio');
@@ -40,14 +40,14 @@ function switchMainTab(tab) {
     }
   }
 
-  if (tab === 'analisis') {
+  if (tab === 'eeff') {
     const fi = document.getElementById('fechaInicio')?.value;
     const ff = document.getElementById('fechaFin')?.value;
     if (fi && ff) window.AnalisisFinanciero?.load?.(fi, ff);
   }
 
   const url = new URL(window.location.href);
-  if (tab === 'eeff' || tab === 'balance' || tab === 'analisis') url.searchParams.set('tab', tab);
+  if (tab === 'eeff' || tab === 'balance') url.searchParams.set('tab', tab);
   else url.searchParams.delete('tab');
   window.history.replaceState({}, '', url.pathname + url.search);
 }
@@ -2179,38 +2179,55 @@ async function loadContabilidad(fechaInicio, fechaFin) {
   renderVtasmenTable(data.ventasAutosNuevosEeff, fmt);
   renderDailySalesTable(data.dailyBreakdown || [], fmt);
 
-  if (window.KpiInsights?.apply && s) {
-    window.KpiInsights.apply('contabilidad', {
-      fechaInicio,
-      fechaFin,
-      summary: {
-        ventasTotales: s.ventasTotales,
-        costoVentas: s.costoVentas,
-        utilidadBruta: s.utilidadBruta,
-        margenBrutoPct: s.margenBrutoPct,
-        gastosOperacion: s.gastosOperacion,
-        utilidadOperacion: s.utilidadOperacion,
-        margenOperacionPct: s.margenOperacionPct,
-        puntoEquilibrio: peMain?.puntoEquilibrio ?? s.puntoEquilibrio,
-        gastoDepartamento: s.gastoDepartamento,
-      },
-      puntoEquilibrio: peData,
-      liquidez: data.balanceGeneral?.liquidez || s.liquidez || eeff.liquidez || null,
-    });
-  }
+  window.__contaInsightBase = {
+    fechaInicio,
+    fechaFin,
+    summary: {
+      ventasTotales: s.ventasTotales,
+      costoVentas: s.costoVentas,
+      utilidadBruta: s.utilidadBruta,
+      margenBrutoPct: s.margenBrutoPct,
+      gastosOperacion: s.gastosOperacion,
+      utilidadOperacion: s.utilidadOperacion,
+      margenOperacionPct: s.margenOperacionPct,
+      puntoEquilibrio: peMain?.puntoEquilibrio ?? s.puntoEquilibrio,
+      gastoDepartamento: s.gastoDepartamento,
+    },
+    puntoEquilibrio: peData,
+    liquidez: data.balanceGeneral?.liquidez || s.liquidez || eeff.liquidez || null,
+  };
+  window.applyContabilidadInsights?.();
 
   return data;
 }
+
+window.applyContabilidadInsights = function applyContabilidadInsights() {
+  if (!window.KpiInsights?.apply) return;
+  const base = window.__contaInsightBase || {};
+  const af = window.AnalisisFinanciero?.getData?.();
+  const hasAf = Boolean(af?.kpis?.length);
+  if (!base.fechaInicio && !hasAf) return;
+  window.KpiInsights.apply('contabilidad', {
+    fechaInicio: base.fechaInicio || af?.periodo?.fechaInicio,
+    fechaFin: base.fechaFin || af?.periodo?.fechaFin,
+    ...base,
+    analisisFinanciero: hasAf
+      ? {
+          periodo: af.periodo,
+          resumen: af.resumen,
+          kpis: af.kpis,
+        }
+      : null,
+  });
+};
 
 async function onConsultContabilidad(fechaInicio, fechaFin) {
   const { setText } = Dashboard;
   const tasks = [
     loadContabilidad(fechaInicio, fechaFin),
     window.EeffSummary?.load(fechaInicio, fechaFin) ?? Promise.resolve(),
+    window.AnalisisFinanciero?.load?.(fechaInicio, fechaFin) ?? Promise.resolve(),
   ];
-  if (activeMainTab === 'analisis' || new URLSearchParams(window.location.search).get('tab') === 'analisis') {
-    tasks.push(window.AnalisisFinanciero?.load?.(fechaInicio, fechaFin) ?? Promise.resolve());
-  }
   const results = await Promise.allSettled(tasks);
   const failed = results.filter((r) => r.status === 'rejected');
   if (failed.length === results.length) {
@@ -2219,6 +2236,11 @@ async function onConsultContabilidad(fechaInicio, fechaFin) {
   if (failed.length) {
     console.warn('[contabilidad] carga parcial:', failed.map((f) => f.reason?.message || f.reason));
   }
+  // Reaplicar con AF ya en DOM (evita carrera loadContabilidad vs AnalisisFinanciero)
+  requestAnimationFrame(() => {
+    window.applyContabilidadInsights?.();
+    setTimeout(() => window.applyContabilidadInsights?.(), 150);
+  });
   setText('lastUpdated', `Actualizado: ${new Date().toLocaleTimeString('es-MX')}`);
 }
 

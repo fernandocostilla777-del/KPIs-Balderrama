@@ -6,7 +6,8 @@
 <title>Seguimiento 360 | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=88" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=146" rel="stylesheet"/>
+<script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="seguimiento">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -26,7 +27,7 @@
 <div class="table-header-row" style="margin-bottom:8px">
 <div>
 <h3 class="section-title" style="margin-bottom:4px">Vista 360</h3>
-<p class="section-subtitle" style="margin:0">Consulta por cliente o el acumulado de actividad por vendedor</p>
+<p class="section-subtitle" style="margin:0">Expediente completo por cliente o desempeño acumulado por vendedor</p>
 </div>
 </div>
 <div class="filter-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
@@ -497,10 +498,69 @@ Ver acumulado
 
 </div>
 
-<div id="emptyState" class="section-panel dashboard-section" style="text-align:center;padding:48px 24px">
-<span class="material-symbols-outlined" style="font-size:44px;color:#94a3b8">person_search</span>
-<p style="color:#64748b;font-weight:600;margin-top:12px">Busca un cliente o elige un vendedor</p>
-<p style="color:#94a3b8;font-size:13px">Por cliente: expediente 360 · Por vendedor: acumulado de actividad de su cartera</p>
+<div id="emptyState" class="vista360-empty section-panel dashboard-section" role="status" aria-live="polite">
+  <div class="vista360-empty__hero">
+    <span class="material-symbols-outlined vista360-empty__icon" aria-hidden="true">person_search</span>
+    <div>
+      <h4 class="vista360-empty__title">Sin expediente abierto</h4>
+      <p id="emptyStateLead" class="vista360-empty__lead">
+        Resumen del periodo seleccionado. Busca un cliente o elige un vendedor para abrir el detalle.
+      </p>
+    </div>
+  </div>
+
+  <div id="emptySummary" class="vista360-empty__summary" aria-busy="true">
+    <div class="vista360-empty__summary-head">
+      <span id="emptySummaryPeriod" class="vista360-empty__period">Periodo —</span>
+      <button type="button" id="btnEmptyVerCierres" class="chip">Ver listado del periodo</button>
+    </div>
+    <div class="vista360-empty__kpis">
+      <div class="vista360-empty__kpi">
+        <span class="vista360-empty__kpi-label">Órdenes cerradas</span>
+        <strong id="emptyKpiOrdenes" class="vista360-empty__kpi-value">—</strong>
+      </div>
+      <div class="vista360-empty__kpi">
+        <span class="vista360-empty__kpi-label">Clientes</span>
+        <strong id="emptyKpiClientes" class="vista360-empty__kpi-value">—</strong>
+      </div>
+      <div class="vista360-empty__kpi">
+        <span class="vista360-empty__kpi-label">Con ID CRM</span>
+        <strong id="emptyKpiCrm" class="vista360-empty__kpi-value">—</strong>
+      </div>
+      <div class="vista360-empty__kpi">
+        <span class="vista360-empty__kpi-label">Importe taller</span>
+        <strong id="emptyKpiImporte" class="vista360-empty__kpi-value">—</strong>
+      </div>
+    </div>
+    <p id="emptySummaryNote" class="vista360-empty__summary-note">Cargando resumen…</p>
+  </div>
+
+  <div class="vista360-empty__grid">
+    <article class="vista360-empty__card" data-empty-mode="cliente">
+      <span class="material-symbols-outlined" aria-hidden="true">badge</span>
+      <h5>Por cliente</h5>
+      <p>Expediente 360: vehículo, ventas, financiamiento, taller, quejas y línea de tiempo.</p>
+      <ul>
+        <li>ID CRM o nombre</li>
+        <li>VIN / serie</li>
+        <li>Teléfono o correo</li>
+      </ul>
+    </article>
+    <article class="vista360-empty__card" data-empty-mode="vendedor">
+      <span class="material-symbols-outlined" aria-hidden="true">groups</span>
+      <h5>Por vendedor</h5>
+      <p>Acumulado de su cartera en el periodo: clientes, contratos, PVA y actividad.</p>
+      <ul>
+        <li>Escribe o elige el asesor</li>
+        <li>Ajusta el periodo arriba</li>
+        <li>Abre “Ver acumulado”</li>
+      </ul>
+    </article>
+  </div>
+
+  <p class="vista360-empty__hint">
+    Tip: el periodo de arriba alimenta este resumen y el acumulado del vendedor; el expediente del cliente también muestra su historial.
+  </p>
 </div>
 
 </div>
@@ -509,10 +569,10 @@ Ver acumulado
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=18"></script>
+<script src="/js/topbar.js?v=21"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/seguimiento.js?v=39"></script>
+<script src="/js/seguimiento.js?v=42"></script>
 </body>
 </html>

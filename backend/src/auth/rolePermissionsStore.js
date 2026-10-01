@@ -17,7 +17,7 @@ const PAGE_CATALOG = [
     label: 'Ventas',
     description: 'Ventas, financiamiento, CRM y objetivos comerciales.',
     homePath: '/sales.html',
-    apiPrefixes: ['/ventas', '/crm', '/objetivos-resultados'],
+    apiPrefixes: ['/ventas', '/crm', '/seguimiento-360', '/objetivos-resultados'],
   },
   {
     id: 'post-sales',
@@ -59,7 +59,7 @@ const PAGE_CATALOG = [
     label: 'Seguimiento 360',
     description: 'Seguimiento de cliente / unidad.',
     homePath: '/seguimiento.html',
-    apiPrefixes: ['/crm'],
+    apiPrefixes: ['/crm', '/seguimiento-360'],
   },
   {
     id: 'admin',

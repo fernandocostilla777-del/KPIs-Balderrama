@@ -51,6 +51,7 @@ const CANALES_MAP = {
   },
   FLOTILLAS: {
     prefijos: [],
+    // FLOTGMF de menudeo se reclasifica después (ventas.js) si el contrato CRM no es flotilla.
     codigos: ['FLOT', 'FLOTGMF'],
   },
   PERDIDA: {

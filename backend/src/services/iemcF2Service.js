@@ -1,8 +1,10 @@
 /**
- * IEMC F-2 / Brecha F-2.1 vs mix objetivo del PDF (objetivos-web).
+ * IEMC F-1 / F-2 vs mix objetivo del PDF (objetivos-web).
  *
  * UOᵢ = unidades objetivo del PDF (facturas por línea).
- * PLᵢ / CFᵢ = promedios desde DMS (catálogo + remisión en piso), no del PDF de planes.
+ * PLᵢ (F-1) = precio lleno guía Planes Chevrolet (promedio MSRP por carline; con IVA).
+ *   No se supone bonificación de crédito en el objetivo.
+ * CFᵢ (F-2 margen) = costo neto DMS; PL s/IVA para emparejar con CF.
  */
 
 const fs = require('fs');
@@ -15,9 +17,34 @@ const {
 } = require('./objetivosResultadosService');
 
 const MIX_FILE = path.join(__dirname, '../../data/mixObjetivo.json');
+const PLANES_FILE = path.join(__dirname, '../../data/planes-chevrolet-ago-my26.json');
 const IVA = 1.16;
 const INVENTORY_SITUATIONS = `('FIS', 'DIS', 'PED', 'PEN', 'SEP', 'DEMO', 'TRAN')`;
 
+/** Mapeo línea plantilla PDF → modelo de la guía de planes. */
+const LINEA_TO_GUIA = {
+  'Aveo HB': 'AVEO HB',
+  'Aveo NB': 'AVEO NB',
+  Onix: 'ONIX',
+  Tracker: 'TRACKER',
+  Trax: 'TRAX',
+  Captiva: 'CAPTIVA',
+  Groove: 'GROOVE NG',
+  Traverse: 'TRAVERSE',
+  Tahoe: 'TAHOE',
+  Suburban: 'SUBURBAN',
+  'Blazer EV': 'BLAZER EV',
+  'Spark EUV': 'SPARK EUV',
+  'Captiva PHEV SUV': 'CAPTIVA HIBRIDA',
+  Colorado: 'COLORADO',
+  'Silverado / Cheyenne Crew Cab': 'SILVERADO',
+  'S10 MAX Chassis Cab': 'S10 MAX',
+  'S10 MAX Crew Cab': 'S10 MAX',
+  'S10 MAX Regular Cab': 'S10 MAX',
+  Montana: 'MONTANA',
+  'Tornado Van': 'TORNADO VAN',
+  'Express Max': 'EXPRESS MAX EV',
+};
 function roundMoney(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 0;
@@ -57,6 +84,53 @@ function sinIva(montoConIva) {
   const n = Number(montoConIva);
   if (!Number.isFinite(n) || n === 0) return 0;
   return roundMoney(n / IVA);
+}
+
+function conIva(montoSinIva) {
+  const n = Number(montoSinIva);
+  if (!Number.isFinite(n) || n === 0) return 0;
+  return roundMoney(n * IVA);
+}
+
+/**
+ * PL lleno por carline desde guía Planes Chevrolet (MSRP promedio versión barata → equipada).
+ * @returns {Record<string, { plConIva: number, plSinIva: number, min: number, max: number, n: number }>}
+ */
+function loadGuiaPlByLinea() {
+  const out = {};
+  try {
+    if (!fs.existsSync(PLANES_FILE)) return out;
+    const parsed = JSON.parse(fs.readFileSync(PLANES_FILE, 'utf8'));
+    const rows = parsed?.sections?.administracion?.rows || [];
+    const byModelo = new Map();
+    for (const r of rows) {
+      const modelo = String(r.modelo || '').trim().toUpperCase();
+      const msrp = Number(r.msrp || 0);
+      if (!modelo || !(msrp > 0)) continue;
+      const prev = byModelo.get(modelo) || { sum: 0, n: 0, min: msrp, max: msrp };
+      prev.sum += msrp;
+      prev.n += 1;
+      prev.min = Math.min(prev.min, msrp);
+      prev.max = Math.max(prev.max, msrp);
+      byModelo.set(modelo, prev);
+    }
+    for (const [linea, modeloGuia] of Object.entries(LINEA_TO_GUIA)) {
+      const agg = byModelo.get(String(modeloGuia).toUpperCase());
+      if (!agg || !agg.n) continue;
+      const plConIva = Math.round(agg.sum / agg.n);
+      out[linea] = {
+        plConIva,
+        plSinIva: sinIva(plConIva),
+        min: agg.min,
+        max: agg.max,
+        n: agg.n,
+        modeloGuia,
+      };
+    }
+  } catch {
+    /* sin guía: F-1 cae a PL DMS */
+  }
+  return out;
 }
 
 function pdfLineaFromTipoAuto(tipoAuto, familia, catalogSet) {
@@ -236,6 +310,7 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
     cfByLinea: {},
     unidadesPiso: 0,
   }));
+  const guiaPl = loadGuiaPlByLinea();
   const cfVendidos = buildCfFromVendidos(vendidosTable, catalogSet);
 
   const realByLinea = new Map();
@@ -258,8 +333,10 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
       costoFactura: 0,
       uba: 0,
       conUba: 0,
+      bonificacion: 0,
     };
     prev.unidades += 1;
+    prev.bonificacion += Math.abs(bonif) || 0;
     if (utilidad == null || subtotal <= 0) {
       unidadesSinUba += 1;
       realByLinea.set(linea, prev);
@@ -277,10 +354,17 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
 
   const mixRows = [];
   let unidadesObjetivo = 0;
-  let ventaNetaObjetivo = 0;
+  let unidadesObjetivoTotal = 0;
+  let ventaNetaObjetivo = 0; // F-1 MOV a PL lleno (c/IVA guía)
+  let ventaNetaObjetivoSinIva = 0; // para margen F-2
+  let ventaNetaObjetivoConCf = 0;
+  let ventaRealAPl = 0; // F-1 MVR* = Σ(UR × PL lleno)
+  let ventaRealAPlSinIva = 0;
   let costoObjetivo = 0;
   let lineasSinPl = 0;
   let lineasSinCf = 0;
+  let lineasConMonto = 0;
+  let bonificacionReal = 0;
 
   const lineasFuente = plantilla.aplicadaAlPeriodo
     ? pdfLineas
@@ -294,57 +378,98 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
     const linea = item.linea;
     const ov = overrideLineas[linea] || {};
     const uo = ov.uo != null && ov.uo !== '' ? Number(ov.uo) : Number(item.facturas || 0);
+    unidadesObjetivoTotal += Number(uo) || 0;
 
-    const plFuente = 'dms_catalogo';
+    const guia = guiaPl[linea] || null;
+    let plFuente = 'guia_planes';
     let cfFuente = 'dms_inventario';
-    const pl = Number(dmsRefs.plByLinea[linea] || 0);
+    // PL lleno (c/IVA) para F-1; s/IVA para emparejar CF en F-2
+    let plConIva = guia ? Number(guia.plConIva) : 0;
+    let plSinIva = guia ? Number(guia.plSinIva) : 0;
+    if (!(plConIva > 0)) {
+      const dmsPl = Number(dmsRefs.plByLinea[linea] || 0);
+      if (dmsPl > 0) {
+        plSinIva = dmsPl;
+        plConIva = conIva(dmsPl);
+        plFuente = 'dms_catalogo';
+      }
+    }
     let cf = Number(dmsRefs.cfByLinea[linea] || 0);
     if (!cf && cfVendidos[linea]) {
       cf = Number(cfVendidos[linea]);
       cfFuente = 'dms_vendidos';
     }
 
-    const plOk = Number.isFinite(pl) && pl > 0;
+    const plOk = Number.isFinite(plConIva) && plConIva > 0;
     const cfOk = Number.isFinite(cf) && cf > 0;
     if (uo > 0 && !plOk) lineasSinPl += 1;
     if (uo > 0 && !cfOk) lineasSinCf += 1;
 
-    const montoVenta = plOk ? roundMoney(uo * pl) : 0;
+    const montoVentaF1 = plOk ? roundMoney(uo * plConIva) : 0;
+    const montoVentaSinIva = plOk ? roundMoney(uo * plSinIva) : 0;
     const montoCosto = cfOk ? roundMoney(uo * cf) : 0;
-    const ubaObj = plOk && cfOk ? roundMoney(montoVenta - montoCosto) : null;
-    if (plOk && cfOk) {
+    const ubaObj = plOk && cfOk ? roundMoney(montoVentaSinIva - montoCosto) : null;
+
+    // F-1 MOV = Σ(UO × PL lleno guía); no supone bonificación de crédito
+    if (uo > 0 && plOk) {
       unidadesObjetivo += Number(uo) || 0;
-      ventaNetaObjetivo += montoVenta;
+      ventaNetaObjetivo += montoVentaF1;
+      ventaNetaObjetivoSinIva += montoVentaSinIva;
+      lineasConMonto += 1;
+    }
+    // F-2 margen: solo líneas con PL y CF (s/IVA)
+    if (uo > 0 && plOk && cfOk) {
+      ventaNetaObjetivoConCf += montoVentaSinIva;
       costoObjetivo += montoCosto;
     }
 
-    const real = realByLinea.get(linea) || { unidades: 0, ventaNeta: 0, costoFactura: 0, uba: 0, conUba: 0 };
+    const real = realByLinea.get(linea) || {
+      unidades: 0, ventaNeta: 0, costoFactura: 0, uba: 0, conUba: 0, bonificacion: 0,
+    };
+    const ur = Number(real.unidades) || 0;
+    const ventaAPlLinea = plOk ? roundMoney(ur * plConIva) : 0;
+    const ventaAPlSinIvaLinea = plOk ? roundMoney(ur * plSinIva) : 0;
+    if (plOk && ur > 0) {
+      ventaRealAPl += ventaAPlLinea;
+      ventaRealAPlSinIva += ventaAPlSinIvaLinea;
+    }
+    bonificacionReal += Number(real.bonificacion) || 0;
+
     mixRows.push({
       linea,
       familia: item.familia || null,
       uo: Number(uo) || 0,
-      pl: plOk ? roundMoney(pl) : null,
+      pl: plOk ? roundMoney(plConIva) : null,
+      plSinIva: plOk ? roundMoney(plSinIva) : null,
       cf: cfOk ? roundMoney(cf) : null,
       plFuente: plOk ? plFuente : (uo > 0 ? 'faltante' : plFuente),
       cfFuente: cfOk ? cfFuente : (uo > 0 ? 'faltante' : cfFuente),
-      ventaObjetivo: plOk ? montoVenta : null,
+      ventaObjetivo: plOk ? montoVentaF1 : null,
       costoObjetivo: cfOk ? montoCosto : null,
       ubaObjetivo: ubaObj,
-      unidadesReales: real.unidades,
+      unidadesReales: ur,
       ventaNetaReal: roundMoney(real.ventaNeta),
+      ventaAPlReal: plOk ? ventaAPlLinea : null,
       ubaReal: roundMoney(real.uba),
+      bonificacion: roundMoney(real.bonificacion || 0),
     });
   }
 
-  const ubaObjetivoMix = roundMoney(ventaNetaObjetivo - costoObjetivo);
+  const ubaObjetivoMix = roundMoney(ventaNetaObjetivoConCf - costoObjetivo);
   const margenBrutoReal = pctOrNull(ubaReal, ventaNetaReal);
-  const margenBrutoObjetivo = pctOrNull(ubaObjetivoMix, ventaNetaObjetivo);
+  const margenBrutoObjetivo = pctOrNull(ubaObjetivoMix, ventaNetaObjetivoConCf);
   const iemc = margenBrutoReal != null && margenBrutoObjetivo != null && margenBrutoObjetivo !== 0
     ? round1((margenBrutoReal / margenBrutoObjetivo) * 100)
     : null;
-  const brecha = mixDisponible && ventaNetaObjetivo > 0
+  const brecha = mixDisponible && ventaNetaObjetivoConCf > 0
     ? roundMoney(ubaReal - ubaObjetivoMix)
     : null;
+
+  // Efecto precio/bonificación: factura (s/IVA) vs valuación a PL lleno s/IVA
+  const efectoBonificacion = ventaRealAPlSinIva > 0
+    ? roundMoney(ventaNetaReal - ventaRealAPlSinIva)
+    : null;
+  const realizacionPrecioPct = pctOrNull(ventaNetaReal, ventaRealAPlSinIva);
 
   const otras = [];
   for (const [linea, real] of realByLinea.entries()) {
@@ -376,23 +501,44 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
       unidadesPiso: dmsRefs.unidadesPiso,
       lineasPl: Object.keys(dmsRefs.plByLinea || {}).length,
       lineasCf: Object.keys(dmsRefs.cfByLinea || {}).length,
+      lineasGuiaPl: Object.keys(guiaPl).length,
+      plPromedio: (() => {
+        const pls = Object.values(guiaPl).map((g) => Number(g.plConIva)).filter((n) => n > 0);
+        if (!pls.length) {
+          const dms = Object.values(dmsRefs.plByLinea || {}).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+          if (!dms.length) return null;
+          return roundMoney(dms.reduce((a, b) => a + b, 0) / dms.length);
+        }
+        return roundMoney(pls.reduce((a, b) => a + b, 0) / pls.length);
+      })(),
     },
     real: {
       unidades: (vendidosTable || []).length,
       unidadesConUba,
       unidadesSinUba,
       ventaNeta: roundMoney(ventaNetaReal),
+      /** Valuación a PL lleno (c/IVA) — numerador F-1 homogéneo con MOV */
+      ventaAPl: roundMoney(ventaRealAPl),
+      ventaAPlSinIva: roundMoney(ventaRealAPlSinIva),
+      bonificacion: roundMoney(bonificacionReal),
+      efectoBonificacion,
+      realizacionPrecioPct,
       uba: roundMoney(ubaReal),
       margenBrutoPct: margenBrutoReal,
     },
     objetivo: {
-      unidades: unidadesObjetivo,
+      unidades: unidadesObjetivo || unidadesObjetivoTotal,
+      unidadesConPl: unidadesObjetivo,
+      /** MOV F-1 = Σ(UO × PL lleno guía, c/IVA) */
       ventaNeta: roundMoney(ventaNetaObjetivo),
+      ventaNetaSinIva: roundMoney(ventaNetaObjetivoSinIva),
       costoFactura: roundMoney(costoObjetivo),
       uba: ubaObjetivoMix,
       margenBrutoPct: margenBrutoObjetivo,
       lineasSinPl,
       lineasSinCf,
+      lineasConMonto,
+      ventaNetaConCosto: roundMoney(ventaNetaObjetivoConCf),
     },
     iemcPct: iemc,
     brecha,
@@ -400,10 +546,11 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
     otrasLineasReales: otras,
     notas: [
       'UOᵢ = facturas objetivo del PDF (mix fijo de planta).',
-      'PLᵢ = promedio s/IVA de precio lista en DMS (UNC_PrecListaPub / PRECLISTA / VEH_VENTA) por línea PDF, sobre unidades en piso.',
-      'CFᵢ = promedio de costo neto remisión (valor unidad − bono planta) por línea PDF, sobre unidades en piso; si no hay piso, respaldo con ventas del mes.',
-      'El denominador objetivo es venta neta del mix (UO × PL), no las unidades realmente vendidas.',
-      'Comisión E.V., gastos extra y plan piso no entran a F-2.',
+      'PLᵢ F-1 = precio lleno guía Planes Chevrolet (MSRP promedio por carline, c/IVA). No incluye bonificación de crédito.',
+      'F-1 = Σ(UR × PL) ÷ Σ(UO × PL) × 100 — ambos a precio lleno; la factura con bono no entra al numerador.',
+      'Efecto bonificación/precio = venta facturada − Σ(UR × PL s/IVA); se reporta en F-2, no en F-1.',
+      'CFᵢ = promedio de costo neto remisión (valor unidad − bono planta) por línea PDF.',
+      'F-2 margen solo usa líneas con PL y CF. Comisión E.V., gastos extra y plan piso no entran a F-2.',
     ],
   };
 }
@@ -411,4 +558,6 @@ async function computeIemcF2({ fechaInicio, fechaFin, vendidosTable = [] } = {})
 module.exports = {
   computeIemcF2,
   loadMixStore,
+  loadGuiaPlByLinea,
+  LINEA_TO_GUIA,
 };

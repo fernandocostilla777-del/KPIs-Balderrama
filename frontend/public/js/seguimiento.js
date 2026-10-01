@@ -20,6 +20,10 @@
   let openKpiKey = null;
   const charts = {};
   let vendedoresCache = [];
+  let client360Drawer = null;
+  let client360Backdrop = null;
+  let client360DrawerExpanded = false;
+  let client360LastSource = null;
 
   function destroyChart(name) {
     if (charts[name]) {
@@ -199,6 +203,92 @@
     }
   }
 
+  function refreshEmptyStateCopy() {
+    const lead = el('emptyStateLead');
+    const root = el('emptyState');
+    if (!root) return;
+    root.querySelectorAll('[data-empty-mode]').forEach((card) => {
+      card.classList.toggle('is-active', card.getAttribute('data-empty-mode') === currentVista);
+    });
+    if (!lead) return;
+    lead.textContent = currentVista === 'vendedor'
+      ? 'Resumen del periodo abajo. Elige un vendedor para ver el acumulado de su cartera.'
+      : 'Resumen del periodo abajo. Busca por ID CRM, nombre, VIN, teléfono o correo para abrir el 360.';
+  }
+
+  function renderEmptySummary(data) {
+    const tot = data?.totales || {};
+    const periodo = data?.periodo || {};
+    const fi = periodo.fechaInicio || '';
+    const ff = periodo.fechaFin || '';
+    setText('emptySummaryPeriod', fi && ff ? `Periodo ${fi} — ${ff}` : 'Periodo seleccionado');
+    setText('emptyKpiOrdenes', tot.ordenesCerradas ?? 0);
+    setText('emptyKpiClientes', tot.clientes ?? 0);
+    setText('emptyKpiCrm', tot.clientesConIdCrm ?? 0);
+    setText('emptyKpiImporte', money(tot.importeTaller || 0));
+    const conCrm = Number(tot.clientesConIdCrm || 0);
+    const clientes = Number(tot.clientes || 0);
+    const note = clientes
+      ? `${clientes} cliente(s) con cierre de taller · ${conCrm} con ID CRM listos para abrir 360.`
+      : 'Sin cierres de taller en este periodo. Ajusta las fechas o busca un cliente.';
+    setText('emptySummaryNote', note);
+    el('emptySummary')?.setAttribute('aria-busy', 'false');
+  }
+
+  function resetEmptySummaryLoading() {
+    el('emptySummary')?.setAttribute('aria-busy', 'true');
+    setText('emptyKpiOrdenes', '…');
+    setText('emptyKpiClientes', '…');
+    setText('emptyKpiCrm', '…');
+    setText('emptyKpiImporte', '…');
+    setText('emptySummaryNote', 'Cargando resumen…');
+  }
+
+  async function loadEmptySummary() {
+    const root = el('emptyState');
+    if (!root || root.classList.contains('hidden')) return;
+    const { fechaInicio, fechaFin } = getPeriod();
+    if (!fechaInicio || !fechaFin) {
+      setText('emptySummaryPeriod', 'Define un periodo arriba');
+      setText('emptyKpiOrdenes', '—');
+      setText('emptyKpiClientes', '—');
+      setText('emptyKpiCrm', '—');
+      setText('emptyKpiImporte', '—');
+      setText('emptySummaryNote', 'Selecciona fechas para ver el resumen de cierres de taller.');
+      el('emptySummary')?.setAttribute('aria-busy', 'false');
+      return;
+    }
+    resetEmptySummaryLoading();
+    setText('emptySummaryPeriod', `Periodo ${fechaInicio} — ${fechaFin}`);
+    try {
+      const data = await api(
+        `/crm/cierres-taller?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}&limit=300`
+      );
+      currentCierresData = data;
+      // Solo pintar si seguimos sin expediente abierto
+      if (!el('emptyState')?.classList.contains('hidden')) {
+        renderEmptySummary(data);
+        setText('periodLabel', `${fechaInicio} — ${fechaFin}`);
+        setStatus(
+          `Resumen · ${data.totales?.clientes || 0} cliente(s) · ${data.totales?.ordenesCerradas || 0} órdenes`
+        );
+      }
+    } catch (err) {
+      setText('emptySummaryNote', err.message || 'No se pudo cargar el resumen');
+      el('emptySummary')?.setAttribute('aria-busy', 'false');
+      setStatus(err.message, 'error');
+    }
+  }
+
+  function showEmptyState() {
+    el('emptyState')?.classList.remove('hidden');
+    el('cierresPanel')?.classList.add('hidden');
+    el('clientPanel')?.classList.add('hidden');
+    el('vendedorPanel')?.classList.add('hidden');
+    refreshEmptyStateCopy();
+    loadEmptySummary();
+  }
+
   function setVista(vista) {
     currentVista = vista === 'vendedor' ? 'vendedor' : 'cliente';
     document.querySelectorAll('[data-vista]').forEach((btn) => {
@@ -206,6 +296,7 @@
     });
     el('vistaClienteWrap')?.classList.toggle('hidden', currentVista !== 'cliente');
     el('vistaVendedorWrap')?.classList.toggle('hidden', currentVista !== 'vendedor');
+    refreshEmptyStateCopy();
 
     if (currentVista === 'vendedor') {
       el('cierresPanel')?.classList.add('hidden');
@@ -215,14 +306,14 @@
         if (el('vendedorInput')?.value.trim()) cargarVendedorResumen();
         else {
           el('vendedorPanel')?.classList.add('hidden');
-          el('emptyState')?.classList.remove('hidden');
+          showEmptyState();
           setStatus('Elige un vendedor para ver el acumulado de su cartera');
         }
       });
     } else {
       el('vendedorPanel')?.classList.add('hidden');
       if (!currentIdContacto && !(el('searchResults')?.children?.length)) {
-        el('emptyState')?.classList.remove('hidden');
+        showEmptyState();
       }
       setStatus('Listo');
     }
@@ -887,39 +978,33 @@
         <small>${[f.anModelo ? `Modelo ${esc(f.anModelo)}` : null, f.vinActual].filter(Boolean).map(esc).join(' · ') || 'Unidad sin identificar'}</small>
       </div>`;
 
+    // icon, label, value, tone, gotoId, openKpi
     const items = [
-      ['event_available', 'Última compra', dateMx(f.fechaUltimaCompra), 'purchase', 'secCompras', null],
+      ['event_available', 'Última compra', dateMx(f.fechaUltimaCompra), 'purchase', 'secCompras', 'compras'],
       ['description', 'Número de contrato', dash(f.numeroContrato), 'finance', 'secFinanciamiento', 'financiamiento'],
-      ['verified_user', 'Seguro del auto', dash(f.seguroAuto), 'finance', 'secFinanciamiento', 'financiamiento', 'seguro'],
+      ['verified_user', 'Seguro del auto', dash(f.seguroAuto), 'finance', 'secFinanciamiento', 'seguro'],
       ['credit_card', 'Tipo de compra', dash(f.tipoCompra), 'finance', 'secFinanciamiento', 'financiamiento'],
       ['calendar_month', 'Plazo contratado', f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
       ['task_alt', 'Mensualidades estimadas', f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)}` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
       ['account_balance_wallet', 'Saldo estimado', f.saldoEstimado != null ? money(f.saldoEstimado) : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
-      ['sell', 'Valor de referencia', f.valorEstimadoUnidad != null ? money(f.valorEstimadoUnidad) : '—', 'finance', 'secFinanciamiento', null],
-      ['build', 'Último servicio', dateMx(f.ultimaVisitaTaller), 'service', 'secOrdenes', 'taller'],
-      ['speed', 'Kilometraje registrado', f.kilometraje != null ? `${Number(f.kilometraje).toLocaleString('es-MX')} km` : '—', 'service', 'secOrdenes', 'taller'],
-      ['car_repair', 'Servicios realizados', Number(f.serviciosRealizados || 0).toLocaleString('es-MX'), 'service', 'secOrdenes', 'taller'],
-      ['support_agent', 'Último contacto comercial', dateMx(f.ultimoContactoComercial), 'relation', 'secTimeline', 'comercial'],
-      ['devices', 'Interacciones digitales', Number(f.interaccionesDigitales || 0).toLocaleString('es-MX'), 'relation', 'secLeads', 'digital'],
-      ['feedback', 'Quejas o incidencias', Number(f.quejasIncidencias || 0).toLocaleString('es-MX'), 'relation', 'secTimeline', 'queja', 'quejas'],
-      ['garage', 'Historial de compras', `${Number(f.historialCompras || 0)} vehículo(s)`, 'purchase', 'secCompras', 'compra', 'compras'],
+      ['sell', 'Valor de referencia', f.valorEstimadoUnidad != null ? money(f.valorEstimadoUnidad) : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['build', 'Último servicio', dateMx(f.ultimaVisitaTaller), 'service', 'secOrdenes', 'ordenes'],
+      ['speed', 'Kilometraje registrado', f.kilometraje != null ? `${Number(f.kilometraje).toLocaleString('es-MX')} km` : '—', 'service', 'secOrdenes', 'ordenes'],
+      ['car_repair', 'Servicios realizados', Number(f.serviciosRealizados || 0).toLocaleString('es-MX'), 'service', 'secOrdenes', 'ordenes'],
+      ['support_agent', 'Último contacto comercial', dateMx(f.ultimoContactoComercial), 'relation', 'secTimeline', 'ciclos'],
+      ['devices', 'Interacciones digitales', Number(f.interaccionesDigitales || 0).toLocaleString('es-MX'), 'relation', 'secLeads', 'leads'],
+      ['feedback', 'Quejas o incidencias', Number(f.quejasIncidencias || 0).toLocaleString('es-MX'), 'relation', 'secTimeline', 'quejas'],
+      ['garage', 'Historial de compras', `${Number(f.historialCompras || 0)} vehículo(s)`, 'purchase', 'secCompras', 'compras'],
     ];
-    el('ficha360Grid').innerHTML = items.map(([icon, label, value, tone, gotoId, filter, openKpi]) => `
-      <button type="button" class="client-360-stat client-360-stat--${tone}" ${openKpi === 'quejas' ? 'id="kQuejas"' : (openKpi === 'seguro' ? 'id="kSeguroAuto"' : '')} data-goto="${esc(gotoId)}" data-timeline-filter="${esc(filter || '')}" ${openKpi ? `data-open-kpi="${esc(openKpi)}"` : ''} title="Ver detalle relacionado">
+    el('ficha360Grid').innerHTML = items.map(([icon, label, value, tone, gotoId, openKpi]) => `
+      <button type="button" class="client-360-stat client-360-stat--${tone}" ${openKpi === 'quejas' ? 'id="kQuejas"' : (openKpi === 'seguro' ? 'id="kSeguroAuto"' : '')} data-goto="${esc(gotoId || '')}" data-open-kpi="${esc(openKpi)}" title="Ver desglose">
         <span class="material-symbols-outlined client-360-stat-icon">${icon}</span>
         <div><span>${label}</span><strong>${value}</strong></div>
       </button>`).join('');
 
-    el('ficha360Grid').querySelectorAll('[data-goto]').forEach((btn) => {
+    el('ficha360Grid').querySelectorAll('[data-open-kpi]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const openKpi = btn.dataset.openKpi;
-        if (openKpi) {
-          openClientKpiByKey(openKpi, btn.dataset.goto || null);
-          return;
-        }
-        const filter = btn.dataset.timelineFilter;
-        if (filter) renderTimeline360(currentTimeline360, filter);
-        gotoSection(btn.dataset.goto);
+        openClientKpiByKey(btn.dataset.openKpi, btn.dataset.goto || null, btn);
       });
     });
 
@@ -1203,6 +1288,36 @@
                 value: c.aseguradora || '—',
               }))
               : [{ label: 'Sin contratos de financiamiento', value: '—' }] },
+          ],
+        };
+      }
+      case 'financiamiento': {
+        const f = h.ficha360 || {};
+        const contratos = h.contratosFinanciamiento || [];
+        return {
+          title: 'Financiamiento y contrato',
+          value: f.numeroContrato || f.tipoCompra || '—',
+          sections: [
+            { titulo: 'Radiografía', rows: [
+              { label: 'Número de contrato', value: f.numeroContrato || '—' },
+              { label: 'Tipo de compra', value: f.tipoCompra || '—' },
+              { label: 'Plazo contratado', value: f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—' },
+              { label: 'Mensualidades estimadas', value: f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)}` : '—' },
+              { label: 'Saldo estimado', value: f.saldoEstimado != null ? money(f.saldoEstimado) : '—' },
+              { label: 'Valor de referencia', value: f.valorEstimadoUnidad != null ? money(f.valorEstimadoUnidad) : '—' },
+              { label: 'Seguro', value: f.seguroAuto || '—' },
+              { label: 'Unidad', value: f.modeloActual || '—' },
+            ] },
+            { titulo: 'Contratos', rows: contratos.length
+              ? contratos.map((c) => ({
+                label: [c.no_contrato || c.contrato, c.unidad || c.vin].filter(Boolean).join(' · ') || 'Contrato',
+                value: [c.financiera || c.tipo_compra, c.plazo != null ? `${c.plazo} m` : null].filter(Boolean).join(' · ') || '—',
+                detail: [
+                  c.aseguradora ? `Seguro: ${c.aseguradora}` : null,
+                  c.saldo != null ? `Saldo: ${money(c.saldo)}` : null,
+                ].filter(Boolean).join(' · ') || null,
+              }))
+              : [{ label: 'Sin contratos de financiamiento ligados por VIN', value: '—' }] },
           ],
         };
       }
@@ -1527,9 +1642,82 @@
     }
   }
 
+  function ensureClient360Drawer() {
+    if (client360Drawer && client360Backdrop) return client360Drawer;
+    client360Backdrop = document.createElement('div');
+    client360Backdrop.className = 'ops-orders-backdrop';
+    client360Backdrop.addEventListener('click', closeKpiDetail);
+
+    client360Drawer = document.createElement('aside');
+    client360Drawer.className = 'ops-orders-drawer';
+    client360Drawer.setAttribute('aria-hidden', 'true');
+    client360Drawer.innerHTML = `
+      <div class="ops-orders-drawer__header">
+        <div class="ops-orders-drawer__title-wrap">
+          <span class="material-symbols-outlined ops-orders-drawer__logo">analytics</span>
+          <div>
+            <h2 class="ops-orders-drawer__title" data-c360-title>Desglose</h2>
+            <span class="ops-orders-drawer__status" data-c360-status>—</span>
+          </div>
+        </div>
+        <div class="ops-orders-drawer__actions">
+          <button type="button" class="ops-orders-drawer__icon-btn" data-c360-expand title="Expandir" aria-label="Expandir panel">
+            <span class="material-symbols-outlined">open_in_full</span>
+          </button>
+          <button type="button" class="ops-orders-drawer__icon-btn" data-c360-close title="Cerrar" aria-label="Cerrar">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </div>
+      <div class="ops-orders-drawer__toolbar">
+        <span class="ops-orders-drawer__meta" data-c360-meta>Radiografía 360</span>
+      </div>
+      <div class="ops-orders-drawer__main">
+        <div class="ops-orders-drawer__body custom-scrollbar" data-c360-body></div>
+      </div>
+      <div class="ops-orders-drawer__footer" data-c360-footer hidden></div>
+    `;
+
+    document.body.appendChild(client360Backdrop);
+    document.body.appendChild(client360Drawer);
+
+    client360Drawer.querySelector('[data-c360-close]')?.addEventListener('click', closeKpiDetail);
+    client360Drawer.querySelector('[data-c360-expand]')?.addEventListener('click', () => {
+      client360DrawerExpanded = !client360DrawerExpanded;
+      client360Drawer.classList.toggle('ops-orders-drawer--expanded', client360DrawerExpanded);
+      const icon = client360Drawer.querySelector('[data-c360-expand] .material-symbols-outlined');
+      if (icon) icon.textContent = client360DrawerExpanded ? 'close_fullscreen' : 'open_in_full';
+      if (client360DrawerExpanded) {
+        client360Drawer.style.top = '';
+        client360Drawer.style.right = '';
+        client360Drawer.style.left = '';
+        client360Drawer.style.height = '';
+      } else {
+        placeClient360Drawer(client360LastSource);
+      }
+    });
+    return client360Drawer;
+  }
+
+  function placeClient360Drawer(sourceEl) {
+    if (!client360Drawer || client360DrawerExpanded) return;
+    const ref = sourceEl || el('ficha360Grid') || el('clientKpis');
+    const rect = ref?.getBoundingClientRect?.();
+    let top = 96;
+    if (rect) top = Math.round(rect.bottom + 12);
+    top = Math.max(72, Math.min(top, Math.round(window.innerHeight * 0.28)));
+    const maxHeight = Math.max(360, window.innerHeight - top - 24);
+    client360Drawer.style.top = `${top}px`;
+    client360Drawer.style.right = window.innerWidth < 640 ? '12px' : '28px';
+    client360Drawer.style.left = window.innerWidth < 640 ? '12px' : 'auto';
+    client360Drawer.style.bottom = 'auto';
+    client360Drawer.style.height = `${Math.min(680, maxHeight)}px`;
+  }
+
   function closeKpiDetail() {
     openKpiKey = null;
     destroyChart('chartClvComposicion');
+    destroyChart('chartKpiDetail');
     ['clientKpiDetail', 'cierresKpiDetail'].forEach((id) => {
       const p = el(id);
       if (p) {
@@ -1537,29 +1725,48 @@
         p.innerHTML = '';
       }
     });
+    if (client360Drawer) {
+      client360Drawer.classList.remove('ops-orders-drawer--open', 'ops-orders-drawer--expanded');
+      client360Drawer.setAttribute('aria-hidden', 'true');
+    }
+    if (client360Backdrop) client360Backdrop.classList.remove('ops-orders-backdrop--visible');
+    client360DrawerExpanded = false;
+    client360LastSource = null;
     document.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
     document.querySelectorAll('.client-360-stat.is-open').forEach((c) => c.classList.remove('is-open'));
   }
 
   function fillKpiDetailPanel(panelId, kpi, detail, gotoId, sourceEl) {
-    const panel = el(panelId);
-    if (!detail || !panel) return;
+    if (!detail) return;
     const key = `${panelId}:${kpi}`;
-
     if (openKpiKey === key) {
       closeKpiDetail();
       return;
     }
     closeKpiDetail();
 
+    const drawer = ensureClient360Drawer();
+    const body = drawer.querySelector('[data-c360-body]');
+    const footer = drawer.querySelector('[data-c360-footer]');
+    const titleEl = drawer.querySelector('[data-c360-title]');
+    const statusEl = drawer.querySelector('[data-c360-status]');
+    const metaEl = drawer.querySelector('[data-c360-meta]');
+    if (titleEl) titleEl.textContent = detail.title || 'Desglose';
+    if (statusEl) statusEl.textContent = detail.value != null ? String(detail.value) : '—';
+    if (metaEl) {
+      metaEl.textContent = panelId === 'cierresKpiDetail'
+        ? 'Cierres de taller'
+        : 'Radiografía 360 · desglose';
+    }
+
     const sectionsHtml = (detail.sections || [])
       .filter((s) => (s.rows || []).length)
       .map((s) => `
-        <div class="kpi-detail-group">
+        <div class="ops-orders-drawer__group">
           <h5>${esc(s.titulo)}</h5>
-          ${s.rows.map((row) => `
-            <div class="kpi-detail-row${row.detail ? ' kpi-detail-row--stack' : ''}">
-              <div class="kpi-detail-row__main">
+          ${(s.rows || []).map((row) => `
+            <div class="ops-orders-drawer__row${row.detail ? ' ops-orders-drawer__row--stack' : ''}">
+              <div class="kpi-detail-row__main" style="width:100%;display:flex;justify-content:space-between;gap:12px">
                 <span class="lbl" title="${esc(row.label)}">${esc(row.label)}</span>
                 <span class="val">${row.badge ? `<span class="badge-tipo badge-flotilla">${esc(row.badge)}</span>` : esc(row.value)}</span>
               </div>
@@ -1569,43 +1776,35 @@
 
     const chart = detail.chart && detail.chart.labels?.length
       ? `
-        <div class="kpi-detail-group kpi-detail-group--chart">
+        <div class="ops-orders-drawer__group">
           <h5>Composición promedio del CLV</h5>
-          <div class="chart-card" style="min-height:220px;padding:8px 12px">
+          <div class="chart-card" style="min-height:200px;padding:8px 12px;background:transparent;box-shadow:none">
             <div class="chart-wrap"><canvas id="${esc(detail.chart.canvasId || 'chartKpiDetail')}"></canvas></div>
           </div>
         </div>`
       : '';
 
-    panel.innerHTML = `
-      <div class="kpi-detail-panel__head">
-        <div>
-          <p class="kpi-detail-panel__eyebrow">Desglose</p>
-          <h4 class="kpi-detail-panel__title">${esc(detail.title)}</h4>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px">
-          <span class="kpi-detail-panel__value">${esc(detail.value)}</span>
-          <button type="button" class="kpi-detail-panel__close" data-close-detail aria-label="Cerrar desglose">
-            <span class="material-symbols-outlined">close</span>
-          </button>
-        </div>
-      </div>
-      <div class="kpi-detail-grid">
-        ${sectionsHtml || '<p style="color:#94a3b8;margin:8px 0">Sin información para desglosar</p>'}
-        ${chart}
-      </div>
-      ${gotoId ? `
-      <div class="kpi-detail-panel__footer">
-        <button type="button" class="chip" data-goto-detail="${esc(gotoId)}">Ver tabla completa
-          <span class="material-symbols-outlined" style="font-size:15px;vertical-align:-3px">arrow_downward</span>
-        </button>
-      </div>` : ''}
-    `;
-    panel.classList.remove('hidden');
-    panel.querySelector('[data-close-detail]')?.addEventListener('click', closeKpiDetail);
-    panel.querySelector('[data-goto-detail]')?.addEventListener('click', (e) => {
-      gotoSection(e.currentTarget.dataset.gotoDetail);
-    });
+    if (body) {
+      body.innerHTML = sectionsHtml || chart
+        ? `${sectionsHtml}${chart}`
+        : '<p class="ops-orders-drawer__hint">Sin información para desglosar</p>';
+    }
+    if (footer) {
+      if (gotoId) {
+        footer.hidden = false;
+        footer.innerHTML = `
+          <button type="button" class="chip" data-goto-detail="${esc(gotoId)}">Ver tabla completa
+            <span class="material-symbols-outlined" style="font-size:15px;vertical-align:-3px">arrow_downward</span>
+          </button>`;
+        footer.querySelector('[data-goto-detail]')?.addEventListener('click', (e) => {
+          closeKpiDetail();
+          gotoSection(e.currentTarget.dataset.gotoDetail);
+        });
+      } else {
+        footer.hidden = true;
+        footer.innerHTML = '';
+      }
+    }
 
     if (detail.chart && detail.chart.labels?.length) {
       const palette = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#e11d48', '#0f766e'];
@@ -1638,14 +1837,19 @@
     }
 
     openKpiKey = key;
+    client360LastSource = sourceEl || null;
     sourceEl?.classList.add('is-open');
-    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    placeClient360Drawer(sourceEl);
+    client360Backdrop.classList.add('ops-orders-backdrop--visible');
+    drawer.classList.add('ops-orders-drawer--open');
+    drawer.setAttribute('aria-hidden', 'false');
   }
 
-  function openClientKpiByKey(kpi, gotoId) {
+  function openClientKpiByKey(kpi, gotoId, sourceEl) {
     if (!currentClientData) return;
     const detail = buildClientKpiDetail(kpi, currentClientData);
-    const source = document.querySelector(`.client-360-stat[data-open-kpi="${kpi}"]`)
+    const source = sourceEl
+      || document.querySelector(`.client-360-stat[data-open-kpi="${kpi}"]`)
       || document.querySelector(`.kpi-card--clickable[data-kpi="${kpi}"]`);
     fillKpiDetailPanel('clientKpiDetail', kpi, detail, gotoId, source);
   }
@@ -1659,6 +1863,10 @@
       : (currentClientData ? buildClientKpiDetail(kpi, currentClientData) : null);
     fillKpiDetailPanel(panelId, kpi, detail, card.dataset.goto || null, card);
   }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && openKpiKey) closeKpiDetail();
+  });
 
   document.querySelectorAll('.kpi-card--clickable[data-kpi]').forEach((card) => {
     card.addEventListener('click', () => renderKpiDetail(card));
@@ -1695,8 +1903,14 @@
 
   el('btnPeriodoOrdenes').addEventListener('click', () => {
     setActivePeriodChip(null);
-    if (currentVista === 'vendedor') cargarVendedorResumen();
-    else cargarCierresPeriodo();
+    if (currentVista === 'vendedor') {
+      if (el('vendedorInput')?.value.trim()) cargarVendedorResumen();
+      else showEmptyState();
+      return;
+    }
+    if (currentIdContacto) openClient(currentIdContacto);
+    else if (!el('cierresPanel')?.classList.contains('hidden')) cargarCierresPeriodo();
+    else showEmptyState();
   });
 
   function setActivePeriodChip(preset) {
@@ -1716,24 +1930,37 @@
         el('cierresPanel').classList.add('hidden');
         if (currentVista === 'vendedor') {
           if (el('vendedorInput')?.value.trim()) cargarVendedorResumen();
-          else setStatus('Periodo: todo el histórico. Elige un vendedor.');
+          else {
+            showEmptyState();
+            setStatus('Periodo: todo el histórico. Elige un vendedor.');
+          }
           return;
         }
         if (currentIdContacto) openClient(currentIdContacto);
-        else setStatus('Periodo limpiado. Define fechas o busca un cliente.');
+        else {
+          showEmptyState();
+          setStatus('Periodo limpiado. Define fechas o busca un cliente.');
+        }
         return;
       }
       const [start, end] = window.Dashboard.getDatePresetRange(preset);
       el('fechaInicioOrdenes').value = window.Dashboard.formatDateInput(start);
       el('fechaFinOrdenes').value = window.Dashboard.formatDateInput(end);
-      if (currentVista === 'vendedor') cargarVendedorResumen();
-      else cargarCierresPeriodo();
+      if (currentVista === 'vendedor') {
+        if (el('vendedorInput')?.value.trim()) cargarVendedorResumen();
+        else showEmptyState();
+        return;
+      }
+      if (currentIdContacto) openClient(currentIdContacto);
+      else showEmptyState();
     });
   });
 
   ['fechaInicioOrdenes', 'fechaFinOrdenes'].forEach((id) => {
     el(id).addEventListener('change', () => setActivePeriodChip(null));
   });
+
+  el('btnEmptyVerCierres')?.addEventListener('click', () => cargarCierresPeriodo());
 
   const params = new URLSearchParams(location.search);
   const initialId = params.get('id');
@@ -1755,16 +1982,15 @@
   if (initialVendedor) {
     if (el('vendedorInput')) el('vendedorInput').value = initialVendedor;
     setVista('vendedor');
-  } else if (hasUrlPeriod && !initialId && !initialQ) {
-    cargarCierresPeriodo();
-  } else if (!hasUrlPeriod && !initialId && !initialQ) {
-    // Por defecto: mes en curso
-    cargarCierresPeriodo();
   } else if (initialId) {
     openClient(initialId);
   } else if (initialQ) {
     el('searchInput').value = initialQ;
     buscar();
+  } else if (hasUrlPeriod) {
+    cargarCierresPeriodo();
+  } else {
+    showEmptyState();
   }
 
   loadCrmStatus();

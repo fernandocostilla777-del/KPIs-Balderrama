@@ -86,18 +86,53 @@ router.get('/', requireMobileAuth, async (req, res, next) => {
       origen: 'cloud-sync',
     };
 
-    // BDC se sirve en vivo desde las tablas CRM de Railway. Así el proyecto
-    // separado no depende de esperar al siguiente snapshot del backend local.
-    const bdc = await getBdcEmbudo({
+    // BDC en vivo desde crm_ciclos (Railway). Contactos = ciclos ∪ leads EV
+    // del snapshot local (crm_leads completo). Si el snapshot ya trae el union
+    // enriquecido, no dejamos que el live lo pise a solo ciclos.
+    const bdcLive = await getBdcEmbudo({
       fechaInicio: req.query.fechaInicio,
       fechaFin: req.query.fechaFin,
     });
+    const snapBdc = payload.resultados?.bdc || {};
+    const snapReal = snapBdc.real || {};
+    const liveReal = bdcLive.real || {};
+    const ciclos = Number(liveReal.contactos || snapReal.contactosCiclos || 0);
+    const leadsAsignados = Number(snapReal.contactosLeadsAsignados || 0);
+    const overlap = Number(snapReal.contactosOverlap || 0);
+    const snapContactos = Number(snapReal.contactos || 0);
+    let contactos;
+    if (leadsAsignados > 0) {
+      contactos = Math.max(0, ciclos + leadsAsignados - overlap);
+    } else if (snapContactos > ciclos) {
+      // Snapshot ya venía con union (o cifra mayor) aunque falte el desglose.
+      contactos = snapContactos;
+    } else {
+      contactos = ciclos;
+    }
+
     payload.resultados = {
       ...(payload.resultados || {}),
       bdc: {
-        ...(payload.resultados?.bdc || {}),
-        ...bdc,
-        meta: payload.resultados?.bdc?.meta || null,
+        ...snapBdc,
+        ...bdcLive,
+        meta: snapBdc.meta || null,
+        real: {
+          ...liveReal,
+          contactos,
+          contactosCiclos: ciclos,
+          contactosLeadsAsignados: leadsAsignados || null,
+          contactosOverlap: leadsAsignados > 0 ? overlap : null,
+        },
+        fuente: leadsAsignados > 0
+          ? 'crm_ciclos (Railway) + crm_leads EV asignados (snapshot)'
+          : (snapContactos > ciclos
+            ? 'crm_ciclos (Railway) + contactos enriquecidos (snapshot)'
+            : (bdcLive.fuente || 'crm_ciclos (Railway)')),
+        nota: leadsAsignados > 0
+          ? `Contactos = ciclos (${ciclos}) ∪ leads con ejecutivo asignado (${leadsAsignados}; solape ${overlap}).`
+          : (snapContactos > ciclos
+            ? `Contactos desde snapshot enriquecido (${snapContactos}); ciclos Railway=${ciclos}.`
+            : (bdcLive.nota || snapBdc.nota || null)),
       },
     };
 

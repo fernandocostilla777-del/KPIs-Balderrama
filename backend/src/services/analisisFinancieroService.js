@@ -9,6 +9,7 @@ const { getCatalogKpis } = require('./accountingCatalogKpiService');
 const { getEeffSummary } = require('./eeffSummaryService');
 const { getInventory } = require('./inventoryService');
 const { getBudgetForPeriod } = require('./budget2026Service');
+const { getPlantillaMetas } = require('./objetivosResultadosService');
 
 function round1(n) {
   const x = Number(n);
@@ -159,9 +160,43 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
   const pptoGastosOp = ppto ? Number(ppto.gastosOperacion || 0) : null;
   const pptoAdmin = ppto ? Number(ppto.gastosAdministracion || 0) : null;
 
-  const metaVenta = cloudMetas?.objetivoVentaEconomica != null
-    ? Number(cloudMetas.objetivoVentaEconomica)
-    : (iemc?.objetivo?.ventaNeta || null);
+  // F-1: Σ(UR×PL) ÷ Σ(UO×PL) a precio lleno guía (sin bonificación de crédito en ninguno de los lados).
+  // La factura con bono no entra al numerador; ese efecto se reporta en F-2.
+  let metaVenta = null;
+  let fuenteObjetivo = null;
+  let unidadesObjetivo = Number(iemc?.objetivo?.unidades || 0) || null;
+  let plPromedioUsado = null;
+  let ventaAPl = Number(iemc?.real?.ventaAPl || 0) || 0;
+
+  if (Number(iemc?.objetivo?.ventaNeta || 0) > 0 && ventaAPl >= 0 && Number(iemc?.objetivo?.lineasConMonto || 0) > 0) {
+    metaVenta = Number(iemc.objetivo.ventaNeta);
+    fuenteObjetivo = 'mix_uo_pl_guia';
+  } else if (cloudMetas?.objetivoVentaEconomica != null && Number(cloudMetas.objetivoVentaEconomica) > 0) {
+    metaVenta = Number(cloudMetas.objetivoVentaEconomica);
+    fuenteObjetivo = 'railway';
+    ventaAPl = Number(iemc?.real?.ventaNeta || 0);
+  } else {
+    const plantilla = getPlantillaMetas({ fechaInicio, fechaFin });
+    const sumLineas = (plantilla.lineasProducto || []).reduce(
+      (s, l) => s + (Number(l.facturas || l.entregas || 0) || 0),
+      0
+    );
+    const metaUnidades = Number(plantilla.facturasAFacturar)
+      || sumLineas
+      || Number(plantilla.volumenReferencia)
+      || null;
+    const plPromedio = Number(iemc?.dms?.plPromedio || 0) || null;
+    if (metaUnidades != null && metaUnidades > 0 && plPromedio != null && plPromedio > 0) {
+      metaVenta = round2(metaUnidades * plPromedio);
+      fuenteObjetivo = 'unidades_x_pl_promedio';
+      unidadesObjetivo = metaUnidades;
+      plPromedioUsado = plPromedio;
+      if (!(ventaAPl > 0) && unidades > 0) {
+        ventaAPl = round2(unidades * plPromedio);
+      }
+    }
+  }
+
   const metaGastoCtrl = cloudMetas?.gastoOperativoControlablePpto != null
     ? Number(cloudMetas.gastoOperativoControlablePpto)
     : pptoGastosOp;
@@ -173,10 +208,25 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
     ? Number(cloudMetas.coberturaFiPlanPisoObjetivoPct)
     : 100;
 
-  const ventaReal = Number(iemc?.real?.ventaNeta || 0);
-  const f1 = pct(ventaReal, metaVenta);
+  const ventaFacturada = Number(iemc?.real?.ventaNeta || 0);
+  const f1 = pct(ventaAPl, metaVenta);
   const f2 = iemc?.iemcPct ?? null;
   const f21 = iemc?.brecha ?? null;
+  const efectoBonificacion = iemc?.real?.efectoBonificacion ?? null;
+  const realizacionPrecioPct = iemc?.real?.realizacionPrecioPct ?? null;
+
+  const topMovLineas = (iemc?.mix || [])
+    .filter((r) => Number(r.ventaObjetivo || 0) > 0)
+    .sort((a, b) => Number(b.ventaObjetivo || 0) - Number(a.ventaObjetivo || 0))
+    .slice(0, 8)
+    .map((r) => ({
+      linea: r.linea,
+      uo: r.uo,
+      ur: r.unidadesReales,
+      pl: r.pl,
+      ventaObjetivo: r.ventaObjetivo,
+      ventaAPlReal: r.ventaAPlReal,
+    }));
 
   const gastoCtrlReal = cloudMetas?.gastoOperativoControlablePpto != null
     ? gastoDepto || gastosOp
@@ -200,34 +250,58 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
   const f7 = pct(gastosAdmin, capacidad > 0 ? capacidad : utilidadBruta);
   const f71 = metaCarga != null ? round2(gastosAdmin - metaCarga) : null;
 
+  const f1Nota = metaVenta == null
+    ? 'Sin objetivo económico: importa mix PDF (UO×PL guía) o captura meta en Railway.'
+    : (fuenteObjetivo === 'mix_uo_pl_guia'
+      ? 'F-1 a precio lleno: Σ(UR×PL) ÷ Σ(UO×PL). La bonificación de la factura no entra; se reporta en F-2.'
+      : (fuenteObjetivo === 'unidades_x_pl_promedio'
+        ? 'MOV estimado: unidades objetivo × precio lista promedio (sin mix línea a línea).'
+        : (Number(iemc?.objetivo?.lineasSinPl || 0) > 0
+          ? `${iemc.objetivo.lineasSinPl} línea(s) con UO sin precio de lista; no entran al MOV.`
+          : null)));
+
+  const f2NotaParts = [];
+  if (!iemc?.mixDisponible) f2NotaParts.push('Sin mix objetivo del PDF para el periodo.');
+  if (efectoBonificacion != null) {
+    f2NotaParts.push(
+      efectoBonificacion < 0
+        ? `Efecto bonificación/precio vs PL lleno: ${efectoBonificacion.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })} (factura debajo del PL; no castiga F-1).`
+        : `Efecto precio vs PL lleno: ${efectoBonificacion.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })}.`
+    );
+  }
+
   const kpis = [
     kpiBase({
       clave: 'F-1',
       nombre: 'Cumplimiento del Objetivo Económico de Venta',
-      descripcion: 'Monto económico de venta real vs objetivo (mix UO×PL o meta Railway).',
+      descripcion: 'Volumen económico a precio lleno: Σ(UR×PL) vs Σ(UO×PL) del mix. Sin bonificación de crédito.',
       valor: f1,
       unidad: '%',
       display: f1 == null ? '—' : `${f1}%`,
       meta: metaVenta,
       status: f1 != null ? 'completo' : 'pendiente_meta',
       tone: toneFromPct(f1, { good: 100, warn: 90 }),
-      formula: 'Venta neta real ÷ Objetivo económico × 100',
-      numerador: ventaReal,
+      formula: 'Σ(UR × PL lleno) ÷ Σ(UO × PL lleno) × 100',
+      numerador: ventaAPl,
       denominador: metaVenta,
       detalle: {
-        ventaNetaReal: ventaReal,
+        ventaAPl: ventaAPl,
+        ventaFacturada: ventaFacturada,
         objetivoEconomico: metaVenta,
+        unidadesObjetivo: unidadesObjetivo,
         unidadesReales: iemc?.real?.unidades ?? unidades,
-        fuenteObjetivo: cloudMetas?.objetivoVentaEconomica != null ? 'railway' : 'mix_uo_pl',
+        plPromedio: plPromedioUsado ?? iemc?.dms?.plPromedio ?? null,
+        fuenteObjetivo: fuenteObjetivo,
+        lineasConMonto: iemc?.objetivo?.lineasConMonto ?? null,
+        lineasSinPl: iemc?.objetivo?.lineasSinPl ?? null,
+        topLineasMov: topMovLineas,
       },
-      nota: metaVenta == null
-        ? 'Sin objetivo económico: importa mix PDF o captura meta en Railway (iemc_financiero_periodos).'
-        : null,
+      nota: f1Nota,
     }),
     kpiBase({
       clave: 'F-2',
       nombre: 'Eficiencia del Mix Comercial (IEMC)',
-      descripcion: 'Margen bruto real ÷ margen bruto del mix objetivo.',
+      descripcion: 'Margen bruto real ÷ margen bruto del mix objetivo. Incluye el efecto de bonificación vs precio lleno.',
       valor: f2,
       unidad: '%',
       display: f2 == null ? '—' : `${f2}%`,
@@ -239,8 +313,13 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
         margenBrutoObjetivo: iemc?.objetivo?.margenBrutoPct ?? null,
         ubaReal: iemc?.real?.uba ?? null,
         ubaObjetivo: iemc?.objetivo?.uba ?? null,
+        ventaFacturada: ventaFacturada,
+        ventaAPlSinIva: iemc?.real?.ventaAPlSinIva ?? null,
+        efectoBonificacion: efectoBonificacion,
+        realizacionPrecioPct: realizacionPrecioPct,
+        bonificacionDms: iemc?.real?.bonificacion ?? null,
       },
-      nota: iemc?.mixDisponible ? null : 'Sin mix objetivo del PDF para el periodo.',
+      nota: f2NotaParts.length ? f2NotaParts.join(' ') : null,
     }),
     kpiBase({
       clave: 'F-2.1',
@@ -265,7 +344,7 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       unidad: '%',
       display: f3 == null ? '—' : `${f3}%`,
       meta: metaGastoCtrl != null && ventaAutos > 0 ? pct(metaGastoCtrl, ventaAutos) : null,
-      status: cloudMetas ? 'completo' : 'parcial',
+      status: f3 != null ? 'completo' : 'parcial',
       tone: toneFromPct(f3, { invert: true, good: 25, warn: 35 }),
       formula: 'Gasto operativo ÷ Ventas autos nuevos × 100',
       numerador: gastoCtrlReal,
@@ -273,11 +352,15 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       detalle: {
         gastoOperativo: gastoCtrlReal,
         ventasAutos: ventaAutos,
-        proxy: cloudMetas ? 'meta_railway' : '0700_total',
+        proxy: cloudMetas?.gastoOperativoControlablePpto != null
+          ? 'meta_railway'
+          : (pptoGastosOp != null ? 'presupuesto_2026' : '0700_total'),
       },
-      nota: cloudMetas
+      nota: cloudMetas?.gastoOperativoControlablePpto != null
         ? null
-        : 'Sin clasificación controlable en Railway: se usa 0700 total como proxy.',
+        : (pptoGastosOp != null
+          ? 'Gasto operativo Contpaq 0700; meta de F-3.1 desde presupuesto 2026.'
+          : 'Gasto operativo = 0700 Contpaq (total del periodo).'),
     }),
     kpiBase({
       clave: 'F-3.1',
@@ -286,14 +369,22 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       valor: f31,
       unidad: 'MXN',
       display: f31 == null ? '—' : null,
-      status: f31 != null ? 'completo' : 'pendiente_meta',
+      meta: metaGastoCtrl,
+      status: f31 != null ? 'completo' : 'parcial',
       tone: f31 == null ? 'slate' : (f31 <= 0 ? 'green' : 'rose'),
       formula: 'Gasto real − Gasto presupuestado',
+      numerador: gastoCtrlReal,
+      denominador: metaGastoCtrl,
       detalle: {
         gastoReal: gastoCtrlReal,
         gastoPresupuesto: metaGastoCtrl,
-        fuenteMeta: cloudMetas?.gastoOperativoControlablePpto != null ? 'railway' : (ppto ? 'presupuesto_2026' : null),
+        fuenteMeta: cloudMetas?.gastoOperativoControlablePpto != null
+          ? 'railway'
+          : (pptoGastosOp != null ? 'presupuesto_2026' : null),
       },
+      nota: f31 != null
+        ? null
+        : 'Sin meta de gasto (Railway o presupuesto 2026) para calcular la brecha.',
     }),
     kpiBase({
       clave: 'F-4',
@@ -354,7 +445,7 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       valor: f6,
       unidad: '%',
       display: f6 == null ? '—' : `${f6}%`,
-      status: f6 != null ? 'parcial' : 'parcial',
+      status: f6 != null ? 'completo' : 'parcial',
       tone: f6 == null ? 'slate' : (f6 >= 0 ? 'green' : 'rose'),
       formula: '(UOC actual − UOC comparable) ÷ |UOC comparable| × 100',
       detalle: {
@@ -362,7 +453,9 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
         crecimientoEbitPct: f6,
         proxy: 'utilidad_operacion_eeff',
       },
-      nota: 'Proxy con utilidad de operación / EBIT hasta clasificar gasto controlable.',
+      nota: f6 != null
+        ? 'Crecimiento según utilidad de operación / EBIT del EEFF del periodo.'
+        : 'Sin comparable EEFF para calcular el crecimiento en este corte.',
     }),
     kpiBase({
       clave: 'F-7',
@@ -371,7 +464,7 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       valor: f7,
       unidad: '%',
       display: f7 == null ? '—' : `${f7}%`,
-      status: f7 != null ? 'parcial' : 'parcial',
+      status: f7 != null ? 'completo' : 'parcial',
       tone: toneFromPct(f7, { invert: true, good: 20, warn: 35 }),
       formula: 'Gastos administración ÷ (Utilidad bruta − gasto operativo) × 100',
       numerador: gastosAdmin,
@@ -382,6 +475,7 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
         gastoOperativo: gastoCtrlReal,
         capacidadOperativa: capacidad,
       },
+      nota: 'Admin Contpaq (grupos 740/750). Capacidad = utilidad bruta − gasto operativo.',
     }),
     kpiBase({
       clave: 'F-7.1',
@@ -390,14 +484,22 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       valor: f71,
       unidad: 'MXN',
       display: f71 == null ? '—' : null,
-      status: f71 != null ? 'completo' : 'pendiente_meta',
+      meta: metaCarga,
+      status: f71 != null ? 'completo' : 'parcial',
       tone: f71 == null ? 'slate' : (f71 <= 0 ? 'green' : 'rose'),
       formula: 'Carga estructural real − Carga presupuestada',
+      numerador: gastosAdmin,
+      denominador: metaCarga,
       detalle: {
         cargaReal: gastosAdmin,
         cargaPresupuesto: metaCarga,
-        fuenteMeta: cloudMetas?.cargaEstructuralPpto != null ? 'railway' : (ppto ? 'presupuesto_2026' : null),
+        fuenteMeta: cloudMetas?.cargaEstructuralPpto != null
+          ? 'railway'
+          : (pptoAdmin != null ? 'presupuesto_2026' : null),
       },
+      nota: f71 != null
+        ? null
+        : 'Sin meta de admin (Railway o presupuesto 2026) para calcular la brecha.',
     }),
   ];
 
@@ -421,7 +523,12 @@ async function getAnalisisFinanciero({ fechaInicio, fechaFin } = {}) {
       planPiso: planPiso > 0,
     },
     resumen: {
-      ventaNetaReal: ventaReal,
+      ventaNetaReal: ventaFacturada,
+      ventaAPl,
+      objetivoEconomico: metaVenta,
+      unidadesObjetivo,
+      fuenteObjetivo,
+      efectoBonificacion,
       ingresoFi,
       unidades,
       planPiso,

@@ -302,7 +302,7 @@ function startScheduler() {
   state.enabled = isEnabled();
   state.clockSlots = getClockSlots();
   state.timeZone = getTimeZone();
-  state.runOnStart = String(process.env.CRM_SHEETS_SYNC_ON_START || 'true').toLowerCase() !== 'false';
+  state.runOnStart = String(process.env.CRM_SHEETS_SYNC_ON_START || 'false').toLowerCase() === 'true';
 
   if (!state.enabled) {
     console.log('[crm-sheets-sync] Desactivado (CRM_SHEETS_SYNC_ENABLED=false)');

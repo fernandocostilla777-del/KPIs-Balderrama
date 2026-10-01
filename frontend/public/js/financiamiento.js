@@ -31,6 +31,7 @@
     facturaNotesByDocto: {},
     gerentesCatalog: null,
     openKpi: null,
+    themeTab: 'solicitudes',
     mixSearch: '',
     fechaInicio: null,
     fechaFin: null,
@@ -348,56 +349,28 @@
     </div>`;
   }
 
-  function seguroCls(label) {
-    const key = String(label || '').trim().toUpperCase();
-    if (key === 'CHUBB') return 'chubb';
-    if (key === 'GNP') return 'gnp';
-    if (key === 'HDI') return 'hdi';
-    if (key === 'QUALITAS') return 'qualitas';
-    return 'other';
-  }
-
   function kpiSeguroChartCard(title, opsKey, cls, block) {
-    const items = (block?.porCompania || []).map((x) => ({
-      label: x.label,
-      count: Number(x.count) || 0,
-      pct: x.pct,
-    }));
-    const total = Number(block?.contratos) || items.reduce((s, x) => s + x.count, 0);
-    const chips = [
-      `<button type="button" class="fi-seguro-stat fi-seguro-stat--total"
-        data-fi-seguro-stat="${escapeHtml(opsKey)}" data-fi-seguro-company=""
-        title="Ver todos">
-        <span class="fi-seguro-stat__label">Total</span>
-        <span class="fi-seguro-stat__value">${num(total)}</span>
-        <span class="fi-seguro-stat__pct">${pct(block?.penetracionPct)}</span>
-      </button>`,
-      ...items.map((x) => `
-        <button type="button" class="fi-seguro-stat fi-seguro-stat--${seguroCls(x.label)}"
-          data-fi-seguro-stat="${escapeHtml(opsKey)}"
-          data-fi-seguro-company="${escapeHtml(x.label)}"
-          title="Filtrar ${escapeHtml(x.label)}">
-          <span class="fi-seguro-stat__swatch" aria-hidden="true"></span>
-          <span class="fi-seguro-stat__label">${escapeHtml(x.label)}</span>
-          <span class="fi-seguro-stat__value">${num(x.count)}</span>
-          <span class="fi-seguro-stat__pct">${x.pct != null ? `${Number(x.pct).toFixed(1)}%` : '—'}</span>
-        </button>`),
-    ].join('');
-
+    const total = Number(block?.contratos) || 0;
+    const sub = total
+      ? `${num(total)} unidades · ${pct(block?.penetracionPct)} penetración`
+      : 'Sin unidades en el periodo';
+    const semiSin = Number(block?.seminuevosSinSeguro) || 0;
+    const nota = opsKey === 'seguroGratis'
+      ? `<p class="fi-seguro-kpi-note" title="Los seminuevos normalmente no incluyen seguro gratis">Nota: ${num(semiSin)} seminuevo${semiSin === 1 ? '' : 's'} no incluyen seguro y no se contabilizan.</p>`
+      : '';
     return `<div class="kpi-card kpi-card--${cls || 'blue'} kpi-card--clickable kpi-card--seguro-chart"
       data-fi-kpi="${escapeHtml(opsKey)}"
       role="button" tabindex="0"
-      title="Clic para ver detalle · clic en barra o tarjeta para filtrar compañía">
+      title="Clic para ver detalle · clic en barra para filtrar compañía">
       <div class="kpi-card-head fi-seguro-kpi-head">
         <span class="kpi-title">${escapeHtml(title)}</span>
         <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
       </div>
-      <div class="fi-seguro-stat-grid" data-fi-seguro-stats="${escapeHtml(opsKey)}">
-        ${chips}
-      </div>
+      <p class="kpi-subtitle fi-seguro-kpi-sub">${escapeHtml(sub)}</p>
       <div class="fi-seguro-kpi-chart">
         <canvas data-fi-seguro-kpi-chart="${escapeHtml(opsKey)}" aria-label="${escapeHtml(title)} por compañía"></canvas>
       </div>
+      ${nota}
       <div class="kpi-accent"></div>
     </div>`;
   }
@@ -419,6 +392,7 @@
   function paintSeguroKpiCharts() {
     destroyKpiSeguroCharts();
     if (typeof Chart === 'undefined' || !els.kpiRoot) return;
+    const labelsFn = window.Dashboard?.chartDataLabels || (typeof chartDataLabels === 'function' ? chartDataLabels : null);
 
     const paintOne = (opsKey) => {
       const canvas = els.kpiRoot.querySelector(`[data-fi-seguro-kpi-chart="${opsKey}"]`);
@@ -437,6 +411,8 @@
       const labels = items.map((x) => x.label);
       const values = items.map((x) => x.value);
       const colors = labels.map((lbl) => seguroColor(lbl));
+      const showLabels = typeof labelsFn === 'function';
+      const maxVal = values.reduce((m, v) => Math.max(m, Number(v) || 0), 0);
 
       kpiSeguroCharts[opsKey] = new Chart(canvas.getContext('2d'), {
         type: 'bar',
@@ -455,6 +431,7 @@
           indexAxis: 'y',
           responsive: true,
           maintainAspectRatio: false,
+          layout: showLabels ? { padding: { right: 28 } } : undefined,
           onClick: (evt, elements) => {
             evt.native?.stopPropagation?.();
             if (!elements?.length) return;
@@ -466,7 +443,19 @@
           },
           plugins: {
             legend: { display: false },
-            datalabels: { display: false },
+            datalabels: showLabels
+              ? {
+                ...labelsFn('barHorizontal'),
+                display: true,
+                clamp: false,
+                clip: false,
+                formatter: (value) => {
+                  const n = Number(value);
+                  if (!Number.isFinite(n) || n === 0) return '';
+                  return n.toLocaleString('es-MX');
+                },
+              }
+              : { display: false },
             tooltip: {
               callbacks: {
                 label(ctx) {
@@ -481,6 +470,7 @@
           scales: {
             x: {
               beginAtZero: true,
+              suggestedMax: showLabels && maxVal ? maxVal * 1.18 : undefined,
               ticks: { precision: 0, font: { size: 10 } },
               grid: { color: 'rgba(148, 163, 184, 0.2)' },
             },
@@ -497,31 +487,142 @@
     paintOne('seguroSubsecuente');
   }
 
-  function mixKpiGroupHtml(mix) {
-    return kpiGroup('Penetración GMF · entregas SOFIA', [
-      kpiCard('Facturas GMF', num(mix.facturasGmf), 'crédito GMF facturado', 'blue', 'facturasGmf'),
-      kpiCard(
-        'GMF Disponibles para timbrar',
-        num(mix.gmfDisponiblesTimbrar),
-        'sin SOFIA + nota CONTRATO COMPRADO',
-        'amber',
-        'gmfDispTimbrar'
-      ),
-      kpiCard('GMF en SOFIA', num(mix.gmf), `${pct(mix.penetracionGmfPct)} de entregas`, 'green', 'gmfSofia'),
-      kpiCard('Contado', num(mix.noGmf), 'entregas SOFIA de contado', 'slate', 'noGmfSofia'),
-      kpiCard('Penetración GMF', pct(mix.penetracionGmfPct), `${num(mix.gmf)} de ${num(mix.totalSofia)} entregas`, 'violet', 'penGmf'),
-      (() => {
-        const os = state.onstarTech || {};
-        const mesLabel = os.periodo?.label ? `mes ${os.periodo.label}` : 'mes actual';
-        return kpiCard(
-          'OnStar',
-          pct(os.penetracionPct),
-          `${num(os.conContrato)} de ${num(os.elegibles)} elegibles SOFIA · ${mesLabel}`,
-          'amber',
-          'onstarTech'
-        );
-      })(),
-    ]);
+  function heroStat(label, value, sub, opsKey) {
+    return `<button type="button" class="fi-hero__stat" data-fi-kpi="${opsKey}" title="Clic para ver desglose">
+      <span class="fi-hero__stat-label">${label}</span>
+      <span class="fi-hero__stat-value">${value}</span>
+      ${sub ? `<span class="fi-hero__stat-sub">${sub}</span>` : ''}
+    </button>`;
+  }
+
+  function renderHeroGmf(mix) {
+    const pen = mix.penetracionGmfPct;
+    const penLabel = pct(pen);
+    const barPct = pen != null && Number.isFinite(Number(pen))
+      ? Math.max(0, Math.min(100, Number(pen)))
+      : 0;
+    const barClass = barPct >= 70 ? 'is-good' : barPct >= 50 ? 'is-warn' : 'is-bad';
+    const os = state.onstarTech || {};
+    const mesLabel = os.periodo?.label ? `mes ${os.periodo.label}` : 'mes actual';
+
+    return `
+      <div class="fi-hero__main" data-fi-kpi="penGmf" role="button" tabindex="0" title="Clic para ver desglose">
+        <span class="fi-hero__kicker">Penetración GMF</span>
+        <div class="fi-hero__pct">${penLabel}</div>
+        <p class="fi-hero__hint">${num(mix.gmf)} de ${num(mix.totalSofia)} entregas SOFIA</p>
+        <div class="fi-hero__bar" aria-hidden="true">
+          <span class="fi-hero__bar-fill ${barClass}" style="width:${barPct}%"></span>
+        </div>
+      </div>
+      <div class="fi-hero__stats">
+        ${heroStat('Facturas GMF', num(mix.facturasGmf), 'crédito facturado', 'facturasGmf')}
+        ${heroStat('Disponibles timbrar', num(mix.gmfDisponiblesTimbrar), 'sin SOFIA + nota', 'gmfDispTimbrar')}
+        ${heroStat('GMF en SOFIA', num(mix.gmf), `${penLabel} de entregas`, 'gmfSofia')}
+        ${heroStat('OnStar', pct(os.penetracionPct), `${num(os.conContrato)} / ${num(os.elegibles)} · ${mesLabel}`, 'onstarTech')}
+      </div>`;
+  }
+
+  const FI_THEME_TABS = ['solicitudes', 'volumen', 'pva', 'seguros'];
+  const FI_THEME_STORAGE_KEY = 'fiThemeTab';
+
+  function tabForKpi(key) {
+    if (MIX_KEYS.has(key) || ONSTAR_KEYS.has(key)) return null;
+    if (SEGURO_KEYS.has(key)) return 'seguros';
+    if (PVA_KEYS.has(key)) return 'pva';
+    if (['solicitudes', 'aprobadas', 'aprobadasNoCompradas', 'rechazadas'].includes(key)) return 'solicitudes';
+    return 'volumen';
+  }
+
+  function readStoredThemeTab() {
+    try {
+      const v = sessionStorage.getItem(FI_THEME_STORAGE_KEY);
+      if (FI_THEME_TABS.includes(v)) return v;
+    } catch { /* ignore */ }
+    return 'solicitudes';
+  }
+
+  function setThemeTab(tab, { persist = true, forceCharts = false } = {}) {
+    const next = FI_THEME_TABS.includes(tab) ? tab : 'solicitudes';
+    const same = next === state.themeTab
+      && els.panels?.[next]
+      && !els.panels[next].hidden;
+
+    if (state.openKpi) {
+      const owned = tabForKpi(state.openKpi);
+      if (owned && owned !== next) closeKpiDetail();
+    }
+
+    state.themeTab = next;
+    if (persist) {
+      try { sessionStorage.setItem(FI_THEME_STORAGE_KEY, next); } catch { /* ignore */ }
+    }
+
+    els.themeTabs?.querySelectorAll('[data-fi-tab]').forEach((btn) => {
+      const on = btn.getAttribute('data-fi-tab') === next;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      if (on) {
+        try {
+          btn.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+        } catch { /* ignore */ }
+      }
+    });
+
+    if (els.panels) {
+      Object.entries(els.panels).forEach(([id, panel]) => {
+        if (!panel) return;
+        const on = id === next;
+        panel.classList.toggle('hidden', !on);
+        panel.hidden = !on;
+        if (on && !same) {
+          panel.classList.remove('fi-theme-panel--enter');
+          // force reflow for enter animation
+          void panel.offsetWidth;
+          panel.classList.add('fi-theme-panel--enter');
+        }
+      });
+    }
+
+    if (next === 'seguros' && (!same || forceCharts)) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          paintSeguroKpiCharts();
+          Object.values(kpiSeguroCharts).forEach((chart) => {
+            try { chart?.resize?.(); } catch { /* ignore */ }
+          });
+        });
+      });
+    }
+  }
+
+  function bindThemeTabs() {
+    if (!els.themeTabs || els.themeTabs._fiTabsBound) return;
+    els.themeTabs._fiTabsBound = true;
+    els.themeTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-fi-tab]');
+      if (!btn || !els.themeTabs.contains(btn)) return;
+      setThemeTab(btn.getAttribute('data-fi-tab'));
+    });
+    els.themeTabs.addEventListener('keydown', (e) => {
+      const btn = e.target.closest('[data-fi-tab]');
+      if (!btn || !els.themeTabs.contains(btn)) return;
+      const buttons = Array.from(els.themeTabs.querySelectorAll('[data-fi-tab]'));
+      const idx = buttons.indexOf(btn);
+      if (idx < 0) return;
+      let nextIdx = idx;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIdx = (idx + 1) % buttons.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nextIdx = (idx - 1 + buttons.length) % buttons.length;
+      else if (e.key === 'Home') nextIdx = 0;
+      else if (e.key === 'End') nextIdx = buttons.length - 1;
+      else return;
+      e.preventDefault();
+      buttons[nextIdx]?.focus();
+      setThemeTab(buttons[nextIdx].getAttribute('data-fi-tab'));
+    });
+  }
+
+  function onVisible() {
+    setThemeTab(state.themeTab || readStoredThemeTab(), { persist: false, forceCharts: true });
   }
 
   function contracts() {
@@ -586,6 +687,10 @@
         return list.filter((c) => volumeTipoOf(c) === 'seminuevo');
       case 'unidadesFlotilla':
         return list.filter((c) => volumeTipoOf(c) === 'flotilla');
+      case 'unidadesDemo':
+        return list.filter((c) => volumeTipoOf(c) === 'demo');
+      case 'unidadesOtros':
+        return list.filter((c) => volumeTipoOf(c) === 'otro');
       case 'conPva':
         return list.filter((c) => Number(c.cantidadPvas || 0) > 0);
       case 'pvaGap':
@@ -595,7 +700,7 @@
       case 'pvaAccesorios':
         return list.filter((c) => c.pvas?.some((p) => p.key === 'accesorios'));
       case 'pvaOnstar':
-        return list.filter((c) => c.pvas?.some((p) => p.key === 'onstar'));
+        return list.filter((c) => c.hasOnstarContrato || c.pvas?.some((p) => p.key === 'onstar'));
       case 'pvaMant':
         return list.filter((c) => c.pvas?.some((p) => p.key === 'mantenimiento'));
       case 'seguroGratis':
@@ -611,6 +716,7 @@
           idCrm: r.idCrm || null,
           noSolicitud: r.noSolicitud || null,
           contrato: r.contrato,
+          fechaCompra: r.fechaCompra || null,
           asesor: r.asesor || null,
           financiera: r.financiera || null,
           unidad: r.unidad || null,
@@ -631,6 +737,16 @@
       case 'aprobadas':
         return rowsForKpi('solicitudes').filter((r) =>
           String(r.estatus || r.tipoCompra || '').toUpperCase().includes('APROBADA')
+        );
+      case 'aprobadasNoCompradas':
+        return rowsForKpi('aprobadas').filter((r) => {
+          const est = String(r.estatus || r.tipoCompra || '').toUpperCase();
+          const conContrato = Boolean(r.contrato || r.fechaCompra || r.fecha_compra || est.includes('FACT'));
+          return !conContrato;
+        });
+      case 'rechazadas':
+        return rowsForKpi('solicitudes').filter((r) =>
+          String(r.estatus || r.tipoCompra || '').toUpperCase().includes('RECHAZADA')
         );
       default:
         return list;
@@ -668,7 +784,15 @@
       },
       unidadesFlotilla: {
         title: 'Flotillas',
-        hint: 'Contratos de flotilla (restadas de Nuevos)',
+        hint: 'Contratos de flotilla (col. AO; restadas de Nuevos/Seminuevos)',
+      },
+      unidadesDemo: {
+        title: 'Demo',
+        hint: 'Contratos con tipo de compra DEMO (col. AN)',
+      },
+      unidadesOtros: {
+        title: 'Otros',
+        hint: 'Contratos sin clasificar como Nuevo, Seminuevo, Flotilla o Demo',
       },
       montoTotal: { title: 'Monto a financiar', hint: 'Suma de monto_financiar' },
       montoPromedio: { title: 'Monto promedio', hint: 'Promedio por contrato' },
@@ -678,16 +802,21 @@
       pvaGap: { title: 'GAP', hint: 'Contratos con GAP' },
       pvaGarantia: { title: 'Garantía extendida', hint: 'Contratos con GE' },
       pvaAccesorios: { title: 'Accesorios', hint: 'Contratos con accesorios' },
-      pvaOnstar: { title: 'OnStar', hint: 'Contratos con OnStar' },
+      pvaOnstar: {
+        title: 'OnStar',
+        hint: 'Contratos con OnStar (monto > 0 o plazo OnStar capturado)',
+      },
       pvaMant: { title: 'Mantenimientos', hint: 'Contratos con mantenimiento integrado' },
       seguroGratis: {
         title: 'Seguro gratis',
         hint: (() => {
           const sg = state.data?.summary?.seguroGratis || {};
           const comps = (sg.porCompania || []).slice(0, 4).map((c) => `${c.label} ${c.count}`).join(' · ');
-          return comps
+          const semi = Number(sg.seminuevosSinSeguro) || 0;
+          const base = comps
             ? `Unidades con seguro gratis (col. AE) · ${comps}`
             : 'Unidades con seguro gratis (col. AE) y compañía aseguradora';
+          return `${base}. Nota: ${num(semi)} seminuevos no incluyen seguro y no se contabilizan.`;
         })(),
       },
       seguroSubsecuente: {
@@ -701,7 +830,22 @@
         })(),
       },
       solicitudes: { title: 'Solicitudes F&I', hint: 'Solicitudes del periodo' },
-      aprobadas: { title: 'Solicitudes aprobadas', hint: 'Estatus contiene APROBADA' },
+      aprobadas: {
+        title: 'Solicitudes aprobadas',
+        hint: (() => {
+          const sol = state.data?.summary?.solicitudes || {};
+          const conv = sol.tasaConversionContratoPct;
+          const n = sol.aprobadasConContrato;
+          const base = 'Estatus contiene APROBADA';
+          if (conv == null) return base;
+          return `${base} · conversión a contrato ${Number(conv).toFixed(1)}% (${num(n)} de ${num(sol.aprobadas)})`;
+        })(),
+      },
+      rechazadas: { title: 'Solicitudes rechazadas', hint: 'Estatus contiene RECHAZADA' },
+      aprobadasNoCompradas: {
+        title: 'Aprobadas no compradas',
+        hint: 'Aprobadas sin contrato / crédito (sin no. contrato, sin fecha de compra y sin FACT)',
+      },
     };
     return map[key] || { title: key, hint: '' };
   }
@@ -730,6 +874,8 @@
       unidadesNuevos: 'directions_car',
       unidadesSeminuevos: 'airport_shuttle',
       unidadesFlotilla: 'local_shipping',
+      unidadesDemo: 'science',
+      unidadesOtros: 'category',
       montoTotal: 'payments',
       montoPromedio: 'payments',
       enganche: 'account_balance_wallet',
@@ -744,6 +890,8 @@
       seguroSubsecuente: 'policy',
       solicitudes: 'request_quote',
       aprobadas: 'check_circle',
+      rechazadas: 'cancel',
+      aprobadasNoCompradas: 'hourglass_top',
     };
     return map[key] || 'analytics';
   }
@@ -910,6 +1058,7 @@
               <div class="fi-seguro-chart-panel__chart">
                 <canvas data-fi-seguro-gratis-chart aria-label="Barras horizontal seguro gratis por compañía"></canvas>
               </div>
+              <p class="fi-seguro-chart-panel__note" data-fi-seguro-gratis-note></p>
             </div>
             <div class="fi-seguro-chart-panel__block">
               <h6 data-fi-seguro-sub-title>Seguro subsecuente</h6>
@@ -948,6 +1097,7 @@
     const seguroMeta = panel.querySelector('[data-fi-seguro-chart-meta]');
     const seguroGratisTitle = panel.querySelector('[data-fi-seguro-gratis-title]');
     const seguroSubTitle = panel.querySelector('[data-fi-seguro-sub-title]');
+    const seguroGratisNote = panel.querySelector('[data-fi-seguro-gratis-note]');
     const seguroGratisCanvas = panel.querySelector('[data-fi-seguro-gratis-chart]');
     const seguroSubCanvas = panel.querySelector('[data-fi-seguro-sub-chart]');
 
@@ -1125,7 +1275,10 @@
 
       if (!isMixKpi(currentMeta.kpi)) {
         const s = state.data?.summary || {};
-        const isSolicitudes = currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas';
+        const isSolicitudes = currentMeta.kpi === 'solicitudes'
+          || currentMeta.kpi === 'aprobadas'
+          || currentMeta.kpi === 'rechazadas'
+          || currentMeta.kpi === 'aprobadasNoCompradas';
         const isOnstar = isOnstarKpi(currentMeta.kpi);
         const porGerente = countByField(rows, (r) => r.gerenteFi || r.fi || 'Sin gerente F&I');
         const porAsesor = countByField(rows, (r) => r.asesor || 'Sin asesor').slice(0, 10);
@@ -1179,6 +1332,7 @@
             (r) => (isGratis ? r.seguroGratis : r.seguroSubsecuente) || 'Sin compañía',
           );
           const blockLabel = isGratis ? 'Seguro gratis' : 'Seguro subsecuente';
+          const semiSin = Number(state.data?.summary?.seguroGratis?.seminuevosSinSeguro) || 0;
           summaryEl.innerHTML = `
             <div class="ops-orders-drawer__group">
               <h5>Resumen</h5>
@@ -1187,7 +1341,9 @@
               <p class="ops-orders-drawer__hint">${escapeHtml(isGratis
                 ? 'Columna AE · seguro gratis (vigencia 12 meses) y compañía'
                 : 'Columna AF · seguro subsecuente y compañía')}</p>
-              <p class="ops-orders-drawer__hint">Las compañías se muestran en el gráfico de barras.</p>
+              ${isGratis
+                ? `<p class="ops-orders-drawer__hint">Nota: ${num(semiSin)} seminuevo${semiSin === 1 ? '' : 's'} no incluyen seguro y no se contabilizan.</p>`
+                : '<p class="ops-orders-drawer__hint">Las compañías se muestran en el gráfico de barras.</p>'}
             </div>
             ${block('Por gerente F&I', 'gerente', porGerente)}
             ${block('Por asesor', 'asesor', porAsesor)}
@@ -1200,6 +1356,12 @@
           <div class="ops-orders-drawer__group">
             <h5>Resumen</h5>
             <div class="ops-orders-drawer__row"><span class="lbl">Registros</span><span class="val">${num(rows.length)}</span></div>
+            ${currentMeta.kpi === 'aprobadas' ? (() => {
+              const sol = s.solicitudes || {};
+              return `
+            <div class="ops-orders-drawer__row"><span class="lbl">Con contrato</span><span class="val">${num(sol.aprobadasConContrato)}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Conv. a contrato</span><span class="val">${pct(sol.tasaConversionContratoPct)}</span></div>`;
+            })() : ''}
             ${isSolicitudes ? '' : `
             <div class="ops-orders-drawer__row"><span class="lbl">Monto a financiar</span><span class="val">${money(monto)}</span></div>
             <div class="ops-orders-drawer__row"><span class="lbl">Enganche</span><span class="val">${money(enganche)}</span></div>
@@ -1343,7 +1505,10 @@
       }
 
       if (crmMode) {
-        const isSolicitudes = currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas';
+        const isSolicitudes = currentMeta.kpi === 'solicitudes'
+          || currentMeta.kpi === 'aprobadas'
+          || currentMeta.kpi === 'rechazadas'
+          || currentMeta.kpi === 'aprobadasNoCompradas';
         const isOnstar = isOnstarKpi(currentMeta.kpi);
         bodyEl.innerHTML = `
           <div class="ops-orders-drawer__list-head">
@@ -1534,7 +1699,7 @@
       mainEl?.classList.remove('ops-orders-drawer__main--with-seguro');
     }
 
-    function buildHorizontalSeguroChart(canvas, items, { activeLabel, onBarClick } = {}) {
+    function buildHorizontalSeguroChart(canvas, items, { activeLabel, onBarClick, showDataLabels = false } = {}) {
       if (!canvas || typeof Chart === 'undefined') return null;
       const labels = items.map((x) => x.label);
       const values = items.map((x) => x.value);
@@ -1544,6 +1709,9 @@
         if (activeLabel) return `${base}99`;
         return base;
       });
+      const labelsFn = window.Dashboard?.chartDataLabels || (typeof chartDataLabels === 'function' ? chartDataLabels : null);
+      const withLabels = showDataLabels && typeof labelsFn === 'function';
+      const maxVal = values.reduce((m, v) => Math.max(m, Number(v) || 0), 0);
       return new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
@@ -1562,6 +1730,7 @@
           indexAxis: 'y',
           responsive: true,
           maintainAspectRatio: false,
+          layout: withLabels ? { padding: { right: 32 } } : undefined,
           onClick: (_evt, elements) => {
             if (!elements?.length || typeof onBarClick !== 'function') return;
             const idx = elements[0].index;
@@ -1570,7 +1739,19 @@
           },
           plugins: {
             legend: { display: false },
-            datalabels: { display: false },
+            datalabels: withLabels
+              ? {
+                ...labelsFn('barHorizontal'),
+                display: true,
+                clamp: false,
+                clip: false,
+                formatter: (value) => {
+                  const n = Number(value);
+                  if (!Number.isFinite(n) || n === 0) return '';
+                  return n.toLocaleString('es-MX');
+                },
+              }
+              : { display: false },
             tooltip: {
               callbacks: {
                 label(ctx) {
@@ -1585,6 +1766,7 @@
           scales: {
             x: {
               beginAtZero: true,
+              suggestedMax: withLabels && maxVal ? maxVal * 1.15 : undefined,
               ticks: { precision: 0, font: { size: 10 } },
               grid: { color: 'rgba(148, 163, 184, 0.22)' },
             },
@@ -1612,6 +1794,13 @@
       if (seguroGratisTitle) {
         seguroGratisTitle.textContent = 'Seguro gratis';
         seguroGratisTitle.classList.toggle('is-active', kpiKey === 'seguroGratis');
+      }
+      if (seguroGratisNote) {
+        const fromApi = Number(state.data?.summary?.seguroGratis?.seminuevosSinSeguro);
+        const semiSin = Number.isFinite(fromApi)
+          ? fromApi
+          : (contracts() || []).filter((c) => volumeTipoOf(c) === 'seminuevo' && !(c.hasSeguroGratis || c.seguroGratis)).length;
+        seguroGratisNote.textContent = `Nota: ${num(semiSin)} seminuevo${semiSin === 1 ? '' : 's'} no incluyen seguro y no se contabilizan.`;
       }
       if (seguroSubTitle) {
         seguroSubTitle.textContent = 'Seguro subsecuente';
@@ -1641,10 +1830,12 @@
       seguroGratisChart = buildHorizontalSeguroChart(seguroGratisCanvas, gratisItems, {
         activeLabel: kpiKey === 'seguroGratis' ? activeCompania : null,
         onBarClick: (label) => focusCompany('seguroGratis', label),
+        showDataLabels: true,
       });
       seguroSubChart = buildHorizontalSeguroChart(seguroSubCanvas, subItems, {
         activeLabel: kpiKey === 'seguroSubsecuente' ? activeCompania : null,
         onBarClick: (label) => focusCompany('seguroSubsecuente', label),
+        showDataLabels: true,
       });
     }
 
@@ -1797,7 +1988,7 @@
       lastCard = null;
       state.openKpi = null;
       state.pendingSeguroCompanyFilter = null;
-      els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
+      els.kpiRoot?.querySelectorAll('[data-fi-kpi].is-open').forEach((c) => c.classList.remove('is-open'));
     }
 
     function open(rows, card, meta = {}) {
@@ -1814,7 +2005,7 @@
       if (searchEl) {
         searchEl.placeholder = isMixKpi(currentMeta.kpi)
           ? 'Buscar factura, VIN, cliente, tipo...'
-          : (currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas'
+          : (currentMeta.kpi === 'solicitudes' || currentMeta.kpi === 'aprobadas' || currentMeta.kpi === 'rechazadas' || currentMeta.kpi === 'aprobadasNoCompradas'
             ? 'Buscar cliente, solicitud, financiera, respuesta, CRM...'
             : (isOnstarKpi(currentMeta.kpi)
               ? 'Buscar VIN, unidad, cliente, plazo OnStar...'
@@ -2500,6 +2691,7 @@
     if (ao.includes('FLOTILLA')) return 'flotilla';
     if (an === 'SEMINUEVO') return 'seminuevo';
     if (an === 'NUEVO') return 'nuevo';
+    if (an === 'DEMO') return 'demo';
     return 'otro';
   }
 
@@ -2507,97 +2699,152 @@
     let nuevos = 0;
     let seminuevos = 0;
     let flotillas = 0;
+    let demo = 0;
+    let otros = 0;
     for (const c of contracts || []) {
       const tipo = volumeTipoOf(c);
       if (tipo === 'flotilla') flotillas += 1;
       else if (tipo === 'seminuevo') seminuevos += 1;
       else if (tipo === 'nuevo') nuevos += 1;
+      else if (tipo === 'demo') demo += 1;
+      else otros += 1;
     }
-    return { nuevos, seminuevos, flotillas };
+    return { nuevos, seminuevos, flotillas, demo, otros };
   }
 
   function renderKpis() {
-    const root = els.kpiRoot;
-    if (!root) return;
+    const hero = els.hero;
+    const panels = els.panels || {};
+    if (!hero && !els.kpiRoot) return;
     const s = state.data?.summary || {};
     const mix = state.retailMix || {};
     const sol = s.solicitudes || {};
     const pva = Object.fromEntries((s.porTipoPva || []).map((t) => [t.key, t]));
-    const mixBlock = mixKpiGroupHtml(mix);
-    // Calcular en cliente (AN/AO) por si el API aún no trae los campos nuevos.
+
+    if (hero) hero.innerHTML = renderHeroGmf(mix);
+
     const vol = volumeByTipoCompra(state.data?.contratos || []);
     const nNuevos = Number.isFinite(Number(s.unidadesNuevos)) ? Number(s.unidadesNuevos) : vol.nuevos;
     const nSemi = Number.isFinite(Number(s.unidadesSeminuevos)) ? Number(s.unidadesSeminuevos) : vol.seminuevos;
     const nFlot = Number.isFinite(Number(s.unidadesFlotilla)) ? Number(s.unidadesFlotilla) : vol.flotillas;
+    const nDemo = Number.isFinite(Number(s.unidadesDemo)) ? Number(s.unidadesDemo) : vol.demo;
+    const nOtros = Number.isFinite(Number(s.unidadesOtros)) ? Number(s.unidadesOtros) : vol.otros;
+    const nContratos = Number(s.contratos) || (nNuevos + nSemi + nFlot + nDemo + nOtros);
+    const volumenCards = [
+      kpiCard(
+        'Contratos',
+        num(nContratos),
+        'Nuevos + Seminuevos + Flotillas + Demo',
+        'blue',
+        'contratos'
+      ),
+      kpiCard(
+        'Nuevos',
+        num(nNuevos),
+        `de ${num(nContratos)} contratos`,
+        'green',
+        'unidadesNuevos'
+      ),
+      kpiCard(
+        'Seminuevos',
+        num(nSemi),
+        `de ${num(nContratos)} contratos`,
+        'amber',
+        'unidadesSeminuevos'
+      ),
+      kpiCard(
+        'Flotillas',
+        num(nFlot),
+        'restadas de Nuevos/Seminuevos',
+        'slate',
+        'unidadesFlotilla'
+      ),
+      kpiCard(
+        'Demo',
+        num(nDemo),
+        `de ${num(nContratos)} contratos`,
+        'violet',
+        'unidadesDemo'
+      ),
+    ];
+    if (nOtros > 0) {
+      volumenCards.push(
+        kpiCard('Otros', num(nOtros), 'sin clasificar AN/AO', 'rose', 'unidadesOtros'),
+      );
+    }
+    volumenCards.push(
+      kpiCard('Monto a financiar', moneyKpi(s.montoFinanciarTotal), `prom. ${moneyKpi(s.montoFinanciarPromedio)}`, 'violet', 'montoTotal'),
+      kpiCard('Enganche prom.', moneyKpi(s.enganchePromedio), 'por contrato', 'amber', 'enganche'),
+      kpiCard('Plazo prom.', s.plazoPromedio != null ? `${s.plazoPromedio} mes` : '—', 'meses contratados', 'slate', 'plazo'),
+    );
 
     if (!state.data?.fuente?.crm) {
-      root.innerHTML = [
-        mixBlock,
-        `<div class="fi-empty">
+      const emptyCrm = `<div class="fi-empty">
           <p>No hay base CRM de financiamiento disponible.</p>
           <p class="section-subtitle">La penetración GMF sí se calcula con entregas SOFIA del periodo consultado.</p>
-        </div>`,
-      ].join('');
+        </div>`;
+      if (panels.solicitudes) panels.solicitudes.innerHTML = emptyCrm;
+      if (panels.volumen) panels.volumen.innerHTML = '';
+      if (panels.pva) panels.pva.innerHTML = '';
+      if (panels.seguros) panels.seguros.innerHTML = '';
+      setThemeTab(state.themeTab || readStoredThemeTab(), { persist: false });
       bindKpiCards();
       restoreOpenKpi();
       return;
     }
 
-    root.innerHTML = [
-      mixBlock,
-      kpiGroup('Solicitudes F&I', [
+    if (panels.solicitudes) {
+      panels.solicitudes.innerHTML = kpiGroup('Solicitudes F&I', [
         kpiCard('Solicitudes', num(sol.total), 'en el periodo', 'blue', 'solicitudes'),
-        kpiCard('Aprobadas', num(sol.aprobadas), `tasa ${pct(sol.tasaAprobacionPct)}`, 'green', 'aprobadas'),
-      ]),
-      kpiGroup('Volumen F&I', [
-        kpiCard('Contratos', num(s.contratos), 'colocados en el periodo', 'blue', 'contratos'),
         kpiCard(
-          'Nuevos',
-          num(nNuevos),
-          `de ${num(s.contratos)} contratos`,
+          'Aprobadas',
+          num(sol.aprobadas),
+          `aprob. ${pct(sol.tasaAprobacionPct)} · conv. contrato ${pct(sol.tasaConversionContratoPct)}`,
           'green',
-          'unidadesNuevos'
+          'aprobadas'
         ),
         kpiCard(
-          'Seminuevos',
-          num(nSemi),
-          'en el periodo',
+          'Aprobadas no compradas',
+          num(sol.aprobadasNoCompradas),
+          `${pct(sol.tasaNoCompraPct)} de aprobadas · sin crédito`,
           'amber',
-          'unidadesSeminuevos'
+          'aprobadasNoCompradas'
         ),
-        kpiCard(
-          'Flotillas',
-          num(nFlot),
-          'restadas de Nuevos',
-          'slate',
-          'unidadesFlotilla'
-        ),
-        kpiCard('Monto a financiar', moneyKpi(s.montoFinanciarTotal), `prom. ${moneyKpi(s.montoFinanciarPromedio)}`, 'violet', 'montoTotal'),
-        kpiCard('Enganche prom.', moneyKpi(s.enganchePromedio), 'por contrato', 'amber', 'enganche'),
-        kpiCard('Plazo prom.', s.plazoPromedio != null ? `${s.plazoPromedio} mes` : '—', 'meses contratados', 'slate', 'plazo'),
-      ]),
-      kpiGroup('Productos PVA', [
+        kpiCard('Rechazadas', num(sol.rechazadas), `tasa ${pct(sol.tasaRechazoPct)}`, 'rose', 'rechazadas'),
+      ]);
+    }
+    if (panels.volumen) {
+      panels.volumen.innerHTML = kpiGroup('Volumen F&I', volumenCards);
+    }
+    if (panels.pva) {
+      panels.pva.innerHTML = kpiGroup('Productos PVA', [
         kpiCard('Con PVA', num(s.contratosConPva), `penetración ${pct(s.penetracionPvaPct)}`, 'green', 'conPva'),
         kpiCard('GAP', num(pva.gap?.contratos || 0), pct(pva.gap?.penetracionPct), 'violet', 'pvaGap'),
         kpiCard('Garantía ext.', num(pva.garantia?.contratos || 0), pct(pva.garantia?.penetracionPct), 'blue', 'pvaGarantia'),
         kpiCard('Accesorios', num(pva.accesorios?.contratos || 0), pct(pva.accesorios?.penetracionPct), 'amber', 'pvaAccesorios'),
         kpiCard('OnStar', num(pva.onstar?.contratos || 0), pct(pva.onstar?.penetracionPct), 'slate', 'pvaOnstar'),
         kpiCard('Mantenimientos', num(pva.mantenimiento?.contratos || 0), pct(pva.mantenimiento?.penetracionPct), 'rose', 'pvaMant'),
-      ]),
-      kpiGroup('Seguros', [
+      ]);
+    }
+    if (panels.seguros) {
+      panels.seguros.innerHTML = kpiGroup('Seguros', [
         kpiSeguroChartCard('Seguro gratis', 'seguroGratis', 'green', s.seguroGratis),
         kpiSeguroChartCard('Seguro subsecuente', 'seguroSubsecuente', 'blue', s.seguroSubsecuente),
-      ], 'kpi-grid--seguro'),
-    ].join('');
+      ], 'kpi-grid--seguro');
+    }
 
+    setThemeTab(state.themeTab || readStoredThemeTab(), { persist: false });
     bindKpiCards();
-    bindSeguroStatCards();
-    paintSeguroKpiCharts();
+    if (state.themeTab === 'seguros') paintSeguroKpiCharts();
     restoreOpenKpi();
   }
 
   function restoreOpenKpi() {
     if (!state.openKpi) return;
+    const neededTab = tabForKpi(state.openKpi);
+    if (neededTab && neededTab !== state.themeTab) {
+      setThemeTab(neededTab, { persist: false });
+    }
     const card = els.kpiRoot?.querySelector(`[data-fi-kpi="${state.openKpi}"]`);
     if (card) {
       const keep = state.openKpi;
@@ -2607,44 +2854,35 @@
   }
 
   function bindKpiCards() {
-    els.kpiRoot?.querySelectorAll('[data-fi-kpi]').forEach((card) => {
-      const key = card.getAttribute('data-fi-kpi');
-      const activate = () => {
-        if (state.openKpi === key) {
-          closeKpiDetail();
-          return;
-        }
-        openKpiDetail(key, card);
-      };
-      card.addEventListener('click', activate);
-      card.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') {
-          ev.preventDefault();
-          activate();
-        }
-      });
+    if (!els.kpiRoot || els.kpiRoot._fiKpiBound) return;
+    els.kpiRoot._fiKpiBound = true;
+    const activate = (card) => {
+      const key = card?.getAttribute?.('data-fi-kpi');
+      if (!key) return;
+      if (state.openKpi === key) {
+        closeKpiDetail();
+        return;
+      }
+      openKpiDetail(key, card);
+    };
+    els.kpiRoot.addEventListener('click', (e) => {
+      const card = e.target.closest('[data-fi-kpi]');
+      if (!card || !els.kpiRoot.contains(card)) return;
+      activate(card);
     });
-  }
-
-  function bindSeguroStatCards() {
-    els.kpiRoot?.querySelectorAll('[data-fi-seguro-stat]').forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const opsKey = btn.getAttribute('data-fi-seguro-stat');
-        const company = String(btn.getAttribute('data-fi-seguro-company') || '').trim();
-        if (!opsKey) return;
-        state.pendingSeguroCompanyFilter = company || null;
-        const card = els.kpiRoot?.querySelector(`[data-fi-kpi="${opsKey}"]`);
-        openKpiDetail(opsKey, card);
-      });
+    els.kpiRoot.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+      const card = ev.target.closest('[data-fi-kpi]');
+      if (!card || !els.kpiRoot.contains(card)) return;
+      ev.preventDefault();
+      activate(card);
     });
   }
 
   function closeKpiDetail() {
     state.openKpi = null;
     state.mixSearch = '';
-    els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
+    els.kpiRoot?.querySelectorAll('[data-fi-kpi].is-open').forEach((c) => c.classList.remove('is-open'));
     if (els.detailPanel) els.detailPanel.classList.add('hidden');
     closeFiMixDrawer();
     renderTable(contracts());
@@ -2652,7 +2890,11 @@
 
   function openKpiDetail(key, card) {
     state.openKpi = key;
-    els.kpiRoot?.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
+    const neededTab = tabForKpi(key);
+    if (neededTab && neededTab !== state.themeTab) {
+      setThemeTab(neededTab);
+    }
+    els.kpiRoot?.querySelectorAll('[data-fi-kpi].is-open').forEach((c) => c.classList.remove('is-open'));
     card?.classList.add('is-open');
 
     if (els.detailPanel) els.detailPanel.classList.add('hidden');
@@ -2785,8 +3027,13 @@
     if (els.subtitle) {
       els.subtitle.textContent = `Periodo ${fechaInicio} → ${fechaFin} · Cargando contratos, facturas y SOFIA…`;
     }
-    if (els.kpiRoot) {
-      els.kpiRoot.innerHTML = '<div class="fi-empty"><p>Cargando contratos, facturas y SOFIA…</p></div>';
+    if (els.hero) {
+      els.hero.innerHTML = '<div class="fi-empty"><p>Cargando contratos, facturas y SOFIA…</p></div>';
+    }
+    if (els.panels) {
+      Object.values(els.panels).forEach((panel) => {
+        if (panel) panel.innerHTML = '';
+      });
     }
 
     state.inflightPromise = (async () => {
@@ -2883,7 +3130,7 @@
           fuente: { crm: false, reason: err.message },
           summary: {},
           contratos: [],
-          solicitudes: { total: 0, aprobadas: 0, muestra: [] },
+          solicitudes: { total: 0, aprobadas: 0, rechazadas: 0, aprobadasNoCompradas: 0, muestra: [] },
         };
         state.onstarTech = null;
         state.retailMix = buildSofiaGmfMix([], []);
@@ -2935,6 +3182,14 @@
     els.root = document.getElementById('secFinanciamiento');
     els.subtitle = document.getElementById('fiSubtitle');
     els.kpiRoot = document.getElementById('fiKpiOperational');
+    els.hero = document.getElementById('fiHeroGmf');
+    els.themeTabs = document.getElementById('fiThemeTabs');
+    els.panels = {
+      solicitudes: document.getElementById('fiPanelSolicitudes'),
+      volumen: document.getElementById('fiPanelVolumen'),
+      pva: document.getElementById('fiPanelPva'),
+      seguros: document.getElementById('fiPanelSeguros'),
+    };
     els.detailPanel = document.getElementById('fiKpiDetail');
     els.detailTitle = document.getElementById('fiDetailTitle');
     els.detailResumen = document.getElementById('fiDetailResumen');
@@ -2942,6 +3197,11 @@
     els.tableBody = document.getElementById('fiTableBody');
     els.searchInput = document.getElementById('buscarFiPreview');
     els.searchMeta = document.getElementById('fiPreviewSearchMeta');
+
+    state.themeTab = readStoredThemeTab();
+    bindThemeTabs();
+    bindKpiCards();
+    setThemeTab(state.themeTab, { persist: false });
 
     els.btnCloseDetail?.addEventListener('click', closeKpiDetail);
     els.searchInput?.addEventListener('input', () => {
@@ -2959,5 +3219,5 @@
     loadGerentesCatalog().catch(() => {});
   }
 
-  window.FinanciamientoVentas = { init, load, hasCache, applyVentasMix };
+  window.FinanciamientoVentas = { init, load, hasCache, applyVentasMix, onVisible };
 })();

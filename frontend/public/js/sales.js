@@ -1,14 +1,23 @@
 ﻿(function () {
   'use strict';
 
-  const SALES_JS_BUILD = 104;
+  const SALES_JS_BUILD = 125;
   if (window.__salesPageInitBuild === SALES_JS_BUILD) return;
 
   let registrosActuales = [];
   let entregasActuales = [];
   let apartadasActuales = [];
   let tomasACuentaActuales = [];
-  let tomasACuentaMeta = { porModeloToma: [], montoAdquisicion: 0, totalVendidosMismoMes: 0, pctVendidosMismoMes: 0 };
+  let tomasChartRegistros = [];
+  let tomasACuentaMeta = {
+    porModeloToma: [],
+    montoAdquisicion: 0,
+    totalVendidos: 0,
+    totalEnInventario: 0,
+    pctVendidos: 0,
+    totalVendidosMismoMes: 0,
+    pctVendidosMismoMes: 0,
+  };
   let activeVentasKpiType = null;
   let activeVentasDrawerKpi = null;
   let ventasDrawerUi = null;
@@ -17,6 +26,7 @@
   let tomasQuarters = new Set([1, 2, 3, 4]);
   let lastTomasMensual = null;
   let lastMixAutos = null;
+  let lineasVsMetaActual = null;
   let mixOtrosExpanded = false;
   let mixOtrosFloat = null;
   let comparativoPeriodoActual = null;
@@ -31,10 +41,113 @@
       panel.classList.toggle('hidden', !mixOtrosExpanded);
       panel.hidden = !mixOtrosExpanded;
     }
-    if (btn) btn.setAttribute('aria-expanded', mixOtrosExpanded ? 'true' : 'false');
-    if (label) label.textContent = mixOtrosExpanded ? 'Ocultar detalle de Otros' : 'Ver detalle de Otros';
+    if (btn) {
+      btn.classList.remove('hidden');
+      btn.setAttribute('aria-expanded', mixOtrosExpanded ? 'true' : 'false');
+    }
+    if (label) label.textContent = mixOtrosExpanded ? 'Ocultar tabla' : 'Ver tabla';
     if (icon) icon.textContent = mixOtrosExpanded ? 'unfold_less' : 'unfold_more';
     if (!mixOtrosExpanded) closeMixOtrosFloat();
+  }
+
+  function renderMixSummary(mix) {
+    const empty = document.getElementById('mixSummaryEmpty');
+    const gaps = document.getElementById('mixSummaryGaps');
+    const chips = document.getElementById('mixSummaryChips');
+    const cumplimientoEl = document.getElementById('mixSummaryCumplimiento');
+    const cumplimientoHint = document.getElementById('mixSummaryCumplimientoHint');
+    const bar = document.getElementById('mixSummaryCumplimientoBar');
+    const volumenEl = document.getElementById('mixSummaryVolumen');
+    const volumenHint = document.getElementById('mixSummaryVolumenHint');
+    const brechaEl = document.getElementById('mixSummaryBrecha');
+    const brechaHint = document.getElementById('mixSummaryBrechaHint');
+    const periodEl = document.getElementById('mixAutosPeriod');
+    const fi = els?.fechaInicio?.value;
+    const ff = els?.fechaFin?.value;
+    if (periodEl) {
+      const fmt = (iso) => {
+        const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso || '—');
+      };
+      periodEl.textContent = (fi && ff) ? `${fmt(fi)} – ${fmt(ff)}` : '—';
+    }
+
+    if (!mix || mix.mode !== 'vsMeta' || !(mix.items || []).length) {
+      if (cumplimientoEl) cumplimientoEl.textContent = '—';
+      if (cumplimientoHint) cumplimientoHint.textContent = 'Sin meta de mix para el periodo';
+      if (bar) bar.style.width = '0%';
+      if (volumenEl) volumenEl.textContent = '—';
+      if (volumenHint) volumenHint.textContent = 'real / meta (facturas)';
+      if (brechaEl) {
+        brechaEl.textContent = '—';
+        brechaEl.classList.remove('is-positive', 'is-negative');
+      }
+      if (brechaHint) brechaHint.textContent = 'suma de |real − meta| por línea';
+      if (gaps) gaps.hidden = true;
+      if (chips) chips.innerHTML = '';
+      if (empty) {
+        empty.classList.remove('hidden');
+        empty.textContent = mix?.mode === 'vsMeta'
+          ? 'Sin líneas de objetivo en la plantilla para este periodo.'
+          : 'Consulte un periodo con plantilla Objetivos para ver cumplimiento y brecha.';
+      }
+      return;
+    }
+
+    empty?.classList.add('hidden');
+    const items = mix.items;
+    const conMeta = items.filter((r) => Number(r.meta) > 0);
+    const cumplidas = conMeta.filter((r) => r.cumplida).length;
+    const pctCumpl = conMeta.length ? Math.round((cumplidas / conMeta.length) * 1000) / 10 : null;
+    const desvio = items.reduce((s, r) => s + Math.abs(Number(r.real || 0) - Number(r.meta || 0)), 0);
+    const atrasos = items
+      .map((r) => ({ ...r, brecha: Number(r.real || 0) - Number(r.meta || 0) }))
+      .filter((r) => r.brecha < 0)
+      .sort((a, b) => a.brecha - b.brecha)
+      .slice(0, 5);
+
+    if (cumplimientoEl) cumplimientoEl.textContent = pctCumpl == null ? '—' : `${pctCumpl}%`;
+    if (cumplimientoHint) {
+      cumplimientoHint.textContent = conMeta.length
+        ? `${cumplidas} de ${conMeta.length} líneas ya cubrieron su meta`
+        : 'Sin líneas con meta';
+    }
+    if (bar) {
+      bar.style.width = `${Math.max(0, Math.min(100, pctCumpl || 0))}%`;
+      bar.classList.toggle('is-good', (pctCumpl || 0) >= 80);
+      bar.classList.toggle('is-warn', (pctCumpl || 0) >= 60 && (pctCumpl || 0) < 80);
+      bar.classList.toggle('is-bad', (pctCumpl || 0) < 60);
+    }
+    if (volumenEl) volumenEl.textContent = `${mix.totalReal} / ${mix.totalMeta}`;
+    if (volumenHint) {
+      const gapVol = Number(mix.totalReal || 0) - Number(mix.totalMeta || 0);
+      const sign = gapVol > 0 ? '+' : '';
+      volumenHint.textContent = `facturas · diferencia ${sign}${gapVol}`;
+    }
+    if (brechaEl) {
+      brechaEl.textContent = String(Math.round(desvio * 10) / 10);
+      brechaEl.classList.toggle('is-negative', desvio > 0);
+      brechaEl.classList.remove('is-positive');
+    }
+    if (brechaHint) {
+      brechaHint.textContent = atrasos.length
+        ? `${atrasos.length} línea(s) abajo de meta`
+        : 'todas las líneas en o sobre meta';
+    }
+    if (gaps && chips) {
+      if (!atrasos.length) {
+        gaps.hidden = true;
+        chips.innerHTML = '';
+      } else {
+        gaps.hidden = false;
+        chips.innerHTML = atrasos.map((r) => `
+          <button type="button" class="mix-summary__chip" data-mix-chip="${escapeHtml(r.carline || r.linea)}" title="Ver unidades de ${escapeHtml(r.linea)}">
+            <span class="mix-summary__chip-name">${escapeHtml(r.linea)}</span>
+            <span class="mix-summary__chip-gap">${r.brecha}</span>
+          </button>
+        `).join('');
+      }
+    }
   }
 
   function ensureMixOtrosFloat() {
@@ -106,28 +219,134 @@
     });
   }
 
+  async function fetchLineasVsMeta() {
+    const fechaInicio = els?.fechaInicio?.value;
+    const fechaFin = els?.fechaFin?.value;
+    if (!fechaInicio || !fechaFin) {
+      lineasVsMetaActual = null;
+      return null;
+    }
+    try {
+      const res = await fetch(
+        `/api/objetivos-resultados/lineas?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
+        { credentials: 'same-origin' },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      lineasVsMetaActual = Array.isArray(data?.resultados?.vsMetaPlantilla)
+        ? data.resultados.vsMetaPlantilla
+        : [];
+      return lineasVsMetaActual;
+    } catch (err) {
+      console.warn('[Sales] lineas vs meta', err.message || err);
+      lineasVsMetaActual = null;
+      return null;
+    }
+  }
+
+  function buildMixVsObjetivoCarline(vsMetaRows) {
+    const items = (Array.isArray(vsMetaRows) ? vsMetaRows : [])
+      .map((r) => {
+        const meta = Number(r.facturas || 0);
+        const real = Number(r.facturasReal || 0);
+        const avance = r.avanceFacturasPct != null
+          ? Number(r.avanceFacturasPct)
+          : (meta > 0 ? Math.round((real / meta) * 1000) / 10 : null);
+        return {
+          linea: String(r.linea || '').trim() || '—',
+          carline: String(r.carline || r.linea || '').trim() || '—',
+          meta,
+          real,
+          avance,
+          cumplida: Boolean(r.cumplida) || (meta > 0 && real >= meta),
+          familia: r.familia || null,
+        };
+      })
+      .filter((r) => r.meta > 0 || r.real > 0)
+      .sort((a, b) => b.meta - a.meta || b.real - a.real || a.linea.localeCompare(b.linea, 'es'));
+
+    const totalMeta = items.reduce((s, r) => s + r.meta, 0);
+    const totalReal = items.reduce((s, r) => s + r.real, 0);
+    return {
+      mode: 'vsMeta',
+      labels: items.map((r) => r.linea),
+      meta: items.map((r) => r.meta),
+      real: items.map((r) => r.real),
+      items,
+      totalMeta,
+      totalReal,
+      total: totalReal,
+      otrosDetalle: [],
+      otrosTotal: 0,
+    };
+  }
+
   function renderMixOtrosDetalle(mix) {
     const controls = document.getElementById('mixOtrosControls');
     const body = document.getElementById('mixOtrosBody');
-    const meta = document.getElementById('mixOtrosMeta');
+    const metaEl = document.getElementById('mixOtrosMeta');
+    if (!controls || !body) return;
+
+    renderMixSummary(mix);
+
+    if (mix?.mode === 'vsMeta') {
+      const items = mix.items || [];
+      if (!items.length) {
+        body.innerHTML = '<tr class="empty-row"><td colspan="6">Sin líneas de objetivo en el periodo.</td></tr>';
+        if (metaEl) metaEl.textContent = '';
+        setMixOtrosExpanded(true);
+        return;
+      }
+      controls.classList.remove('hidden');
+      controls.style.display = 'flex';
+      const cumplidas = items.filter((r) => r.cumplida).length;
+      if (metaEl) {
+        metaEl.textContent = `${items.length} líneas · ${cumplidas} cumplidas`;
+      }
+      body.innerHTML = items.map((r, idx) => {
+        const brecha = Number(r.real || 0) - Number(r.meta || 0);
+        const brechaClass = brecha > 0 ? 'cell-positive' : (brecha < 0 ? 'cell-negative' : '');
+        const avance = Number(r.avance || 0);
+        const avanceW = Math.max(0, Math.min(100, avance));
+        const estado = r.cumplida
+          ? '<span class="ld-badge ld-badge--ok">Cumplida</span>'
+          : (avance >= 60
+            ? '<span class="ld-badge ld-badge--warn">En curso</span>'
+            : '<span class="ld-badge ld-badge--warn">Pendiente</span>');
+        const avanceTxt = r.avance == null ? '—' : `${r.avance}%`;
+        return `<tr class="mix-otros-row" data-mix-modelo-idx="${idx}" data-mix-modelo="${escapeHtml(r.carline || r.linea)}" title="Ver unidades de esta línea" tabindex="0" role="button">
+          <td><strong>${escapeHtml(r.linea)}</strong></td>
+          <td class="cell-num">${r.meta}</td>
+          <td class="cell-num">${r.real}</td>
+          <td class="cell-num ${brechaClass}">${brecha > 0 ? '+' : ''}${brecha}</td>
+          <td class="cell-num mix-avance-cell">
+            <div class="mix-avance">
+              <span class="mix-avance__pct">${avanceTxt}</span>
+              <span class="mix-avance__bar" aria-hidden="true"><span class="mix-avance__fill${r.cumplida ? ' is-ok' : (avance >= 60 ? ' is-warn' : ' is-bad')}" style="width:${avanceW}%"></span></span>
+            </div>
+          </td>
+          <td>${estado}</td>
+        </tr>`;
+      }).join('');
+      setMixOtrosExpanded(true);
+      return;
+    }
+
     const modelos = mix?.otrosDetalle || [];
     const otrosTotal = mix?.otrosTotal || 0;
     const total = mix?.total || 0;
 
-    if (!controls || !body) return;
-
     if (!modelos.length) {
-      controls.classList.add('hidden');
+      body.innerHTML = '<tr class="empty-row"><td colspan="6">Sin detalle disponible.</td></tr>';
+      if (metaEl) metaEl.textContent = '';
       setMixOtrosExpanded(false);
-      body.innerHTML = '<tr class="empty-row"><td colspan="4">Sin unidades en Otros.</td></tr>';
-      if (meta) meta.textContent = '';
       return;
     }
 
     controls.classList.remove('hidden');
     controls.style.display = 'flex';
-    if (meta) {
-      meta.textContent = `${modelos.length} modelos · ${otrosTotal} uds (${total > 0 ? Math.round((otrosTotal / total) * 1000) / 10 : 0}% del mix)`;
+    if (metaEl) {
+      metaEl.textContent = `${modelos.length} modelos · ${otrosTotal} uds (${total > 0 ? Math.round((otrosTotal / total) * 1000) / 10 : 0}% del mix)`;
     }
 
     body.innerHTML = modelos.map(([label, count], idx) => {
@@ -136,9 +355,11 @@
       const pctOtros = otrosTotal > 0 ? Math.round((n / otrosTotal) * 1000) / 10 : 0;
       return `<tr class="mix-otros-row" data-mix-modelo-idx="${idx}" data-mix-modelo="${escapeHtml(label)}" title="Ver unidades de este modelo" tabindex="0" role="button">
         <td><strong>${escapeHtml(label)}</strong></td>
+        <td class="cell-num">—</td>
         <td class="cell-num">${n}</td>
-        <td class="cell-num">${pctMix}%</td>
-        <td class="cell-num">${pctOtros}%</td>
+        <td class="cell-num">—</td>
+        <td class="cell-num">${pctMix}% mix</td>
+        <td class="cell-num">${pctOtros}% otros</td>
       </tr>`;
     }).join('');
   }
@@ -156,12 +377,29 @@
       analyzeBtn.addEventListener('click', () => openMixAutosDrawer());
     }
 
+    const chipsHost = document.getElementById('mixSummaryChips');
+    if (chipsHost && chipsHost.dataset.bound !== '1') {
+      chipsHost.dataset.bound = '1';
+      chipsHost.addEventListener('click', (e) => {
+        const chip = e.target.closest('[data-mix-chip]');
+        if (!chip) return;
+        const carline = chip.getAttribute('data-mix-chip');
+        if (carline) openMixOtrosModeloDrawer(carline);
+      });
+    }
+
     const body = document.getElementById('mixOtrosBody');
     if (body && body.dataset.bound !== '1') {
       body.dataset.bound = '1';
       const openFromRow = (row) => {
         const idx = Number(row?.dataset?.mixModeloIdx);
         if (!Number.isFinite(idx)) return;
+        if (lastMixAutos?.mode === 'vsMeta') {
+          const item = lastMixAutos.items?.[idx];
+          const carline = item?.carline || item?.linea;
+          if (carline) openMixOtrosModeloDrawer(carline);
+          return;
+        }
         const modelo = lastMixAutos?.otrosDetalle?.[idx]?.[0];
         if (modelo) openMixOtrosModeloDrawer(modelo);
       };
@@ -210,12 +448,8 @@
       input.readOnly = !editable;
       input.tabIndex = editable ? 0 : -1;
       input.title = editable
-        ? 'Objetivo compartido del periodo (editable por Administración)'
+        ? 'Escriba el objetivo del periodo'
         : 'Solo Administración puede modificar este objetivo';
-    });
-    document.querySelectorAll('[data-goal-step]').forEach((btn) => {
-      btn.disabled = !editable;
-      btn.hidden = !editable;
     });
     els.goalRetailPanel?.classList.toggle('goal-chart-panel--readonly', !editable);
     els.goalSofiaPanel?.classList.toggle('goal-chart-panel--readonly', !editable);
@@ -552,8 +786,16 @@
     return (units || []).filter((u) => (u.isApartada || u.situacion === 'SEP') && !isExcludedCarryOverApartada(u));
   }
 
-  async function ensureApartadasInResumen() {
+  async function ensureApartadasInResumen(ventasPayload = null) {
     if (!resumenActual) return;
+    const fromVentas = Array.isArray(ventasPayload?.apartadasInventario)
+      ? ventasPayload.apartadasInventario
+      : null;
+    if (fromVentas) {
+      apartadasActuales = filterCarryOverApartadas(fromVentas);
+      resumenActual.unidadesApartadas = apartadasActuales.length;
+      return;
+    }
     try {
       const inv = await Dashboard.api('/inventory?planPisoPeriod=all');
       const units = Array.isArray(inv?.inventoryTable)
@@ -767,6 +1009,46 @@
     trackEl.setAttribute('aria-valuetext', `${pct}% del objetivo`);
   }
 
+  function updateGoalFaltante(which, actual, goal) {
+    const isRetail = which === 'retail';
+    const valueEl = document.getElementById(isRetail ? 'goalRetailFaltante' : 'goalSofiaFaltante');
+    const hintEl = document.getElementById(isRetail ? 'goalRetailFaltanteHint' : 'goalSofiaFaltanteHint');
+    const wrapEl = document.getElementById(isRetail ? 'goalRetailFaltanteWrap' : 'goalSofiaFaltanteWrap');
+    if (!valueEl) return;
+
+    const safeActual = Number.isFinite(actual) ? actual : 0;
+    const unit = isRetail ? 'unid.' : 'notif.';
+    if (!goal || goal <= 0) {
+      valueEl.textContent = '—';
+      valueEl.classList.remove('is-complete', 'is-pending');
+      wrapEl?.classList.remove('is-complete', 'is-pending');
+      if (hintEl) hintEl.textContent = 'Defina el objetivo';
+      return;
+    }
+
+    const falta = Math.max(0, Math.round(goal - safeActual));
+    if (falta === 0) {
+      valueEl.textContent = '0';
+      valueEl.classList.add('is-complete');
+      valueEl.classList.remove('is-pending');
+      wrapEl?.classList.add('is-complete');
+      wrapEl?.classList.remove('is-pending');
+      if (hintEl) hintEl.textContent = `objetivo cumplido · ${safeActual} de ${goal}`;
+    } else {
+      valueEl.textContent = String(falta);
+      valueEl.classList.add('is-pending');
+      valueEl.classList.remove('is-complete');
+      wrapEl?.classList.add('is-pending');
+      wrapEl?.classList.remove('is-complete');
+      if (hintEl) hintEl.textContent = `${falta} ${unit} · ${safeActual} de ${goal}`;
+    }
+  }
+
+  function updateSofiaBrecha(actual, goal) {
+    // Compat: C-1.1 ahora se muestra como “falta para cumplir” en el encabezado SOFIA.
+    updateGoalFaltante('sofia', actual, goal);
+  }
+
   function renderGoalChart(which, actual, goal) {
     const isRetail = which === 'retail';
     const canvasId = isRetail ? 'chartGoalRetail' : 'chartGoalSofia';
@@ -830,6 +1112,7 @@
     }
 
     updateGoalProgress(which, safeActual, goal);
+    updateGoalFaltante(which, safeActual, goal);
 
     createChart(chartName, canvasId, {
       type: 'doughnut',
@@ -1224,124 +1507,198 @@
     if (esAcumulado) renderChartsMensuales(resumen.comparativoMensual, resumen);
 
     destroyChart('departamento', 'chartDepartamento');
-    const porCanalRaw = resumen.porCanal?.length
-      ? resumen.porCanal
-      : (typeof CanalesVenta !== 'undefined' ? CanalesVenta.countByCanal(registrosActuales) : []);
-    const porCanal = [...(porCanalRaw || [])].sort((a, b) => Number(b.count || 0) - Number(a.count || 0)
-      || String(a.label || '').localeCompare(String(b.label || ''), 'es'));
+    destroyChart('vendedor', 'chartVendedor');
+    // Totales por fuerza · clic abre detalle de vendedores
+    const retailRows = getRetailRows().filter((r) => !r.IS_DEMO);
+    const porCanalRaw = (typeof CanalesVenta !== 'undefined')
+      ? CanalesVenta.countByCanal(retailRows)
+      : (resumen.porCanal || []);
+    const porCanal = [...(porCanalRaw || [])]
+      .filter((x) => {
+        const label = String(x.label || '').toLowerCase();
+        return label !== 'flotillas' && label !== 'perdida';
+      })
+      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0)
+        || String(a.label || '').localeCompare(String(b.label || ''), 'es'));
     if (porCanal.length) {
       createChart('departamento', 'chartDepartamento', {
         type: 'bar',
         data: {
           labels: porCanal.map((x) => x.label),
           datasets: [{
-            label: 'Ventas',
+            label: 'Ventas retail',
             data: porCanal.map((x) => x.count),
             backgroundColor: porCanal.map((x) => (CANAL_COLORS && CANAL_COLORS[x.label]) || (chartColors && chartColors.slate) || '#94a3b8'),
           }],
         },
-        options: chartOptions({ plugins: { legend: { display: false } } }),
+        options: chartOptions({
+          plugins: { legend: { display: false } },
+          onClick(_evt, elements) {
+            if (!elements?.length) return;
+            const idx = elements[0].index;
+            const item = porCanal[idx];
+            if (!item?.label) return;
+            openDepartamentoFuerzaDrawer(item.label);
+          },
+          onHover(evt, elements) {
+            const canvas = evt?.native?.target || evt?.chart?.canvas;
+            if (!canvas?.style) return;
+            canvas.style.cursor = elements?.length ? 'pointer' : 'default';
+          },
+        }),
       });
     }
 
     try {
-      const topVendedores = buildTopVendedoresRetailPorFuerza(10);
-      if (topVendedores.labels.length && topVendedores.datasets.length) {
-        createChart('vendedor', 'chartVendedor', {
-          type: 'bar',
-          data: {
-            labels: topVendedores.labels,
-            datasets: topVendedores.datasets,
-          },
-          options: chartOptions({
-            indexAxis: 'y',
-            scales: {
-              x: { stacked: true, beginAtZero: true },
-              y: { stacked: true },
-            },
-            plugins: {
-              legend: { display: true, position: 'bottom' },
-            },
-          }),
-        });
-      } else {
-        destroyChart('vendedor', 'chartVendedor');
-      }
-    } catch (err) {
-      console.error('[Sales] chartVendedor', err);
-      destroyChart('vendedor', 'chartVendedor');
-    }
-
-    try {
-      const mix = buildMixVentaAutos(resumen, 10);
+      const vsMeta = Array.isArray(lineasVsMetaActual) && lineasVsMetaActual.length
+        ? buildMixVsObjetivoCarline(lineasVsMetaActual)
+        : null;
+      const mix = (vsMeta && vsMeta.labels.length)
+        ? vsMeta
+        : buildMixVentaAutos(resumen, 10);
       lastMixAutos = mix;
       destroyChart('mixAutos', 'chartMixAutos');
       wireMixOtrosControls();
       renderMixOtrosDetalle(mix);
       if (mix.labels.length) {
-        const palette = (chartPalette && chartPalette.length)
-          ? chartPalette
-          : ['#2D5BFF', '#9B51E0', '#27AE60', '#E056FD', '#f59e0b', '#14b8a6', '#ef4444', '#64748b', '#0ea5e9', '#2C3E50'];
-        createChart('mixAutos', 'chartMixAutos', {
-          type: 'bar',
-          data: {
-            labels: mix.labels,
-            datasets: [{
-              label: 'Unidades',
-              data: mix.data,
-              backgroundColor: mix.labels.map((label, i) => {
-                if (label === 'Otros') return '#94a3b8';
-                return palette[i % palette.length];
-              }),
-              borderRadius: 8,
-              maxBarThickness: 28,
-            }],
-          },
-          options: chartOptions({
-            indexAxis: 'y',
-            onClick(_evt, elements) {
-              if (!elements?.length) {
-                openMixAutosDrawer();
-                return;
-              }
-              const idx = elements[0].index;
-              const label = mix.labels[idx];
-              if (!label) {
-                openMixAutosDrawer();
-                return;
-              }
-              openMixAutosDrawer({
-                filter: { dim: 'carline', value: label, label },
-              });
-              if (label === 'Otros' && (mix.otrosDetalle || []).length) {
-                setMixOtrosExpanded(true);
-              }
+        if (mix.mode === 'vsMeta') {
+          createChart('mixAutos', 'chartMixAutos', {
+            type: 'bar',
+            data: {
+              labels: mix.labels,
+              datasets: [
+                {
+                  label: 'Meta facturas',
+                  data: mix.meta,
+                  backgroundColor: 'rgba(148, 163, 184, 0.55)',
+                  borderColor: '#64748b',
+                  borderWidth: 1,
+                  borderRadius: 6,
+                  maxBarThickness: 18,
+                },
+                {
+                  label: 'Real facturas',
+                  data: mix.real,
+                  backgroundColor: mix.items.map((r) => (r.cumplida ? 'rgba(16, 185, 129, 0.75)' : 'rgba(45, 91, 255, 0.75)')),
+                  borderColor: mix.items.map((r) => (r.cumplida ? '#059669' : '#2D5BFF')),
+                  borderWidth: 1,
+                  borderRadius: 6,
+                  maxBarThickness: 18,
+                },
+              ],
             },
-            onHover(evt, elements) {
-              const canvas = evt?.native?.target || evt?.chart?.canvas;
-              if (!canvas?.style) return;
-              canvas.style.cursor = elements?.length ? 'pointer' : 'default';
-            },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  label(ctx) {
-                    const val = Number(ctx.raw || 0);
-                    const total = mix.total || 0;
-                    const p = total > 0 ? Math.round((val / total) * 1000) / 10 : 0;
-                    return ` ${val} uds · ${p}% del mix · clic para analizar`;
+            options: chartOptions({
+              indexAxis: 'y',
+              onClick(_evt, elements) {
+                if (!elements?.length) {
+                  openMixAutosDrawer();
+                  return;
+                }
+                const idx = elements[0].index;
+                const item = mix.items[idx];
+                if (!item) {
+                  openMixAutosDrawer();
+                  return;
+                }
+                openMixAutosDrawer({
+                  filter: { dim: 'carline', value: item.carline || item.linea, label: item.linea },
+                });
+              },
+              onHover(evt, elements) {
+                const canvas = evt?.native?.target || evt?.chart?.canvas;
+                if (!canvas?.style) return;
+                canvas.style.cursor = elements?.length ? 'pointer' : 'default';
+              },
+              plugins: {
+                legend: { display: true, position: 'bottom' },
+                tooltip: {
+                  callbacks: {
+                    afterBody(items) {
+                      const idx = items?.[0]?.dataIndex;
+                      const row = mix.items[idx];
+                      if (!row) return '';
+                      const avance = row.avance == null ? '—' : `${row.avance}%`;
+                      return [
+                        `Avance: ${avance}`,
+                        row.cumplida ? 'Estado: cumplida' : 'Estado: pendiente',
+                      ];
+                    },
                   },
                 },
               },
+              scales: {
+                x: { beginAtZero: true, ticks: { precision: 0 }, stacked: false },
+                y: { grid: { display: false }, stacked: false },
+              },
+            }),
+          });
+          setMixOtrosExpanded(true);
+        } else {
+          const palette = (chartPalette && chartPalette.length)
+            ? chartPalette
+            : ['#2D5BFF', '#9B51E0', '#27AE60', '#E056FD', '#f59e0b', '#14b8a6', '#ef4444', '#64748b', '#0ea5e9', '#2C3E50'];
+          createChart('mixAutos', 'chartMixAutos', {
+            type: 'bar',
+            data: {
+              labels: mix.labels,
+              datasets: [{
+                label: 'Unidades',
+                data: mix.data,
+                backgroundColor: mix.labels.map((label, i) => {
+                  if (label === 'Otros') return '#94a3b8';
+                  return palette[i % palette.length];
+                }),
+                borderRadius: 8,
+                maxBarThickness: 28,
+              }],
             },
-            scales: {
-              x: { beginAtZero: true, ticks: { precision: 0 } },
-              y: { grid: { display: false } },
-            },
-          }),
-        });
+            options: chartOptions({
+              indexAxis: 'y',
+              onClick(_evt, elements) {
+                if (!elements?.length) {
+                  openMixAutosDrawer();
+                  return;
+                }
+                const idx = elements[0].index;
+                const label = mix.labels[idx];
+                if (!label) {
+                  openMixAutosDrawer();
+                  return;
+                }
+                openMixAutosDrawer({
+                  filter: { dim: 'carline', value: label, label },
+                });
+                if (label === 'Otros' && (mix.otrosDetalle || []).length) {
+                  setMixOtrosExpanded(true);
+                }
+              },
+              onHover(evt, elements) {
+                const canvas = evt?.native?.target || evt?.chart?.canvas;
+                if (!canvas?.style) return;
+                canvas.style.cursor = elements?.length ? 'pointer' : 'default';
+              },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label(ctx) {
+                      const val = Number(ctx.raw || 0);
+                      const total = mix.total || 0;
+                      const p = total > 0 ? Math.round((val / total) * 1000) / 10 : 0;
+                      return ` ${val} uds · ${p}% del mix · clic para analizar`;
+                    },
+                  },
+                },
+              },
+              scales: {
+                x: { beginAtZero: true, ticks: { precision: 0 } },
+                y: { grid: { display: false } },
+              },
+            }),
+          });
+        }
       } else {
+        renderMixOtrosDetalle(mix);
         setMixOtrosExpanded(false);
       }
     } catch (err) {
@@ -1446,86 +1803,6 @@
       otrosDetalle: rest,
       otrosTotal: restSum,
     };
-  }
-
-  function buildTopVendedoresRetailPorFuerza(limit = 10) {
-    const retail = getRetailRows();
-    const byVendor = new Map();
-
-    for (const row of retail) {
-      const vendedor = String(row.VENDEDOR || '(Sin dato)').trim() || '(Sin dato)';
-      const fuerza = String(row.CANAL_LABEL || 'Otros').trim() || 'Otros';
-      if (!byVendor.has(vendedor)) {
-        byVendor.set(vendedor, { total: 0, byFuerza: new Map() });
-      }
-      const entry = byVendor.get(vendedor);
-      entry.total += 1;
-      entry.byFuerza.set(fuerza, (entry.byFuerza.get(fuerza) || 0) + 1);
-    }
-
-    const canalOrden = (typeof CanalesVenta !== 'undefined' && Array.isArray(CanalesVenta.CANALES_ORDEN))
-      ? CanalesVenta.CANALES_ORDEN
-      : ['PISO', 'FORANEOS', 'CHOLULA', 'ZACATELCO', 'SUAUTO', 'CASA', 'OTROS'];
-    const labelOf = (c) => (typeof CanalesVenta !== 'undefined' && CanalesVenta.getCanalLabel)
-      ? CanalesVenta.getCanalLabel(c)
-      : c;
-    const fuerzaOrder = canalOrden
-      .filter((c) => c !== 'FLOTILLAS' && c !== 'PERDIDA')
-      .map((c) => labelOf(c));
-    const fallbackOrder = ['Piso', 'Foraneos', 'Cholula', 'Zacatelco', 'Suauto', 'Casa', 'Otros'];
-    const order = fuerzaOrder.length ? fuerzaOrder : fallbackOrder;
-    const fuerzaRank = (name) => {
-      const idx = order.indexOf(name);
-      return idx >= 0 ? idx : 999;
-    };
-
-    const ranked = [...byVendor.entries()]
-      .map(([name, stats]) => {
-        let dominante = 'Otros';
-        let max = -1;
-        for (const [f, n] of stats.byFuerza.entries()) {
-          if (n > max || (n === max && fuerzaRank(f) < fuerzaRank(dominante))) {
-            max = n;
-            dominante = f;
-          }
-        }
-        return [name, { total: stats.total, byFuerza: stats.byFuerza, dominante }];
-      })
-      .sort((a, b) =>
-        b[1].total - a[1].total
-        || fuerzaRank(a[1].dominante) - fuerzaRank(b[1].dominante)
-        || a[0].localeCompare(b[0], 'es')
-      )
-      .slice(0, limit);
-
-    const fuerzasPresentes = new Set();
-    for (const [, stats] of ranked) {
-      for (const f of stats.byFuerza.keys()) fuerzasPresentes.add(f);
-    }
-
-    const fuerzas = [
-      ...order.filter((f) => fuerzasPresentes.has(f)),
-      ...[...fuerzasPresentes].filter((f) => !order.includes(f)).sort((a, b) => a.localeCompare(b, 'es')),
-    ];
-
-    // Eje Y = vendedor; cada segmento de color = fuerza de ventas
-    const labels = ranked.map(([name, stats]) => {
-      const short = name.split(/\s+/).filter(Boolean).slice(0, 2).join(' ');
-      return stats.dominante && stats.dominante !== 'Otros'
-        ? `${short} · ${stats.dominante}`
-        : short;
-    });
-
-    const datasets = fuerzas.map((fuerza) => ({
-      label: fuerza,
-      data: ranked.map(([, stats]) => stats.byFuerza.get(fuerza) || 0),
-      backgroundColor: (CANAL_COLORS && CANAL_COLORS[fuerza]) || (chartColors && chartColors.slate) || '#94a3b8',
-      borderWidth: 0,
-      borderRadius: 3,
-      stack: 'fuerza',
-    }));
-
-    return { labels, datasets, ranked };
   }
 
   function isDemoRow(row) {
@@ -1651,13 +1928,13 @@
     const map = {
       retail: {
         title: 'Ventas retail',
-        hint: 'Unidades retail del periodo (excluye flotilla)',
+        hint: 'Menudeo del periodo. FLOTGMF cuenta aquí si el contrato CRM no es flotilla.',
         icon: 'storefront',
         card: () => els.kpiCardRetail,
       },
       flotilla: {
         title: 'Flotillas',
-        hint: 'Unidades flotilla del periodo',
+        hint: 'FLOT y FLOTGMF con contrato flotilla. El menudeo facturado en FLOTGMF va a retail.',
         icon: 'local_shipping',
         card: () => els.kpiCardFlotillas,
       },
@@ -1675,13 +1952,13 @@
       },
       tomasACuenta: {
         title: 'Tomas a cuenta',
-        hint: 'Usados tomados y cuántos ya se vendieron el mismo mes',
+        hint: 'Usados tomados del periodo · revendidos en cualquier fecha vs lo que sigue en inventario',
         icon: 'swap_horiz',
         card: () => els.sectionTomasACuenta,
       },
       mixAutos: {
         title: 'Mix de venta de autos',
-        hint: 'Participación por carline / modelo del periodo · filtros dinámicos',
+        hint: 'Real vs objetivo de facturas por carline (plantilla Objetivos) · filtros dinámicos',
         icon: 'pie_chart',
         card: () => document.getElementById('secMixAutos'),
       },
@@ -1705,6 +1982,17 @@
     drawer.open('mixAutos', card, { filter: filter || null, forceOpen: true });
   }
 
+  function openDepartamentoFuerzaDrawer(fuerzaLabel) {
+    const label = String(fuerzaLabel || '').trim();
+    if (!label) return;
+    const drawer = ensureVentasKpiDrawer();
+    const card = document.getElementById('secVentasDepartamento');
+    drawer.open('retail', card, {
+      forceOpen: true,
+      filter: { dim: 'canal', value: label, label },
+    });
+  }
+
   function clearVentasKpiSelection() {
     [els.kpiCardRetail, els.kpiCardFlotillas, els.kpiCardEntregasSofia, els.kpiCardCarryOver]
       .forEach((card) => {
@@ -1713,6 +2001,7 @@
       });
     els.sectionTomasACuenta?.classList.remove('section-focus', 'is-selected', 'is-open');
     document.getElementById('secMixAutos')?.classList.remove('is-selected', 'is-open', 'section-focus');
+    document.getElementById('secVentasDepartamento')?.classList.remove('is-selected', 'is-open', 'section-focus');
   }
 
   function formatTomaFecha(value) {
@@ -1727,6 +2016,19 @@
 
   function tomaRecordKey(r) {
     return `${r.idPedido || ''}|${String(r.vinToma || '').toUpperCase()}|${r.facturaNuevo || ''}`;
+  }
+
+  /** Reventa del usado tomado: cualquier fecha (no solo mismo mes). */
+  function isTomaVendida(r) {
+    if (!r) return false;
+    if (r.vendido != null) return Boolean(r.vendido);
+    return Boolean(r.vendidoMismoMes);
+  }
+
+  function isTomaEnInventario(r) {
+    if (!r) return false;
+    if (r.enInventario != null) return Boolean(r.enInventario);
+    return !isTomaVendida(r);
   }
 
   let tomaDetailFloat = null;
@@ -1820,14 +2122,15 @@
         </dl>
       </section>
       <section class="toma-float__section">
-        <h4>Venta del usado (mismo mes)</h4>
+        <h4>Venta del usado</h4>
         <dl class="toma-float__grid">
-          ${row('Estatus', record.vendidoMismoMes ? 'Vendido' : 'Sin venta en el mes de la toma')}
+          ${row('Estatus', isTomaVendida(record) ? 'Vendido' : 'En inventario (sin venta)')}
           ${row('Fecha venta', formatTomaFecha(record.fechaVentaUsado))}
           ${row('Pedido USN', record.pedidoUsn)}
           ${row('Monto venta', moneyCell(record.montoVentaUsado))}
           ${row('Cliente usado', record.clienteUsado)}
           ${row('Vendedor usado', record.vendedorUsado)}
+          ${row('¿Mismo mes de la toma?', record.vendidoMismoMes ? 'Sí' : (isTomaVendida(record) ? 'No' : '—'))}
         </dl>
       </section>
       <section class="toma-float__section">
@@ -1871,26 +2174,70 @@
         row.modeloToma, row.modeloNuevo, row.anModeloToma, row.anModeloNuevo,
         row.usuarioToma, row.idPedido, row.fechaToma, row.fechaFactura,
         row.clienteUsado, row.vendedorUsado, row.pedidoUsn, row.fechaVentaUsado,
-        row.vendidoMismoMes ? 'vendido' : 'pendiente',
+        isTomaVendida(row) ? 'vendido' : 'inventario pendiente',
+        row.vendidoMismoMes ? 'mismo mes' : '',
       ].some((val) => String(val ?? '').toLowerCase().includes(q))
     );
   }
 
-  function toggleTomasACuentaPanel() {
-    ensureVentasKpiDrawer().open('tomasACuenta', els.sectionTomasACuenta);
+  function tomaFechaMonthKey(value) {
+    if (value == null || value === '') return null;
+    if (typeof value === 'string') {
+      const s = value.trim();
+      const mIso = s.match(/^(\d{4})-(\d{2})/);
+      if (mIso) return `${mIso[1]}-${mIso[2]}`;
+      const mDmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (mDmy) return `${mDmy[3]}-${String(mDmy[2]).padStart(2, '0')}`;
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      // Preferir componentes de calendario UTC para fechas ISO a medianoche.
+      const y = value.getUTCFullYear();
+      const m = value.getUTCMonth() + 1;
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+    const raw = String(value);
+    const mIso2 = raw.match(/^(\d{4})-(\d{2})/);
+    if (mIso2) return `${mIso2[1]}-${mIso2[2]}`;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function openTomasDrawer({ filter = null, useChartRows = false } = {}) {
+    const drawer = ensureVentasKpiDrawer();
+    drawer.open('tomasACuenta', els.sectionTomasACuenta, {
+      filter: filter || null,
+      forceOpen: true,
+      rowsOverride: useChartRows
+        ? (tomasChartRegistros.length ? tomasChartRegistros : tomasACuentaActuales)
+        : null,
+    });
     els.sectionTomasACuenta?.classList.add('section-focus');
+  }
+
+  function toggleTomasACuentaPanel() {
+    openTomasDrawer();
   }
 
   function renderTomasSection(resumen, tomasMensual) {
     const rows = tomasACuentaActuales || [];
     const tomas = Number(resumen?.totalTomasACuenta ?? rows.length ?? 0);
     const vendidas = Number(
-      resumen?.totalTomasVendidasMismoMes
+      resumen?.totalTomasVendidas
+      ?? tomasACuentaMeta.totalVendidos
+      ?? resumen?.totalTomasVendidasMismoMes
       ?? tomasACuentaMeta.totalVendidosMismoMes
-      ?? rows.filter((r) => r.vendidoMismoMes).length
+      ?? rows.filter((r) => isTomaVendida(r)).length
+    );
+    const enInventario = Number(
+      resumen?.totalTomasEnInventario
+      ?? tomasACuentaMeta.totalEnInventario
+      ?? Math.max(0, tomas - vendidas)
     );
     const pct = Number(
-      resumen?.pctTomasVendidasMismoMes
+      resumen?.pctTomasVendidas
+      ?? tomasACuentaMeta.pctVendidos
+      ?? resumen?.pctTomasVendidasMismoMes
       ?? tomasACuentaMeta.pctVendidosMismoMes
       ?? (tomas > 0 ? Math.round((vendidas / tomas) * 1000) / 10 : 0)
     );
@@ -1900,58 +2247,18 @@
     if (els.tomasStatPct) els.tomasStatPct.textContent = tomas > 0 ? `${pct}%` : '—';
     if (els.tomasSectionSubtitle) {
       els.tomasSectionSubtitle.textContent = tomas > 0
-        ? `${vendidas} de ${tomas} usados tomados del periodo ya se vendieron en el mismo mes · ${pct}%`
-        : 'Usados tomados del periodo · cuántos ya se vendieron el mismo mes';
+        ? `${vendidas} de ${tomas} ya se vendieron · ${enInventario} siguen en inventario · ${pct}%`
+        : 'Usados tomados del periodo · revendidos vs inventario pendiente';
     }
 
     const fi = els.fechaInicio?.value || '';
     const ff = els.fechaFin?.value || '';
     if (els.tomasInfoSubtitle) {
-      const rango = fi && ff
-        ? `${fi.split('-').reverse().join('/')} – ${ff.split('-').reverse().join('/')}`
-        : 'Periodo seleccionado';
-      els.tomasInfoSubtitle.textContent = tomas > 0
-        ? `${tomas} tomas · ${vendidas} vendidas · ${rango}`
-        : `Sin tomas · ${rango}`;
+      const rango = fi && ff ? `${fi} → ${ff}` : 'Periodo seleccionado';
+      els.tomasInfoSubtitle.textContent = rango;
     }
 
     renderTomasMensualChart(tomasMensual);
-
-    if (!els.tomasSectionBody) return;
-    if (!rows.length) {
-      els.tomasSectionBody.innerHTML = '<tr><td colspan="3" class="empty-row">Sin tomas en el periodo.</td></tr>';
-      return;
-    }
-
-    // Compacto: pendientes primero, luego vendidos; máx. 10 filas (el resto en Detalle).
-    const ordenadas = rows.slice().sort((a, b) => {
-      if (Boolean(a.vendidoMismoMes) !== Boolean(b.vendidoMismoMes)) {
-        return a.vendidoMismoMes ? 1 : -1;
-      }
-      return String(b.fechaToma || '').localeCompare(String(a.fechaToma || ''));
-    });
-    const visibles = ordenadas.slice(0, 10);
-    const resto = Math.max(0, ordenadas.length - visibles.length);
-
-    els.tomasSectionBody.innerHTML = `${visibles.map((r) => `
-      <tr class="tomas-row" data-toma-key="${escapeHtml(tomaRecordKey(r))}" title="Ver ficha rápida">
-        <td><strong class="toma-vin-link">${escapeHtml(r.vinToma || '—')}</strong></td>
-        <td>
-          <span class="carline-utilidad-carline" title="${escapeHtml(r.modeloToma || '')}">${escapeHtml(r.modeloToma || '—')}</span>
-        </td>
-        <td>
-          <span class="tomas-badge ${r.vendidoMismoMes ? 'tomas-badge--vendido' : 'tomas-badge--pendiente'}">
-            ${r.vendidoMismoMes ? 'Vendido' : 'No vendido'}
-          </span>
-        </td>
-      </tr>
-    `).join('')}${resto > 0 ? `
-      <tr>
-        <td colspan="3" class="empty-row" style="font-size:11px">
-          +${resto} más · abre <strong>Detalle</strong>
-        </td>
-      </tr>
-    ` : ''}`;
   }
 
   function buildTomasTrimestres(tomasMensual) {
@@ -2025,8 +2332,8 @@
 
     if (els.tomasChartSubtitle) {
       els.tomasChartSubtitle.textContent = data.mesEnCursoExcluido
-        ? `Acumulado ${anio} al ${corteFmt || 'corte'} · meses del trimestre · mes en curso excluido`
-        : `Acumulado ${anio}${corteFmt ? ` al ${corteFmt}` : ''} · tomados vs vendidos el mismo mes`;
+        ? `Acumulado ${anio} al ${corteFmt || 'corte'} · clic en una barra para ver unidades · mes en curso excluido`
+        : `Acumulado ${anio}${corteFmt ? ` al ${corteFmt}` : ''} · clic en una barra para ver las unidades`;
     }
 
     createChart('tomasMensual', 'chartTomasMensual', {
@@ -2040,13 +2347,42 @@
             backgroundColor: chartColors?.slate || '#2C3E50',
           },
           {
-            label: 'Vendidos mismo mes',
+            label: 'Ya vendidos',
             data: vendidos,
             backgroundColor: chartColors?.primary || '#2D5BFF',
           },
         ],
       },
       options: chartOptions({
+        onClick(_evt, elements) {
+          if (!elements?.length) {
+            openTomasDrawer({ useChartRows: true });
+            return;
+          }
+          const hit = elements[0];
+          const idx = hit.index;
+          const ds = hit.datasetIndex;
+          const m = monthPoints[idx];
+          if (!m?.key) {
+            openTomasDrawer({ useChartRows: true });
+            return;
+          }
+          const isVendidos = ds === 1;
+          const mesLabel = `${m.label} ${m.year || anio}`;
+          openTomasDrawer({
+            useChartRows: true,
+            filter: {
+              dim: isVendidos ? 'mesTomaVendidos' : 'mesToma',
+              value: m.key,
+              label: isVendidos ? `Ya vendidos · ${mesLabel}` : `Tomados · ${mesLabel}`,
+            },
+          });
+        },
+        onHover(evt, elements) {
+          const canvas = evt?.native?.target || evt?.chart?.canvas;
+          if (!canvas?.style) return;
+          canvas.style.cursor = elements?.length ? 'pointer' : 'default';
+        },
         plugins: {
           tooltip: {
             callbacks: {
@@ -2061,9 +2397,9 @@
                 if (i == null) return '';
                 const t = Number(tomados[i] || 0);
                 const v = Number(vendidos[i] || 0);
-                if (!t) return 'Sin tomas en el mes';
+                if (!t) return 'Sin tomas en el mes · clic para detalle';
                 const p = ((v / t) * 100).toFixed(1);
-                return `% revendidos: ${p}%`;
+                return [`% revendidos: ${p}%`, 'Clic para ver unidades'];
               },
             },
           },
@@ -2173,6 +2509,8 @@
       modeloNuevo: 'Modelo nuevo',
       vendido: 'Estatus usado',
       vendedorUsado: 'Vendedor usado',
+      mesToma: 'Mes de toma',
+      mesTomaVendidos: 'Vendidos del mes',
     };
 
     function placeNearKpi(card) {
@@ -2208,11 +2546,29 @@
       else if (panel.classList.contains('ops-orders-drawer--open')) placeNearKpi(lastCard);
     }
 
+    function syncDrawerTitle() {
+      if (!titleEl) return;
+      if ((currentMeta.kpi === 'retail' || currentMeta.kpi === 'flotilla')
+        && activeFilter?.dim === 'canal') {
+        const base = currentMeta.kpi === 'flotilla' ? 'Flotillas' : 'Ventas retail';
+        titleEl.textContent = `${base} · ${activeFilter.label || activeFilter.value}`;
+        return;
+      }
+      if ((currentMeta.kpi === 'retail' || currentMeta.kpi === 'flotilla')
+        && activeFilter?.dim === 'vendedor') {
+        const base = currentMeta.kpi === 'flotilla' ? 'Flotillas' : 'Ventas retail';
+        titleEl.textContent = `${base} · ${activeFilter.label || activeFilter.value}`;
+        return;
+      }
+      titleEl.textContent = currentMeta.title || 'Detalle de ventas';
+    }
+
     function updateFilterChip() {
       if (!filterChip) return;
       if (!activeFilter) {
         filterChip.hidden = true;
         filterChip.textContent = '';
+        syncDrawerTitle();
         return;
       }
       filterChip.hidden = false;
@@ -2220,6 +2576,7 @@
         <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
         ${escapeHtml(FILTER_DIM_LABEL[activeFilter.dim] || activeFilter.dim)}: ${escapeHtml(activeFilter.label || activeFilter.value)}
         <span class="material-symbols-outlined" aria-hidden="true">close</span>`;
+      syncDrawerTitle();
     }
 
     function matchesActiveFilter(r) {
@@ -2257,9 +2614,13 @@
         if (dim === 'vendedor') return String(r.vendedor || 'Sin vendedor') === value;
         if (dim === 'modeloNuevo') return String(r.modeloNuevo || 'Sin modelo') === value;
         if (dim === 'vendedorUsado') return String(r.vendedorUsado || 'Sin vendedor') === value;
+        if (dim === 'mesToma') return tomaFechaMonthKey(r.fechaToma) === value;
+        if (dim === 'mesTomaVendidos') {
+          return tomaFechaMonthKey(r.fechaToma) === value && isTomaVendida(r);
+        }
         if (dim === 'vendido') {
-          if (value === 'Vendido mismo mes') return Boolean(r.vendidoMismoMes);
-          if (value === 'Sin venta en el mes') return !r.vendidoMismoMes;
+          if (value === 'Vendido' || value === 'Vendido mismo mes') return isTomaVendida(r);
+          if (value === 'En inventario' || value === 'Sin venta en el mes') return isTomaEnInventario(r);
         }
       }
       return true;
@@ -2334,14 +2695,46 @@
       }
 
       if (currentMeta.kpi === 'sofia') {
+        const usuarios = countByField(rows, (r) => r.SOF_CveUSu);
+        const goal = getGoalValue('sofia');
+        const sofiaCount = Number(resumenActual?.totalNotificacionesEntrega ?? rows.length ?? 0);
+        const { sinTimbrar, numeradorActual } = getCarryOverParts();
+        const c1 = (typeof AnalisisComercial !== 'undefined' && AnalisisComercial.getKpi)
+          ? AnalisisComercial.getKpi('C-1')
+          : null;
+        const c11 = (typeof AnalisisComercial !== 'undefined' && AnalisisComercial.getKpi)
+          ? AnalisisComercial.getKpi('C-1.1')
+          : null;
+        const det = { ...(c1?.detalle || {}), ...(c11?.detalle || {}) };
+        const entregas = det.entregas != null ? Number(det.entregas) : sofiaCount;
+        const metaEntregas = det.metaEntregas != null ? Number(det.metaEntregas) : (goal || null);
+        const brecha = det.brecha != null
+          ? Number(det.brecha)
+          : (metaEntregas != null ? entregas - metaEntregas : null);
+        const avancePct = c1?.display
+          || (metaEntregas > 0 ? `${Math.round((entregas / metaEntregas) * 1000) / 10}%` : '—');
+        const coberturaPct = formatCoberturaPct(numeradorActual, metaEntregas || goal);
+        const fuente = det.fuente ? String(det.fuente) : '';
         summaryEl.innerHTML = `
           <div class="ops-orders-drawer__group">
             <h5>Resumen</h5>
             <div class="ops-orders-drawer__row"><span class="lbl">Entregas</span><span class="val">${rows.length}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Usuarios que timbraron</span><span class="val">${usuarios.length}</span></div>
             <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
           </div>
           ${block('Estatus', 'estatus', countByField(rows, (r) => r.SOF_Estatus))}
-          ${block('Usuario', 'vendedor', countByField(rows, (r) => r.SOF_CveUSu))}
+          ${block('Usuarios que timbraron', 'vendedor', usuarios)}
+          <div class="ops-orders-drawer__group">
+            <h5>Componentes</h5>
+            <div class="ops-orders-drawer__row"><span class="lbl">Entregas SOFIA</span><span class="val">${entregas}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Objetivo entregas</span><span class="val">${metaEntregas ?? '—'}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Avance (C-1)</span><span class="val">${escapeHtml(String(avancePct))}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Brecha vs objetivo (C-1.1)</span><span class="val">${brecha == null ? '—' : brecha}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Sin timbrar</span><span class="val">${sinTimbrar}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Cobertura (SOFIA + sin timbrar)</span><span class="val">${escapeHtml(coberturaPct || '—')}</span></div>
+            ${fuente ? `<p class="ops-orders-drawer__hint">Fuente objetivo: ${escapeHtml(fuente)}</p>` : ''}
+            <p class="ops-orders-drawer__hint">Componentes del cumplimiento de entregas y cobertura asociados a las notificaciones SOFIA del periodo.</p>
+          </div>
         `;
         return;
       }
@@ -2349,22 +2742,25 @@
       if (currentMeta.kpi === 'tomasACuenta') {
         const monto = rows.reduce((s, r) => s + (Number(r.importeVehiculo) || 0), 0);
         const montoAdq = rows.reduce((s, r) => s + (Number(r.importeAdquisicion) || 0), 0);
-        const vendidas = rows.filter((r) => r.vendidoMismoMes).length;
+        const vendidas = rows.filter((r) => isTomaVendida(r)).length;
+        const enInventario = Math.max(0, rows.length - vendidas);
+        const mismoMes = rows.filter((r) => r.vendidoMismoMes).length;
         const pct = rows.length > 0
           ? Math.round((vendidas / rows.length) * 1000) / 10
-          : Number(resumenActual?.pctTomasVendidasMismoMes ?? 0);
+          : Number(resumenActual?.pctTomasVendidas ?? resumenActual?.pctTomasVendidasMismoMes ?? 0);
         const montoVentaUsado = rows.reduce((s, r) => s + (Number(r.montoVentaUsado) || 0), 0);
         const fi = els.fechaInicio?.value || '';
         const ff = els.fechaFin?.value || '';
-        const periodoLabel = fi && ff ? `${fi} â†’ ${ff}` : 'Periodo seleccionado';
+        const periodoLabel = fi && ff ? `${fi} → ${ff}` : 'Periodo seleccionado';
         summaryEl.innerHTML = `
           <div class="ops-orders-drawer__group">
             <h5>Resumen del periodo</h5>
             <p class="ops-orders-drawer__hint">${escapeHtml(periodoLabel)}</p>
             <div class="ops-orders-drawer__row"><span class="lbl">Tomas</span><span class="val">${rows.length}</span></div>
-            <div class="ops-orders-drawer__row"><span class="lbl">Vendidas mismo mes</span><span class="val">${vendidas}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">Ya vendidas</span><span class="val">${vendidas}</span></div>
+            <div class="ops-orders-drawer__row"><span class="lbl">En inventario</span><span class="val">${enInventario}</span></div>
             <div class="ops-orders-drawer__row"><span class="lbl">% revendidas</span><span class="val">${pct}%</span></div>
-            <p class="ops-orders-drawer__hint">${vendidas} de ${rows.length} usados tomados ya se vendieron en el mismo mes de la toma</p>
+            <p class="ops-orders-drawer__hint">${vendidas} de ${rows.length} ya se vendieron (cualquier fecha) · ${enInventario} siguen en inventario${mismoMes ? ` · ${mismoMes} en el mismo mes de la toma` : ''}</p>
           </div>
           <div class="ops-orders-drawer__group">
             <h5>Montos</h5>
@@ -2374,10 +2770,10 @@
           </div>
           ${block('Modelo toma', 'modeloToma', countByField(rows, (r) => r.modeloToma))}
           ${block('Estatus usado', 'vendido', [
-            { label: 'Vendido mismo mes', value: vendidas },
-            { label: 'Sin venta en el mes', value: Math.max(0, rows.length - vendidas) },
+            { label: 'Vendido', value: vendidas },
+            { label: 'En inventario', value: enInventario },
           ])}
-          ${block('Vendedor usado', 'vendedorUsado', countByField(rows.filter((r) => r.vendidoMismoMes), (r) => r.vendedorUsado))}
+          ${block('Vendedor usado', 'vendedorUsado', countByField(rows.filter((r) => isTomaVendida(r)), (r) => r.vendedorUsado))}
         `;
         return;
       }
@@ -2409,15 +2805,32 @@
         return;
       }
 
+      const scoped = activeFilter
+        ? sourceRows.filter(matchesActiveFilter)
+        : rows;
+      const canalFilter = activeFilter?.dim === 'canal';
+      const vendedorFilter = activeFilter?.dim === 'vendedor';
+      const fuerzaHint = canalFilter
+        ? `Detalle de vendedores · fuerza ${activeFilter.label || activeFilter.value}`
+        : (currentMeta.hint || '');
       summaryEl.innerHTML = `
         <div class="ops-orders-drawer__group">
           <h5>Resumen</h5>
-          <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length}</span></div>
-          <p class="ops-orders-drawer__hint">${escapeHtml(currentMeta.hint || '')}</p>
+          <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${scoped.length}</span></div>
+          <p class="ops-orders-drawer__hint">${escapeHtml(fuerzaHint)}</p>
         </div>
-        ${block('Canal', 'canal', countByField(rows, (r) => r.CANAL_LABEL))}
-        ${block('Vendedor', 'vendedor', countByField(rows, (r) => r.VENDEDOR))}
-        ${block('Modelo', 'modelo', countByField(rows, (r) => r.VEH_TIPOAUTO))}
+        ${canalFilter
+          ? ''
+          : block('Canal', 'canal', countByField(rows, (r) => r.CANAL_LABEL))}
+        ${block(
+          canalFilter ? 'Vendedores de la fuerza' : 'Vendedor',
+          'vendedor',
+          countByField(scoped, (r) => r.VENDEDOR)
+        )}
+        ${vendedorFilter
+          ? block('Canal', 'canal', countByField(scoped, (r) => r.CANAL_LABEL))
+          : ''}
+        ${block('Modelo', 'modelo', countByField(scoped, (r) => r.VEH_TIPOAUTO))}
       `;
     }
 
@@ -2486,7 +2899,8 @@
       }
 
       if (currentMeta.kpi === 'tomasACuenta') {
-        const vendidas = filtered.filter((r) => r.vendidoMismoMes).length;
+        const vendidas = filtered.filter((r) => isTomaVendida(r)).length;
+        const enInventario = Math.max(0, filtered.length - vendidas);
         const monto = filtered.reduce((s, r) => s + (Number(r.importeVehiculo) || 0), 0);
         const pct = filtered.length > 0
           ? Math.round((vendidas / filtered.length) * 1000) / 10
@@ -2499,9 +2913,9 @@
               <small>${escapeHtml(moneyCell(monto))}</small>
             </div>
             <div class="toma-period-banner__item">
-              <span class="toma-period-banner__label">Vendidos mismo mes</span>
+              <span class="toma-period-banner__label">Ya vendidos</span>
               <strong>${vendidas}</strong>
-              <small>usados revendidos</small>
+              <small>${enInventario} en inventario</small>
             </div>
             <div class="toma-period-banner__item">
               <span class="toma-period-banner__label">% revendidos</span>
@@ -2516,15 +2930,15 @@
             <button type="button" class="ops-orders-drawer__item ops-orders-drawer__item--clickable" data-toma-key="${escapeHtml(tomaRecordKey(r))}" title="Ver detalle de la toma">
               <div class="ops-orders-drawer__item-head">
                 <strong class="toma-vin-link">${escapeHtml(r.vinToma || 'Sin VIN toma')}</strong>
-                <span class="ops-orders-drawer__tag">${r.vendidoMismoMes ? 'Vendido' : 'Pendiente'}</span>
+                <span class="ops-orders-drawer__tag">${isTomaVendida(r) ? 'Vendido' : 'En inventario'}</span>
               </div>
-              <p class="ops-orders-drawer__msg">${escapeHtml(r.modeloToma || 'Usado')} ${escapeHtml(r.anModeloToma || '')}${r.vendidoMismoMes ? ` · venta ${escapeHtml(formatTomaFecha(r.fechaVentaUsado))}` : ''}</p>
+              <p class="ops-orders-drawer__msg">${escapeHtml(r.modeloToma || 'Usado')} ${escapeHtml(r.anModeloToma || '')}${isTomaVendida(r) ? ` · venta ${escapeHtml(formatTomaFecha(r.fechaVentaUsado))}${r.vendidoMismoMes ? '' : ' (otro mes)'}` : ''}</p>
               <div class="ops-orders-drawer__facts">
                 <span>Toma ${escapeHtml(formatTomaFecha(r.fechaToma))}</span>
                 <span>${escapeHtml(moneyCell(r.importeVehiculo))}</span>
                 <span>${escapeHtml(r.vendedorUsado || r.vendedor || '—')}</span>
               </div>
-              <p class="ops-orders-drawer__sub">${r.vendidoMismoMes
+              <p class="ops-orders-drawer__sub">${isTomaVendida(r)
                 ? `${escapeHtml(r.clienteUsado || '—')} · Pedido USN ${escapeHtml(String(r.pedidoUsn ?? '—'))} · ${escapeHtml(moneyCell(r.montoVentaUsado))}`
                 : `${escapeHtml(r.cliente || '—')} · Pedido nuevo ${escapeHtml(String(r.idPedido ?? '—'))}`}</p>
             </button>`).join('')}`;
@@ -2593,12 +3007,17 @@
       const forceOpen = Boolean(opts.forceOpen);
 
       if (activeVentasDrawerKpi === kpiKey && panel.classList.contains('ops-orders-drawer--open')) {
-        if (initialFilter) {
-          activeFilter = {
-            dim: initialFilter.dim,
-            value: initialFilter.value,
-            label: initialFilter.label || initialFilter.value,
-          };
+        if (initialFilter || opts.rowsOverride) {
+          if (Array.isArray(opts.rowsOverride)) {
+            sourceRows = opts.rowsOverride.slice();
+          }
+          if (initialFilter) {
+            activeFilter = {
+              dim: initialFilter.dim,
+              value: initialFilter.value,
+              label: initialFilter.label || initialFilter.value,
+            };
+          }
           updateFilterChip();
           renderList(searchEl?.value || '');
           return;
@@ -2635,7 +3054,9 @@
         searchEl.value = '';
       }
 
-      sourceRows = rowsForVentasDrawer(kpiKey).slice();
+      sourceRows = Array.isArray(opts.rowsOverride)
+        ? opts.rowsOverride.slice()
+        : rowsForVentasDrawer(kpiKey).slice();
       activeFilter = initialFilter
         ? {
           dim: initialFilter.dim,
@@ -2700,7 +3121,7 @@
       } else if (currentMeta.kpi === 'tomasACuenta') {
         const lines = [[
           'Pedido', 'VINToma', 'ModeloToma', 'AnioToma', 'ImporteVehiculo', 'ImporteAdquisicion',
-          'FechaToma', 'VendidoMismoMes', 'FechaVentaUsado', 'PedidoUsn', 'MontoVentaUsado', 'ClienteUsado', 'VendedorUsado',
+          'FechaToma', 'Vendido', 'VendidoMismoMes', 'FechaVentaUsado', 'PedidoUsn', 'MontoVentaUsado', 'ClienteUsado', 'VendedorUsado',
           'SerieNuevo', 'ModeloNuevo', 'AnioNuevo', 'Factura', 'FechaFactura', 'Cliente', 'Vendedor', 'UsuarioToma',
         ].join(',')];
         for (const r of lastExportRows) {
@@ -2712,6 +3133,7 @@
             r.importeVehiculo ?? '',
             r.importeAdquisicion ?? '',
             formatTomaFecha(r.fechaToma),
+            isTomaVendida(r) ? 'SI' : 'NO',
             r.vendidoMismoMes ? 'SI' : 'NO',
             formatTomaFecha(r.fechaVentaUsado),
             r.pedidoUsn ?? '',
@@ -2938,8 +3360,9 @@
     if (activeSalesTab === 'comisiones' && window.ComisionesVentas?.load) {
       sideLoads.push(window.ComisionesVentas.load(fechaInicio, fechaFin, { force: true }));
     }
-    if (activeSalesTab === 'analisis' && window.AnalisisComercial?.load) {
-      sideLoads.push(window.AnalisisComercial.load(fechaInicio, fechaFin));
+    // CMI comercial vive repartido en Ventas / Financiamiento (no en un tab único).
+    if (window.AnalisisComercial?.load) {
+      sideLoads.push(window.AnalisisComercial.load(fechaInicio, fechaFin, { force: fresh }));
     }
     // Financiamiento: arrancar de inmediato con el periodo del filtro (no esperar /api/ventas).
     // Así no se queda pintado el mes anterior mientras carga ventas/SOFIA.
@@ -2987,6 +3410,9 @@
       registrosActuales = registrosRaw.map((row) => CanalesVenta.enrichRegistro(row));
       entregasActuales = Array.isArray(data.entregasSofia) ? data.entregasSofia : [];
       tomasACuentaActuales = Array.isArray(data.tomasACuenta) ? data.tomasACuenta : [];
+      tomasChartRegistros = Array.isArray(data.tomasMensual?.registros) && data.tomasMensual.registros.length
+        ? data.tomasMensual.registros
+        : tomasACuentaActuales;
       tomasACuentaMeta = data.tomasACuentaMeta || {
         porModeloToma: [],
         montoAdquisicion: 0,
@@ -3019,8 +3445,11 @@
         els.kpiEntregasSofiaSub.textContent = `${demosBit}Actualizado ${stamp}`;
       }
 
-      await fetchSharedGoals().catch((err) => console.warn('[Goals]', err.message));
-      await ensureApartadasInResumen();
+      await Promise.all([
+        fetchSharedGoals().catch((err) => console.warn('[Goals]', err.message)),
+        fetchLineasVsMeta().catch((err) => console.warn('[Mix vs meta]', err.message)),
+        ensureApartadasInResumen(data).catch((err) => console.warn('[Carry over]', err.message)),
+      ]);
       renderCarryOverKpi();
       renderCoberturaKpi();
       renderKpiVisualBars(resumenActual);
@@ -3051,17 +3480,19 @@
         const tomasRows = tomasACuentaActuales || [];
         const tomasTotal = Number(resumen.totalTomasACuenta ?? tomasRows.length ?? 0);
         const tomasVendidos = Number(
-          resumen.totalTomasVendidasMismoMes
+          resumen.totalTomasVendidas
+          ?? tomasACuentaMeta.totalVendidos
+          ?? resumen.totalTomasVendidasMismoMes
           ?? tomasACuentaMeta.totalVendidosMismoMes
-          ?? tomasRows.filter((r) => r.vendidoMismoMes).length
+          ?? tomasRows.filter((r) => isTomaVendida(r)).length
         );
-        const pendientesRows = tomasRows.filter((r) => !r.vendidoMismoMes);
+        const pendientesRows = tomasRows.filter((r) => isTomaEnInventario(r));
         const byModelo = new Map();
         for (const r of tomasRows) {
           const modelo = String(r.modeloToma || 'Sin modelo').trim() || 'Sin modelo';
           const cur = byModelo.get(modelo) || { modelo, tomas: 0, vendidos: 0, pendientes: 0 };
           cur.tomas += 1;
-          if (r.vendidoMismoMes) cur.vendidos += 1;
+          if (isTomaVendida(r)) cur.vendidos += 1;
           else cur.pendientes += 1;
           byModelo.set(modelo, cur);
         }
@@ -3387,14 +3818,12 @@
       || hash === 'tráfico'
     ) return 'afluencia';
     if (hash === 'comisiones' || hash === 'comision' || hash === 'comisiones-fi') return 'comisiones';
-    if (hash === 'analisis-comercial' || hash === 'analisis' || hash === 'cmi' || hash === 'comercial') return 'analisis';
     const params = new URLSearchParams(location.search);
     const tab = String(params.get('tab') || '').toLowerCase();
     if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
     if (tab === 'leads' || tab === 'lead' || tab === 'oportunidades') return 'leads';
     if (tab === 'afluencia' || tab === 'trafico' || tab === 'tráfico' || tab === 'mtk' || tab === 'marketing') return 'afluencia';
     if (tab === 'comisiones' || tab === 'comision') return 'comisiones';
-    if (tab === 'analisis' || tab === 'analisis-comercial' || tab === 'cmi' || tab === 'comercial') return 'analisis';
     return 'ventas';
   }
 
@@ -3488,14 +3917,10 @@
       void window.ComisionesVentas.load(fi, ff);
       return;
     }
-
-    if (tab === 'analisis' && window.AnalisisComercial?.load) {
-      void window.AnalisisComercial.load(fi, ff);
-    }
   }
 
   async function switchSalesTab(tab) {
-    const next = ['financiamiento', 'leads', 'afluencia', 'comisiones', 'analisis'].includes(tab) ? tab : 'ventas';
+    const next = ['financiamiento', 'leads', 'afluencia', 'comisiones'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
     if (next !== 'ventas') {
       ventasDrawerUi?.close?.();
@@ -3512,7 +3937,6 @@
     const panelLd = document.getElementById('panelVentasLeads');
     const panelAf = document.getElementById('panelVentasAfluencia');
     const panelCom = document.getElementById('panelVentasComisiones');
-    const panelAc = document.getElementById('panelVentasAnalisisComercial');
     if (panelVentas) {
       panelVentas.classList.toggle('hidden', next !== 'ventas');
       panelVentas.hidden = next !== 'ventas';
@@ -3533,10 +3957,6 @@
       panelCom.classList.toggle('hidden', next !== 'comisiones');
       panelCom.hidden = next !== 'comisiones';
     }
-    if (panelAc) {
-      panelAc.classList.toggle('hidden', next !== 'analisis');
-      panelAc.hidden = next !== 'analisis';
-    }
 
     const title = document.querySelector('.top-bar-title');
     if (title) {
@@ -3546,9 +3966,7 @@
           ? 'Leads'
           : (next === 'afluencia'
             ? 'Afluencia'
-            : (next === 'comisiones'
-              ? 'Comisiones'
-              : (next === 'analisis' ? 'Análisis comercial' : 'Ventas de Unidades'))));
+            : (next === 'comisiones' ? 'Comisiones' : 'Ventas de Unidades')));
     }
 
     if (next === 'financiamiento') {
@@ -3570,25 +3988,38 @@
       if (location.hash !== '#comisiones') {
         history.replaceState(null, '', `${location.pathname}${location.search}#comisiones`);
       }
-    } else if (next === 'analisis') {
-      if (location.hash !== '#analisis-comercial' && location.hash !== '#analisis') {
-        history.replaceState(null, '', `${location.pathname}${location.search}#analisis-comercial`);
-      }
-      const fi = document.getElementById('fechaInicio')?.value;
-      const ff = document.getElementById('fechaFin')?.value;
-      if (fi && ff) window.AnalisisComercial?.load?.(fi, ff);
     } else if (
       location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
       || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
       || location.hash === '#afluencia' || location.hash === '#afluencia-mtk' || location.hash === '#mtk'
       || location.hash === '#marketing' || location.hash === '#trafico' || location.hash === '#tráfico'
       || location.hash === '#comisiones' || location.hash === '#comision'
-      || location.hash === '#analisis-comercial' || location.hash === '#analisis'
+      || location.hash === '#analisis-comercial' || location.hash === '#analisis' || location.hash === '#cmi'
     ) {
       history.replaceState(null, '', `${location.pathname}${location.search}`);
     }
 
     // Cambio de panel inmediato; datos en cache = instantáneo, si no se cargan en background.
+    const mainScroll = document.querySelector('.main-content');
+    if (mainScroll && mainScroll.scrollTop > 16) {
+      try {
+        mainScroll.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch {
+        mainScroll.scrollTop = 0;
+      }
+    }
+    document.querySelector('#salesMainTabs .contabilidad-tab.active')?.scrollIntoView({
+      behavior: 'smooth',
+      inline: 'nearest',
+      block: 'nearest',
+    });
+
+    if (next === 'financiamiento') {
+      requestAnimationFrame(() => {
+        window.FinanciamientoVentas?.onVisible?.();
+      });
+    }
+
     await ensureActiveTabData(next);
   }
 
@@ -3656,14 +4087,6 @@
     els.goalRetailInput?.addEventListener('change', () => onGoalInputChange('retail'));
     els.goalSofiaInput?.addEventListener('input', () => onGoalInputChange('sofia'));
     els.goalSofiaInput?.addEventListener('change', () => onGoalInputChange('sofia'));
-
-    document.querySelectorAll('[data-goal-step]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const which = btn.dataset.goalStep;
-        const dir = parseInt(btn.dataset.dir, 10);
-        if (which === 'retail' || which === 'sofia') adjustGoal(which, dir);
-      });
-    });
 
     ['fechaInicio', 'fechaFin'].forEach((id) => {
       document.getElementById(id)?.addEventListener('change', () => {

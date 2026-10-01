@@ -6,7 +6,8 @@
 <title>Administración | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=88" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=145" rel="stylesheet"/>
+<script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="admin">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -23,7 +24,7 @@
 <div class="admin-header">
 <div>
 <h2 class="section-title">Usuarios del dashboard</h2>
-<p class="admin-subtitle">Cree y administre cuentas con acceso por rol.</p>
+<p class="admin-subtitle">Cree cuentas y asigne un rol. El acceso a módulos se define abajo en «Permisos por rol».</p>
 </div>
 <button type="button" class="btn-glass btn-primary" id="btnNewUser">
 <span class="material-symbols-outlined">person_add</span>
@@ -39,6 +40,7 @@
 <tr>
 <th>Usuario</th>
 <th>Rol</th>
+<th>Módulos (por rol)</th>
 <th>Estado</th>
 <th>Creado</th>
 <th>Acciones</th>
@@ -53,21 +55,38 @@
 <div class="admin-header">
 <div>
 <h2 class="section-title">Permisos por rol</h2>
-<p class="admin-subtitle">Seleccione qué módulos puede ver cada rol. El acceso a API se ajusta según las páginas marcadas.</p>
+<p class="admin-subtitle">Marque qué módulos ve cada rol. Los usuarios heredan el acceso de su rol (no se configuran uno a uno).</p>
 </div>
 <div class="admin-header-actions">
 <button type="button" class="btn-glass btn-secondary" id="btnResetRolePermissions">
 <span class="material-symbols-outlined">restart_alt</span>
 <span>Restablecer</span>
 </button>
-<button type="button" class="btn-glass btn-primary" id="btnSaveRolePermissions">
+<button type="button" class="btn-glass btn-primary" id="btnSaveRolePermissions" disabled>
 <span class="material-symbols-outlined">save</span>
 <span>Guardar permisos</span>
 </button>
 </div>
 </div>
+<div class="admin-perm-legend" aria-hidden="false">
+<div class="admin-perm-legend-item">
+<span class="material-symbols-outlined">group</span>
+<span>1. Asigne un <strong>rol</strong> al usuario arriba.</span>
+</div>
+<div class="admin-perm-legend-item">
+<span class="material-symbols-outlined">tune</span>
+<span>2. Aquí active o quite <strong>módulos</strong> de ese rol.</span>
+</div>
+<div class="admin-perm-legend-item">
+<span class="material-symbols-outlined">sync_alt</span>
+<span>3. Todos los usuarios con ese rol cambian al guardar.</span>
+</div>
+</div>
+<div class="admin-perm-toolbar">
 <p id="rolePermissionsMeta" class="admin-hint"></p>
-<div id="rolePermissionsGrid" class="admin-alert-prefs"></div>
+<p id="rolePermissionsDirty" class="admin-perm-dirty hidden" role="status">Hay cambios sin guardar</p>
+</div>
+<div id="rolePermissionsGrid" class="admin-perm-matrix-wrap"></div>
 </section>
 
 <section class="section-panel dashboard-section" id="alertPrefsSection">
@@ -247,6 +266,7 @@ Ver contraseña actual
 <label class="admin-field">
 <span>Rol</span>
 <select id="formRole" required></select>
+<div id="formRoleAccessPreview" class="admin-role-access-preview"></div>
 </label>
 <label class="admin-field admin-field-check hidden" id="activeFieldWrap">
 <span>
@@ -266,8 +286,8 @@ Usuario activo
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=18"></script>
+<script src="/js/topbar.js?v=21"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/admin.js?v=7"></script>
+<script src="/js/admin.js?v=8"></script>
 </body>
 </html>

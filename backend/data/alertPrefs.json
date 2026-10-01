@@ -35,6 +35,14 @@
       "sin_timbrar",
       "taller_abiertas",
       "sistema"
+    ],
+    "gestion_inventario": [
+      "inventario_envejecidas",
+      "inventario_sin_previas",
+      "plan_piso",
+      "entregas_sin_previa",
+      "taller_abiertas",
+      "sistema"
     ]
   }
 }

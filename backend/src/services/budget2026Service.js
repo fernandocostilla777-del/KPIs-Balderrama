@@ -87,8 +87,9 @@ function parseResumen(wb) {
 }
 
 function findFinRow(wb, pattern) {
-  const rows = sheetRows(wb, 'PRESUPUESTO FINANCIERO 2026');
   const target = normLabel(pattern);
+  if (!target) return null; // sin etiqueta no hay fila válida (evita tomar filas de encabezado vacías)
+  const rows = sheetRows(wb, 'PRESUPUESTO FINANCIERO 2026');
   return rows.find((row) => normLabel(row[FIN_LABEL_COL]) === target);
 }
 

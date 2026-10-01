@@ -1,6 +1,6 @@
 const { getPool, sql } = require('../db');
 const { enrichVentasRows, countByCanal, CANALES_ORDEN, getCanalLabel } = require('./canales-venta');
-const { getNotificacionesEntrega, computeCoberturaSofia } = require('./sofia-entregas');
+const { getNotificacionesEntrega, computeCoberturaSofia, annotateFlotillaGmfContrato } = require('./sofia-entregas');
 const { getComparativoYtd, buildYtdRanges } = require('./ytd-comparativo');
 const { getMejorUtilidadPorCarline } = require('./utilidadCarlineService');
 const { getInventory } = require('./inventoryService');
@@ -315,6 +315,29 @@ function isFlotilla(row) {
   return row.TIPOVENTA === FLOTILLA_LABEL;
 }
 
+/**
+ * FLOTGMF facturada por el equipo de flotillas cuenta en menudeo
+ * si el contrato CRM (especial / tipo de compra) no es flotilla.
+ * FLOT sigue en flotillas. Sin contrato en CRM se conserva flotilla.
+ */
+function reclassifyFlotgmfMenudeo(rows = []) {
+  return annotateFlotillaGmfContrato(rows).map((row) => {
+    const forma = String(row.FORMAPAGO_ORIGINAL || '').trim().toUpperCase();
+    if (forma !== 'FLOTGMF' || row.ES_FLOTILLA_CONTRATO) return row;
+    const tieneContrato = Boolean(
+      String(row.CONTRATO_ESPECIAL || '').trim()
+      || String(row.CONTRATO_TIPO_COMPRA || '').trim(),
+    );
+    if (!tieneContrato) return row;
+    return {
+      ...row,
+      TIPOVENTA: 'GMF',
+      CANAL_VENTA: 'OTROS',
+      CANAL_LABEL: getCanalLabel('OTROS'),
+    };
+  });
+}
+
 function isDemoRow(row) {
   return Boolean(row.IS_DEMO) || isDemoVentaRow(row);
 }
@@ -448,7 +471,24 @@ function mergeDemosTimbradoSalidaEnSofia({ demos = [], entregasRows = [], inicio
 
 function parseFechaDoc(value) {
   if (!value) return null;
-  const parts = String(value).trim().split('/');
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return {
+      day: value.getDate(),
+      month: value.getMonth() + 1,
+      year: value.getFullYear(),
+      monthKey: `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`,
+    };
+  }
+  const raw = String(value).trim();
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    if (!day || !month || !year) return null;
+    return { day, month, year, monthKey: `${year}-${String(month).padStart(2, '0')}` };
+  }
+  const parts = raw.split('/');
   if (parts.length !== 3) return null;
 
   const day = Number(parts[0]);
@@ -701,9 +741,12 @@ function summarizeVentas(rows, inicio, fin, sofiaEntregas = {}) {
   const totalFacturadas = cobertura.totalUnidadesFacturadas;
   const totalRetailConDemos = retail.length + demosRetail;
   const totalFlotillasConDemos = flotillas.length + demosFlotilla;
+  // Total ventas = todas las facturas. Flotillas se desglosan en su propia tarjeta.
+  // totalUnidadesFacturadas sigue siendo la base de menudeo SOFIA (sin FLOT).
+  const totalVentas = totalRetailConDemos + totalFlotillasConDemos;
 
   return {
-    totalVentas: totalFacturadas,
+    totalVentas,
     totalVentasBrutas: marked.length,
     totalDemos: demos.length,
     totalDemosRetail: demosRetail,
@@ -755,8 +798,8 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
   const pool = await getPool();
-  // Tomas por PET_FECHOPE. "Vendidas mismo mes" = el usado ya tiene pedido
-  // USN_PEDIDO status I en el mismo mes calendario de la toma (no ventas de nuevos).
+  // Tomas por PET_FECHOPE. "Vendidas" = el usado ya tiene pedido USN_PEDIDO status I
+  // en cualquier fecha >= toma (para ver qué del mes tomado sigue en inventario).
   const result = await pool.request()
     .input('fechaInicio', sql.Date, inicio)
     .input('fechaFin', sql.Date, fin)
@@ -836,8 +879,8 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
         FROM USN_PEDIDO u
         WHERE UPPER(LTRIM(RTRIM(u.PMS_NUMSERIE))) = UPPER(LTRIM(RTRIM(t.PET_VINTOMA)))
           AND ISNULL(u.PMS_STATUS, '') = 'I'
-          AND YEAR(CONVERT(DATE, u.PMS_FECHOPE, 103)) = YEAR(CONVERT(DATE, t.PET_FECHOPE, 103))
-          AND MONTH(CONVERT(DATE, u.PMS_FECHOPE, 103)) = MONTH(CONVERT(DATE, t.PET_FECHOPE, 103))
+          -- Cualquier reventa del usado a partir de la fecha de toma (no solo mismo mes)
+          AND CONVERT(DATE, u.PMS_FECHOPE, 103) >= CONVERT(DATE, t.PET_FECHOPE, 103)
         ORDER BY CONVERT(DATE, u.PMS_FECHOPE, 103) ASC, u.PMS_NUMPEDIDO ASC
       ) ventaUsado
       LEFT JOIN PER_PERSONAS cliUsado
@@ -855,11 +898,22 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
     const key = `${row.idPedido}|${vinKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const vendidoMismoMes = row.pedidoUsn != null && row.pedidoUsn !== '';
+    const fechaToma = row.fechaToma || null;
+    const fechaVentaUsado = row.fechaVentaUsado || null;
+    const vendido = row.pedidoUsn != null && row.pedidoUsn !== '';
+    const tomaParsed = parseFechaDoc(fechaToma);
+    const ventaParsed = parseFechaDoc(fechaVentaUsado);
+    const vendidoMismoMes = Boolean(
+      vendido
+      && tomaParsed
+      && ventaParsed
+      && tomaParsed.year === ventaParsed.year
+      && tomaParsed.month === ventaParsed.month
+    );
     registros.push({
       idPedido: row.idPedido,
       vinToma: String(row.vinToma || '').trim(),
-      fechaToma: row.fechaToma || null,
+      fechaToma,
       usuarioToma: String(row.usuarioToma || '').trim() || null,
       serieNuevo: String(row.serieNuevo || '').trim(),
       facturaNuevo: String(row.facturaNuevo || '').trim() || null,
@@ -872,9 +926,11 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
       anModeloNuevo: String(row.anModeloNuevo || row.anModeloPedido || '').trim() || null,
       importeAdquisicion: row.importeAdquisicion != null ? Number(row.importeAdquisicion) : null,
       importeVehiculo: row.importeVehiculo != null ? Number(row.importeVehiculo) : null,
+      vendido,
+      enInventario: !vendido,
       vendidoMismoMes,
       pedidoUsn: row.pedidoUsn != null ? Number(row.pedidoUsn) : null,
-      fechaVentaUsado: row.fechaVentaUsado || null,
+      fechaVentaUsado,
       montoVentaUsado: row.montoVentaUsado != null ? Number(row.montoVentaUsado) : null,
       clienteUsado: String(row.clienteUsado || '').replace(/\s+/g, ' ').trim() || null,
       vendedorUsado: String(row.vendedorUsado || '').replace(/\s+/g, ' ').trim() || null,
@@ -882,8 +938,8 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
   }
 
   registros.sort((a, b) => {
-    if (Boolean(b.vendidoMismoMes) !== Boolean(a.vendidoMismoMes)) {
-      return a.vendidoMismoMes ? -1 : 1;
+    if (Boolean(b.vendido) !== Boolean(a.vendido)) {
+      return a.vendido ? -1 : 1;
     }
     const pa = parseFechaDoc(a.fechaToma) || parseFechaDoc(a.fechaFactura);
     const pb = parseFechaDoc(b.fechaToma) || parseFechaDoc(b.fechaFactura);
@@ -896,7 +952,9 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
   const montoTotal = registros.reduce((s, r) => s + (Number(r.importeVehiculo) || 0), 0);
   const montoAdquisicion = registros.reduce((s, r) => s + (Number(r.importeAdquisicion) || 0), 0);
   const montoVentasUsado = registros.reduce((s, r) => s + (Number(r.montoVentaUsado) || 0), 0);
+  const totalVendidos = registros.filter((r) => r.vendido).length;
   const totalVendidosMismoMes = registros.filter((r) => r.vendidoMismoMes).length;
+  const totalEnInventario = registros.length - totalVendidos;
   const porModeloToma = {};
   for (const r of registros) {
     const key = String(r.modeloToma || 'Sin modelo').trim() || 'Sin modelo';
@@ -907,7 +965,12 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
 
   return {
     total: registros.length,
+    totalVendidos,
+    totalEnInventario,
     totalVendidosMismoMes,
+    pctVendidos: registros.length > 0
+      ? Math.round((totalVendidos / registros.length) * 1000) / 10
+      : 0,
     pctVendidosMismoMes: registros.length > 0
       ? Math.round((totalVendidosMismoMes / registros.length) * 1000) / 10
       : 0,
@@ -932,7 +995,7 @@ function buildTomasPorMes(registros, inicio, fin) {
     const parsed = parseFechaDoc(r.fechaToma);
     if (!parsed || !buckets[parsed.monthKey]) continue;
     buckets[parsed.monthKey].tomados += 1;
-    if (r.vendidoMismoMes) buckets[parsed.monthKey].vendidos += 1;
+    if (r.vendido || r.vendidoMismoMes) buckets[parsed.monthKey].vendidos += 1;
   }
 
   const meses = monthRange.map((m) => buckets[m.key]);
@@ -996,7 +1059,7 @@ async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false
 
     const data = {
       registros: await annotateDemosFromSofDemo(
-        markDemoVentasRows(enrichVentasRows(result.recordset)),
+        markDemoVentasRows(reclassifyFlotgmfMenudeo(enrichVentasRows(result.recordset))),
       ),
       sofiaEntregas,
       entregasSofia: sofiaEntregas.registrosEntrega ?? [],
@@ -1023,7 +1086,13 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
 
   const incluirPorMes = isAcumuladoAnual(inicio, fin);
   const ytdRanges = buildYtdRanges(fechaFin);
-  const sameAsYtd = fechaInicio === ytdRanges.inicioActual && fechaFin === ytdRanges.finActual;
+
+  // Gráfica de tomas: acumulado del año hasta fechaFin (incluye mes en curso).
+  // El YTD de ventas YoY sí excluye el mes incompleto; aquí no conviene ocultar septiembre.
+  const tomasChartAnio = fin.getFullYear();
+  const tomasChartInicio = formatDateInput(new Date(tomasChartAnio, 0, 1));
+  const tomasChartFin = fechaFin;
+  const sameAsTomasChart = fechaInicio === tomasChartInicio && fechaFin === tomasChartFin;
 
   const fechaInicioAnterior = shiftDateYear(fechaInicio, -1);
   const fechaFinAnterior = shiftDateYear(fechaFin, -1);
@@ -1056,11 +1125,11 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
       console.warn('[ventas] tomas a cuenta:', err.message);
       return { total: 0, montoTotal: 0, registros: [], porMes: null, error: err.message };
     }),
-    sameAsYtd
+    sameAsTomasChart
       ? Promise.resolve(null)
       : getTomasACuenta({
-        fechaInicio: ytdRanges.inicioActual,
-        fechaFin: ytdRanges.finActual,
+        fechaInicio: tomasChartInicio,
+        fechaFin: tomasChartFin,
       }).catch((err) => {
         console.warn('[ventas] tomas mensual YTD:', err.message);
         return { total: 0, registros: [], porMes: null, error: err.message };
@@ -1071,20 +1140,29 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
   const sofiaEntregas = core.sofiaEntregas;
   const resumen = summarizeVentas(rows, inicio, fin, sofiaEntregas);
   resumen.unidadesApartadas = Number(inventorySnap?.summary?.availableApartadas ?? 0);
+  const apartadasInventario = Array.isArray(inventorySnap?.inventoryTable)
+    ? inventorySnap.inventoryTable.filter((u) => u.isApartada || u.situacion === 'SEP')
+    : [];
   resumen.totalTomasACuenta = Number(tomasACuenta.total || 0);
   resumen.montoTomasACuenta = Number(tomasACuenta.montoTotal || 0);
   resumen.montoAdquisicionTomas = Number(tomasACuenta.montoAdquisicion || 0);
+  resumen.totalTomasVendidas = Number(tomasACuenta.totalVendidos || tomasACuenta.totalVendidosMismoMes || 0);
+  resumen.totalTomasEnInventario = Number(
+    tomasACuenta.totalEnInventario
+    ?? Math.max(0, resumen.totalTomasACuenta - resumen.totalTomasVendidas)
+  );
+  resumen.pctTomasVendidas = Number(tomasACuenta.pctVendidos || tomasACuenta.pctVendidosMismoMes || 0);
   resumen.totalTomasVendidasMismoMes = Number(tomasACuenta.totalVendidosMismoMes || 0);
   resumen.montoTomasVendidasMismoMes = Number(tomasACuenta.montoVentasUsado || 0);
-  resumen.pctTomasVendidasMismoMes = Number(tomasACuenta.pctVendidosMismoMes || 0);
-  // Compat: ya no es % de ventas nuevas con toma, sino % de tomas revendidas el mismo mes.
-  resumen.pctVentasConToma = resumen.pctTomasVendidasMismoMes;
+  // Compat: el KPI/UI de tomas ahora mide reventa total (cualquier fecha), no solo mismo mes.
+  resumen.pctTomasVendidasMismoMes = resumen.pctTomasVendidas;
+  resumen.pctVentasConToma = resumen.pctTomasVendidas;
 
-  const tomasChartSource = sameAsYtd ? tomasACuenta : (tomasYtdRaw || tomasACuenta);
+  const tomasChartSource = sameAsTomasChart ? tomasACuenta : (tomasYtdRaw || tomasACuenta);
   const tomasMensual = tomasChartSource.porMes || buildTomasPorMes(
     tomasChartSource.registros || [],
-    parseDateInput(ytdRanges.inicioActual),
-    parseDateInput(ytdRanges.finActual)
+    parseDateInput(tomasChartInicio),
+    parseDateInput(tomasChartFin)
   );
 
   let resumenAnterior = null;
@@ -1114,16 +1192,21 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
     utilidadCarline,
     registros: rows,
     entregasSofia: resumen.entregasSofiaEfectivas || sofiaEntregas.registrosEntrega || [],
+    apartadasInventario,
     tomasACuenta: tomasACuenta.registros || [],
     tomasMensual: {
-      anio: ytdRanges.anioActual,
-      corte: ytdRanges.corte,
-      mesEnCursoExcluido: ytdRanges.mesEnCursoExcluido,
       ...tomasMensual,
+      anio: tomasChartAnio,
+      corte: tomasChartFin,
+      mesEnCursoExcluido: false,
+      registros: tomasChartSource.registros || [],
     },
     tomasACuentaMeta: {
       porModeloToma: tomasACuenta.porModeloToma || [],
       montoAdquisicion: tomasACuenta.montoAdquisicion || 0,
+      totalVendidos: tomasACuenta.totalVendidos || 0,
+      totalEnInventario: tomasACuenta.totalEnInventario || 0,
+      pctVendidos: tomasACuenta.pctVendidos || 0,
       totalVendidosMismoMes: tomasACuenta.totalVendidosMismoMes || 0,
       pctVendidosMismoMes: tomasACuenta.pctVendidosMismoMes || 0,
       montoVentasUsado: tomasACuenta.montoVentasUsado || 0,

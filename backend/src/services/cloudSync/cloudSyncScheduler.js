@@ -1,6 +1,8 @@
 /**
  * Scheduler de sincronización local → API en la nube (PostgreSQL).
  *
+ * - Cada 2 min (CLOUD_SYNC_OBJETIVOS_INTERVAL_MINUTES): solo Objetivos Web,
+ *   sin esperar al resto de dominios ni a la carga de Sheets.
  * - Cada N min (default 30): TODOS los dominios juntos
  *   (overview, ventas, forecast, inventario, contabilidad, crm, postventa, auth, personal)
  * - Día 1 del mes (02:00): cierre mensual del mes anterior (mismos dominios)
@@ -21,13 +23,31 @@ const SYNC_DOMAINS = [
   'objetivos',
   'auth',
   'personal',
+  'vendidos',
 ];
+
+/** Su fallo se registra en el resultado sin cortar el resto del ciclo. */
+const OPTIONAL_DOMAINS = new Set(['vendidos']);
+
+async function syncDomainSafe(domain, options) {
+  if (!OPTIONAL_DOMAINS.has(domain)) return syncDomain(domain, options);
+  try {
+    return await syncDomain(domain, options);
+  } catch (err) {
+    console.warn(`[cloud-sync] ${domain} omitido: ${err.message}`);
+    return { ok: false, domain, error: err.message };
+  }
+}
 
 const state = {
   enabled: false,
   running: false,
   incrementalTimer: null,
   monthlyTimer: null,
+  objetivosTimer: null,
+  objetivosRunning: false,
+  lastObjetivosAt: null,
+  nextObjetivosAt: null,
   lastIncrementalAt: null,
   lastDailyAt: null,
   lastMonthlyAt: null,
@@ -82,6 +102,8 @@ function getStatus() {
     incrementalDomains: SYNC_DOMAINS.filter((d) => d !== 'auth' && d !== 'postventa'),
     dailyDomain: 'postventa',
     running: state.running,
+    lastObjetivosAt: state.lastObjetivosAt,
+    nextObjetivosAt: state.nextObjetivosAt,
     lastIncrementalAt: state.lastIncrementalAt,
     lastDailyAt: state.lastDailyAt,
     lastMonthlyAt: state.lastMonthlyAt,
@@ -127,6 +149,56 @@ async function refreshCrmSheetsForObjetivos() {
   });
 }
 
+function objetivosIntervalMs() {
+  const minutes = Number(process.env.CLOUD_SYNC_OBJETIVOS_INTERVAL_MINUTES || 2);
+  return Math.max(1, Number.isFinite(minutes) ? minutes : 2) * 60 * 1000;
+}
+
+/** Publica el mes en curso a Railway sin esperar al ciclo de 30 min. */
+async function publishObjetivosNow({ reason = 'objetivos' } = {}) {
+  if (!isEnabled()) {
+    return { ok: false, skipped: true, reason: 'CLOUD_SYNC_ENABLED=false' };
+  }
+  if (state.objetivosRunning) {
+    return { ok: false, skipped: true, reason: 'Publicación de objetivos en curso' };
+  }
+
+  state.objetivosRunning = true;
+  const range = getCurrentMonthRange();
+  try {
+    const result = await syncDomain('objetivos', {
+      ...range,
+      syncType: 'incremental',
+    });
+    state.lastObjetivosAt = new Date().toISOString();
+    state.lastResults.objetivos = { reason, at: state.lastObjetivosAt, result };
+    console.log(`[cloud-sync] Objetivos ${range.periodKey} publicados (${reason})`);
+    return result;
+  } catch (err) {
+    state.lastError = err.message || String(err);
+    state.lastResults.objetivos = {
+      reason,
+      at: new Date().toISOString(),
+      error: state.lastError,
+    };
+    console.warn(`[cloud-sync] Objetivos no publicados (${reason}): ${state.lastError}`);
+    return { ok: false, error: state.lastError };
+  } finally {
+    state.objetivosRunning = false;
+    state.nextObjetivosAt = new Date(Date.now() + objetivosIntervalMs()).toISOString();
+  }
+}
+
+function scheduleObjetivos() {
+  if (state.objetivosTimer) clearInterval(state.objetivosTimer);
+  const intervalMs = objetivosIntervalMs();
+  state.objetivosTimer = setInterval(() => {
+    publishObjetivosNow({ reason: 'objetivos-schedule' }).catch(() => {});
+  }, intervalMs);
+  if (typeof state.objetivosTimer.unref === 'function') state.objetivosTimer.unref();
+  state.nextObjetivosAt = new Date(Date.now() + intervalMs).toISOString();
+}
+
 async function runFullSync({ reason = 'schedule', syncType = 'incremental' } = {}) {
   const range = getCurrentMonthRange();
   const results = {};
@@ -141,7 +213,7 @@ async function runFullSync({ reason = 'schedule', syncType = 'incremental' } = {
 
   for (const domain of SYNC_DOMAINS) {
     const domainSyncType = domain === 'auth' || domain === 'personal' ? 'monthly' : syncType;
-    results[domain] = await syncDomain(domain, {
+    results[domain] = await syncDomainSafe(domain, {
       ...range,
       fechaInicio: range.fechaInicio,
       fechaFin: range.fechaFin,
@@ -173,7 +245,7 @@ async function runMonthlySync({ reason = 'monthly' } = {}) {
   const range = getMonthRangeForKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
   const results = {};
   for (const domain of SYNC_DOMAINS) {
-    results[domain] = await syncDomain(domain, {
+    results[domain] = await syncDomainSafe(domain, {
       periodKey: domain === 'auth' || domain === 'personal' ? undefined : range.periodKey,
       fechaInicio: range.fechaInicio,
       fechaFin: range.fechaFin,
@@ -238,14 +310,20 @@ function startScheduler() {
   }
 
   const intervalMin = Number(process.env.CLOUD_SYNC_INTERVAL_MINUTES || 30);
+  const objetivosMin = Math.max(1, Number(process.env.CLOUD_SYNC_OBJETIVOS_INTERVAL_MINUTES || 2));
   console.log(
-    `[cloud-sync] Programado: cada ${intervalMin} min TODOS los dominios juntos`
-    + ` (${SYNC_DOMAINS.join(', ')})`
+    `[cloud-sync] Objetivos Web cada ${objetivosMin} min`
+    + ` · resto de dominios cada ${intervalMin} min (${SYNC_DOMAINS.join(', ')})`
     + ' · cierre mensual día 1 02:00'
   );
 
+  scheduleObjetivos();
   scheduleIncremental();
   scheduleMonthly();
+
+  setTimeout(() => {
+    publishObjetivosNow({ reason: 'objetivos-startup' }).catch(() => {});
+  }, 15_000).unref?.();
 
   if (String(process.env.CLOUD_SYNC_ON_START || 'false').toLowerCase() === 'true') {
     setTimeout(() => {
@@ -259,8 +337,10 @@ function startScheduler() {
 function stopScheduler() {
   if (state.incrementalTimer) clearInterval(state.incrementalTimer);
   if (state.monthlyTimer) clearTimeout(state.monthlyTimer);
+  if (state.objetivosTimer) clearInterval(state.objetivosTimer);
   state.incrementalTimer = null;
   state.monthlyTimer = null;
+  state.objetivosTimer = null;
   state.enabled = false;
 }
 

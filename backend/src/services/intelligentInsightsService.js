@@ -1437,23 +1437,97 @@ function buildInventoryInsights(payload = {}) {
     });
   }
 
-  if (ageing >= 5) {
+  const concentrados = Array.isArray(s.antiguedadConcentrada) ? s.antiguedadConcentrada : [];
+  const pct90 = Number(s.pct90 ?? 0);
+  if (ageing >= 5 || concentrados.length) {
+    const foco = concentrados.slice().sort((a, b) => Number(b.pct90) - Number(a.pct90))[0];
+    const focoTxt = foco
+      ? ` ${foco.carline} concentra ${foco.pct90}% de sus unidades en +90 días (${foco.r90} de ${foco.total}).`
+      : '';
     push(list, {
       id: 'inv-aging',
       kpiId: 'kpiAgeingAlerts',
       module: 'inventory',
-      severity: ageing >= 12 ? 'critical' : 'warning',
+      severity: ageing >= 12 || (foco && Number(foco.pct90) >= 50) ? 'critical' : 'warning',
       title: 'Antigüedad 60+',
-      summary: `${ageing} unidades físicas con 60+ días; intereses asociados al plan piso.`,
-      analysis: 'Falla de rotación de stock: cada día adicional eleva costo financiero (plan piso) y presión de descuento.',
+      summary: `${ageing} unidades físicas con 60+ días.${pct90 ? ` ${pct90}% del disponible tiene +90 días.` : ''}${focoTxt}`,
+      analysis: 'Falla de rotación de stock: cada día adicional eleva costo financiero (plan piso) y presión de descuento. Un carline con más del 30% de sus unidades en +90 días concentra el envejecimiento.',
       recommendations: [
-        'Plan de salida por VIN (transferencia, promo, demo).',
-        'Revisar pedido a planta vs días promedio de stock.',
+        foco
+          ? `Ver unidades de ${foco.carline} en el rango +90 del análisis de inventario.`
+          : 'Plan de salida por VIN (transferencia, promo, demo).',
+        'Revisar pedido a planta vs días de stock.',
       ],
-      metrics: { ageing, planPiso, avgDays },
+      metrics: { ageing, planPiso, avgDays, pct90, carline: foco?.carline || null },
       chatPrompt: chatPrompt('Inventario', 'Antigüedad 60+', [
-        `Envejecidas: ${ageing}`, `Plan piso: ${planPiso}`, `Días prom.: ${avgDays}`,
+        `Envejecidas: ${ageing}`, `+90 días: ${pct90}%`, `Plan piso: ${planPiso}`,
+        foco ? `Carline: ${foco.carline} ${foco.pct90}%` : '',
       ]),
+    });
+  }
+
+  const candidatas = Array.isArray(s.costoCandidatasDetalle) ? s.costoCandidatasDetalle : [];
+  const candidatasN = Number(s.costoCandidatas ?? candidatas.length);
+  if (candidatasN > 0) {
+    const ejemplo = candidatas[0];
+    push(list, {
+      id: 'inv-costo-piso',
+      kpiId: 'kCostoInventario',
+      module: 'inventory',
+      severity: candidatasN >= 5 ? 'warning' : 'info',
+      title: 'Costo de inventario ya come la utilidad',
+      summary: `${candidatasN} unidad(es) con plan piso igual o mayor al 30% de su utilidad bruta histórica.${ejemplo ? ` Ej. ${ejemplo.carline || '—'} ${ejemplo.vin || ''} (${ejemplo.pctCosto ?? '—'}%).` : ''}`,
+      analysis: 'El interés acumulado de plan piso ya se come una parte material de lo que esa versión dejó en ventas anteriores. Seguir esperando encarece la salida.',
+      recommendations: [
+        'Lista de candidatas a descuento, intercambio de planta o promoción.',
+        'Atacar primero las de mayor plan piso acumulado.',
+      ],
+      responsable: 'Gerente Comercial Ventas',
+      audiencia: ['Gerencia Comercial', 'Gerencia Ventas', 'Inventarios'],
+      metrics: {
+        candidatas: candidatasN,
+        costoAcumulado60: Number(s.costoAcumulado60 || 0),
+        costoDiario60: Number(s.costoDiario60 || 0),
+      },
+      chatPrompt: chatPrompt('Inventario', 'Costo de inventario', [
+        `Candidatas: ${candidatasN}`,
+        `Piso 60+: ${s.costoAcumulado60 || 0}`,
+        `Costo diario: ${s.costoDiario60 || 0}`,
+      ]),
+    });
+  }
+
+  const quiebre = Array.isArray(s.coberturaQuiebre) ? s.coberturaQuiebre : [];
+  const sobrestock = Array.isArray(s.coberturaSobrestock) ? s.coberturaSobrestock : [];
+  const sinVentas = Array.isArray(s.coberturaSinVentas) ? s.coberturaSinVentas : [];
+  if (quiebre.length || sobrestock.length || sinVentas.length) {
+    const partes = [];
+    if (quiebre.length) partes.push(`Quiebre (<20 días): ${quiebre.slice(0, 4).join(', ')}.`);
+    if (sobrestock.length) partes.push(`Sobrestock (>90 días): ${sobrestock.slice(0, 4).join(', ')}.`);
+    if (sinVentas.length) partes.push(`${sinVentas.length} carline(s) sin ventas en 90 días, aparte.`);
+    push(list, {
+      id: 'inv-dias-venta',
+      kpiId: 'kCobertura',
+      module: 'inventory',
+      severity: quiebre.length ? 'warning' : 'info',
+      title: 'Cobertura fuera de banda',
+      summary: partes.join(' '),
+      analysis: 'La cobertura compara el disponible de cada carline con el ritmo de venta de los últimos 90 días. Menos de 20 días anticipa quiebre; más de 90, sobrestock. Sin ventas no se divide entre cero.',
+      recommendations: [
+        quiebre.length ? 'Sugerir pedido a planta para los carlines en quiebre.' : null,
+        sobrestock.length ? 'Revisar precio o mover los carlines en sobrestock.' : null,
+        sinVentas.length ? 'Los carlines sin ventas en 90 días se revisan aparte, no entran al cálculo.' : null,
+      ].filter(Boolean),
+      responsable: 'Gerente Comercial Ventas',
+      audiencia: ['Gerencia Comercial', 'Gerencia Ventas', 'Inventarios'],
+      metrics: {
+        coberturaDias: s.coberturaDias ?? null,
+        fuera: Number(s.coberturaFuera || 0),
+        quiebre: quiebre.length,
+        sobrestock: sobrestock.length,
+        sinVentas: sinVentas.length,
+      },
+      chatPrompt: chatPrompt('Inventario', 'Cobertura en días de venta', partes),
     });
   }
 
@@ -1624,6 +1698,9 @@ function buildInventoryInsights(payload = {}) {
         + `Utilidad bruta ${round1(vendBruta)}`
         + (vendNetaProm != null ? `; neta promedio ${round1(vendNetaProm)}/ud` : '')
         + '. '
+        + (Number(vend.bajoCosto || 0) > 0
+          ? `${Number(vend.bajoCosto)} vendida(s) bajo costo (bruta negativa: precio, bonificación o nota de crédito). `
+          : '')
         + (vendNetaNeg > 0
           ? `${vendNetaNeg} unidad(es) (${pctNetaNeg}%) con utilidad neta negativa`
             + (peores.length
@@ -1871,7 +1948,7 @@ function buildPostSalesInsights(payload = {}) {
   if (b91 >= 5 && b120 === 0) {
     push(list, {
       id: 'ps-aging91',
-      kpiId: 'psAging91',
+      kpiId: 'psAging120',
       module: 'post-sales',
       severity: 'info',
       title: 'Órdenes acercándose a +120 días',
@@ -1892,7 +1969,7 @@ function buildPostSalesInsights(payload = {}) {
   if (conRefacciones >= 10) {
     push(list, {
       id: 'ps-con-refacciones',
-      kpiId: 'psConRefacciones',
+      kpiId: 'psDiasEsperaRefacc',
       module: 'post-sales',
       severity: conRefacciones >= 40 ? 'warning' : 'info',
       title: 'Órdenes abiertas con refacciones cargadas',
@@ -1934,7 +2011,7 @@ function buildPostSalesInsights(payload = {}) {
     const pct = round1((sinPromesa / abiertas) * 100);
     push(list, {
       id: 'ps-sin-promesa',
-      kpiId: 'psSinPromesa',
+      kpiId: 'psPromesasVencidas',
       module: 'post-sales',
       severity: 'warning',
       title: 'Abiertas sin fecha promesa',
@@ -1971,7 +2048,7 @@ function buildPostSalesInsights(payload = {}) {
   if (sinImporte >= 8 || sinFecha >= 5) {
     push(list, {
       id: 'ps-calidad-datos',
-      kpiId: 'psSinImporte',
+      kpiId: 'psBacklog',
       module: 'post-sales',
       severity: 'info',
       title: 'Calidad de datos de órdenes deficiente',
@@ -2127,7 +2204,7 @@ function buildSeguimientoInsights(payload = {}) {
       const pct = round1((conCrm / clientes) * 100);
       push(list, {
         id: 'seg-cierres-crm',
-        kpiId: 'kCierreCrm',
+        kpiId: payload.anchorCrm || 'kCierreCrm',
         module: 'seguimiento',
         severity: 'warning',
         title: 'Cierres de taller sin ID CRM',
@@ -2141,6 +2218,89 @@ function buildSeguimientoInsights(payload = {}) {
         metrics: { ordenes, clientes, conCrm, pct },
         chatPrompt: chatPrompt('Seguimiento 360 · cierres', 'Sin ID CRM', [
           `Órdenes: ${ordenes}`, `Clientes: ${clientes}`, `Con CRM: ${conCrm}`, `Periodo: ${payload.fechaInicio} — ${payload.fechaFin}`,
+        ]),
+      });
+    }
+  }
+
+  if (vista === 'maduracion') {
+    // P-VTA-4 · Tiempo de Maduración Comercial (sin semáforo propio por catálogo).
+    const cob = payload.cobertura || {};
+    const gen = payload.general || {};
+    const movil3 = Number(payload.movil3?.promedio);
+    const historico = Number(payload.historico?.promedio);
+    const origenes = payload.origenes || {};
+    const mezclaActual = Number(origenes.cartera?.mezclaPct);
+    const mezclaPrevia = Number(payload.mezclaCarteraPrevia);
+    const periodo = `${payload.fechaInicio || '—'} — ${payload.fechaFin || '—'}`;
+
+    if (cob.aplica && Number.isFinite(Number(cob.pct)) && Number(cob.pct) < 100 && Number(cob.faltante) > 0) {
+      const pct = round1(Number(cob.pct));
+      const esperadas = Number(cob.esperadas || 0);
+      const faltante = Number(cob.faltante || 0);
+      const brecha = Math.max(0, Math.round((faltante - esperadas) * 10) / 10);
+      push(list, {
+        id: 'seg-maduracion-cobertura',
+        kpiId: 'kCobertura',
+        module: 'seguimiento',
+        severity: pct < 85 ? 'critical' : 'warning',
+        title: 'Pipeline maduro insuficiente para el objetivo',
+        summary: `Los prospectos activos cubren ${pct}% de las ${faltante} unidades que faltan (≈${esperadas} esperadas en ${cob.horizonteDias} días).`,
+        analysis: `Con la curva histórica de maduración, ${Number(cob.prospectosActivos || 0)} prospectos activos (${Number(cob.prospectosMaduros || 0)} ya en zona de maduración) producirían ≈${esperadas} ventas antes del cierre; quedarían ${brecha} unidades por compensar el mes siguiente salvo que entren ≈${Number(cob.prospectosNecesarios || 0)} prospectos nuevos.`,
+        recommendations: [
+          'Priorizar en el 1 a 1 a los prospectos con mayor probabilidad de cierre (lista en la ventana de la tarjeta).',
+          'Acelerar campañas de generación: cada prospecto nuevo tarda en promedio ' + (Number.isFinite(Number(gen.promedio)) ? `${round1(Number(gen.promedio))} días` : 'varias semanas') + ' en madurar.',
+          'Revisar objetivos de los ciclos en Neg. Caliente y Pre-pedido para cerrar dentro del periodo.',
+        ],
+        metrics: { pct, esperadas, faltante, objetivo: Number(cob.objetivo || 0), facturadas: Number(cob.facturadas || 0), horizonte: Number(cob.horizonteDias || 0) },
+        chatPrompt: chatPrompt('Seguimiento 360 · P-VTA-4', 'Cobertura del objetivo', [
+          `Objetivo: ${cob.objetivo}`, `Facturadas: ${cob.facturadas}`, `Esperadas: ${esperadas}`, `Faltante: ${faltante}`, `Periodo: ${periodo}`,
+        ]),
+      });
+    }
+
+    if (Number.isFinite(movil3) && Number.isFinite(historico) && historico > 0
+      && Number(payload.movil3?.n || 0) >= 20 && movil3 >= historico * 1.2) {
+      const var1 = round1(((movil3 - historico) / historico) * 100);
+      push(list, {
+        id: 'seg-maduracion-alza',
+        kpiId: 'kMaduracion',
+        module: 'seguimiento',
+        severity: 'warning',
+        title: 'Maduración comercial al alza',
+        summary: `El promedio móvil de 3 meses (${round1(movil3)} días) supera en ${var1}% al histórico propio (${round1(historico)} días).`,
+        analysis: 'El ciclo prospecto → venta se está alargando: los cierres del periodo vienen de prospectos más antiguos, lo que retrasa la conversión del pipeline en facturación.',
+        recommendations: [
+          'Revisar tiempos de primera atención y seguimiento en los ciclos activos.',
+          'Separar por origen: si el alza viene de cartera, revisar recompra; si viene de leads, revisar calidad por canal.',
+        ],
+        metrics: { movil3: round1(movil3), historico: round1(historico), variacionPct: var1 },
+        chatPrompt: chatPrompt('Seguimiento 360 · P-VTA-4', 'Maduración al alza', [
+          `Móvil 3 meses: ${round1(movil3)} días`, `Histórico: ${round1(historico)} días`, `Periodo: ${periodo}`,
+        ]),
+      });
+    }
+
+    if (Number.isFinite(mezclaActual) && Number.isFinite(mezclaPrevia)
+      && Number(gen.n || 0) >= 20 && Math.abs(mezclaActual - mezclaPrevia) >= 15) {
+      const sube = mezclaActual > mezclaPrevia;
+      push(list, {
+        id: 'seg-maduracion-mezcla',
+        kpiId: 'kMaduracionOrigen',
+        module: 'seguimiento',
+        severity: 'info',
+        title: 'Cambio de mezcla cartera / lead',
+        summary: `La participación de cartera pasó de ${round1(mezclaPrevia)}% a ${round1(mezclaActual)}% de las ventas.`,
+        analysis: sube
+          ? 'El promedio general de maduración se mueve por más ventas de cartera (ciclos más cortos), no necesariamente por mayor velocidad comercial.'
+          : 'El promedio general de maduración se mueve por más ventas de leads nuevos (ciclos más largos), no necesariamente por menor velocidad comercial.',
+        recommendations: [
+          'Leer la maduración por origen antes de comparar contra meses anteriores.',
+          sube ? 'Sostener la generación de leads nuevos para no depender solo de recompra.' : 'Reforzar campañas de retención y recompra a cartera.',
+        ],
+        metrics: { mezclaActual: round1(mezclaActual), mezclaPrevia: round1(mezclaPrevia) },
+        chatPrompt: chatPrompt('Seguimiento 360 · P-VTA-4', 'Cambio de mezcla', [
+          `Cartera actual: ${round1(mezclaActual)}%`, `Cartera previa: ${round1(mezclaPrevia)}%`, `Periodo: ${periodo}`,
         ]),
       });
     }
@@ -2200,7 +2360,7 @@ function buildSeguimientoInsights(payload = {}) {
     if (abierto > 0 && ordenes > 0) {
       push(list, {
         id: 'seg-cli-abierto',
-        kpiId: 'kImporteTaller',
+        kpiId: 'kOrdenes',
         module: 'seguimiento',
         severity: 'info',
         title: 'Importe de taller abierto',

@@ -141,3 +141,17 @@ Solo se despliega `cloud-api/` + PostgreSQL. El dashboard operativo permanece en
 - No suba `.env` ni `node_modules/` (ya están en `.gitignore`).
 - Tras cambios en el backend, reinicie con `npm run start:backend` o `npm start`.
 - Scripts de validación: `npm run test:etl --prefix backend -- 2026-06-01 2026-06-30`
+
+## Pruebas
+
+```bash
+npm test            # alertas inteligentes y contrato backend-frontend (ids de tarjetas)
+```
+
+Corren con `node:test`, sin dependencias extra ni base de datos.
+
+## Documentación
+
+- [docs/MAPA_VISUAL.md](./docs/MAPA_VISUAL.md): cómo se ve cada pantalla y dónde vive cada cosa.
+- [docs/ESTADO_Y_ENFOQUE.md](./docs/ESTADO_Y_ENFOQUE.md): estado real, discrepancias y prioridades.
+- [docs/PATRON_SECCION_KPI.md](./docs/PATRON_SECCION_KPI.md): receta para armar una sección tarjetas + gráfico + alerta.

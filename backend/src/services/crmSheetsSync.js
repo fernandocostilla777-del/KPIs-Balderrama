@@ -238,6 +238,10 @@ async function runSync({ reason = 'manual', skipCloud = false, etls, fullObjetiv
     const result = await syncCrmSheets({ quiet: false, etls: etlList });
 
     if (typeof crmCiclos.releaseDb === 'function') crmCiclos.releaseDb();
+    // Reconstruir en segundo plano los índices que la sincronización invalidó.
+    if (typeof crmCiclos.warmCaches === 'function') {
+      crmCiclos.warmCaches({ log: null }).catch(() => { /* informativo */ });
+    }
 
     let cloud = null;
     if (!skipCloud) {

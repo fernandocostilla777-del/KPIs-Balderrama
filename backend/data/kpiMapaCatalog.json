@@ -2,7 +2,7 @@
   "source": "Catálogo de KPI´s ABP 2026",
   "sheet": "Mapa de indicadores",
   "generatedAt": "2026-08-17T20:39:01.781Z",
-  "count": 47,
+  "count": 48,
   "items": [
     {
       "id": "SV-4-0",
@@ -850,6 +850,64 @@
         "Capital Humano",
         "Gerentes de área"
       ]
+    },
+    {
+      "id": "P-VTA-4-0",
+      "clave": "P-VTA-4",
+      "perspectiva": "Procesos",
+      "indicador": "Tiempo de Maduración Comercial",
+      "kpi": "Ciclo Prospecto → Venta / Velocidad del pipeline",
+      "formula": "Σ días naturales desde la primera identificación del prospecto del ciclo comercial hasta Venta Lograda ÷ número de ciclos que alcanzaron Venta Lograda en el periodo.",
+      "interpretacion": "Mide el ciclo real de maduración comercial, desde que el prospecto es identificado por primera vez dentro del ciclo que produce la compra hasta Venta Lograda. Su evolución convierte el conocimiento histórico del ciclo en capacidad anticipativa sobre el pipeline.",
+      "valorControl": "Informativo: sin meta ni semáforo inicial (no parametrizar). Días naturales, mensual, con histórico móvil y por origen (cartera / lead). La cobertura del objetivo derivada se lee contra 100%.",
+      "responsable": "Gerencia Comercial / Gerencia de Ventas",
+      "usadoPor": [
+        "Gerencia General",
+        "Gerencia Comercial",
+        "Gerentes de Ventas",
+        "Gerencia BDC",
+        "MKT Digital",
+        "Data Manager"
+      ],
+      "informativo": true,
+      "fuente": "CRM/STREGA y facturación conciliadas por ID del prospecto; HT-PRO-1 consolidará estos acontecimientos.",
+      "consecuente": "C-9 — Cumplimiento del Objetivo de Facturación"
+    },
+    {
+      "id": "INV-COSTO-0",
+      "clave": "INV-COSTO",
+      "perspectiva": "Comercial",
+      "indicador": "Costo de mantener el inventario",
+      "kpi": "Plan piso de unidades con 60 días o más",
+      "formula": "Suma del plan piso acumulado de unidades disponibles con 60 días o más, más el interés diario (factor × importe de remisión) de las que ya generan cargo.",
+      "interpretacion": "Señala qué unidades ya costaron más de lo que conviene seguir esperando, comparando el plan piso acumulado contra la utilidad bruta histórica de esa versión.",
+      "valorControl": "Informativo: sin meta ni semáforo inicial. Alerta cuando el plan piso de una unidad alcanza o supera el 30% de su utilidad bruta histórica.",
+      "responsable": "Gerencia Comercial / Inventarios",
+      "usadoPor": [
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "Inventarios",
+        "Data Manager"
+      ],
+      "informativo": true
+    },
+    {
+      "id": "INV-COB-0",
+      "clave": "INV-COB",
+      "perspectiva": "Comercial",
+      "indicador": "Cobertura de inventario en días de venta",
+      "kpi": "Días de venta que cubre el disponible por carline",
+      "formula": "Disponibles del carline ÷ (ventas de los últimos 90 días del carline / 90). Sin ventas en 90 días no se divide.",
+      "interpretacion": "Dice qué carlines están por quedarse sin unidades y cuáles tienen más stock del que el ritmo reciente de venta alcanza a mover.",
+      "valorControl": "Informativo: sin meta ni semáforo inicial. Menos de 20 días = quiebre; 20–60 = sano; 61–90 = alto; más de 90 = sobrestock.",
+      "responsable": "Gerencia Comercial / Inventarios",
+      "usadoPor": [
+        "Gerencia Comercial",
+        "Gerencia Ventas",
+        "Inventarios",
+        "Data Manager"
+      ],
+      "informativo": true
     }
   ]
 }

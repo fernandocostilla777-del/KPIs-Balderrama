@@ -12,6 +12,10 @@ let intHistData = null;
 let ageingSlowRows = [];
 let ageingCarlineFilters = [];
 let ageingCarlineFilter = 'all';
+let ageingRangeFilter = '';
+let ageingSort = 'costo';
+let inventarioLectura = null;
+const invLecturaCharts = { antiguedad: null, costo: null, cobertura: null };
 let ageingSearch = '';
 let vendidosRows = [];
 let vendidosCarlineFilters = [];
@@ -304,6 +308,18 @@ function rowsForAutosKpi(kpiId) {
   if (kpiId === 'ageing') {
     return inventoryRows.filter((r) => r.situacion === 'FIS' && Number(r.daysInStock || 0) >= 60);
   }
+  if (kpiId === 'days') {
+    if (ageingCarlineFilter !== 'all' || ageingRangeFilter) return filteredAgeingSlowRows();
+    return ageingSlowRows.slice().sort((a, b) => ageingDaysOf(b) - ageingDaysOf(a));
+  }
+  if (kpiId === 'costo') {
+    return ageingSlowRows
+      .filter((r) => ageingDaysOf(r) >= 60 || Number(r.planPisoAcumulado || 0) > 0)
+      .sort((a, b) => Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0));
+  }
+  if (kpiId === 'cobertura') {
+    return (inventarioLectura?.cobertura?.items || []).slice();
+  }
   if (kpiId === 'entregasSinPrevias') {
     return (window.__invSofiaSinPrevias || []).slice();
   }
@@ -357,6 +373,33 @@ function autosKpiMeta(kpiId) {
       card: () => document.getElementById('kpiAgeingAlerts'),
     };
   }
+  if (kpiId === 'days') {
+    return {
+      title: 'Días en stock',
+      hint: 'Mediana de días desde remisión en el disponible. El promedio queda como dato secundario.',
+      scopeLabel: 'disponibles',
+      icon: 'schedule',
+      card: () => document.getElementById('kpiDaysStock'),
+    };
+  }
+  if (kpiId === 'costo') {
+    return {
+      title: 'Costo de inventario',
+      hint: 'Plan piso acumulado de unidades con 60 días o más, y el interés que siguen generando cada día.',
+      scopeLabel: 'unidades',
+      icon: 'account_balance',
+      card: () => document.getElementById('kCostoInventario'),
+    };
+  }
+  if (kpiId === 'cobertura') {
+    return {
+      title: 'Cobertura',
+      hint: 'Días de venta que cubre el disponible: existencias ÷ (ventas de 90 días / 90). Menos de 20: quiebre. Más de 90: sobrestock.',
+      scopeLabel: 'carlines',
+      icon: 'timelapse',
+      card: () => document.getElementById('kCobertura'),
+    };
+  }
   return {
     title: 'Unidades totales',
     hint: 'Todas las situaciones · las apartadas (SEP) muestran días y quién las apartó',
@@ -406,6 +449,26 @@ function downloadAutosKpiCsv(rows, title, kpi) {
       r.CLIENTE || '',
       r.SOF_Estatus || '',
       r.SOF_CveUSu || '',
+    ]);
+  } else if (kpi === 'days' || kpi === 'costo') {
+    headers = ['Carline', 'Versión', 'VIN', 'Días', 'Plan piso', 'Costo diario', 'Utilidad histórica'];
+    lines = rows.map((r) => [
+      r.carline || '',
+      r.version || '',
+      r.vin || '',
+      ageingDaysOf(r),
+      Number(r.planPisoAcumulado || 0),
+      Number(r.costoDiario || 0),
+      r.utilidadPromedio ?? '',
+    ]);
+  } else if (kpi === 'cobertura') {
+    headers = ['Carline', 'Disponibles', 'Ventas 90 días', 'Días de cobertura', 'Banda'];
+    lines = rows.map((r) => [
+      r.carline || '',
+      Number(r.disponibles || 0),
+      Number(r.vendidas90 || 0),
+      r.dias ?? '',
+      coberturaBandaLabel(r.banda),
     ]);
   } else if (kpi === 'demos') {
     headers = [
@@ -610,6 +673,17 @@ function ensureAutosKpiDrawer() {
   }
 
   function matchesActiveFilter(r) {
+    if (currentMeta.kpi === 'days' || currentMeta.kpi === 'costo') {
+      if (!activeFilter) return true;
+      if (activeFilter.dim === 'carline') return String(r.carline || '') === activeFilter.value;
+      if (activeFilter.dim === 'rango') return ageRangeOf(ageingDaysOf(r)) === activeFilter.value;
+      return true;
+    }
+    if (currentMeta.kpi === 'cobertura') {
+      if (!activeFilter) return true;
+      if (activeFilter.dim === 'banda') return String(r.banda || '') === activeFilter.value;
+      return true;
+    }
     if (!activeFilter) return true;
     if (showingFacturado() || isFacturadoRow(r)) {
       if (activeFilter.dim === 'modelo') {
@@ -749,6 +823,11 @@ function ensureAutosKpiDrawer() {
       return;
     }
 
+    if (currentMeta.kpi === 'days' || currentMeta.kpi === 'costo' || currentMeta.kpi === 'cobertura') {
+      renderLecturaDrawerSummary(summaryEl, rows, currentMeta, activeFilter);
+      return;
+    }
+
     if (isSofiaKpi(currentMeta.kpi)) {
       const porEstatus = countByField(rows, (r) => r.SOF_Estatus || 'Sin estatus').slice(0, 10);
       const porUsuario = countByField(rows, (r) => r.SOF_CveUSu || 'Sin usuario').slice(0, 10);
@@ -858,6 +937,14 @@ function ensureAutosKpiDrawer() {
     const searched = !q
       ? viewRows
       : viewRows.filter((r) => {
+        if (currentMeta.kpi === 'days' || currentMeta.kpi === 'costo') {
+          return [r.vin, r.carline, r.version, r.paquete]
+            .some((v) => String(v || '').toLowerCase().includes(q));
+        }
+        if (currentMeta.kpi === 'cobertura') {
+          return [r.carline, r.banda, coberturaBandaLabel(r.banda)]
+            .some((v) => String(v || '').toLowerCase().includes(q));
+        }
         if (showingFact || isFacturadoRow(r)) {
           return [r.VTE_FECHDOCTO, r.VTE_DOCTO, r.VTE_SERIE, r.VEH_TIPOAUTO, r.CLIENTE, r.VENDEDOR, r.PREVIAS]
             .some((v) => String(v || '').toLowerCase().includes(q));
@@ -876,11 +963,13 @@ function ensureAutosKpiDrawer() {
     const filtered = searched.filter(matchesActiveFilter);
     lastExportRows = filtered;
 
-    statusEl.textContent = showingFact
-      ? `${filtered.length.toLocaleString('es-MX')} factura(s)`
-      : sofia
-        ? `${filtered.length.toLocaleString('es-MX')} entrega(s)`
-        : `${filtered.length.toLocaleString('es-MX')} unidad(es)`;
+    statusEl.textContent = currentMeta.kpi === 'cobertura'
+      ? `${filtered.length.toLocaleString('es-MX')} carline(s)`
+      : showingFact
+        ? `${filtered.length.toLocaleString('es-MX')} factura(s)`
+        : sofia
+          ? `${filtered.length.toLocaleString('es-MX')} entrega(s)`
+          : `${filtered.length.toLocaleString('es-MX')} unidad(es)`;
     metaEl.textContent = activeFilter || showingFact || q
       ? `${filtered.length} de ${viewRows.length}`
       : `${viewRows.length} registros`;
@@ -945,6 +1034,11 @@ function ensureAutosKpiDrawer() {
               <span>${escapeHtml(dash(r.SOF_CveUSu))}</span>
             </div>
           </div>`).join('')}`;
+      return;
+    }
+
+    if (currentMeta.kpi === 'days' || currentMeta.kpi === 'costo' || currentMeta.kpi === 'cobertura') {
+      bodyEl.innerHTML = renderLecturaDrawerList(filtered, currentMeta.kpi);
       return;
     }
 
@@ -1064,6 +1158,16 @@ function ensureAutosKpiDrawer() {
   searchEl?.addEventListener('input', () => renderList(searchEl.value));
   filterChip?.addEventListener('click', clearFilter);
   summaryEl.addEventListener('click', (e) => {
+    if (e.target.closest('[data-ageing-goto]')) {
+      const carlineBtn = summaryEl.querySelector('[data-autos-filter-dim="carline"].is-active');
+      const rangoBtn = summaryEl.querySelector('[data-autos-filter-dim="rango"].is-active');
+      if (carlineBtn) ageingCarlineFilter = carlineBtn.dataset.autosFilterValue || 'all';
+      if (rangoBtn) ageingRangeFilter = rangoBtn.dataset.autosFilterValue || '';
+      renderAgeingCarlineFilterTabs();
+      renderAgeingSlowTable();
+      document.getElementById('secAnalisisInventario')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     const btn = e.target.closest('[data-autos-filter-dim]');
     if (!btn || !summaryEl.contains(btn)) return;
     setFilter(
@@ -1109,6 +1213,15 @@ function filterRows(term) {
   }
   if (activeAutosKpi === 'ageing') {
     rows = rows.filter((r) => r.situacion === 'FIS' && Number(r.daysInStock || 0) >= 60);
+  }
+  if (activeAutosKpi === 'days' || activeAutosKpi === 'costo' || activeAutosKpi === 'cobertura') {
+    return rows.filter((r) => {
+      const q = term.trim().toLowerCase();
+      if (!q) return true;
+      return [
+        r.tipoAuto, r.familia, r.serie, r.ubicacion, r.situacion, r.situacionLabel,
+      ].some((val) => String(val || '').toLowerCase().includes(q));
+    });
   }
 
   if (autosKpiFilter?.kpi === activeAutosKpi) {
@@ -1176,16 +1289,162 @@ function renderTable(rows, { searchTerm = '' } = {}) {
   }).join('');
 }
 
+const AGE_RANGE_LABEL = {
+  r0: '0–30 días',
+  r31: '31–60 días',
+  r61: '61–90 días',
+  r90: '+90 días',
+};
+
+function ageRangeOf(dias) {
+  const n = Number(dias);
+  if (!Number.isFinite(n)) return '';
+  if (n <= 30) return 'r0';
+  if (n <= 60) return 'r31';
+  if (n <= 90) return 'r61';
+  return 'r90';
+}
+
+function coberturaBandaLabel(banda) {
+  if (banda === 'quiebre') return 'Quiebre';
+  if (banda === 'sano') return 'Sano';
+  if (banda === 'alto') return 'Alto';
+  if (banda === 'sobrestock') return 'Sobrestock';
+  if (banda === 'sin_ventas') return 'Sin ventas en 90 d';
+  return '—';
+}
+
+function renderLecturaDrawerSummary(summaryEl, rows, meta, activeFilter) {
+  if (!summaryEl) return;
+  const { fmt } = Dashboard;
+  const isActive = (dim, value) => activeFilter && activeFilter.dim === dim && activeFilter.value === value;
+  const chip = (dim, value, label, count) => `
+    <button type="button" class="ops-orders-drawer__row ops-orders-drawer__row--filter${isActive(dim, value) ? ' is-active' : ''}"
+      data-autos-filter-dim="${escapeHtml(dim)}" data-autos-filter-value="${escapeHtml(value)}" data-autos-filter-label="${escapeHtml(label)}">
+      <span class="lbl">${escapeHtml(label)}</span>
+      <span class="val">${Number(count).toLocaleString('es-MX')}</span>
+    </button>`;
+
+  if (meta.kpi === 'cobertura') {
+    const porBanda = ['quiebre', 'sano', 'alto', 'sobrestock', 'sin_ventas']
+      .map((banda) => ({ banda, n: rows.filter((r) => r.banda === banda).length }))
+      .filter((x) => x.n > 0);
+    summaryEl.innerHTML = `
+      <div class="ops-orders-drawer__group">
+        <h5>Cobertura</h5>
+        <div class="ops-orders-drawer__row"><span class="lbl">Carlines</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+        <p class="ops-orders-drawer__hint">${escapeHtml(meta.hint || '')}</p>
+      </div>
+      <div class="ops-orders-drawer__group">
+        <h5>Por banda</h5>
+        ${porBanda.map((x) => chip('banda', x.banda, coberturaBandaLabel(x.banda), x.n)).join('') || '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+      </div>`;
+    return;
+  }
+
+  const piso = rows.reduce((s, r) => s + Number(r.planPisoAcumulado || 0), 0);
+  const diario = rows.reduce((s, r) => s + Number(r.costoDiario || 0), 0);
+  const days = rows.map(ageingDaysOf).filter((n) => Number.isFinite(n));
+  const sorted = days.slice().sort((a, b) => a - b);
+  const mediana = sorted.length
+    ? (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : Math.round((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2))
+    : null;
+  const plus90 = rows.filter((r) => ageingDaysOf(r) > 90).length;
+  const porCarline = countByField(rows, (r) => r.carline || 'Sin familia').slice(0, 8);
+  const porRango = ['r0', 'r31', 'r61', 'r90']
+    .map((key) => ({ key, n: rows.filter((r) => ageRangeOf(ageingDaysOf(r)) === key).length }))
+    .filter((x) => x.n > 0);
+  summaryEl.innerHTML = `
+    <div class="ops-orders-drawer__group">
+      <h5>${meta.kpi === 'costo' ? 'Costo' : 'Días en stock'}</h5>
+      <div class="ops-orders-drawer__row"><span class="lbl">Unidades</span><span class="val">${rows.length.toLocaleString('es-MX')}</span></div>
+      <div class="ops-orders-drawer__row"><span class="lbl">Mediana</span><span class="val">${mediana == null ? '—' : `${mediana} d`}</span></div>
+      <div class="ops-orders-drawer__row"><span class="lbl">+90 días</span><span class="val">${plus90.toLocaleString('es-MX')}</span></div>
+      <div class="ops-orders-drawer__row"><span class="lbl">Plan piso</span><span class="val">${fmt.money(piso)}</span></div>
+      <div class="ops-orders-drawer__row"><span class="lbl">Costo diario</span><span class="val">${fmt.money(diario)}</span></div>
+      <p class="ops-orders-drawer__hint">${escapeHtml(meta.hint || '')}</p>
+      <button type="button" class="ops-orders-drawer__row ops-orders-drawer__row--filter" data-ageing-goto="analisis">
+        <span class="lbl">Ver unidades en el análisis</span>
+        <span class="val">→</span>
+      </button>
+    </div>
+    <div class="ops-orders-drawer__group">
+      <h5>Por rango</h5>
+      ${porRango.map((x) => chip('rango', x.key, AGE_RANGE_LABEL[x.key], x.n)).join('') || '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+    </div>
+    <div class="ops-orders-drawer__group">
+      <h5>Por carline</h5>
+      ${porCarline.map((x) => chip('carline', x.label, x.label, x.value)).join('') || '<p class="ops-orders-drawer__hint">Sin datos</p>'}
+    </div>`;
+}
+
+function renderLecturaDrawerList(rows, kpi) {
+  const { fmt } = Dashboard;
+  if (!rows.length) {
+    return `<div class="ops-orders-drawer__empty">
+      <span class="material-symbols-outlined">inbox</span>
+      <p>No hay registros para este indicador.</p>
+    </div>`;
+  }
+  if (kpi === 'cobertura') {
+    return `
+      <div class="ops-orders-drawer__list-head">
+        <h5>Días de venta por carline</h5>
+        <span>${rows.length.toLocaleString('es-MX')}</span>
+      </div>
+      ${rows.map((r) => `
+        <div class="ops-orders-drawer__item" style="cursor:default">
+          <div class="ops-orders-drawer__item-head">
+            <strong>${escapeHtml(dash(r.carline))}</strong>
+            <span class="ops-orders-drawer__tag">${escapeHtml(coberturaBandaLabel(r.banda))}</span>
+          </div>
+          <p class="ops-orders-drawer__msg">${r.banda === 'sin_ventas' ? 'Sin ventas en 90 d' : `${r.dias ?? '—'} días de cobertura`}</p>
+          <div class="ops-orders-drawer__facts">
+            <span>${Number(r.disponibles || 0)} disponibles</span>
+            <span>${Number(r.vendidas90 || 0)} ventas en 90 d</span>
+          </div>
+        </div>`).join('')}`;
+  }
+  return `
+    <div class="ops-orders-drawer__list-head">
+      <h5>${kpi === 'costo' ? 'Unidades por costo acumulado' : 'Unidades del disponible'}</h5>
+      <span>${rows.length.toLocaleString('es-MX')}</span>
+    </div>
+    ${rows.map((r) => `
+      <div class="ops-orders-drawer__item" style="cursor:default">
+        <div class="ops-orders-drawer__item-head">
+          <strong>${escapeHtml(dash(r.carline))}</strong>
+          <span class="ops-orders-drawer__tag">${escapeHtml(AGE_RANGE_LABEL[ageRangeOf(ageingDaysOf(r))] || '—')}</span>
+        </div>
+        <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.version))} · VIN ${escapeHtml(dash(r.vin))}</p>
+        <div class="ops-orders-drawer__facts">
+          <span>${ageingDaysOf(r)} días</span>
+          <span>Piso ${fmt.money(Number(r.planPisoAcumulado || 0))}</span>
+          <span>Diario ${Number(r.costoDiario || 0) > 0 ? fmt.money(r.costoDiario) : '—'}</span>
+        </div>
+      </div>`).join('')}`;
+}
+
 function filteredAgeingSlowRows() {
-  let rows = ageingSlowRows;
+  let rows = ageingSlowRows.slice();
   if (ageingCarlineFilter && ageingCarlineFilter !== 'all') {
     rows = rows.filter((r) => String(r.carline || '') === ageingCarlineFilter);
   }
+  if (ageingRangeFilter) {
+    rows = rows.filter((r) => ageRangeOf(ageingDaysOf(r)) === ageingRangeFilter);
+  }
   const q = String(ageingSearch || '').trim().toLowerCase();
-  if (!q) return rows;
-  return rows.filter((r) => [
-    r.vin, r.carline, r.version, r.catalogo, r.paquete,
-  ].some((v) => String(v || '').toLowerCase().includes(q)));
+  if (q) {
+    rows = rows.filter((r) => [
+      r.vin, r.carline, r.version, r.catalogo, r.paquete,
+    ].some((v) => String(v || '').toLowerCase().includes(q)));
+  }
+  const byCosto = (a, b) => Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0)
+    || ageingDaysOf(b) - ageingDaysOf(a);
+  const byDias = (a, b) => ageingDaysOf(b) - ageingDaysOf(a)
+    || Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0);
+  rows.sort(ageingSort === 'dias' ? byDias : byCosto);
+  return rows;
 }
 
 function ageingDaysOf(row) {
@@ -1370,7 +1629,7 @@ function renderAgeingAnalysisSummary(rows = ageingSlowRows) {
           datasets: [{
             label: 'Plan piso',
             data: pisoRank.map(([, n]) => Math.round(n)),
-            backgroundColor: 'rgba(190, 18, 60, 0.72)',
+            backgroundColor: '#d97706',
             borderRadius: 8,
           }],
         },
@@ -1392,24 +1651,32 @@ function renderAgeingAnalysisSummary(rows = ageingSlowRows) {
 function renderAgeingCarlineFilterTabs(filters = ageingCarlineFilters) {
   const nav = document.getElementById('ageingCarlineFilterTabs');
   if (!nav) return;
-  const list = Array.isArray(filters) ? filters : [];
+  const list = (Array.isArray(filters) ? filters : [])
+    .map((m) => ({ label: String(m.label || 'Sin familia'), count: Number(m.count || 0) }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'es'));
   if (ageingCarlineFilter !== 'all' && !list.some((m) => m.label === ageingCarlineFilter)) {
     ageingCarlineFilter = 'all';
   }
-  const total = list.reduce((s, m) => s + Number(m.count || 0), 0);
+  const total = list.reduce((s, m) => s + m.count, 0);
+  const max = list.reduce((m, item) => Math.max(m, item.count), 0) || 1;
+  const chip = (name, count, value, share) => {
+    const on = ageingCarlineFilter === value;
+    const pct = total ? Math.round((count / total) * 1000) / 10 : 0;
+    const title = value === 'all'
+      ? `Todos · ${count} unidades`
+      : `${name} · ${count} unidades · ${pct}%`;
+    return `<button type="button" class="vendidos-unit-chip${on ? ' is-active' : ''}" role="tab" data-ageing-filter="${escapeHtml(value)}" aria-pressed="${on ? 'true' : 'false'}" title="${escapeHtml(title)}" style="--share:${share}">
+      <span class="vendidos-unit-chip__name">${escapeHtml(name)}</span>
+      <span class="vendidos-unit-chip__count">${count}</span>
+    </button>`;
+  };
   nav.innerHTML = [
-    `<button type="button" class="ageing-carline-chip${ageingCarlineFilter === 'all' ? ' is-active' : ''}" data-ageing-filter="all" aria-pressed="${ageingCarlineFilter === 'all'}">
-      <span class="ageing-carline-chip__name">Todos</span>
-      <span class="ageing-carline-chip__count">${total}</span>
-    </button>`,
-    ...list.map((m) => {
-      const on = ageingCarlineFilter === m.label;
-      return `<button type="button" class="ageing-carline-chip${on ? ' is-active' : ''}" data-ageing-filter="${escapeHtml(m.label)}" aria-pressed="${on}">
-        <span class="ageing-carline-chip__name">${escapeHtml(m.label)}</span>
-        <span class="ageing-carline-chip__count">${Number(m.count || 0)}</span>
-      </button>`;
-    }),
+    chip('Todos', total, 'all', 0),
+    ...list.map((m) => chip(vendidosUnitLabel(m.label), m.count, m.label, Math.round((m.count / max) * 1000) / 1000)),
   ].join('');
+  if (ageingCarlineFilter !== 'all') {
+    nav.querySelector('.vendidos-unit-chip.is-active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
 }
 
 function currentVendidosRange() {
@@ -1468,12 +1735,15 @@ function notaCreditoSinIva(r) {
 }
 
 function pctRetencion(bruta, neta) {
-  if (bruta == null || !Number(bruta)) return null;
-  if (neta == null) return null;
-  return Math.round((Number(neta) / Number(bruta)) * 1000) / 10;
+  if (bruta == null || neta == null) return null;
+  const b = Number(bruta);
+  if (!Number.isFinite(b) || b === 0) return null;
+  if (b < 0) return 'perdida';
+  return Math.round((Number(neta) / b) * 1000) / 10;
 }
 
 function renderRetencionCell(pct) {
+  if (pct === 'perdida') return '<strong class="ageing-retencion is-neg">Pérdida</strong>';
   if (pct == null) return '<span class="ageing-slow-hint">—</span>';
   const tone = pct < 0 ? 'is-neg' : (pct < 50 ? 'is-warn' : 'is-ok');
   return `<strong class="ageing-retencion ${tone}">${pct.toLocaleString('es-MX', { maximumFractionDigits: 1 })}%</strong>`;
@@ -1848,6 +2118,53 @@ function bindExtrasPopover(root) {
   });
 }
 
+const VENDIDOS_CONTADO = new Set(['CASACON', 'PLNCON', 'CHCON', 'FORCON', 'ZACCON', 'CON', 'FLOT']);
+
+function vendidosTipoPago(row) {
+  const key = String(row?.formaPago || '').trim().toUpperCase();
+  if (VENDIDOS_CONTADO.has(key)) return 'contado';
+  if (!key || key === 'PERDIDA') return '';
+  return 'credito';
+}
+
+const INV_CARLINE_NOMBRE = [
+  [/EQUINOX\s*EV|EQUINOXEV/, 'Equinox EV'],
+  [/BLAZER\s*EV|BLAZEREV/, 'Blazer EV'],
+  [/SPARK\s*EUV|SPARKEV/, 'Spark EUV'],
+  [/SILVERADO\s*2500|SILVERADO2500|SILVER2500/, 'Silverado 2500'],
+  [/SILVERADO|CHEYENNE/, 'Silverado'],
+  [/SUBURBAN|^SUBUR$/, 'Suburban'],
+  [/TRAVERSE|^TRAV$/, 'Traverse'],
+  [/^TRACKER$|^TRACKE$/, 'Tracker'],
+  [/^COLORADO$|^COL$/, 'Colorado'],
+  [/TAHOE/, 'Tahoe'],
+  [/CAPTIVA/, 'Captiva'],
+  [/GROOVE/, 'Groove'],
+  [/MONTANA/, 'Montana'],
+  [/^AVEO/, 'Aveo'],
+  [/^ONIX/, 'Onix'],
+  [/^TRAX$/, 'Trax'],
+  [/TORNADO/, 'Tornado'],
+  [/EXPRESS/, 'Express'],
+];
+
+function prettyCarline(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return 'Sin familia';
+  const up = raw.toUpperCase().replace(/["'.]/g, ' ').replace(/\s+/g, ' ');
+  for (const [re, label] of INV_CARLINE_NOMBRE) {
+    if (re.test(up)) return label;
+  }
+  return vendidosUnitLabel(raw);
+}
+
+function vendidosUnitLabel(label) {
+  return String(label || '')
+    .trim()
+    .toLowerCase()
+    .replace(/(^|\s)\S/g, (ch) => ch.toUpperCase());
+}
+
 function filteredVendidosRows() {
   let rows = vendidosRows;
   if (vendidosCarlineFilter && vendidosCarlineFilter !== 'all') {
@@ -1864,24 +2181,32 @@ function filteredVendidosRows() {
 function renderVendidosCarlineFilterTabs(filters = vendidosCarlineFilters) {
   const nav = document.getElementById('vendidosCarlineFilterTabs');
   if (!nav) return;
-  const list = Array.isArray(filters) ? filters : [];
+  const list = (Array.isArray(filters) ? filters : [])
+    .map((m) => ({ label: String(m.label || 'Sin familia'), count: Number(m.count || 0) }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'es'));
   if (vendidosCarlineFilter !== 'all' && !list.some((m) => m.label === vendidosCarlineFilter)) {
     vendidosCarlineFilter = 'all';
   }
-  const total = list.reduce((s, m) => s + Number(m.count || 0), 0);
+  const total = list.reduce((s, m) => s + m.count, 0);
+  const max = list.reduce((m, item) => Math.max(m, item.count), 0) || 1;
+  const chip = (name, count, value, share) => {
+    const on = vendidosCarlineFilter === value;
+    const pct = total ? Math.round((count / total) * 1000) / 10 : 0;
+    const title = value === 'all'
+      ? `Todos · ${count} unidades`
+      : `${name} · ${count} unidades · ${pct}%`;
+    return `<button type="button" class="vendidos-unit-chip${on ? ' is-active' : ''}" role="tab" data-vendidos-filter="${escapeHtml(value)}" aria-pressed="${on ? 'true' : 'false'}" title="${escapeHtml(title)}" style="--share:${share}">
+      <span class="vendidos-unit-chip__name">${escapeHtml(name)}</span>
+      <span class="vendidos-unit-chip__count">${count}</span>
+    </button>`;
+  };
   nav.innerHTML = [
-    `<button type="button" class="ageing-carline-chip${vendidosCarlineFilter === 'all' ? ' is-active' : ''}" data-vendidos-filter="all" aria-pressed="${vendidosCarlineFilter === 'all'}">
-      <span class="ageing-carline-chip__name">Todos</span>
-      <span class="ageing-carline-chip__count">${total}</span>
-    </button>`,
-    ...list.map((m) => {
-      const on = vendidosCarlineFilter === m.label;
-      return `<button type="button" class="ageing-carline-chip${on ? ' is-active' : ''}" data-vendidos-filter="${escapeHtml(m.label)}" aria-pressed="${on}">
-        <span class="ageing-carline-chip__name">${escapeHtml(m.label)}</span>
-        <span class="ageing-carline-chip__count">${Number(m.count || 0)}</span>
-      </button>`;
-    }),
+    chip('Todos', total, 'all', 0),
+    ...list.map((m) => chip(vendidosUnitLabel(m.label), m.count, m.label, Math.round((m.count / max) * 1000) / 1000)),
   ].join('');
+  if (vendidosCarlineFilter !== 'all') {
+    nav.querySelector('.vendidos-unit-chip.is-active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
 }
 
 function renderVendidosTable(rows = filteredVendidosRows()) {
@@ -1892,9 +2217,15 @@ function renderVendidosTable(rows = filteredVendidosRows()) {
   const list = Array.isArray(rows) ? rows : [];
   const meta = document.getElementById('vendidosSearchMeta');
   if (meta) {
-    const filtered = vendidosSearch.trim() || vendidosCarlineFilter !== 'all';
+    const unitOn = vendidosCarlineFilter !== 'all';
+    const filtered = Boolean(vendidosSearch.trim()) || unitOn;
     meta.classList.toggle('hidden', !filtered);
-    if (filtered) meta.textContent = `${list.length} de ${vendidosRows.length}`;
+    if (filtered) {
+      const clear = unitOn
+        ? ' <button type="button" class="vendidos-filter-clear" id="vendidosClearFilter">Quitar filtro</button>'
+        : '';
+      meta.innerHTML = `${list.length} de ${vendidosRows.length}${clear}`;
+    }
   }
   if (!list.length) {
     const empty = vendidosLoading
@@ -1904,9 +2235,9 @@ function renderVendidosTable(rows = filteredVendidosRows()) {
     return;
   }
   body.innerHTML = list.map((r) => {
-    const carline = r.carline || '—';
+    const tipoPago = vendidosTipoPago(r);
+    const tipoLabel = tipoPago === 'contado' ? 'Contado' : (tipoPago === 'credito' ? 'Crédito' : '—');
     const version = r.version || '—';
-    const vin = r.vin || '—';
     const utilidad = r.utilidadPromedio == null ? null : Number(r.utilidadPromedio);
     const utilidadNeta = r.utilidadNeta == null ? null : Number(r.utilidadNeta);
     const planPiso = Number(r.planPisoAcumulado || 0);
@@ -1926,13 +2257,13 @@ function renderVendidosTable(rows = filteredVendidosRows()) {
       ? '—'
       : `<strong>${fmt.money(costoNeto)}</strong>${bonif > 0 ? `<span class="ageing-slow-hint">− Bonif. ${fmt.money(bonif)}</span>` : ''}`;
     return `<tr class="${rowClass}">
-      <td class="ageing-slow-carline"><strong>${escapeHtml(carline)}</strong></td>
+      <td class="vendidos-pago">${escapeHtml(tipoLabel)}</td>
       <td class="ageing-slow-version" title="${escapeHtml(version)}"><span>${escapeHtml(version)}</span></td>
       <td class="ageing-slow-vin">${renderVendidosFichaCell(r)}</td>
       <td class="cell-num">${r.precio ? fmt.money(r.precio) : '—'}${Number(r.isan || 0) > 0 ? `<span class="ageing-slow-hint">− ISAN ${fmt.money(r.isan)}</span>` : ''}</td>
       <td class="cell-num">${costoCell}</td>
       <td class="cell-num ageing-slow-nota">${notaCell}</td>
-      <td class="cell-num ageing-slow-utilidad"><strong>${utilidad == null ? '—' : fmt.money(utilidad)}</strong></td>
+      <td class="cell-num ageing-slow-utilidad"><strong>${utilidad == null ? '—' : fmt.money(utilidad)}</strong>${utilidad != null && utilidad < 0 ? '<span class="vendidos-bajo-costo">Bajo costo</span>' : ''}</td>
       <td class="cell-num ageing-slow-comision">${renderComisionEvCell(r, fmt)}</td>
       <td class="cell-num ageing-slow-extras">${renderExtrasCell(r, fmt)}</td>
       <td class="cell-num ageing-slow-piso">${pisoCell}</td>
@@ -1954,6 +2285,8 @@ function buildVendidosInsightPayload() {
   const utilidadBrutaTotal = brutaRows.reduce((s, r) => s + Number(r.utilidadPromedio || 0), 0);
   const ingresoFiTotal = rows.reduce((s, r) => s + Number(r.ingresoFinanciamiento || 0), 0);
   const conNetaNegativa = rows.filter((r) => r.utilidadNeta != null && Number(r.utilidadNeta) < 0);
+  const bajoCosto = rows.filter((r) => r.utilidadPromedio != null && Number(r.utilidadPromedio) < 0);
+  const netaNegPorGastos = conNetaNegativa.filter((r) => Number(r.utilidadPromedio) >= 0);
   const sinIngresoFi = rows.filter((r) => !(Number(r.ingresoFinanciamiento) > 0)).length;
   const menudeo = rows.filter((r) => !r.isFlotilla).length;
   const flotilla = rows.filter((r) => r.isFlotilla).length;
@@ -1987,6 +2320,18 @@ function buildVendidosInsightPayload() {
     ingresoFiTotal: Math.round(ingresoFiTotal * 100) / 100,
     sinIngresoFi,
     conNetaNegativa: conNetaNegativa.length,
+    bajoCosto: bajoCosto.length,
+    netaNegPorGastos: netaNegPorGastos.length,
+    bajoCostoDetalle: bajoCosto
+      .slice()
+      .sort((a, b) => Number(a.utilidadPromedio || 0) - Number(b.utilidadPromedio || 0))
+      .slice(0, 3)
+      .map((r) => ({ vin: r.vin, carline: r.carline, bruta: Number(r.utilidadPromedio || 0) })),
+    gastosDetalle: netaNegPorGastos
+      .slice()
+      .sort((a, b) => Number(a.utilidadNeta || 0) - Number(b.utilidadNeta || 0))
+      .slice(0, 3)
+      .map((r) => ({ vin: r.vin, carline: r.carline, neta: Number(r.utilidadNeta || 0) })),
     menudeo,
     flotilla,
     peoresNeta,
@@ -2016,32 +2361,37 @@ function buildAutosVendidosInsightCards(payload, fmt) {
   }
 
   const pctSinFi = Math.round((payload.sinIngresoFi / unidades) * 1000) / 10;
-  const pctNetaNeg = Math.round((payload.conNetaNegativa / unidades) * 1000) / 10;
   const conFi = unidades - payload.sinIngresoFi;
+  const bajoCosto = Number(payload.bajoCosto || 0);
+  const porGastos = Number(payload.netaNegPorGastos || 0);
 
-  cards.push({
-    tone: 'ok',
-    icon: 'analytics',
-    title: `${unidades} unidad(es) · neta ${fmt.money(payload.utilidadNetaTotal)}`,
-    meta: `Bruta ${fmt.money(payload.utilidadBrutaTotal)} · menudeo ${payload.menudeo} · flotilla ${payload.flotilla}`
-      + (payload.utilidadNetaPromedio != null ? ` · neta prom. ${fmt.money(payload.utilidadNetaPromedio)}` : ''),
-    action: 'Abre Cierre de unidades vendidas para bajar a VIN y carline.',
-  });
-
-  if (payload.conNetaNegativa > 0) {
-    const peores = (payload.peoresNeta || []).slice(0, 3)
-      .map((p) => `${p.vin || '—'} (${fmt.money(p.utilidadNeta)})`)
+  if (bajoCosto > 0) {
+    const detalle = (payload.bajoCostoDetalle || [])
+      .map((p) => `${p.carline || '—'} ${p.vin || ''} (bruta ${fmt.money(p.bruta)})`)
       .join(' · ');
     cards.push({
-      tone: payload.conNetaNegativa >= 5 || pctNetaNeg >= 40 ? 'critical' : 'warning',
-      icon: 'trending_down',
-      title: `${payload.conNetaNegativa} venta(s) con utilidad neta negativa (${pctNetaNeg}%)`,
-      meta: peores
-        ? `Peores: ${peores}`
-        : 'Comisión E.V., extras o plan piso están comiendo la bruta.',
-      action: 'Prioriza VINs con más días de piso y revisa gastos extra.',
+      tone: 'critical',
+      icon: 'money_off',
+      title: `${bajoCosto} venta(s) bajo costo`,
+      meta: detalle || 'El costo neto supera el subtotal facturado.',
+      action: 'Problema de precio, bonificación o nota de crédito: revisa la negociación antes de comisión y extras.',
     });
-  } else {
+  }
+
+  if (porGastos > 0) {
+    const detalle = (payload.gastosDetalle || [])
+      .map((p) => `${p.carline || '—'} ${p.vin || ''} (${fmt.money(p.neta)})`)
+      .join(' · ');
+    cards.push({
+      tone: porGastos >= 5 ? 'critical' : 'warning',
+      icon: 'trending_down',
+      title: `${porGastos} venta(s) con neta negativa por gastos`,
+      meta: detalle || 'La bruta era positiva y la consumieron comisión, extras o plan piso.',
+      action: 'Revisa gastos extra y días de piso de esos VIN.',
+    });
+  }
+
+  if (!bajoCosto && !porGastos) {
     cards.push({
       tone: 'ok',
       icon: 'verified',
@@ -2088,11 +2438,11 @@ function buildAutosVendidosInsightCards(payload, fmt) {
     cards.push({
       tone: 'ok',
       icon: 'directions_car',
-      title: `Más volumen: ${top[0]} (${top[1].n})`,
+      title: `Más volumen: ${vendidosUnitLabel(top[0])} · ${top[1].n} ud${top[1].n === 1 ? '' : 's'}`,
       meta: worstNeta
         ? `Menor neta/ud: ${worstNeta[0]} · ${fmt.money(worstNeta[1].neta / worstNeta[1].n)} · F&I carline top ${fmt.money(top[1].fi)}`
         : `F&I del carline ${fmt.money(top[1].fi)}`,
-      action: 'Usa el filtro de carline en la tabla de vendidos para profundizar.',
+      action: 'Usa el filtro de unidad sobre la tabla para profundizar.',
     });
   }
 
@@ -2173,6 +2523,19 @@ function applyInventoryInsights() {
       avgDaysAvailable: s.avgDaysAvailable,
       ageingAlertsCount: s.ageingAlertsCount ?? s.urgentAlerts,
       ageingAlertsPlanPisoTotal: s.ageingAlertsPlanPisoTotal,
+      medianaDias: s.medianaDias,
+      pct90: s.pct90,
+      plus90: s.plus90,
+      antiguedadConcentrada: s.antiguedadConcentrada,
+      costoDiario60: s.costoDiario60,
+      costoAcumulado60: s.costoAcumulado60,
+      costoCandidatas: s.costoCandidatas,
+      costoCandidatasDetalle: s.costoCandidatasDetalle,
+      coberturaDias: s.coberturaDias,
+      coberturaFuera: s.coberturaFuera,
+      coberturaQuiebre: s.coberturaQuiebre,
+      coberturaSobrestock: s.coberturaSobrestock,
+      coberturaSinVentas: s.coberturaSinVentas,
       planPisoTotal: s.planPisoTotal,
       planPisoUnits: s.planPisoUnits,
       planPisoPeriodLabel: s.planPisoPeriodLabel,
@@ -2190,22 +2553,602 @@ function applyInventoryInsights() {
   });
 }
 
+const VENDIDOS_MES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const VENDIDOS_MES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const VENDIDOS_MIN_CARLINE_CHART = 8;
+const VENDIDOS_POCAS_UNIDADES = 5;
+const VENDIDOS_OTROS_MAX = 3;
+let vendidosPrevRows = null;
+let vendidosPrevLabel = '';
+let vendidosCarlineMode = 'unidad';
+const vendidosResumenCharts = { cascada: null, carline: null };
+
+function vendidosPrevRange(range) {
+  const fi = String(range?.fechaInicio || '');
+  const ff = String(range?.fechaFin || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fi) || !/^\d{4}-\d{2}-\d{2}$/.test(ff)) return null;
+  if (fi.slice(0, 7) !== ff.slice(0, 7) || fi.slice(8) !== '01') return null;
+  const y = Number(fi.slice(0, 4));
+  const m = Number(fi.slice(5, 7));
+  const today = new Date();
+  const todayIso = isoDate(today);
+  const cutDay = todayIso >= fi && todayIso <= ff ? today.getDate() : Number(ff.slice(8));
+  const py = m === 1 ? y - 1 : y;
+  const pm = m === 1 ? 12 : m - 1;
+  const lastPrev = new Date(py, pm, 0).getDate();
+  const endDay = Math.min(cutDay, lastPrev);
+  const mm = String(pm).padStart(2, '0');
+  return {
+    fechaInicio: `${py}-${mm}-01`,
+    fechaFin: `${py}-${mm}-${String(endDay).padStart(2, '0')}`,
+    label: `1–${endDay} ${VENDIDOS_MES_CORTO[pm - 1]}`,
+  };
+}
+
+function vendidosMoneySigned(n) {
+  const x = Number(n || 0);
+  const abs = Math.abs(x).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${x < 0 ? '−' : ''}$${abs}`;
+}
+
+function vendidosMoneyShort(n) {
+  const x = Number(n || 0);
+  const a = Math.abs(x);
+  const sign = x < 0 ? '−' : '';
+  if (a >= 1e6) {
+    return `${sign}$${(a / 1e6).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} M`;
+  }
+  if (a >= 1e3) {
+    const k = a / 1e3;
+    const digits = k >= 100 ? 0 : 1;
+    return `${sign}$${k.toLocaleString('es-MX', { maximumFractionDigits: digits })} k`;
+  }
+  return `${sign}$${a.toLocaleString('es-MX', { maximumFractionDigits: 0 })}`;
+}
+
+function vendidosDeltaMoney(cur, prev, label) {
+  if (prev == null || !label) return '';
+  if (cur > 0 && prev > 0) {
+    const pct = Math.round(((cur - prev) / prev) * 1000) / 10;
+    return `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toLocaleString('es-MX')}% vs ${label}`;
+  }
+  const diff = cur - prev;
+  const txt = vendidosMoneyShort(diff);
+  return `${diff > 0 ? '+' : ''}${txt} vs ${label}`;
+}
+
+function vendidosPeriodoNombre() {
+  const m = Number(String(currentVendidosRange()?.fechaInicio || '').slice(5, 7));
+  return VENDIDOS_MES[m - 1] || '';
+}
+
+function vendidosMayorDeduccion(c) {
+  if (!c || !(Number(c.bruta) > 0)) return null;
+  const otros = Math.round((Number(c.neta || 0) - (Number(c.bruta || 0) - Number(c.comision || 0) - Number(c.extras || 0) - Number(c.piso || 0))) * 100) / 100;
+  const candidatos = [
+    { label: 'Gastos extra', monto: Number(c.extras || 0), frase: 'los gastos extra', verbo: 'consumen' },
+    { label: 'Comisión E.V.', monto: Number(c.comision || 0), frase: 'la comisión', verbo: 'consume' },
+    { label: 'Plan piso', monto: Number(c.piso || 0), frase: 'el plan piso', verbo: 'consume' },
+    { label: 'Otros ajustes', monto: otros < -1 ? -otros : 0, frase: 'otros ajustes', verbo: 'consumen' },
+  ].filter((d) => d.monto > 0);
+  if (!candidatos.length) return null;
+  candidatos.sort((a, b) => b.monto - a.monto);
+  const top = candidatos[0];
+  return { ...top, pct: Math.round((top.monto / c.bruta) * 100) };
+}
+
+function vendidosLead(t) {
+  const mes = vendidosPeriodoNombre();
+  const uds = `${t.unidades.toLocaleString('es-MX')} unidad${t.unidades === 1 ? '' : 'es'}`;
+  const partes = [mes ? `${mes}: ${uds}` : uds];
+  if (t.netaN) {
+    let neta = `utilidad neta ${vendidosMoneyShort(t.neta)}`;
+    if (t.cascada.fi > 0) neta += ` (${vendidosMoneyShort(t.cascada.neta + t.cascada.fi)} con F&I)`;
+    partes.push(neta);
+  }
+  const mayor = vendidosMayorDeduccion(t.cascada);
+  if (mayor) partes.push(`${mayor.frase} ${mayor.verbo} ${mayor.pct}% de la utilidad bruta`);
+  return `${partes.join(' · ')}.`;
+}
+
+function vendidosCascadaTitulo(c) {
+  if (!(Number(c?.bruta) > 0)) {
+    return Number(c?.bruta) < 0
+      ? 'La utilidad bruta del periodo es negativa'
+      : 'No hay utilidad bruta en el periodo';
+  }
+  const quedan = Math.round((Number(c.neta || 0) / c.bruta) * 100);
+  const cifra = `${quedan < 0 ? '−' : ''}$${Math.abs(quedan)}`;
+  const cola = c.fi > 0 ? ' antes de F&I' : '';
+  return `De cada $100 de bruta quedan ${cifra}${cola}`;
+}
+
+function vendidosTotals(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const conNeta = list.filter((r) => r.utilidadNeta != null && r.utilidadPromedio != null);
+  const sum = (arr, key) => arr.reduce((s, r) => s + Number(r[key] || 0), 0);
+  const brutaRows = list.filter((r) => r.utilidadPromedio != null);
+  const netas = conNeta.map((r) => Number(r.utilidadNeta || 0)).sort((a, b) => a - b);
+  const mid = Math.floor(netas.length / 2);
+  return {
+    unidades: list.length,
+    flotilla: list.filter((r) => r.isFlotilla).length,
+    neta: sum(conNeta, 'utilidadNeta'),
+    netaN: conNeta.length,
+    mediana: netas.length ? (netas.length % 2 ? netas[mid] : (netas[mid - 1] + netas[mid]) / 2) : null,
+    bruta: sum(brutaRows, 'utilidadPromedio'),
+    venta: sum(brutaRows, 'precio'),
+    cascada: {
+      bruta: sum(conNeta, 'utilidadPromedio'),
+      comision: sum(conNeta, 'comisionEv'),
+      extras: sum(conNeta, 'gastosAdicionales'),
+      piso: sum(conNeta, 'planPisoAcumulado'),
+      neta: sum(conNeta, 'utilidadNeta'),
+      fi: sum(list, 'ingresoFinanciamiento'),
+    },
+  };
+}
+
+function renderVendidosResumen() {
+  const setTxt = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  const setTone = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('is-neg', value != null && value < 0);
+    el.classList.toggle('is-ok', value != null && value > 0);
+  };
+  const setTitle = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.title = text || '';
+  };
+  if (vendidosLoading) {
+    ['vrUnidades', 'vrNeta', 'vrNetaUd', 'vrMargen'].forEach((id) => setTxt(id, '…'));
+    setTxt('vrLead', 'Cargando la lectura del cierre…');
+    return;
+  }
+  const t = vendidosTotals(vendidosRows);
+  const p = Array.isArray(vendidosPrevRows) ? vendidosTotals(vendidosPrevRows) : null;
+  const label = p ? vendidosPrevLabel : '';
+  setTxt('vrLead', vendidosLead(t));
+  setTxt('vrCascadaTitulo', t.netaN ? vendidosCascadaTitulo(t.cascada) : 'Sin utilidad neta en el periodo');
+  setTxt('vrCascadaSub', 'Cascada de margen');
+
+  setTxt('vrUnidades', t.unidades.toLocaleString('es-MX'));
+  const diffU = p ? t.unidades - p.unidades : null;
+  setTxt('vrUnidadesHint', [
+    diffU == null ? null : `${diffU > 0 ? '+' : diffU < 0 ? '−' : ''}${Math.abs(diffU)} vs ${label}`,
+    `${t.flotilla} flotilla`,
+  ].filter(Boolean).join(' · '));
+
+  setTxt('vrNeta', t.netaN ? vendidosMoneyShort(t.neta) : '—');
+  setTitle('vrNeta', t.netaN ? vendidosMoneySigned(t.neta) : '');
+  setTone('vrNeta', t.netaN ? t.neta : null);
+  setTxt('vrNetaHint', p && p.netaN ? vendidosDeltaMoney(t.neta, p.neta, label) : (t.netaN ? `${t.netaN} unidad(es) con neta` : 'Sin unidades con neta'));
+
+  const prom = t.netaN ? t.neta / t.netaN : null;
+  setTxt('vrNetaUd', prom == null ? '—' : vendidosMoneyShort(prom));
+  setTitle('vrNetaUd', prom == null ? '' : vendidosMoneySigned(prom));
+  setTone('vrNetaUd', prom);
+  const pocas = t.netaN > 0 && t.netaN < VENDIDOS_POCAS_UNIDADES;
+  setTxt('vrNetaUdHint', [
+    t.mediana == null ? null : `Mediana ${vendidosMoneyShort(t.mediana)}`,
+    pocas ? 'pocas unidades, el promedio puede engañar' : null,
+  ].filter(Boolean).join(' · ') || '—');
+  document.getElementById('vrNetaUdHint')?.classList.toggle('is-warn', pocas);
+
+  const margen = t.venta > 0 ? Math.round((t.bruta / t.venta) * 1000) / 10 : null;
+  setTxt('vrMargen', margen == null ? '—' : `${margen.toLocaleString('es-MX')}%`);
+  setTone('vrMargen', margen);
+  const quedan = t.cascada.bruta > 0 ? Math.round((t.cascada.neta / t.cascada.bruta) * 100) : null;
+  setTxt('vrMargenHint', quedan == null
+    ? (t.cascada.bruta < 0 ? 'La bruta del periodo es negativa' : '—')
+    : `De cada $100 de bruta quedan ${quedan < 0 ? '−' : ''}$${Math.abs(quedan)}`);
+
+  renderVendidosCascada(t.cascada, t.netaN);
+  renderVendidosCarlineChart();
+}
+
+const vendidosBarLabelsPlugin = {
+  id: 'vendidosBarLabels',
+  afterDatasetsDraw(chart) {
+    const values = chart.options.plugins?.vendidosBarLabels?.values;
+    const notes = chart.options.plugins?.vendidosBarLabels?.notes;
+    if (!Array.isArray(values)) return;
+    const { ctx } = chart;
+    const meta = chart.getDatasetMeta(0);
+    const horizontal = chart.options.indexAxis === 'y';
+    ctx.save();
+    ctx.font = '600 12px Inter, Segoe UI, sans-serif';
+    meta.data.forEach((bar, i) => {
+      const text = values[i];
+      if (!text) return;
+      if (horizontal) {
+        const neg = Number(chart.data.datasets[0].data[i]) < 0;
+        ctx.fillStyle = '#1e293b';
+        ctx.textAlign = neg ? 'right' : 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(text), bar.x + (neg ? -6 : 6), bar.y);
+      } else {
+        const top = Math.min(bar.y, bar.base);
+        const note = notes?.[i];
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#1e293b';
+        ctx.fillText(String(text), bar.x, top - (note ? 16 : 4));
+        if (note) {
+          ctx.fillStyle = '#78350f';
+          ctx.font = '700 12px Inter, Segoe UI, sans-serif';
+          ctx.fillText(String(note), bar.x, top - 2);
+          ctx.font = '600 12px Inter, Segoe UI, sans-serif';
+        }
+      }
+    });
+    ctx.restore();
+  },
+};
+
+const vendidosCascadaLinksPlugin = {
+  id: 'vendidosCascadaLinks',
+  afterDatasetsDraw(chart) {
+    const levels = chart.options.plugins?.vendidosCascadaLinks?.levels;
+    if (!Array.isArray(levels)) return;
+    const meta = chart.getDatasetMeta(0);
+    const yScale = chart.scales.y;
+    if (!yScale) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(71, 85, 105, 0.55)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < meta.data.length - 1; i++) {
+      const a = meta.data[i];
+      const b = meta.data[i + 1];
+      if (!a || !b || levels[i] == null) continue;
+      const y = yScale.getPixelForValue(levels[i]);
+      ctx.beginPath();
+      ctx.moveTo(a.x + a.width / 2, y);
+      ctx.lineTo(b.x - b.width / 2, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+};
+
+const vendidosPromedioPlugin = {
+  id: 'vendidosPromedio',
+  afterDatasetsDraw(chart) {
+    const avg = chart.options.plugins?.vendidosPromedio?.value;
+    const label = chart.options.plugins?.vendidosPromedio?.label;
+    if (avg == null || !Number.isFinite(avg) || !label) return;
+    const xScale = chart.scales.x;
+    const area = chart.chartArea;
+    if (!xScale || !area) return;
+    const x = xScale.getPixelForValue(avg);
+    const { ctx } = chart;
+    ctx.save();
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, area.top);
+    ctx.lineTo(x, area.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '700 12px Inter, Segoe UI, sans-serif';
+    ctx.textBaseline = 'top';
+    const width = ctx.measureText(label).width;
+    const lx = x + 6 + width > area.right ? x - width - 6 : x + 6;
+    ctx.textAlign = 'left';
+    ctx.fillText(label, lx, area.top + 2);
+    ctx.restore();
+  },
+};
+
+function vendidosCanalCascada(step) {
+  if (step?.kind === 'resta') return '▼ resta';
+  if (step?.kind === 'suma') return '▲ suma';
+  return 'total';
+}
+
+function renderVendidosCascada(c, netaN) {
+  destroyChart(vendidosResumenCharts.cascada);
+  vendidosResumenCharts.cascada = null;
+  const canvas = document.getElementById('chartVendCascada');
+  if (!canvas || typeof Chart === 'undefined' || !netaN) return;
+  const steps = [];
+  let acc = c.bruta;
+  steps.push({ label: 'Utilidad bruta', range: [0, c.bruta], value: c.bruta, kind: 'total', level: c.bruta });
+  const restar = (label, monto) => {
+    if (!monto) return;
+    const next = acc - monto;
+    steps.push({ label, range: [acc, next], value: -monto, kind: 'resta', level: next });
+    acc = next;
+  };
+  restar('Comisión E.V.', c.comision);
+  restar('Gastos extra', c.extras);
+  restar('Plan piso', c.piso);
+  const otros = Math.round((c.neta - acc) * 100) / 100;
+  if (Math.abs(otros) >= 1) {
+    steps.push({
+      label: 'Otros ajustes',
+      range: [acc, c.neta],
+      value: otros,
+      kind: otros < 0 ? 'resta' : 'suma',
+      level: c.neta,
+    });
+  }
+  steps.push({ label: 'Utilidad neta', range: [0, c.neta], value: c.neta, kind: 'total', level: c.neta });
+  if (c.fi > 0) {
+    steps.push({ label: 'Ingresos F&I', range: [c.neta, c.neta + c.fi], value: c.fi, kind: 'suma', level: c.neta + c.fi });
+    steps.push({ label: 'Neta con F&I', range: [0, c.neta + c.fi], value: c.neta + c.fi, kind: 'total', level: c.neta + c.fi });
+  }
+  steps[steps.length - 1].answer = true;
+  const mayor = vendidosMayorDeduccion(c);
+  const color = (s) => {
+    if (s.kind === 'resta') return '#d97706';
+    if (s.kind === 'suma') return '#059669';
+    if (s.value < 0) return s.answer ? '#9f1239' : '#be123c';
+    return s.answer ? '#1e3a8a' : '#60a5fa';
+  };
+  const hi = Math.max(0, ...steps.map((s) => Math.max(s.range[0], s.range[1])));
+  const lo = Math.min(0, ...steps.map((s) => Math.min(s.range[0], s.range[1])));
+  const pad = Math.max((hi - lo) * 0.16, 1);
+  vendidosResumenCharts.cascada = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: steps.map((s) => s.label),
+      datasets: [{
+        data: steps.map((s) => s.range),
+        backgroundColor: steps.map(color),
+        borderColor: steps.map((s) => (s.answer ? (s.value < 0 ? '#450a0a' : '#0f172a') : 'transparent')),
+        borderWidth: steps.map((s) => (s.answer ? 2 : 0)),
+        borderRadius: 4,
+        borderSkipped: false,
+      }],
+    },
+    plugins: [vendidosCascadaLinksPlugin, vendidosBarLabelsPlugin],
+    options: Dashboard.chartOptions({
+      layout: { padding: { top: 36 } },
+      plugins: {
+        legend: { display: false },
+        vendidosBarLabels: {
+          values: steps.map((s) => vendidosMoneyShort(s.value)),
+          notes: steps.map((s) => (mayor && s.label === mayor.label ? `${mayor.pct}% de la bruta` : '')),
+        },
+        vendidosCascadaLinks: { levels: steps.map((s) => s.level) },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const step = steps[ctx.dataIndex];
+              return `${vendidosCanalCascada(step)}: ${vendidosMoneySigned(step?.value)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#1e293b', font: { size: 12, weight: '600' } },
+        },
+        y: {
+          beginAtZero: lo === 0,
+          min: lo === 0 ? 0 : lo - pad * 0.25,
+          max: hi + pad,
+          ticks: { display: false },
+          grid: { color: 'rgba(148, 163, 184, 0.08)', drawTicks: false },
+          border: { display: false },
+        },
+      },
+    }),
+  });
+}
+
+function vendidosCarlineItems(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    const key = r.carline || 'Sin familia';
+    const cur = map.get(key) || { carline: key, n: 0, neta: 0, bajo: 0 };
+    cur.n += 1;
+    cur.neta += Number(r.utilidadNeta || 0);
+    if (r.utilidadPromedio != null && Number(r.utilidadPromedio) < 0) cur.bajo += 1;
+    map.set(key, cur);
+  }
+  const all = [...map.values()].map((v) => ({ ...v, prom: v.n ? v.neta / v.n : 0, otros: false, problema: false }));
+  const principales = all
+    .filter((v) => v.n >= VENDIDOS_OTROS_MAX)
+    .sort((a, b) => b.n - a.n || String(a.carline).localeCompare(String(b.carline), 'es'));
+  const chicos = all.filter((v) => v.n < VENDIDOS_OTROS_MAX);
+  if (chicos.length) {
+    const n = chicos.reduce((s, v) => s + v.n, 0);
+    const neta = chicos.reduce((s, v) => s + v.neta, 0);
+    principales.push({
+      carline: null,
+      etiqueta: `Otros (${n} unidad${n === 1 ? '' : 'es'})`,
+      n,
+      neta,
+      prom: n ? neta / n : 0,
+      bajo: chicos.reduce((s, v) => s + v.bajo, 0),
+      otros: true,
+      problema: false,
+    });
+  }
+  return principales;
+}
+
+function vendidosCarlineColor(item, avg, porUnidad) {
+  if (item.otros) return '#cbd5e1';
+  if (!porUnidad) return item.neta < 0 ? '#fb7185' : '#2563eb';
+  const tol = Math.max(Math.abs(avg) * 0.12, 1000);
+  if (Math.abs(item.prom - avg) <= tol) return '#64748b';
+  return item.prom < avg ? '#d97706' : '#34d399';
+}
+
+function renderVendidosCarlineChart() {
+  destroyChart(vendidosResumenCharts.carline);
+  vendidosResumenCharts.carline = null;
+  const canvas = document.getElementById('chartVendCarline');
+  const box = document.getElementById('vendCarlineBox');
+  const nota = document.getElementById('vendCarlineNota');
+  const titulo = document.getElementById('vrCarlineTitulo');
+  const sub = document.getElementById('vrCarlineSub');
+  const hint = document.getElementById('vrCarlineModeHint');
+  const porUnidad = vendidosCarlineMode !== 'total';
+  if (hint) {
+    hint.textContent = porUnidad
+      ? 'Por unidad muestra la neta promedio. El orden sigue por unidades vendidas.'
+      : 'Total suma la utilidad neta de todas las unidades del carline. El orden sigue por unidades vendidas.';
+  }
+  const rows = (vendidosRows || []).filter((r) => r.utilidadNeta != null);
+  if (rows.length < VENDIDOS_MIN_CARLINE_CHART) {
+    if (box) box.classList.add('hidden');
+    if (titulo) titulo.textContent = rows.length ? 'Pocas unidades para comparar carlines' : 'Sin unidades con utilidad neta';
+    if (sub) sub.textContent = `El gráfico aparece desde ${VENDIDOS_MIN_CARLINE_CHART} unidades`;
+    if (nota) {
+      nota.classList.remove('hidden');
+      nota.textContent = rows.length
+        ? `Con ${rows.length} unidad(es) la comparación por carline no es representativa. El gráfico aparece desde ${VENDIDOS_MIN_CARLINE_CHART} unidades.`
+        : 'Sin unidades con utilidad neta en el periodo.';
+    }
+    return;
+  }
+  if (box) box.classList.remove('hidden');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const items = vendidosCarlineItems(rows);
+  const avg = rows.reduce((s, r) => s + Number(r.utilidadNeta || 0), 0) / rows.length;
+  const problema = items
+    .filter((x) => !x.otros && x.n >= VENDIDOS_MIN_CARLINE_CHART && x.prom < avg)
+    .sort((a, b) => a.prom - b.prom)[0] || null;
+  if (problema) problema.problema = true;
+  const named = items.filter((x) => !x.otros);
+  if (titulo) {
+    if (problema) {
+      titulo.textContent = `${vendidosUnitLabel(problema.carline)} es el carline con menor utilidad por unidad`;
+    } else if (named[0] && named[1]) {
+      const pct = Math.round(((named[0].n + named[1].n) / rows.length) * 100);
+      titulo.textContent = `${vendidosUnitLabel(named[0].carline)} y ${vendidosUnitLabel(named[1].carline)} concentran ${pct}% de las unidades`;
+    } else if (named[0]) {
+      const pct = Math.round((named[0].n / rows.length) * 100);
+      titulo.textContent = `${vendidosUnitLabel(named[0].carline)} concentra ${pct}% de las unidades`;
+    } else {
+      titulo.textContent = 'Las unidades quedan en carlines de poco volumen';
+    }
+  }
+  if (sub) {
+    sub.textContent = porUnidad
+      ? 'Por carline · ordenado por unidades · la línea es el promedio del mes'
+      : 'Total de utilidad neta · ordenado por unidades';
+  }
+  if (nota) {
+    if (problema) {
+      const bajo = problema.bajo > 0
+        ? `, ${problema.bajo} venta${problema.bajo === 1 ? '' : 's'} bajo costo`
+        : '';
+      nota.textContent = `${vendidosUnitLabel(problema.carline)}: ${problema.n} uds, ${vendidosMoneyShort(problema.prom)} por unidad${bajo}`;
+      nota.classList.remove('hidden');
+    } else {
+      nota.textContent = '';
+      nota.classList.add('hidden');
+    }
+  }
+  const valor = (x) => (porUnidad ? x.prom : x.neta);
+  const etiquetaValor = (x) => {
+    const base = vendidosMoneyShort(valor(x));
+    if (!x.problema || !porUnidad) return base;
+    if (x.bajo > 0) return `${base} · ${x.bajo} bajo costo`;
+    return `${base} · bajo el promedio`;
+  };
+  if (box) box.style.height = `${Math.max(220, Math.min(640, 56 + items.length * 34))}px`;
+  const plugins = porUnidad ? [vendidosPromedioPlugin, vendidosBarLabelsPlugin] : [vendidosBarLabelsPlugin];
+  vendidosResumenCharts.carline = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: items.map((x) => (x.otros
+        ? x.etiqueta
+        : `${vendidosUnitLabel(x.carline)} · ${x.n} ud${x.n === 1 ? '' : 's'}`)),
+      datasets: [{
+        data: items.map((x) => Math.round(valor(x))),
+        backgroundColor: items.map((x) => vendidosCarlineColor(x, avg, porUnidad)),
+        borderColor: items.map((x) => (x.problema && porUnidad ? '#92400e' : 'transparent')),
+        borderWidth: items.map((x) => (x.problema && porUnidad ? 2 : 0)),
+        borderRadius: 4,
+      }],
+    },
+    plugins,
+    options: Dashboard.chartOptions({
+      indexAxis: 'y',
+      layout: { padding: { left: 8, right: 108, top: 16 } },
+      onClick: (_evt, elements) => {
+        const item = items[elements?.[0]?.index];
+        if (!item || item.otros) return;
+        vendidosCarlineFilter = item.carline;
+        renderVendidosCarlineFilterTabs();
+        renderVendidosTable();
+        document.getElementById('secVendidosAnalisis')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+      plugins: {
+        legend: { display: false },
+        vendidosBarLabels: { values: items.map(etiquetaValor) },
+        vendidosPromedio: porUnidad ? { value: avg, label: `Prom. ${vendidosMoneyShort(avg)}` } : undefined,
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const item = items[ctx.dataIndex];
+              if (!item) return '';
+              const exacto = porUnidad
+                ? `Neta por unidad ${vendidosMoneySigned(item.prom)}`
+                : `Neta total ${vendidosMoneySigned(item.neta)}`;
+              return `${exacto} · ${item.n} unidad${item.n === 1 ? '' : 'es'}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#334155',
+            font: { size: 12, weight: '600' },
+            callback: (v) => vendidosMoneyShort(v),
+          },
+          grid: { color: 'rgba(148, 163, 184, 0.12)' },
+        },
+        y: {
+          ticks: { color: '#1e293b', font: { size: 12, weight: '600' } },
+          grid: { display: false },
+        },
+      },
+    }),
+  });
+}
+
 async function loadVendidosAnalisis({ quiet = false } = {}) {
   const { api } = Dashboard;
   const range = currentVendidosRange();
+  const prevRange = vendidosPrevRange(range);
   vendidosLoading = true;
   renderVendidosKpiCard();
+  renderVendidosResumen();
   if (!quiet) renderVendidosTable([]);
   try {
-    const data = await api(`/inventory/vendidos?fechaInicio=${encodeURIComponent(range.fechaInicio)}&fechaFin=${encodeURIComponent(range.fechaFin)}`);
+    const qs = (r) => `fechaInicio=${encodeURIComponent(r.fechaInicio)}&fechaFin=${encodeURIComponent(r.fechaFin)}`;
+    const [data, prev] = await Promise.all([
+      api(`/inventory/vendidos?${qs(range)}`),
+      prevRange ? api(`/inventory/vendidos?${qs(prevRange)}`).catch(() => null) : Promise.resolve(null),
+    ]);
     vendidosRows = Array.isArray(data.vendidosTable) ? data.vendidosTable : [];
+    vendidosPrevRows = prev && Array.isArray(prev.vendidosTable) ? prev.vendidosTable : null;
+    vendidosPrevLabel = prevRange?.label || '';
     vendidosCarlineFilters = Array.isArray(data.carlineFilters) ? data.carlineFilters : [];
     renderVendidosCarlineFilterTabs(vendidosCarlineFilters);
     renderVendidosTable();
     renderIemcF2(data.iemc || null);
   } catch (err) {
     vendidosRows = [];
+    vendidosPrevRows = null;
     vendidosCarlineFilters = [];
+    renderVendidosCarlineFilterTabs([]);
     const body = document.getElementById('vendidosSlowBody');
     if (body) {
       body.innerHTML = `<tr><td colspan="13" class="empty-row">${escapeHtml(err.message || 'No se pudieron cargar las ventas.')}</td></tr>`;
@@ -2214,6 +3157,7 @@ async function loadVendidosAnalisis({ quiet = false } = {}) {
   } finally {
     vendidosLoading = false;
     renderVendidosKpiCard();
+    renderVendidosResumen();
     applyInventoryInsights();
   }
 }
@@ -2260,6 +3204,7 @@ function renderIemcF2(data, errorMessage) {
       status.textContent = errorMessage;
       status.classList.add('is-warn');
     }
+    document.getElementById('secIemcF2')?.classList.remove('iemc-f2--sin-mix');
     const body = document.getElementById('iemcF2MixBody');
     if (body) body.innerHTML = `<tr><td colspan="9" class="empty-row">${escapeHtml(errorMessage)}</td></tr>`;
     return;
@@ -2299,12 +3244,45 @@ function renderIemcF2(data, errorMessage) {
   if (!body) return;
   const rows = Array.isArray(data?.mix) ? data.mix : [];
   const otras = Array.isArray(data?.otrasLineasReales) ? data.otrasLineasReales : [];
+  const cellMoney = (n) => (n == null ? '—' : fmt.money(n));
+  const section = document.getElementById('secIemcF2');
+  const headRow = section?.querySelector('.iemc-f2-table thead tr');
+  const sinMix = !data?.mixDisponible;
+  section?.classList.toggle('iemc-f2--sin-mix', sinMix);
+
+  if (sinMix) {
+    if (headRow) {
+      headRow.innerHTML = '<th>Línea vendida</th><th class="cell-num">Uds real</th><th class="cell-num">Venta real</th><th class="cell-num">UBA real</th><th class="cell-num">Margen real</th>';
+    }
+    const vendidas = [...rows, ...otras]
+      .filter((r) => Number(r.unidadesReales || 0) > 0)
+      .sort((a, b) => Number(b.unidadesReales || 0) - Number(a.unidadesReales || 0));
+    if (!vendidas.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty-row">Sin ventas reales en el periodo.</td></tr>';
+      return;
+    }
+    body.innerHTML = vendidas.map((r) => {
+      const venta = Number(r.ventaNetaReal || 0);
+      const uba = r.ubaReal == null ? null : Number(r.ubaReal);
+      const margen = venta > 0 && uba != null ? Math.round((uba / venta) * 1000) / 10 : null;
+      return `<tr>
+        <td><strong>${escapeHtml(r.linea)}</strong>${r.familia ? `<span class="ageing-slow-hint">${escapeHtml(r.familia)}</span>` : ''}</td>
+        <td class="cell-num">${Number(r.unidadesReales || 0)}</td>
+        <td class="cell-num">${cellMoney(r.ventaNetaReal)}</td>
+        <td class="cell-num">${cellMoney(r.ubaReal)}</td>
+        <td class="cell-num"><strong class="ageing-retencion ${margen == null ? '' : (margen < 0 ? 'is-neg' : 'is-ok')}">${margen == null ? '—' : `${margen.toLocaleString('es-MX')}%`}</strong></td>
+      </tr>`;
+    }).join('');
+    return;
+  }
+
+  if (headRow) {
+    headRow.innerHTML = '<th>Línea mix</th><th class="cell-num">UO</th><th class="cell-num">PL s/IVA</th><th class="cell-num">CF s/IVA</th><th class="cell-num">Venta obj.</th><th class="cell-num">UBA obj.</th><th class="cell-num">Uds real</th><th class="cell-num">Venta real</th><th class="cell-num">UBA real</th>';
+  }
   if (!rows.length && !otras.length) {
     body.innerHTML = '<tr><td colspan="9" class="empty-row">Sin mix objetivo para el mes.</td></tr>';
     return;
   }
-
-  const cellMoney = (n) => (n == null ? '—' : fmt.money(n));
 
   const mixHtml = rows.map((r) => {
     const plCell = `${cellMoney(r.pl)}<span class="iemc-f2-src">${escapeHtml(iemcFuenteLabel(r.plFuente))}</span>`;
@@ -2346,16 +3324,23 @@ function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
   const list = Array.isArray(rows) ? rows : [];
   const meta = document.getElementById('ageingSearchMeta');
   if (meta) {
-    const filtered = ageingSearch.trim() || ageingCarlineFilter !== 'all';
+    const unitOn = ageingCarlineFilter !== 'all' || Boolean(ageingRangeFilter);
+    const filtered = Boolean(ageingSearch.trim()) || unitOn;
     meta.classList.toggle('hidden', !filtered);
-    if (filtered) meta.textContent = `${list.length} de ${ageingSlowRows.length}`;
+    if (filtered) {
+      const rangeTxt = ageingRangeFilter ? ` · ${AGE_RANGE_LABEL[ageingRangeFilter] || ''}` : '';
+      const clear = unitOn
+        ? ' <button type="button" class="vendidos-filter-clear" id="ageingClearFilter">Quitar filtro</button>'
+        : '';
+      meta.innerHTML = `${list.length} de ${ageingSlowRows.length}${rangeTxt}${clear}`;
+    }
   }
 
   if (!list.length) {
     const empty = ageingSlowRows.length
       ? 'Sin coincidencias para el filtro.'
       : 'Sin inventario real (DIS / FIS / SEP) para analizar.';
-    body.innerHTML = `<tr><td colspan="11" class="empty-row">${empty}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="12" class="empty-row">${empty}</td></tr>`;
     return;
   }
 
@@ -2390,6 +3375,10 @@ function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
     const pisoCell = generaInteres && planPiso > 0
       ? `<strong>${fmt.money(planPiso)}</strong><span class="ageing-slow-hint">${pisoSuperaUtilidad ? 'Come utilidad' : '+30 días'}</span>`
       : '<span class="ageing-slow-hint">Sin cargo</span>';
+    const costoDiario = Number(r.costoDiario || 0);
+    const diarioCell = costoDiario > 0
+      ? `<strong>${fmt.money(costoDiario)}</strong>`
+      : '<span class="ageing-slow-hint">—</span>';
     const netaCell = utilidadNeta == null
       ? '<span class="ageing-slow-hint">—</span>'
       : `<strong>${fmt.money(utilidadNeta)}</strong>`;
@@ -2409,6 +3398,7 @@ function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
       <td class="cell-num ageing-slow-utilidad">${utilidadCell}</td>
       <td class="cell-num ageing-slow-extras">${extrasCell}</td>
       <td class="cell-num ageing-slow-piso">${pisoCell}</td>
+      <td class="cell-num ageing-slow-diario">${diarioCell}</td>
       <td class="cell-num ageing-slow-neta">${netaCell}</td>
       <td class="cell-num">${renderRetencionCell(pctRetencion(utilidad, utilidadNeta))}</td>
     </tr>`;
@@ -2658,11 +3648,399 @@ function renderCharts(data) {
     ? data.ageingSlowTable
     : (Array.isArray(data.ageingChart) ? data.ageingChart : []);
   ageingCarlineFilters = Array.isArray(data.ageingCarlineFilters) ? data.ageingCarlineFilters : [];
+  inventarioLectura = data.inventarioLectura || null;
   renderAgeingCarlineFilterTabs(ageingCarlineFilters);
   renderAgeingSlowTable();
+  renderInventarioLectura(inventarioLectura);
 
   destroyChart(ageingChart);
   ageingChart = null;
+}
+
+function lecturaChartHeight(count, rowPx = 28, min = 220) {
+  return Math.max(min, Math.min(640, 56 + count * rowPx));
+}
+
+function invLecturaTexto(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function invLecturaAviso(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('hidden', !text);
+}
+
+const invStackLabelsPlugin = {
+  id: 'invStackLabels',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const n = chart.data.labels.length;
+    ctx.save();
+    ctx.font = '700 12px Inter, Segoe UI, sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < n; i++) {
+      let right = 0;
+      let total = 0;
+      let y = null;
+      chart.data.datasets.forEach((ds, di) => {
+        const bar = chart.getDatasetMeta(di).data[i];
+        const value = Number(ds.data[i] || 0);
+        total += value;
+        if (!bar || !value) return;
+        y = bar.y;
+        const width = Math.abs(bar.x - bar.base);
+        right = Math.max(right, bar.x, bar.base);
+        if (width >= 18) {
+          ctx.fillStyle = di >= 2 ? '#fff' : '#14532d';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(value), (bar.x + bar.base) / 2, bar.y);
+        }
+      });
+      if (total && y != null) {
+        ctx.fillStyle = '#1e293b';
+        ctx.textAlign = 'left';
+        ctx.fillText(String(total), right + 6, y);
+      }
+    }
+    ctx.restore();
+  },
+};
+
+const invCoberturaBandasPlugin = {
+  id: 'invCoberturaBandas',
+  beforeDatasetsDraw(chart) {
+    const scale = chart.scales.x;
+    const area = chart.chartArea;
+    if (!scale || !area) return;
+    const bandas = [
+      [0, 20, 'rgba(217, 119, 6, 0.14)'],
+      [20, 60, 'rgba(22, 163, 74, 0.12)'],
+      [60, 90, 'rgba(100, 116, 139, 0.14)'],
+      [90, 120, 'rgba(124, 58, 237, 0.12)'],
+    ];
+    const { ctx } = chart;
+    ctx.save();
+    bandas.forEach(([desde, hasta, color]) => {
+      const x0 = scale.getPixelForValue(desde);
+      const x1 = scale.getPixelForValue(hasta);
+      ctx.fillStyle = color;
+      ctx.fillRect(x0, area.top, x1 - x0, area.bottom - area.top);
+    });
+    ctx.restore();
+  },
+};
+
+function invAntiguedadFilas(por) {
+  const ranked = [...por].sort((a, b) => b.r90 - a.r90 || b.r61 - a.r61 || b.r31 - a.r31 || b.total - a.total);
+  const top = ranked.slice(0, 10).map((row) => ({ ...row, otros: false }));
+  const rest = ranked.slice(10);
+  if (!rest.length) return top;
+  const otros = rest.reduce((acc, row) => {
+    acc.r0 += row.r0 || 0;
+    acc.r31 += row.r31 || 0;
+    acc.r61 += row.r61 || 0;
+    acc.r90 += row.r90 || 0;
+    acc.total += row.total || 0;
+    return acc;
+  }, {
+    carline: null,
+    etiqueta: `Otros (${rest.length} carline${rest.length === 1 ? '' : 's'})`,
+    r0: 0,
+    r31: 0,
+    r61: 0,
+    r90: 0,
+    total: 0,
+    otros: true,
+  });
+  top.push(otros);
+  return top;
+}
+
+function invCostoColor(days) {
+  const d = Number(days);
+  if (d >= 180) return '#be123c';
+  if (d >= 90) return '#f97316';
+  return '#facc15';
+}
+
+function invCoberturaColor(banda) {
+  if (banda === 'quiebre') return '#d97706';
+  if (banda === 'sano') return '#16a34a';
+  if (banda === 'alto') return '#64748b';
+  if (banda === 'sobrestock') return '#7c3aed';
+  return '#94a3b8';
+}
+
+let ageingVista = 'tabla';
+
+function setAgeingVista(vista) {
+  ageingVista = vista === 'cobertura' ? 'cobertura' : 'tabla';
+  const esCobertura = ageingVista === 'cobertura';
+  document.querySelectorAll('#ageingVista [data-ageing-vista]').forEach((el) => {
+    const on = el.dataset.ageingVista === ageingVista;
+    el.classList.toggle('is-active', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  const figura = document.getElementById('figInvCobertura');
+  const destinoAnalisis = document.getElementById('ageingVistaCobertura');
+  const destinoLectura = document.querySelector('#secInvLectura .inv-lectura');
+  const destino = esCobertura ? destinoAnalisis : destinoLectura;
+  if (figura && destino && figura.parentElement !== destino) destino.appendChild(figura);
+  destinoAnalisis?.classList.toggle('hidden', !esCobertura);
+  document.getElementById('ageingTablaWrap')?.classList.toggle('hidden', esCobertura);
+  document.getElementById('ageingSort')?.classList.toggle('hidden', esCobertura);
+  if (invLecturaCharts.cobertura) {
+    requestAnimationFrame(() => invLecturaCharts.cobertura?.resize());
+  }
+}
+
+function invFiltrarCarline(carline) {
+  if (!carline) return;
+  setAgeingVista('tabla');
+  ageingCarlineFilter = carline;
+  ageingRangeFilter = '';
+  ageingSearch = '';
+  const input = document.getElementById('buscarAgeingInv');
+  if (input) input.value = '';
+  renderAgeingCarlineFilterTabs();
+  renderAgeingSlowTable();
+  document.getElementById('secAnalisisInventario')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderInventarioLectura(lectura) {
+  const { chartOptions } = Dashboard;
+  const tick12 = { color: '#1e293b', font: { size: 12, weight: '600' } };
+  for (const key of Object.keys(invLecturaCharts)) {
+    destroyChart(invLecturaCharts[key]);
+    invLecturaCharts[key] = null;
+  }
+  if (!lectura || typeof Chart === 'undefined') return;
+
+  const por = Array.isArray(lectura.antiguedad?.porCarline) ? lectura.antiguedad.porCarline : [];
+  const filasEdad = invAntiguedadFilas(por);
+  const plus90 = Number(lectura.antiguedad?.plus90 || 0);
+  const totalInv = por.reduce((s, row) => s + Number(row.total || 0), 0);
+  const pct90 = totalInv ? Math.round((plus90 / totalInv) * 100) : 0;
+  const sobre60 = Number(lectura.costo?.unidades60 || 0);
+  invLecturaTexto(
+    'invAntiguedadTitulo',
+    totalInv
+      ? `${plus90.toLocaleString('es-MX')} unidad${plus90 === 1 ? '' : 'es'} lleva${plus90 === 1 ? '' : 'n'} más de 90 días (${pct90}% del inventario)`
+      : 'Sin unidades para leer antigüedad',
+  );
+  invLecturaTexto(
+    'invAntiguedadSub',
+    totalInv
+      ? `${sobre60.toLocaleString('es-MX')} unidad${sobre60 === 1 ? '' : 'es'} con 60 días o más · clic en un carline filtra el análisis`
+      : '0–30, 31–60, 61–90 y más de 90 días',
+  );
+  const envejecidos = por.filter((row) => row.total >= 5 && Number(row.pct90) >= 30);
+  invLecturaAviso(
+    'invAntiguedadAviso',
+    envejecidos.length
+      ? `30% o más de sus unidades superan 90 días: ${envejecidos.map((row) => `${prettyCarline(row.carline)} (${row.r90} de ${row.total})`).join(', ')}.`
+      : '',
+  );
+  const canvasA = document.getElementById('chartInvAntiguedad');
+  const boxA = canvasA?.parentElement;
+  if (canvasA && filasEdad.length) {
+    if (boxA) boxA.style.height = `${lecturaChartHeight(filasEdad.length, 32)}px`;
+    const keys = ['r0', 'r31', 'r61', 'r90'];
+    const colors = ['#bbf7d0', '#65a30d', '#d97706', '#be123c'];
+    const labels = ['0–30', '31–60', '61–90', 'Más de 90'];
+    const maxStack = Math.max(...filasEdad.map((row) => row.total), 1);
+    invLecturaCharts.antiguedad = new Chart(canvasA, {
+      type: 'bar',
+      data: {
+        labels: filasEdad.map((row) => (row.otros ? row.etiqueta : prettyCarline(row.carline))),
+        datasets: keys.map((key, i) => ({
+          label: labels[i],
+          data: filasEdad.map((row) => row[key] || 0),
+          backgroundColor: colors[i],
+          stack: 'edad',
+          borderWidth: 0,
+        })),
+      },
+      plugins: [invStackLabelsPlugin],
+      options: chartOptions({
+        indexAxis: 'y',
+        layout: { padding: { right: 28 } },
+        onClick: (_evt, elements) => {
+          const row = filasEdad[elements?.[0]?.index];
+          if (!row || row.otros) return;
+          invFiltrarCarline(row.carline);
+        },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+        scales: {
+          x: {
+            stacked: true,
+            beginAtZero: true,
+            max: Math.ceil(maxStack * 1.22),
+            grid: { color: 'rgba(148, 163, 184, 0.12)' },
+            ticks: { ...tick12, precision: 0 },
+          },
+          y: { stacked: true, grid: { display: false }, ticks: tick12 },
+        },
+      }),
+    });
+  }
+
+  const top = (Array.isArray(lectura.costo?.top) ? lectura.costo.top : [])
+    .filter((row) => Number(row.planPisoAcumulado || 0) > 0);
+  const versionPorVin = new Map((ageingSlowRows || []).map((row) => [row.vin, row.version || '']));
+  const pisoTotal = (ageingSlowRows || []).reduce((s, row) => s + Number(row.planPisoAcumulado || 0), 0);
+  const pisoTop = top.reduce((s, row) => s + Number(row.planPisoAcumulado || 0), 0);
+  const pisoPct = pisoTotal > 0 ? Math.round((pisoTop / pisoTotal) * 100) : null;
+  invLecturaTexto(
+    'invCostoTitulo',
+    top.length
+      ? `${top.length} unidad${top.length === 1 ? '' : 'es'} concentra${top.length === 1 ? '' : 'n'} ${vendidosMoneyShort(pisoTop)} de plan piso${pisoPct == null ? '' : ` (${pisoPct}% del total)`}`
+      : 'Sin plan piso acumulado',
+  );
+  invLecturaTexto('invCostoSub', 'Carline y últimos 6 del VIN · el color es la antigüedad');
+  const canvasC = document.getElementById('chartInvCosto');
+  const boxC = canvasC?.parentElement;
+  if (canvasC && top.length) {
+    if (boxC) boxC.style.height = `${lecturaChartHeight(top.length, 34, 180)}px`;
+    invLecturaCharts.costo = new Chart(canvasC, {
+      type: 'bar',
+      data: {
+        labels: top.map((row) => `${prettyCarline(row.carline)} · ${String(row.vin || '').slice(-6) || '—'}`),
+        datasets: [{
+          data: top.map((row) => Math.round(Number(row.planPisoAcumulado || 0))),
+          backgroundColor: top.map((row) => invCostoColor(row.daysInStock)),
+          borderRadius: 6,
+        }],
+      },
+      plugins: [vendidosBarLabelsPlugin],
+      options: chartOptions({
+        indexAxis: 'y',
+        layout: { padding: { right: 92 } },
+        onClick: (_evt, elements) => {
+          const row = top[elements?.[0]?.index];
+          if (!row?.vin) return;
+          ageingCarlineFilter = 'all';
+          ageingRangeFilter = '';
+          ageingSearch = row.vin;
+          const input = document.getElementById('buscarAgeingInv');
+          if (input) input.value = row.vin;
+          renderAgeingCarlineFilterTabs();
+          renderAgeingSlowTable();
+          document.getElementById('secAnalisisInventario')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+        plugins: {
+          legend: { display: false },
+          vendidosBarLabels: {
+            values: top.map((row) => `${vendidosMoneyShort(row.planPisoAcumulado)} · ${row.daysInStock ?? '—'} d`),
+          },
+          tooltip: {
+            callbacks: {
+              title: (items) => prettyCarline(top[items?.[0]?.dataIndex]?.carline),
+              label: (ctx) => {
+                const row = top[ctx.dataIndex];
+                if (!row) return '';
+                const version = row.version || versionPorVin.get(row.vin) || 'Sin versión';
+                return [
+                  version,
+                  row.vin || 'Sin VIN',
+                  vendidosMoneySigned(row.planPisoAcumulado),
+                  `${row.daysInStock ?? '—'} días en inventario`,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: { display: false, beginAtZero: true, grace: '8%' },
+          y: { grid: { display: false }, ticks: tick12 },
+        },
+      }),
+    });
+  }
+
+  const cobertura = lectura.cobertura || {};
+  const medibles = (Array.isArray(cobertura.items) ? cobertura.items : [])
+    .filter((row) => row.banda !== 'sin_ventas' && row.dias != null);
+  const quiebre = Array.isArray(cobertura.quiebre) ? cobertura.quiebre : [];
+  const sobrestock = Array.isArray(cobertura.sobrestock) ? cobertura.sobrestock : [];
+  const sinVentas = Array.isArray(cobertura.sinVentas) ? cobertura.sinVentas : [];
+  const nombra = (lista) => {
+    const nombres = lista.map((nombre) => prettyCarline(nombre));
+    if (nombres.length <= 3) return nombres.join(', ');
+    return `${nombres.slice(0, 3).join(', ')} y ${nombres.length - 3} más`;
+  };
+  let coberturaTitulo = 'Sin cobertura calculada';
+  if (quiebre.length && sobrestock.length) {
+    coberturaTitulo = `${quiebre.length === 1 ? nombra(quiebre) : `${quiebre.length} carlines`} con menos de 20 días y ${sobrestock.length === 1 ? nombra(sobrestock) : `${sobrestock.length} con más de 90`}`;
+  } else if (quiebre.length) {
+    coberturaTitulo = `${nombra(quiebre)} con menos de 20 días de cobertura`;
+  } else if (sobrestock.length) {
+    coberturaTitulo = `${nombra(sobrestock)} con más de 90 días de cobertura`;
+  } else if (medibles.length) {
+    coberturaTitulo = 'Ningún carline está en quiebre ni en sobrestock';
+  }
+  invLecturaTexto('invCoberturaTitulo', coberturaTitulo);
+  invLecturaTexto('invCoberturaSub', 'La banda de fondo marca quiebre, sano, atención y sobrestock. Lo que pasa de 120 días se rotula +120 d.');
+  invLecturaAviso(
+    'invCoberturaAviso',
+    sinVentas.length
+      ? `Sin ventas en 90 días, sin cobertura: ${sinVentas.map((nombre) => prettyCarline(nombre)).join(', ')}.`
+      : '',
+  );
+  const canvasB = document.getElementById('chartInvCobertura');
+  const boxB = canvasB?.parentElement;
+  if (boxB) boxB.classList.toggle('hidden', !medibles.length);
+  if (canvasB && medibles.length) {
+    if (boxB) boxB.style.height = `${lecturaChartHeight(medibles.length, 32)}px`;
+    invLecturaCharts.cobertura = new Chart(canvasB, {
+      type: 'bar',
+      data: {
+        labels: medibles.map((row) => prettyCarline(row.carline)),
+        datasets: [{
+          data: medibles.map((row) => Math.min(Number(row.dias), 120)),
+          backgroundColor: medibles.map((row) => invCoberturaColor(row.banda)),
+          borderRadius: 6,
+        }],
+      },
+      plugins: [invCoberturaBandasPlugin, vendidosBarLabelsPlugin],
+      options: chartOptions({
+        indexAxis: 'y',
+        layout: { padding: { right: 56 } },
+        onClick: (_evt, elements) => {
+          const row = medibles[elements?.[0]?.index];
+          if (!row?.carline) return;
+          invFiltrarCarline(row.carline);
+        },
+        plugins: {
+          legend: { display: false },
+          vendidosBarLabels: {
+            values: medibles.map((row) => (Number(row.dias) > 120 ? '+120 d' : `${row.dias} d`)),
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const row = medibles[ctx.dataIndex];
+                if (!row) return '';
+                return `${row.dias} días · ${row.disponibles} disponibles · ${row.vendidas90} ventas en 90 días`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            min: 0,
+            max: 120,
+            grid: { color: 'rgba(148, 163, 184, 0.12)' },
+            ticks: { ...tick12, stepSize: 20, callback: (value) => `${value} d` },
+          },
+          y: { grid: { display: false }, ticks: tick12 },
+        },
+      }),
+    });
+  }
 }
 
 async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
@@ -2719,7 +4097,25 @@ async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
         'sSinPreviasSub',
         `${fmt.number(s.conPrevias ?? inventoryRows.filter((r) => Number(r.previas || 0) > 0).length)} con previas`
       );
-      setText('sDays', `${s.avgDaysAvailable} días`);
+      setText('sDays', s.medianaDias == null ? '—' : `${fmt.number(s.medianaDias)} días`);
+      setText(
+        'sDaysSub',
+        `Prom. ${fmt.number(s.avgDaysAvailable ?? 0)} d · ${s.pct90 ?? 0}% con +90 días`,
+      );
+      const costo60 = s.costoAcumulado60 ?? data.inventarioLectura?.costo?.acumulado60 ?? 0;
+      const unidades60 = data.inventarioLectura?.costo?.unidades60 ?? 0;
+      setText('sCostoInv', fmt.currency(costo60 || 0));
+      setText(
+        'sCostoInvSub',
+        `${fmt.number(unidades60)} VIN 60+ · ${fmt.currency(s.costoDiario60 || 0)} / día`,
+      );
+      setText('sCobertura', s.coberturaDias == null ? '—' : `${fmt.number(s.coberturaDias)} d`);
+      setText(
+        'sCoberturaSub',
+        s.coberturaDias == null
+          ? 'Sin ventas en 90 d'
+          : `${fmt.number(s.coberturaFuera || 0)} carlines fuera de banda`,
+      );
       {
         const ageingN = Number(s.ageingAlertsCount ?? s.urgentAlerts ?? 0);
         const availableN = Number(s.available || 0);
@@ -2728,11 +4124,12 @@ async function loadInventory({ onlyPlanPiso = false, quiet = false } = {}) {
           : null;
         setText('sAlerts', fmt.number(ageingN));
         const pisoTxt = `Plan piso ${fmt.currency(s.ageingAlertsPlanPisoTotal || 0)}`;
+        const pct90Txt = `${s.pct90 ?? 0}% con +90 días`;
         setText(
           'sAlertsSub',
           exposicionPct == null
-            ? `Físico 60+ · ${pisoTxt}`
-            : `C-3 · ${exposicionPct}% del disponible · ${pisoTxt}`,
+            ? `Físico 60+ · ${pct90Txt} · ${pisoTxt}`
+            : `C-3 · ${exposicionPct}% a 60+ · ${pct90Txt} · ${pisoTxt}`,
         );
         const ageingCard = document.getElementById('kpiAgeingAlerts');
         if (ageingCard) {
@@ -2894,6 +4291,7 @@ function setInventoryScope(scope) {
   document.getElementById('panelInventarioCierre')?.classList.toggle('hidden', inventoryScope !== 'cierre');
   document.getElementById('panelInventarioSeminuevos')?.classList.toggle('hidden', inventoryScope !== 'seminuevos');
   document.getElementById('panelInventarioPostventa')?.classList.toggle('hidden', inventoryScope !== 'postventa');
+  document.body.classList.toggle('inventory-cierre', inventoryScope === 'cierre');
 
   const title = document.querySelector('.top-bar-title');
   if (title) {
@@ -4866,6 +6264,19 @@ document.getElementById('buscarVendidosInv')?.addEventListener('input', (e) => {
   vendidosSearch = e.target.value || '';
   renderVendidosTable();
 });
+document.getElementById('vendCarlineMode')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-vend-mode]');
+  if (!btn) return;
+  const next = btn.dataset.vendMode === 'total' ? 'total' : 'unidad';
+  if (next === vendidosCarlineMode) return;
+  vendidosCarlineMode = next;
+  btn.parentElement.querySelectorAll('[data-vend-mode]').forEach((el) => {
+    const on = el === btn;
+    el.classList.toggle('is-active', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  renderVendidosCarlineChart();
+});
 document.getElementById('vendidosCarlineFilterTabs')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-vendidos-filter]');
   if (!btn) return;
@@ -4873,9 +6284,17 @@ document.getElementById('vendidosCarlineFilterTabs')?.addEventListener('click', 
   document.querySelectorAll('#vendidosCarlineFilterTabs [data-vendidos-filter]').forEach((el) => {
     const on = el.dataset.vendidosFilter === vendidosCarlineFilter;
     el.classList.toggle('is-active', on);
-    el.classList.toggle('active', on);
     el.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+  if (vendidosCarlineFilter !== 'all') {
+    btn.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }
+  renderVendidosTable();
+});
+document.getElementById('vendidosSearchMeta')?.addEventListener('click', (e) => {
+  if (!e.target.closest('#vendidosClearFilter')) return;
+  vendidosCarlineFilter = 'all';
+  renderVendidosCarlineFilterTabs(vendidosCarlineFilters);
   renderVendidosTable();
 });
 document.getElementById('vendidosPeriod')?.addEventListener('change', () => {
@@ -4904,12 +6323,31 @@ document.getElementById('ageingCarlineFilterTabs')?.addEventListener('click', (e
   const btn = e.target.closest('[data-ageing-filter]');
   if (!btn) return;
   ageingCarlineFilter = btn.dataset.ageingFilter || 'all';
-  document.querySelectorAll('#ageingCarlineFilterTabs [data-ageing-filter]').forEach((el) => {
-    const on = el.dataset.ageingFilter === ageingCarlineFilter;
+  if (ageingCarlineFilter === 'all') ageingRangeFilter = '';
+  renderAgeingCarlineFilterTabs();
+  renderAgeingSlowTable();
+});
+document.getElementById('ageingVista')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ageing-vista]');
+  if (!btn) return;
+  setAgeingVista(btn.dataset.ageingVista);
+});
+document.getElementById('ageingSort')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ageing-sort]');
+  if (!btn) return;
+  ageingSort = btn.dataset.ageingSort === 'dias' ? 'dias' : 'costo';
+  document.querySelectorAll('#ageingSort [data-ageing-sort]').forEach((el) => {
+    const on = el.dataset.ageingSort === ageingSort;
     el.classList.toggle('is-active', on);
-    el.classList.toggle('active', on);
     el.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+  renderAgeingSlowTable();
+});
+document.getElementById('ageingSearchMeta')?.addEventListener('click', (e) => {
+  if (!e.target.closest('#ageingClearFilter')) return;
+  ageingCarlineFilter = 'all';
+  ageingRangeFilter = '';
+  renderAgeingCarlineFilterTabs();
   renderAgeingSlowTable();
 });
 document.getElementById('intHistFilterTabs')?.addEventListener('click', (e) => {

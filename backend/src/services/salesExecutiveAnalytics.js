@@ -255,20 +255,30 @@ function computeFuerzaVentas(rows) {
 function buildRecomendaciones(analytics) {
   const recs = [];
   const { rentabilidad, aging, fi, fuerzaVentas } = analytics;
+  const mencionados = new Set();
+  const margenDebil = new Set((rentabilidad.paretoBottom || []).map((m) => m.model));
 
   if (rentabilidad.paretoTop.length) {
     const top = rentabilidad.paretoTop[0];
-    recs.push(
-      `Impulsar pedido a planta de ${top.model}: concentra ${top.sharePct}% de la utilidad del periodo con margen del ${top.marginPct}%.`
-    );
+    mencionados.add(top.model);
+    if (margenDebil.has(top.model)) {
+      recs.push(
+        `Cuidar margen de ${top.model}: concentra ${top.sharePct}% de la utilidad del periodo, pero el margen bruto es solo ${top.marginPct}% (${top.units} uds.). Revise descuentos y bonificaciones antes de pedir más a planta.`
+      );
+    } else {
+      recs.push(
+        `Impulsar pedido a planta de ${top.model}: concentra ${top.sharePct}% de la utilidad del periodo con margen del ${top.marginPct}%.`
+      );
+    }
   }
 
-  if (rentabilidad.paretoBottom.length) {
-    const low = rentabilidad.paretoBottom[0];
+  const low = (rentabilidad.paretoBottom || []).find((m) => !mencionados.has(m.model));
+  if (low) {
+    mencionados.add(low.model);
     recs.push(
       `Frenar volumen de ${low.model}: margen bruto de solo ${low.marginPct}% (${low.units} uds.) — revisar descuentos y bonificaciones.`
     );
-  } else if (aging.estancadosMayorDescuento) {
+  } else if (!margenDebil.size && aging.estancadosMayorDescuento) {
     recs.push(
       'Unidades con +60 días en inventario salieron con mayores bonificaciones; priorice remate y ajuste el mix de pedidos.'
     );

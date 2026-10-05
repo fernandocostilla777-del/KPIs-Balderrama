@@ -6,6 +6,7 @@
 (function () {
   let state = {
     data: null,
+    prospeccion: null,
     fechaInicio: null,
     fechaFin: null,
     search: '',
@@ -619,6 +620,58 @@
       </p>
       <div class="ld-periodo-vacio__actions">${suggestBtn}</div>
     `;
+  }
+
+  function renderProspeccion() {
+    const grid = document.getElementById('ldPproGrid');
+    const body = document.getElementById('ldPproEjecutivos');
+    const nota = document.getElementById('ldPproNota');
+    const pack = state.prospeccion;
+    if (!grid || !body) return;
+    if (pack?.loading) {
+      grid.innerHTML = '<p class="section-subtitle">Calculando el proceso de prospección y la cartera activa…</p>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">Calculando…</td></tr>';
+      return;
+    }
+    if (!pack || pack.error) {
+      grid.innerHTML = `<p class="section-subtitle">${escapeHtml(pack?.error || 'Sin indicadores de prospección.')}</p>`;
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">Sin cartera.</td></tr>';
+      return;
+    }
+    const cards = pack.indicadores || [];
+    if (nota && pack.cartera?.ultimoEstatus) {
+      nota.textContent = `La Cobertura de Gestión de la Cartera Comercial Activa mide los ciclos activos con acción siguiente al corte. Último movimiento de estatus en esa cartera: ${pack.cartera.ultimoEstatus}.`;
+    }
+    grid.innerHTML = cards.map((item) => {
+      const value = item.disponible && item.valor != null ? pct(item.valor) : 'Sin dato';
+      const tone = !item.disponible ? 'slate' : (item.meta != null && item.valor != null && item.valor >= item.meta ? 'green' : 'amber');
+      const nums = item.numerador != null && item.denominador != null
+        ? `${num(item.numerador)} de ${num(item.denominador)}`
+        : (item.denominador != null ? `Universo ${num(item.denominador)}` : '');
+      return `
+        <article class="kpi-card kpi-card--${tone}">
+          <div class="kpi-card-head"><span class="kpi-title">${escapeHtml(item.nombre)}</span></div>
+          <div class="kpi-value">${value}</div>
+          <p class="kpi-subtitle">${escapeHtml([item.componente, nums].filter(Boolean).join(' · '))}</p>
+          <p class="kpi-subtitle">${escapeHtml(item.detalle || '')}</p>
+          <div class="kpi-accent"></div>
+        </article>`;
+    }).join('');
+    const rows = pack.cartera?.porEjecutivo || [];
+    body.innerHTML = rows.length
+      ? rows.map((row) => {
+        const q = new URLSearchParams({ vendedor: row.ejecutivo });
+        if (state.fechaFin) q.set('fechaFin', state.fechaFin);
+        return `
+          <tr>
+            <td>${escapeHtml(row.ejecutivo)}</td>
+            <td class="cell-num">${num(row.cartera)}</td>
+            <td class="cell-num">${num(row.vigentes)}</td>
+            <td class="cell-num">${row.coberturaPct == null ? '—' : pct(row.coberturaPct)}</td>
+            <td><a href="/seguimiento.html?${q.toString()}">Expediente del ejecutivo</a></td>
+          </tr>`;
+      }).join('')
+      : '<tr class="empty-row"><td colspan="5">Sin cartera activa en el CRM.</td></tr>';
   }
 
   function renderKpis() {
@@ -1667,6 +1720,7 @@
   function renderAll() {
     updateSubtitle();
     renderPeriodoVacio();
+    renderProspeccion();
     renderKpis();
     renderCampanasCaducar();
     renderAlertasConversion();
@@ -1776,17 +1830,24 @@
     state.inflightKey = key;
     state.inflightPromise = (async () => {
       try {
-        const res = await fetch(
-          `/api/ventas/leads?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`,
-          { credentials: 'same-origin' },
-        );
+        const qs = `fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`;
+        const res = await fetch(`/api/ventas/leads?${qs}`, { credentials: 'same-origin' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || res.statusText);
         state.data = data;
+        state.prospeccion = { loading: true };
         state.cacheKey = key;
+        renderAll();
+        const proRes = await fetch(`/api/ventas/leads/prospeccion?${qs}`, { credentials: 'same-origin' });
+        const pro = await proRes.json().catch(() => ({}));
+        if (state.cacheKey === key) {
+          state.prospeccion = proRes.ok ? pro : { error: pro.error || 'No se pudo calcular el proceso de prospección.' };
+          renderProspeccion();
+        }
       } catch (err) {
         console.warn('[Leads]', err);
         state.cacheKey = null;
+        state.prospeccion = { error: err.message };
         state.data = {
           summary: {},
           funnel: [],

@@ -1,5 +1,7 @@
 # Documentación de avance — KPIs BALDERRAMA
 
+> **Nota (1 oct 2026):** este documento está cortado en julio 2026. Para el estado actual ver [docs/ESTADO_Y_ENFOQUE.md](./docs/ESTADO_Y_ENFOQUE.md) y [docs/MAPA_VISUAL.md](./docs/MAPA_VISUAL.md).
+
 **Fecha de corte:** 13 jul 2026  
 **Stack:** monorepo Node.js — backend Express (:3000) + frontend estático (:5173)  
 **BD operativa:** SQL Server `GMOFARRIL`

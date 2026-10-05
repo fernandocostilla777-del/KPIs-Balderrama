@@ -72,6 +72,8 @@ const INSIGHT_TO_CATALOG = {
   'inv-sin-previas': ['P-5', 'entregas sin incidencias', 'proceso de entrega', 'satisfacción en la entrega'],
   'inv-entregas-sin-previas': ['P-5', 'entregas sin incidencias', 'proceso de entrega'],
   'inv-aging': ['C-3', 'días de rotación de inventario', 'inventario envejecido'],
+  'inv-costo-piso': ['INV-COSTO'],
+  'inv-dias-venta': ['INV-COB'],
   'inv-plan-piso': ['P-1', 'costo financiero del inventario'],
   'inv-pv-traspasos': ['P-1', 'rotación de inventario'],
   'inv-pv-refacciones-valor': ['P-1', 'rotación de inventario'],
@@ -80,6 +82,9 @@ const INSIGHT_TO_CATALOG = {
   'contabilidad-roe': ['SV-1', 'roe'],
   'contabilidad-margen': ['F-6', 'C-2', 'margen'],
   'contabilidad-ciclo': ['F-3', 'ciclo de efectivo'],
+  'seg-maduracion-cobertura': ['P-VTA-4', 'tiempo de maduración comercial'],
+  'seg-maduracion-alza': ['P-VTA-4', 'tiempo de maduración comercial'],
+  'seg-maduracion-mezcla': ['P-VTA-4', 'tiempo de maduración comercial'],
   'seguimiento-conversion': ['tasa de cierre', 'conversión'],
   'seguimiento-citas': ['tasa de asistencia', 'tasa de citas'],
   'marketing-conversion': ['conversión de marketing a venta'],
@@ -321,11 +326,17 @@ function enrichInsight(insight, { roleId } = {}) {
     ? catalogInterp
     : null;
 
+  // KPIs que el catálogo marca como "no parametrizar": el color sigue la severidad
+  // operativa, pero la etiqueta deja claro que no hay meta definida.
+  const informativo = Boolean(catalogEntry?.informativo) && !/cobertura/i.test(String(insight.id || ''));
+
   const enriched = {
     ...insight,
     severity,
     semaforo,
-    semaforoLabel: semaforo === 'rojo' ? 'Riesgo alto' : semaforo === 'amarillo' ? 'Requiere ajuste' : 'En control',
+    semaforoLabel: informativo
+      ? 'Informativo · sin meta'
+      : (semaforo === 'rojo' ? 'Riesgo alto' : semaforo === 'amarillo' ? 'Requiere ajuste' : 'En control'),
     interpretacion,
     valorControl,
     catalogClave: catalogEntry?.clave || null,

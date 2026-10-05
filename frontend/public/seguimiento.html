@@ -6,7 +6,7 @@
 <title>Seguimiento 360 | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=146" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=157" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="seguimiento">
@@ -117,6 +117,41 @@ Ver acumulado
 <div id="kVendPruebas" class="kpi-value">—</div>
 </div>
 </div>
+
+<section id="secHtPro2" class="section-panel dashboard-section" aria-label="Expediente Integral del Ejecutivo de Ventas (EIEV)">
+<div class="client-360-divider"><span>Expediente Integral del Ejecutivo de Ventas (EIEV)</span></div>
+<p id="htPro2Nota" class="section-subtitle" style="margin:0 0 10px">Cobertura de Gestión de la Cartera Comercial Activa de este ejecutivo: prospectos con situación conocida y acción siguiente.</p>
+<div class="kpi-grid" style="margin-bottom:12px">
+<div class="kpi-card kpi-card--blue">
+<div class="kpi-card-head"><span class="kpi-title">Cartera activa</span></div>
+<div id="kHtPro2Cartera" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--green">
+<div class="kpi-card-head"><span class="kpi-title">Con acción siguiente</span></div>
+<div id="kHtPro2Vigentes" class="kpi-value">—</div>
+</div>
+<div class="kpi-card kpi-card--amber">
+<div class="kpi-card-head"><span class="kpi-title">Cobertura de Gestión de la Cartera Comercial Activa</span></div>
+<div id="kHtPro2Cobertura" class="kpi-value">—</div>
+</div>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Prospecto</th>
+<th>Estatus</th>
+<th>Acción siguiente</th>
+<th>Gestión</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="htPro2Body">
+<tr class="empty-row"><td colspan="5">Sin cartera.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
 
 <div class="client-360-divider"><span>Desempeño comercial</span></div>
 <div class="kpi-grid" style="margin:14px 0">
@@ -337,12 +372,6 @@ Ver acumulado
 <div id="ficha360Method" class="client-360-method hidden"></div>
 </section>
 
-<section class="client-360-detail-intro dashboard-section">
-<span class="client-360-eyebrow">DETALLE OPERATIVO</span>
-<h3 class="section-title" style="margin:4px 0">Desglose por dominio</h3>
-<p class="section-subtitle" style="margin:0">Las tablas amplían lo que ya resume el expediente: misma unidad, mismo cliente y mismos eventos.</p>
-</section>
-
 <section class="chart-grid">
 <div class="section-panel">
 <h3 class="section-title">Actividad del cliente por año</h3>
@@ -354,146 +383,10 @@ Ver acumulado
 </div>
 </section>
 
-<section id="secUnidades" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Unidades vinculadas en el distribuidor</h3>
-<span id="unidadesDistribuidorCount" class="top-bar-meta"></span>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>Serie / VIN</th>
-<th>Modelo</th>
-<th>Año modelo</th>
-<th class="cell-num">Órdenes</th>
-<th>Primera visita</th>
-<th>Última visita</th>
-<th>Origen</th>
-<th>Factura venta</th>
-</tr></thead>
-<tbody id="unidadesDistribuidorTable"></tbody>
-</table>
-</div>
-</section>
-
-<section id="secCompras" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Compras (unidades)</h3>
-<span id="comprasCount" class="top-bar-meta"></span>
-</div>
-<p class="section-subtitle">VIN del CRM cruzado con SQL: factura de venta (ADE_VTAFI) y órdenes de servicio (SER_ORDEN)</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>VIN (CRM)</th>
-<th>Producto</th>
-<th>Modelo SQL</th>
-<th>Factura CRM</th>
-<th>Fecha factura</th>
-<th>Vendedor</th>
-<th class="cell-num">Órdenes serv.</th>
-</tr></thead>
-<tbody id="comprasTable"></tbody>
-</table>
-</div>
-</section>
-
-<section id="secFinanciamiento" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Financiamiento y PVA</h3>
-<span id="financiamientoCount" class="top-bar-meta"></span>
-</div>
-<p class="section-subtitle">Contratos de “Historico de contratos” relacionados por número de serie (VIN) al cliente</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>VIN</th>
-<th>No. contrato</th>
-<th>Unidad</th>
-<th>Fecha compra</th>
-<th class="cell-num">Plazo</th>
-<th>Enganche %</th>
-<th class="cell-money">Enganche $</th>
-<th>GAP</th>
-<th>Garantía extendida</th>
-<th>OnStar</th>
-<th>Mantenimientos</th>
-<th>Aseguradora</th>
-<th>Robo parcial</th>
-<th>Tipo de plan</th>
-</tr></thead>
-<tbody id="financiamientoTable"></tbody>
-</table>
-</div>
-</section>
-
-<section id="secOrdenes" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Órdenes de servicio</h3>
-<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-<span id="ordenesImporte" class="top-bar-meta"></span>
-<span id="ordenesCount" class="top-bar-meta"></span>
-</div>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>Orden</th>
-<th>Serie</th>
-<th>Modelo</th>
-<th>Ingreso</th>
-<th>Cierre</th>
-<th>Asesor</th>
-<th>Factura taller</th>
-<th class="cell-money">Importe</th>
-</tr></thead>
-<tbody id="ordenesTable"></tbody>
-</table>
-</div>
-</section>
-
-<section id="secPruebas" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Pruebas de manejo</h3>
-<span id="pruebasManejoCount" class="top-bar-meta"></span>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>Fecha</th>
-<th>Hora</th>
-<th>Vehículo</th>
-<th>Tipo</th>
-<th>VIN</th>
-<th>Ejecutivo</th>
-<th>Centro de trabajo</th>
-<th class="cell-num">Km recorridos</th>
-</tr></thead>
-<tbody id="pruebasManejoTable"></tbody>
-</table>
-</div>
-</section>
-
-<section id="secLeads" class="section-panel table-panel dashboard-section">
-<div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Leads (interesado)</h3>
-<span id="leadsCount" class="top-bar-meta"></span>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr>
-<th>Fecha</th>
-<th>Sucursal</th>
-<th>Tipo</th>
-<th>Canal</th>
-<th>Auto de interés</th>
-<th>Resultado</th>
-<th>Ejecutivo</th>
-<th>Cita</th>
-</tr></thead>
-<tbody id="leadsTable"></tbody>
-</table>
-</div>
+<section id="secHtPro1" class="section-panel dashboard-section" aria-label="Expediente Integral del Prospecto (EIP)">
+<div class="client-360-divider"><span>Expediente Integral del Prospecto (EIP)</span></div>
+<p id="htPro1Nota" class="section-subtitle" style="margin:0 0 10px">Una fila por ciclo. La cobertura de gestión de este prospecto sale de si el ciclo activo tiene acción siguiente.</p>
+<div id="htPro1Body" class="kpi-grid"></div>
 </section>
 
 </div>
@@ -501,12 +394,68 @@ Ver acumulado
 <div id="emptyState" class="vista360-empty section-panel dashboard-section" role="status" aria-live="polite">
   <div class="vista360-empty__hero">
     <span class="material-symbols-outlined vista360-empty__icon" aria-hidden="true">person_search</span>
-    <div>
+    <div class="vista360-empty__hero-text">
       <h4 class="vista360-empty__title">Sin expediente abierto</h4>
       <p id="emptyStateLead" class="vista360-empty__lead">
         Resumen del periodo seleccionado. Busca un cliente o elige un vendedor para abrir el detalle.
       </p>
     </div>
+    <div class="vista360-empty__modes" role="group" aria-label="Cómo quieres consultar">
+      <button type="button" class="vista360-empty__mode" data-empty-mode="cliente">
+        <span class="material-symbols-outlined" aria-hidden="true">badge</span>
+        <span><strong>Por cliente</strong><small>ID CRM, nombre, VIN, teléfono o correo</small></span>
+      </button>
+      <button type="button" class="vista360-empty__mode" data-empty-mode="vendedor">
+        <span class="material-symbols-outlined" aria-hidden="true">groups</span>
+        <span><strong>Por vendedor</strong><small>Acumulado de su cartera en el periodo</small></span>
+      </button>
+    </div>
+  </div>
+
+  <div id="emptyMaduracion" class="vista360-empty__summary vista360-maduracion" aria-busy="true" aria-label="Tiempo de maduración comercial">
+    <div class="vista360-empty__summary-head">
+      <span class="vista360-empty__period">Tiempo de maduración comercial <small class="vista360-maduracion__clave">P-VTA-4</small></span>
+      <span id="emptyMadPeriodo" class="vista360-empty__kpi-sub"></span>
+    </div>
+    <div class="kpi-section">
+      <div class="kpi-section__cards">
+        <button type="button" id="kMaduracion" class="vista360-empty__kpi vista360-empty__kpi--blue vista360-empty__kpi--clickable kpi-insight-anchor" data-mad-kpi="maduracion" title="Ver desglose">
+          <span class="vista360-empty__kpi-label">Días de maduración</span>
+          <strong id="kMaduracionValor" class="vista360-empty__kpi-value">—</strong>
+          <span id="kMaduracionSub" class="vista360-empty__kpi-sub"></span>
+        </button>
+        <button type="button" id="kMaduracionOrigen" class="vista360-empty__kpi vista360-empty__kpi--violet vista360-empty__kpi--clickable kpi-insight-anchor" data-mad-kpi="origen" title="Ver desglose">
+          <span class="vista360-empty__kpi-label">Cartera vs lead</span>
+          <strong id="kMaduracionOrigenValor" class="vista360-empty__kpi-value">—</strong>
+          <span id="kMaduracionOrigenSub" class="vista360-empty__kpi-sub"></span>
+        </button>
+        <button type="button" id="kCobertura" class="vista360-empty__kpi vista360-empty__kpi--green vista360-empty__kpi--clickable kpi-insight-anchor" data-mad-kpi="cobertura" title="Ver desglose">
+          <span class="vista360-empty__kpi-label">Cobertura del objetivo</span>
+          <strong id="kCoberturaValor" class="vista360-empty__kpi-value">—</strong>
+          <span id="kCoberturaSub" class="vista360-empty__kpi-sub"></span>
+        </button>
+        <button type="button" id="kProspectosMaduros" class="vista360-empty__kpi vista360-empty__kpi--amber vista360-empty__kpi--clickable" data-mad-kpi="prospectos" title="Ver desglose">
+          <span class="vista360-empty__kpi-label">Prospectos activos</span>
+          <strong id="kProspectosMadurosValor" class="vista360-empty__kpi-value">—</strong>
+          <span id="kProspectosMadurosSub" class="vista360-empty__kpi-sub"></span>
+        </button>
+      </div>
+      <div class="kpi-section__charts vista360-maduracion__charts">
+        <figure class="kpi-section__chart kpi-section__chart--wide">
+          <figcaption>Maduración mensual · general, cartera y lead (días)</figcaption>
+          <div class="kpi-section__canvas"><canvas id="chartMadSerie"></canvas></div>
+        </figure>
+        <figure class="kpi-section__chart">
+          <figcaption id="chartMadEdadCaption">Prospectos activos por edad</figcaption>
+          <div class="kpi-section__canvas"><canvas id="chartMadEdad"></canvas></div>
+        </figure>
+        <figure class="kpi-section__chart">
+          <figcaption>Objetivo vs facturado + pipeline maduro</figcaption>
+          <div class="kpi-section__canvas"><canvas id="chartMadObjetivo"></canvas></div>
+        </figure>
+      </div>
+    </div>
+    <p id="emptyMadNota" class="vista360-empty__summary-note">Cargando maduración…</p>
   </div>
 
   <div id="emptySummary" class="vista360-empty__summary" aria-busy="true">
@@ -514,48 +463,44 @@ Ver acumulado
       <span id="emptySummaryPeriod" class="vista360-empty__period">Periodo —</span>
       <button type="button" id="btnEmptyVerCierres" class="chip">Ver listado del periodo</button>
     </div>
-    <div class="vista360-empty__kpis">
-      <div class="vista360-empty__kpi">
-        <span class="vista360-empty__kpi-label">Órdenes cerradas</span>
-        <strong id="emptyKpiOrdenes" class="vista360-empty__kpi-value">—</strong>
+    <div class="kpi-section">
+      <div class="kpi-section__cards">
+        <div class="vista360-empty__kpi vista360-empty__kpi--blue">
+          <span class="vista360-empty__kpi-label">Órdenes cerradas</span>
+          <strong id="emptyKpiOrdenes" class="vista360-empty__kpi-value">—</strong>
+        </div>
+        <div class="vista360-empty__kpi vista360-empty__kpi--violet">
+          <span class="vista360-empty__kpi-label">Clientes</span>
+          <strong id="emptyKpiClientes" class="vista360-empty__kpi-value">—</strong>
+        </div>
+        <div id="emptyCardCrm" class="vista360-empty__kpi vista360-empty__kpi--green kpi-insight-anchor">
+          <span class="vista360-empty__kpi-label">Con ID CRM</span>
+          <strong id="emptyKpiCrm" class="vista360-empty__kpi-value">—</strong>
+          <span id="emptyKpiCrmPct" class="vista360-empty__kpi-sub"></span>
+        </div>
+        <div class="vista360-empty__kpi vista360-empty__kpi--amber">
+          <span class="vista360-empty__kpi-label">Importe taller</span>
+          <strong id="emptyKpiImporte" class="vista360-empty__kpi-value">—</strong>
+        </div>
       </div>
-      <div class="vista360-empty__kpi">
-        <span class="vista360-empty__kpi-label">Clientes</span>
-        <strong id="emptyKpiClientes" class="vista360-empty__kpi-value">—</strong>
-      </div>
-      <div class="vista360-empty__kpi">
-        <span class="vista360-empty__kpi-label">Con ID CRM</span>
-        <strong id="emptyKpiCrm" class="vista360-empty__kpi-value">—</strong>
-      </div>
-      <div class="vista360-empty__kpi">
-        <span class="vista360-empty__kpi-label">Importe taller</span>
-        <strong id="emptyKpiImporte" class="vista360-empty__kpi-value">—</strong>
+      <div class="kpi-section__charts">
+        <figure class="kpi-section__chart kpi-section__chart--wide">
+          <figcaption>Top clientes por importe de taller</figcaption>
+          <div class="kpi-section__canvas"><canvas id="chartEmptyTop"></canvas></div>
+        </figure>
+        <figure class="kpi-section__chart">
+          <figcaption>Cobertura de ID CRM</figcaption>
+          <div class="kpi-section__canvas"><canvas id="chartEmptyCrm"></canvas></div>
+        </figure>
       </div>
     </div>
     <p id="emptySummaryNote" class="vista360-empty__summary-note">Cargando resumen…</p>
   </div>
 
-  <div class="vista360-empty__grid">
-    <article class="vista360-empty__card" data-empty-mode="cliente">
-      <span class="material-symbols-outlined" aria-hidden="true">badge</span>
-      <h5>Por cliente</h5>
-      <p>Expediente 360: vehículo, ventas, financiamiento, taller, quejas y línea de tiempo.</p>
-      <ul>
-        <li>ID CRM o nombre</li>
-        <li>VIN / serie</li>
-        <li>Teléfono o correo</li>
-      </ul>
-    </article>
-    <article class="vista360-empty__card" data-empty-mode="vendedor">
-      <span class="material-symbols-outlined" aria-hidden="true">groups</span>
-      <h5>Por vendedor</h5>
-      <p>Acumulado de su cartera en el periodo: clientes, contratos, PVA y actividad.</p>
-      <ul>
-        <li>Escribe o elige el asesor</li>
-        <li>Ajusta el periodo arriba</li>
-        <li>Abre “Ver acumulado”</li>
-      </ul>
-    </article>
+  <div id="emptyQuick" class="vista360-empty__quick hidden">
+    <h5 class="vista360-empty__quick-title">Abrir un 360 ahora</h5>
+    <p class="vista360-empty__quick-sub">Clientes del periodo con expediente completo: unidad comprada en CRM, teléfono y actividad registrada.</p>
+    <ul id="emptyQuickList" class="vista360-empty__quick-list"></ul>
   </div>
 
   <p class="vista360-empty__hint">
@@ -569,10 +514,11 @@ Ver acumulado
 <script src="/js/auth-client.js"></script>
 <script src="/js/shared.js?v=5"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=21"></script>
+<script src="/js/topbar.js?v=23"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
+<script src="/js/kpi-section.js?v=2"></script>
 <script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/seguimiento.js?v=42"></script>
+<script src="/js/seguimiento.js?v=57"></script>
 </body>
 </html>

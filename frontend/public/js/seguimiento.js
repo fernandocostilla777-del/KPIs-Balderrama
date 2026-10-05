@@ -228,12 +228,439 @@
     setText('emptyKpiImporte', money(tot.importeTaller || 0));
     const conCrm = Number(tot.clientesConIdCrm || 0);
     const clientes = Number(tot.clientes || 0);
+    const completos = Number(tot.clientesCompletos || 0);
     const note = clientes
-      ? `${clientes} cliente(s) con cierre de taller · ${conCrm} con ID CRM listos para abrir 360.`
+      ? `${clientes} cliente(s) con cierre de taller · ${conCrm} con ID CRM listos para abrir 360${completos ? ` · ${completos} con unidad comprada y datos completos` : ''}.`
       : 'Sin cierres de taller en este periodo. Ajusta las fechas o busca un cliente.';
     setText('emptySummaryNote', note);
+    setText('emptyKpiCrmPct', clientes ? `${Math.round((conCrm / clientes) * 100)}% del total` : '');
     el('emptySummary')?.setAttribute('aria-busy', 'false');
+    renderEmptyCharts(data);
+    renderEmptyQuick(data);
+    // Misma alerta de «cierres sin ID CRM», anclada a la tarjeta del inicio.
+    window.KpiSection.alert('seguimiento', {
+      vista: 'cierres',
+      anchorCrm: 'emptyCardCrm',
+      fechaInicio: fi || null,
+      fechaFin: ff || null,
+      totales: tot,
+    });
   }
+
+  function renderEmptyCharts(data) {
+    const clientes = data?.clientes || [];
+    const tot = data?.totales || {};
+    const top = clientes.filter((c) => Number(c.importe) > 0).slice(0, 6);
+    const P = window.KpiSection.palette;
+    window.KpiSection.chart('emptyTop', el('chartEmptyTop'), {
+      type: 'hbar',
+      unit: '$',
+      labels: top.map((c) => {
+        const name = String(c.cliente || 'Sin nombre').trim();
+        return name.length > 20 ? `${name.slice(0, 18)}…` : name;
+      }),
+      values: top.map((c) => Math.round(Number(c.importe || 0))),
+      colors: top.map((c) => (c.idCrm ? P.primary : P.muted)),
+      clickable: (i) => Boolean(top[i]?.idCrm),
+      onClick: (i) => openClient(top[i].idCrm),
+    });
+    const total = Number(tot.clientes || 0);
+    const conCrm = Number(tot.clientesConIdCrm || 0);
+    window.KpiSection.chart('emptyCrm', el('chartEmptyCrm'), {
+      type: 'doughnut',
+      labels: ['Con ID CRM', 'Sin ID CRM'],
+      values: total ? [conCrm, Math.max(total - conCrm, 0)] : [0, 1],
+      colors: total ? [P.success, P.muted] : ['#e2e8f0', '#e2e8f0'],
+    });
+  }
+
+  function renderEmptyQuick(data) {
+    const root = el('emptyQuick');
+    const list = el('emptyQuickList');
+    if (!root || !list) return;
+    // Prioridad: expediente completo (unidad comprada en CRM + teléfono + actividad),
+    // luego puntaje de calidad y por último importe de taller.
+    const candidatos = (data?.clientes || []).filter((c) => c.idCrm);
+    const completos = candidatos.filter((c) => c.calidad?.completo);
+    const rows = (completos.length >= 3 ? completos : candidatos)
+      .slice()
+      .sort((a, b) => (
+        Number(Boolean(b.calidad?.completo)) - Number(Boolean(a.calidad?.completo))
+        || Number(b.calidad?.score || 0) - Number(a.calidad?.score || 0)
+        || Number(b.importe || 0) - Number(a.importe || 0)
+      ))
+      .slice(0, 5);
+    root.classList.toggle('hidden', !rows.length);
+    const sub = root.querySelector('.vista360-empty__quick-sub');
+    if (sub) {
+      sub.textContent = completos.length
+        ? `${completos.length} cliente(s) del periodo con expediente completo: unidad comprada en CRM, teléfono y actividad registrada.`
+        : 'Clientes del periodo con ID CRM, por mayor importe de taller.';
+    }
+    list.innerHTML = rows.map((c) => {
+      const q = c.calidad || {};
+      const partes = [];
+      if (q.compras) partes.push(`${q.compras} unidad(es) comprada(s)`);
+      partes.push(`${Number(c.ordenes || 0)} orden(es)`);
+      partes.push(money(c.importe || 0));
+      const chip = '<span class="chip">Ver 360</span>';
+      return `
+      <li>
+        <button type="button" class="vista360-empty__quick-item${q.completo ? ' is-complete' : ''}" data-open-quick="${esc(c.idCrm)}" title="Abrir expediente 360">
+          <span class="vista360-empty__quick-name">${dash(c.cliente)}</span>
+          <span class="vista360-empty__quick-meta">${partes.join(' · ')}</span>
+          ${chip}
+        </button>
+      </li>`;
+    }).join('');
+    list.querySelectorAll('[data-open-quick]').forEach((btn) => {
+      btn.addEventListener('click', () => openClient(btn.dataset.openQuick));
+    });
+  }
+
+  /* ───────── P-VTA-4 · Tiempo de maduración comercial (inicio sin expediente) ───────── */
+
+  let currentMaduracionData = null;
+  const ORIGEN_LABEL = { cartera: 'Cartera', lead: 'Lead', sin_clasificar: 'Sin clasificar' };
+  const dias = (v) => (v == null ? '—' : `${Number(v).toLocaleString('es-MX', { maximumFractionDigits: 1 })} d`);
+  const mesCorto = (ym) => {
+    const [y, m] = String(ym || '').split('-');
+    const nombres = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    return m ? `${nombres[Number(m) - 1] || m} ${String(y).slice(2)}` : ym;
+  };
+
+  function resetMaduracionLoading(texto = 'Cargando maduración…') {
+    el('emptyMaduracion')?.setAttribute('aria-busy', 'true');
+    ['kMaduracionValor', 'kMaduracionOrigenValor', 'kCoberturaValor', 'kProspectosMadurosValor'].forEach((id) => setText(id, '…'));
+    ['kMaduracionSub', 'kMaduracionOrigenSub', 'kCoberturaSub', 'kProspectosMadurosSub', 'emptyMadPeriodo'].forEach((id) => setText(id, ''));
+    setText('emptyMadNota', texto);
+  }
+
+  async function loadEmptyMaduracion() {
+    const root = el('emptyMaduracion');
+    if (!root || el('emptyState')?.classList.contains('hidden')) return;
+    const { fechaInicio, fechaFin } = getPeriod();
+    if (!fechaInicio || !fechaFin) {
+      resetMaduracionLoading('Selecciona fechas para medir la maduración del periodo.');
+      root.setAttribute('aria-busy', 'false');
+      return;
+    }
+    resetMaduracionLoading();
+    try {
+      const data = await api(
+        `/seguimiento-360/maduracion?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}`
+      );
+      currentMaduracionData = data;
+      if (!el('emptyState')?.classList.contains('hidden')) renderMaduracion(data);
+    } catch (err) {
+      setText('emptyMadNota', err.message || 'No se pudo calcular la maduración.');
+      ['kMaduracionValor', 'kMaduracionOrigenValor', 'kCoberturaValor', 'kProspectosMadurosValor'].forEach((id) => setText(id, '—'));
+      root.setAttribute('aria-busy', 'false');
+    }
+  }
+
+  function renderMaduracion(data) {
+    const g = data.general || {};
+    const o = data.origenes || {};
+    const cob = data.cobertura || {};
+    const per = data.periodo || {};
+    const zona = data.zonaMaduracion || {};
+    setText('emptyMadPeriodo', per.fechaInicio && per.fechaFin ? `Ventas facturadas ${per.fechaInicio} — ${per.fechaFin}` : '');
+
+    // Tarjeta 1: días de maduración = promedio de los últimos 12 meses.
+    const cardMad = el('kMaduracion');
+    const anio = data.anual || {};
+    setText('kMaduracionValor', anio.n ? dias(anio.promedio) : '—');
+    setText('kMaduracionSub', anio.n
+      ? `promedio últimos 12 meses · mediana ${dias(anio.mediana)} · ${Number(anio.n).toLocaleString('es-MX')} ventas`
+      : 'Sin ventas medidas en los últimos 12 meses');
+    cardMad?.classList.toggle('vista360-empty__kpi--muted', !anio.n);
+
+    // Tarjeta 2: cartera vs lead.
+    const cart = o.cartera || {};
+    const lead = o.lead || {};
+    const sinC = o.sin_clasificar || {};
+    setText('kMaduracionOrigenValor', (cart.n || lead.n)
+      ? `${cart.n ? dias(cart.promedio) : '—'} / ${lead.n ? dias(lead.promedio) : '—'}`
+      : '—');
+    setText('kMaduracionOrigenSub', g.n
+      ? `mezcla ${Math.round(cart.mezclaPct || 0)}% cartera · ${Math.round(lead.mezclaPct || 0)}% lead · ${Math.round(sinC.mezclaPct || 0)}% sin clasificar`
+      : 'Cartera = compra previa · Lead = entró por STREGA');
+
+    // Tarjeta 3: cobertura del objetivo.
+    const cardCob = el('kCobertura');
+    let cobValor = '—';
+    let cobSub = '';
+    if (cob.periodoCerrado) {
+      cobValor = cob.objetivo != null ? `${cob.facturadas} / ${cob.objetivo}` : `${cob.facturadas || 0}`;
+      cobSub = cob.objetivo != null
+        ? `periodo cerrado · ${Math.round((Number(cob.facturadas || 0) / Number(cob.objetivo)) * 100)}% del objetivo facturado`
+        : 'periodo cerrado · sin objetivo retail capturado en Ventas';
+    } else if (cob.objetivo == null) {
+      cobValor = `≈${cob.esperadas ?? 0}`;
+      cobSub = `ventas esperadas en ${cob.horizonteDias} días · captura el objetivo retail en Ventas para medir cobertura`;
+    } else if (Number(cob.faltante) === 0) {
+      cobValor = '100%';
+      cobSub = `objetivo ${cob.objetivo} ya cubierto con ${cob.facturadas} facturadas`;
+    } else {
+      cobValor = cob.pct != null ? `${Number(cob.pct).toLocaleString('es-MX', { maximumFractionDigits: 1 })}%` : '—';
+      cobSub = `≈${cob.esperadas} esperadas vs ${cob.faltante} que faltan · ${cob.horizonteDias} días restantes`;
+    }
+    setText('kCoberturaValor', cobValor);
+    setText('kCoberturaSub', cobSub);
+    cardCob?.classList.toggle('vista360-empty__kpi--muted', !cob.aplica);
+
+    // Tarjeta 4: prospectos activos.
+    setText('kProspectosMadurosValor', Number(cob.prospectosActivos || 0).toLocaleString('es-MX'));
+    setText('kProspectosMadurosSub', zona.desde != null
+      ? `${Number(cob.prospectosMaduros || 0).toLocaleString('es-MX')} con ${zona.desde}+ días (zona ${zona.desde}–${zona.hasta} d)`
+      : 'ciclos en cartera activa con actividad en 180 días');
+
+    renderMaduracionCharts(data);
+
+    const ex = data.excluidas || {};
+    const datos = data.datos || {};
+    const partes = [];
+    if (g.n) partes.push(`${g.n} venta(s) medidas`);
+    if (ex.total) partes.push(`${ex.total} excluida(s): ${Object.entries(ex.motivos || {}).map(([k, v]) => `${v} ${k}`).join(', ')}`);
+    if (data.movil3?.n) partes.push(`móvil 3 meses ${dias(data.movil3.promedio)} vs histórico ${dias(data.historico?.promedio)}`);
+    if (datos.ciclosEnVivo && datos.ciclosEnVivoSync) {
+      const sync = String(datos.ciclosEnVivoSync).replace('T', ' ').slice(0, 16);
+      partes.push(`ciclos en vivo al ${sync} (se actualizan una vez al día)`);
+    }
+    if (datos.ultimoCicloAbierto) partes.push(`ciclos abiertos hasta ${datos.ultimoCicloAbierto}`);
+    if (datos.ultimaFactura) partes.push(`última factura CRM ${datos.ultimaFactura}`);
+    setText('emptyMadNota', partes.length ? `${partes.join(' · ')}.` : 'Sin datos de maduración para este periodo.');
+    el('emptyMaduracion')?.setAttribute('aria-busy', 'false');
+
+    const serie = data.serie || [];
+    const previos = serie.slice(0, -1).filter((m) => m.mezclaCarteraPct != null).slice(-3);
+    const mezclaPrevia = previos.length
+      ? previos.reduce((s, m) => s + Number(m.mezclaCarteraPct), 0) / previos.length
+      : null;
+    window.KpiSection.alert('seguimiento', {
+      vista: 'maduracion',
+      fechaInicio: per.fechaInicio || null,
+      fechaFin: per.fechaFin || null,
+      general: g,
+      origenes: o,
+      movil3: data.movil3 || null,
+      historico: data.historico || null,
+      cobertura: cob,
+      mezclaCarteraPrevia: mezclaPrevia,
+    });
+  }
+
+  function renderMaduracionCharts(data) {
+    const P = window.KpiSection.palette;
+    const serie = data.serie || [];
+    const lineOpts = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 350 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+        datalabels: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y == null ? '—' : `${ctx.parsed.y} d`}`,
+            afterBody: (items) => {
+              const m = serie[items[0]?.dataIndex];
+              return m ? [`Ventas medidas: ${m.ventas}`, m.mezclaCarteraPct != null ? `Cartera: ${m.mezclaCarteraPct}%` : ''] : [];
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.2)' }, ticks: { font: { size: 11 }, callback: (v) => `${v} d` } },
+      },
+    };
+    createChart('madSerie', 'chartMadSerie', {
+      type: 'line',
+      data: {
+        labels: serie.map((m) => mesCorto(m.mes)),
+        datasets: [
+          { label: 'General', data: serie.map((m) => m.general?.promedio ?? null), borderColor: P.navy, backgroundColor: P.navy, tension: .3, pointRadius: 3, borderWidth: 2, spanGaps: true },
+          { label: 'Cartera', data: serie.map((m) => m.cartera?.promedio ?? null), borderColor: P.success, backgroundColor: P.success, tension: .3, pointRadius: 2, borderWidth: 1.5, borderDash: [4, 3], spanGaps: true },
+          { label: 'Lead', data: serie.map((m) => m.lead?.promedio ?? null), borderColor: P.primary, backgroundColor: P.primary, tension: .3, pointRadius: 2, borderWidth: 1.5, borderDash: [4, 3], spanGaps: true },
+        ],
+      },
+      options: lineOpts,
+    });
+
+    const edades = data.activosPorEdad || [];
+    const zona = data.zonaMaduracion || {};
+    const caption = el('chartMadEdadCaption');
+    if (caption) {
+      caption.textContent = zona.desde != null
+        ? `Prospectos activos por edad · zona de maduración ${zona.desde}–${zona.hasta} d`
+        : 'Prospectos activos por edad';
+    }
+    window.KpiSection.chart('madEdad', el('chartMadEdad'), {
+      type: 'bar',
+      labels: edades.map((b) => b.label),
+      values: edades.map((b) => b.n),
+      colors: edades.map((b) => (b.enZona ? P.warn : P.sky)),
+    });
+
+    const cob = data.cobertura || {};
+    const objetivo = Number(cob.objetivo || 0);
+    const facturadas = Number(cob.facturadas || 0);
+    const esperadas = cob.periodoCerrado ? 0 : Number(cob.esperadas || 0);
+    const barOpts = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 350 },
+      indexAxis: 'y',
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+        datalabels: { display: false },
+        tooltip: { callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${Number(ctx.parsed.x || 0).toLocaleString('es-MX', { maximumFractionDigits: 1 })} u` } },
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, grid: { color: 'rgba(148,163,184,.2)' }, ticks: { font: { size: 11 } } },
+        y: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+      },
+    };
+    createChart('madObjetivo', 'chartMadObjetivo', {
+      type: 'bar',
+      data: {
+        labels: ['Objetivo', 'Pipeline'],
+        datasets: [
+          { label: 'Objetivo retail', data: [objetivo || null, null], backgroundColor: P.muted, borderRadius: 6, maxBarThickness: 26 },
+          { label: 'Facturadas (CRM)', data: [null, facturadas], backgroundColor: P.success, borderRadius: 6, maxBarThickness: 26 },
+          { label: 'Esperadas del pipeline', data: [null, esperadas], backgroundColor: P.warn, borderRadius: 6, maxBarThickness: 26 },
+        ],
+      },
+      options: barOpts,
+    });
+  }
+
+  function buildMaduracionKpiDetail(kpi, data) {
+    const g = data.general || {};
+    const o = data.origenes || {};
+    const cob = data.cobertura || {};
+    const num = (v) => Number(v || 0).toLocaleString('es-MX', { maximumFractionDigits: 1 });
+    const origenChip = (origen) => ORIGEN_LABEL[origen] || origen || '—';
+    const filaVenta = (v) => ({
+      label: `${v.nombre || v.idContacto} · ${v.producto || 'unidad'}`,
+      value: dias(v.dias),
+      detail: [
+        `Llegó ${v.llegada} (${v.llegadaFuente || 'ciclo'})`,
+        `facturó ${v.fechaFactura}`,
+        origenChip(v.origen),
+        v.canal ? `canal ${v.canal}` : null,
+        v.ciclosHastaCerrar > 1 ? `${v.ciclosHastaCerrar} ciclos hasta cerrar` : null,
+        v.vendedor ? `ejecutivo ${v.vendedor}` : null,
+      ].filter(Boolean).join(' · '),
+    });
+
+    switch (kpi) {
+      case 'maduracion': {
+        const ventas = (data.ventas || []).slice().sort((a, b) => Number(b.dias) - Number(a.dias));
+        const anio = data.anual || {};
+        return {
+          title: 'Días de maduración · P-VTA-4',
+          value: anio.n ? dias(anio.promedio) : '—',
+          sections: [
+            { titulo: 'Promedio del año (últimos 12 meses)', rows: [
+              { label: 'Promedio', value: dias(anio.promedio) },
+              { label: 'Mediana', value: dias(anio.mediana) },
+              { label: 'Percentil 75', value: dias(anio.p75) },
+              { label: 'Ventas medidas', value: num(anio.n) },
+            ] },
+            { titulo: 'Resumen del periodo', rows: [
+              { label: 'Promedio', value: dias(g.promedio) },
+              { label: 'Mediana', value: dias(g.mediana) },
+              { label: 'Percentil 75', value: dias(g.p75) },
+              { label: 'Mínimo · máximo', value: `${dias(g.min)} · ${dias(g.max)}` },
+              { label: 'Ventas medidas', value: num(g.n) },
+              { label: 'Excluidas', value: num(data.excluidas?.total), detail: Object.entries(data.excluidas?.motivos || {}).map(([k, v]) => `${v} ${k}`).join(', ') || undefined },
+            ] },
+            { titulo: 'Tendencia', rows: [
+              { label: 'Promedio móvil 3 meses', value: dias(data.movil3?.promedio), detail: `${num(data.movil3?.n)} ventas` },
+              { label: 'Histórico (9 meses previos)', value: dias(data.historico?.promedio), detail: `${num(data.historico?.n)} ventas` },
+              { label: 'Rango intercuartil 12 meses', value: data.anual?.p25 != null ? `${data.anual.p25}–${data.anual.p75} d` : '—', detail: 'Zona de maduración: donde cierra la mitad central de las ventas.' },
+            ] },
+            { titulo: 'Ventas más lentas del periodo', rows: ventas.slice(0, 10).map(filaVenta) },
+            { titulo: 'Cómo se mide', rows: Object.values(data.metodologia || {}).slice(0, 3).map((t) => ({ label: t, value: '' })) },
+          ],
+        };
+      }
+      case 'origen': {
+        const canales = data.leadsPorCanal || [];
+        const filaOrigen = (key) => {
+          const s = o[key] || {};
+          return {
+            label: ORIGEN_LABEL[key],
+            value: s.n ? dias(s.promedio) : '—',
+            detail: s.n
+              ? `${num(s.n)} ventas · ${num(s.mezclaPct)}% de la mezcla · mediana ${dias(s.mediana)} · P75 ${dias(s.p75)}${s.ciclosHastaCerrar ? ` · ${num(s.ciclosHastaCerrar)} ciclos hasta cerrar` : ''}`
+              : 'Sin ventas de este origen en el periodo',
+          };
+        };
+        return {
+          title: 'Maduración por origen',
+          value: `${num(o.cartera?.mezclaPct)}% cartera · ${num(o.lead?.mezclaPct)}% lead`,
+          sections: [
+            { titulo: 'Por origen', rows: ['cartera', 'lead', 'sin_clasificar'].map(filaOrigen) },
+            { titulo: 'Leads por canal de entrada', rows: canales.length
+              ? canales.map((c) => ({ label: c.canal, value: dias(c.promedio), detail: `${num(c.n)} ventas · mediana ${dias(c.mediana)}` }))
+              : [{ label: 'Sin ventas de lead en el periodo', value: '—' }] },
+            { titulo: 'Ventas de cartera', rows: (data.ventas || []).filter((v) => v.origen === 'cartera').slice(0, 8).map(filaVenta) },
+            { titulo: 'Criterio', rows: [{ label: data.metodologia?.origen || '', value: '' }] },
+          ],
+        };
+      }
+      case 'cobertura':
+      case 'prospectos': {
+        const prospectos = data.prospectos || [];
+        const edades = data.activosPorEdad || [];
+        const esCobertura = kpi === 'cobertura';
+        return {
+          title: esCobertura ? 'Cobertura del objetivo' : 'Prospectos activos',
+          value: esCobertura
+            ? (cob.aplica && cob.pct != null ? `${num(cob.pct)}%` : (cob.periodoCerrado ? 'Periodo cerrado' : 'Sin objetivo'))
+            : num(cob.prospectosActivos),
+          sections: [
+            { titulo: 'Objetivo del periodo', rows: [
+              { label: 'Objetivo retail (Ventas)', value: cob.objetivo != null ? num(cob.objetivo) : '—', detail: cob.objetivoFuente ? `fuente: ${cob.objetivoFuente === 'saved' ? 'capturado' : 'histórico'}` : 'Captura el objetivo retail del mes en Ventas para medir la cobertura.' },
+              { label: 'Facturadas (ventas CRM)', value: num(cob.facturadas) },
+              { label: 'Faltante', value: cob.faltante != null ? num(cob.faltante) : '—' },
+              { label: 'Esperadas del pipeline', value: cob.periodoCerrado ? '—' : `≈${num(cob.esperadas)}`, detail: cob.periodoCerrado ? 'El periodo ya cerró: no hay días restantes para madurar.' : `en los ${cob.horizonteDias} días que faltan del periodo` },
+              { label: 'Prospectos nuevos necesarios', value: cob.prospectosNecesarios ? `≈${num(cob.prospectosNecesarios)}` : '—', detail: 'Si el pipeline actual no alcanza, prospectos adicionales a la tasa promedio de conversión del pipeline.' },
+            ] },
+            { titulo: 'Prospectos activos por edad', rows: edades.map((b) => ({ label: b.label, value: num(b.n), badge: b.enZona ? 'zona de maduración' : undefined })) },
+            { titulo: 'Prospectos con mayor probabilidad de cierre', rows: prospectos.slice(0, 15).map((p) => ({
+              label: `${p.nombre || p.idContacto} · ${p.estatus || 'sin estatus'}`,
+              value: cob.periodoCerrado ? `${num(p.edad)} d` : `${Math.round(Number(p.probabilidad || 0) * 100)}%`,
+              detail: `${num(p.edad)} días desde ${p.llegada} · ${origenChip(p.origen)}${p.canal ? ` · ${p.canal}` : ''} · última actividad ${p.ultimaActividad || '—'}${p.vendedor ? ` · ${p.vendedor}` : ''}`,
+            })) },
+            { titulo: 'Curva histórica', rows: [{
+              label: `Base: ${num(cob.curva?.compras)} compras y ${num(cob.curva?.perdidos)} prospectos perdidos con llegada entre ${cob.curva?.desde || '—'} y ${cob.curva?.hasta || '—'}.`,
+              value: '',
+              detail: data.metodologia?.cobertura,
+            }] },
+          ],
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  function openMaduracionKpi(card) {
+    if (!currentMaduracionData) return;
+    const kpi = card.dataset.madKpi;
+    const detail = buildMaduracionKpiDetail(kpi, currentMaduracionData);
+    fillKpiDetailPanel('maduracionKpiDetail', kpi, detail, null, card);
+  }
+
+  document.querySelectorAll('[data-mad-kpi]').forEach((card) => {
+    card.addEventListener('click', () => openMaduracionKpi(card));
+  });
 
   function resetEmptySummaryLoading() {
     el('emptySummary')?.setAttribute('aria-busy', 'true');
@@ -256,10 +683,13 @@
       setText('emptyKpiImporte', '—');
       setText('emptySummaryNote', 'Selecciona fechas para ver el resumen de cierres de taller.');
       el('emptySummary')?.setAttribute('aria-busy', 'false');
+      loadEmptyMaduracion();
       return;
     }
     resetEmptySummaryLoading();
     setText('emptySummaryPeriod', `Periodo ${fechaInicio} — ${fechaFin}`);
+    // P-VTA-4 se carga en paralelo; no bloquea el resumen de cierres.
+    loadEmptyMaduracion();
     try {
       const data = await api(
         `/crm/cierres-taller?fechaInicio=${encodeURIComponent(fechaInicio)}&fechaFin=${encodeURIComponent(fechaFin)}&limit=300`
@@ -569,6 +999,128 @@
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
+  function dateMx(value) {
+    if (!value) return '—';
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : esc(value);
+  }
+
+  function etiquetaUnidad(unidad) {
+    const modelo = String(unidad?.modelo || unidad?.ficha?.modeloActual || 'Unidad').trim();
+    const anio = unidad?.anModelo || unidad?.ficha?.anModelo;
+    const vin = unidad?.vin || unidad?.ficha?.vinActual || '';
+    return [anio ? `${modelo} ${anio}` : modelo, vin].filter(Boolean).join(' · ');
+  }
+
+  // Postventa del EIP tomada de las series del expediente 360 (unidadesRadiografia).
+  function renderPosventaEip(h, vinSeleccionado = null) {
+    const opciones = h?.unidadesRadiografia || [];
+    const elegida = vinSeleccionado
+      ? opciones.find((u) => String(u.vin) === String(vinSeleccionado))
+      : null;
+    const unidad = elegida || opciones[0] || null;
+    const f = unidad?.ficha || h?.ficha360 || null;
+    if (!f) return '';
+    const serie = f.vinActual || unidad?.vin || null;
+    const serieNorm = String(serie || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const ordenes = (h?.ordenesServicio || []).filter((o) => {
+      if (String(o.status || '').trim().toUpperCase() === 'C') return false;
+      if (!serieNorm) return true;
+      const ordenSerie = String(o.serie || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return ordenSerie.includes(serieNorm) || serieNorm.includes(ordenSerie);
+    });
+    const importe = ordenes.reduce((sum, o) => sum + Number(o.importe || 0), 0);
+    const selector = opciones.length > 1
+      ? `<select id="eipPosventaUnidad" class="kpi-subtitle" style="margin-left:8px" aria-label="Serie para postventa">${opciones.map((u) => `
+          <option value="${esc(u.vin)}"${String(u.vin) === String(unidad?.vin) ? ' selected' : ''}>${esc(etiquetaUnidad(u))}</option>`).join('')}</select>`
+      : '';
+    return `<article class="kpi-card kpi-card--blue" id="eipPosventaCard"><div class="kpi-card-head"><span class="kpi-title">Postventa de la serie</span>${selector}</div><p class="kpi-subtitle">${dash(f.modeloActual)}${serie ? ` · serie ${esc(serie)}` : ''} · ${Number(f.serviciosRealizados || 0)} servicio(s) · último ${dateMx(f.ultimaVisitaTaller)} · ${f.kilometraje != null ? `${Number(f.kilometraje).toLocaleString('es-MX')} km` : 'sin kilometraje'} · importe ${money(importe)} · ${Number(f.quejasPosventa || 0)} queja(s) CSI posventa</p></article>`;
+  }
+
+  async function cargarExpedienteProspecto(idContacto) {
+    const body = el('htPro1Body');
+    const nota = el('htPro1Nota');
+    if (!body || !idContacto) return;
+    body.innerHTML = '<p class="section-subtitle">Cargando expediente…</p>';
+    try {
+      const data = await api(`/seguimiento-360/expediente/${encodeURIComponent(idContacto)}`);
+      const p = data.prospecto;
+      const ciclos = data.ciclos || [];
+      const activos = ciclos.filter((c) => c.enCarteraActiva);
+      const vigentes = activos.filter((c) => c.gestionVigente).length;
+      if (nota) {
+        nota.textContent = activos.length
+          ? `Cobertura de gestión de este prospecto: ${vigentes} de ${activos.length} ciclos activos con acción siguiente.`
+          : 'Este contacto no tiene un ciclo en la cartera activa.';
+      }
+      const origen = p?.origen || null;
+      const canalOrigen = origen?.canal || p?.canal || null;
+      const campanaOrigen = origen?.campana || p?.campana || null;
+      const cambioCanal = origen && p && (
+        (origen.canal || '') !== (p.canal || '') || (origen.campana || '') !== (p.campana || '')
+      );
+      const origenHtml = p
+        ? `<p class="kpi-subtitle" style="margin-top:6px"><strong>Origen:</strong> canal ${dash(canalOrigen)} · campaña ${dash(campanaOrigen)}${origen?.fechaEntrada && origen.fechaEntrada !== p.fechaEntrada ? ` · primer registro ${esc(origen.fechaEntrada)}` : ''}${cambioCanal ? `<br><small>Lead vigente por canal ${dash(p.canal)} · campaña ${dash(p.campana)}</small>` : ''}</p>`
+        : '';
+      const hoja = p
+        ? `<article class="kpi-card kpi-card--blue"><div class="kpi-card-head"><span class="kpi-title">Hoja STREGA</span></div><p class="kpi-subtitle">Entrada ${dash(p.fechaEntrada)} · resultado ${dash(p.resultado)} · contacto BDC ${dash(p.contactoBdc)} · ejecutivo ${dash(p.ejecutivo)}</p>${origenHtml}</article>`
+        : '<article class="kpi-card kpi-card--slate"><div class="kpi-card-head"><span class="kpi-title">Hoja STREGA</span></div><p class="kpi-subtitle">Sin lead de este ID.</p></article>';
+      const cicloCards = ciclos.slice(0, 4).map((c) => `
+        <article class="kpi-card kpi-card--${c.gestionVigente ? 'green' : 'amber'}">
+          <div class="kpi-card-head"><span class="kpi-title">${esc(c.estatus || 'Sin estatus')}</span></div>
+          <p class="kpi-subtitle">${c.gestionVigente ? 'Gestión vigente' : 'Sin acción siguiente'} · siguiente ${dash(c.accionSiguiente)} · ejecutivo ${dash(c.vendedor)}</p>
+        </article>`).join('');
+      const faltan = (data.faltantes || []).map((f) => `<li>${esc(f)}</li>`).join('');
+      body.innerHTML = `${hoja}${cicloCards}${renderPosventaEip(currentClientData)}<article class="kpi-card kpi-card--slate"><div class="kpi-card-head"><span class="kpi-title">Aún no medible</span></div><ul class="kpi-subtitle" style="margin:8px 0 0;padding-left:18px">${faltan}</ul></article>`;
+      const enlazarPosventa = () => {
+        body.querySelector('#eipPosventaUnidad')?.addEventListener('change', (event) => {
+          const card = body.querySelector('#eipPosventaCard');
+          if (card) card.outerHTML = renderPosventaEip(currentClientData, event.target.value);
+          enlazarPosventa();
+        });
+      };
+      enlazarPosventa();
+    } catch (err) {
+      body.innerHTML = `<p class="section-subtitle">${esc(err.message)}</p>`;
+    }
+  }
+
+  async function cargarCarteraEjecutivo(vendedor, fechaFin) {
+    const body = el('htPro2Body');
+    if (!body || !vendedor) return;
+    setText('kHtPro2Cartera', '…');
+    setText('kHtPro2Vigentes', '…');
+    setText('kHtPro2Cobertura', '…');
+    try {
+      const qs = new URLSearchParams({ vendedor });
+      if (fechaFin) qs.set('fechaFin', fechaFin);
+      const data = await api(`/seguimiento-360/cartera?${qs.toString()}`);
+      setText('kHtPro2Cartera', data.cartera ?? 0);
+      setText('kHtPro2Vigentes', data.vigentes ?? 0);
+      setText('kHtPro2Cobertura', data.coberturaPct == null ? '—' : `${Number(data.coberturaPct).toFixed(1)}%`);
+      const nota = el('htPro2Nota');
+      if (nota) {
+        nota.textContent = `Corte ${data.corte}. ${data.sinGestion || 0} prospectos de la cartera no tienen acción siguiente. Meta 100 %.`;
+      }
+      const lista = data.lista || [];
+      body.innerHTML = lista.length
+        ? lista.map((row) => `
+          <tr>
+            <td>${dash(row.nombre)}</td>
+            <td>${dash(row.estatus)}</td>
+            <td>${dash(row.accionSiguiente)}</td>
+            <td>${row.gestionVigente ? 'Vigente' : 'Pendiente'}</td>
+            <td>${row.idContacto ? `<a href="/seguimiento.html?id=${encodeURIComponent(row.idContacto)}">Expediente</a>` : ''}</td>
+          </tr>`).join('')
+        : '<tr class="empty-row"><td colspan="5">Este ejecutivo no tiene ciclos en la cartera activa.</td></tr>';
+    } catch (err) {
+      setText('kHtPro2Cartera', '—');
+      setText('kHtPro2Vigentes', '—');
+      setText('kHtPro2Cobertura', '—');
+      body.innerHTML = `<tr class="empty-row"><td colspan="5">${esc(err.message)}</td></tr>`;
+    }
+  }
+
   function renderVendedorResumen(data) {
     currentVendedorData = data;
     closeVendComercialDetail();
@@ -592,6 +1144,7 @@
     setText('kVendLeads', tot.leads ?? 0);
     setText('kVendSolicitudes', tot.solicitudes ?? 0);
     setText('kVendPruebas', tot.pruebas ?? 0);
+    cargarCarteraEjecutivo(data.vendedor, periodo.fechaFin);
     const libroUnits = Number(libro.unidades ?? libro.sql?.unidades ?? 0);
     setText('vendedorCount', `${(data.clientes || []).length} cliente(s) listado(s)`);
 
@@ -962,21 +1515,41 @@
 
   }
 
-  function dateMx(value) {
-    if (!value) return '—';
-    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    return match ? `${match[3]}/${match[2]}/${match[1]}` : esc(value);
-  }
-
-  function renderFicha360(h) {
-    const f = h.ficha360 || {};
+  function renderFicha360(h, vinSeleccionado = null) {
+    const opciones = Array.isArray(h.unidadesRadiografia) ? h.unidadesRadiografia : [];
+    const elegida = vinSeleccionado
+      ? opciones.find((u) => String(u.vin) === String(vinSeleccionado))
+      : null;
+    const f = elegida?.ficha || h.ficha360 || {};
+    h.fichaVista = f;
     const vehicle = el('ficha360Vehicle');
-    vehicle.innerHTML = `
-      <span class="material-symbols-outlined">directions_car</span>
+    const resumenUnidad = `
       <div>
         <strong>${dash(f.modeloActual)}</strong>
         <small>${[f.anModelo ? `Modelo ${esc(f.anModelo)}` : null, f.vinActual].filter(Boolean).map(esc).join(' · ') || 'Unidad sin identificar'}</small>
       </div>`;
+    if (opciones.length > 1) {
+      const vinActivo = elegida?.vin || f.vinActual || opciones[0].vin;
+      vehicle.classList.add('client-360-vehicle--multi');
+      vehicle.innerHTML = `
+        <span class="material-symbols-outlined">directions_car</span>
+        ${resumenUnidad}
+        <span class="material-symbols-outlined client-360-vehicle__chevron" aria-hidden="true">unfold_more</span>
+        <select id="ficha360Unidad" class="client-360-vehicle__select" aria-label="Cambiar unidad analizada" title="Cambiar unidad analizada (${opciones.length})">
+          ${opciones.map((u) => `
+            <option value="${esc(u.vin)}"${String(u.vin) === String(vinActivo) ? ' selected' : ''}>${esc(etiquetaUnidad(u))}</option>
+          `).join('')}
+        </select>`;
+      vehicle.querySelector('#ficha360Unidad')?.addEventListener('change', (event) => {
+        closeKpiDetail();
+        renderFicha360(h, event.target.value);
+      });
+    } else {
+      vehicle.classList.remove('client-360-vehicle--multi');
+      vehicle.innerHTML = `
+        <span class="material-symbols-outlined">directions_car</span>
+        ${resumenUnidad}`;
+    }
 
     // icon, label, value, tone, gotoId, openKpi
     const items = [
@@ -984,8 +1557,18 @@
       ['description', 'Número de contrato', dash(f.numeroContrato), 'finance', 'secFinanciamiento', 'financiamiento'],
       ['verified_user', 'Seguro del auto', dash(f.seguroAuto), 'finance', 'secFinanciamiento', 'seguro'],
       ['credit_card', 'Tipo de compra', dash(f.tipoCompra), 'finance', 'secFinanciamiento', 'financiamiento'],
-      ['calendar_month', 'Plazo contratado', f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
-      ['task_alt', 'Mensualidades estimadas', f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)}` : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
+      ['payments', 'Mensualidad estimada',
+        f.mensualidadEstimada != null
+          ? money(f.mensualidadEstimada)
+          : (f.mensualidadesPagadas != null
+            ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)} meses`
+            : (f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—')),
+        'finance', 'secFinanciamiento', 'financiamiento',
+        f.mensualidadEstimada != null && f.plazoContratado != null
+          ? (f.mensualidadesPagadas != null
+            ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado)} meses`
+            : `Plazo ${Number(f.plazoContratado)} meses`)
+          : null],
       ['account_balance_wallet', 'Saldo estimado', f.saldoEstimado != null ? money(f.saldoEstimado) : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
       ['sell', 'Valor de referencia', f.valorEstimadoUnidad != null ? money(f.valorEstimadoUnidad) : '—', 'finance', 'secFinanciamiento', 'financiamiento'],
       ['build', 'Último servicio', dateMx(f.ultimaVisitaTaller), 'service', 'secOrdenes', 'ordenes'],
@@ -996,10 +1579,10 @@
       ['feedback', 'Quejas o incidencias', Number(f.quejasIncidencias || 0).toLocaleString('es-MX'), 'relation', 'secTimeline', 'quejas'],
       ['garage', 'Historial de compras', `${Number(f.historialCompras || 0)} vehículo(s)`, 'purchase', 'secCompras', 'compras'],
     ];
-    el('ficha360Grid').innerHTML = items.map(([icon, label, value, tone, gotoId, openKpi]) => `
+    el('ficha360Grid').innerHTML = items.map(([icon, label, value, tone, gotoId, openKpi, hint]) => `
       <button type="button" class="client-360-stat client-360-stat--${tone}" ${openKpi === 'quejas' ? 'id="kQuejas"' : (openKpi === 'seguro' ? 'id="kSeguroAuto"' : '')} data-goto="${esc(gotoId || '')}" data-open-kpi="${esc(openKpi)}" title="Ver desglose">
         <span class="material-symbols-outlined client-360-stat-icon">${icon}</span>
-        <div><span>${label}</span><strong>${value}</strong></div>
+        <div><span>${label}</span><strong>${value}</strong>${hint ? `<small>${hint}</small>` : ''}</div>
       </button>`).join('');
 
     el('ficha360Grid').querySelectorAll('[data-open-kpi]').forEach((btn) => {
@@ -1019,7 +1602,7 @@
 
   let currentTimeline360 = [];
 
-  function renderTimeline360(events, active = 'todos') {
+  function renderTimeline360(events, active = null) {
     currentTimeline360 = events || [];
     const list = currentTimeline360;
     const categories = [
@@ -1033,11 +1616,13 @@
       ['queja', 'Quejas CSI'],
     ].filter(([key]) => key === 'todos' || list.some((event) => event.categoria === key));
     el('timeline360Filters').innerHTML = categories.map(([key, label]) => `
-      <button type="button" class="timeline-360-filter${active === key ? ' is-active' : ''}" data-timeline-filter="${key}">
+      <button type="button" class="timeline-360-filter${active === key ? ' is-active' : ''}" data-timeline-filter="${key}" aria-pressed="${active === key ? 'true' : 'false'}">
         ${label}<span>${key === 'todos' ? list.length : list.filter((event) => event.categoria === key).length}</span>
       </button>`).join('');
-    const filtered = active === 'todos' ? list : list.filter((event) => event.categoria === active);
-    setText('timeline360Count', `${filtered.length} evento(s)`);
+    const filtered = !active
+      ? []
+      : (active === 'todos' ? list : list.filter((event) => event.categoria === active));
+    setText('timeline360Count', active ? `${filtered.length} evento(s)` : '');
     const iconByCategory = {
       compra: 'directions_car',
       financiamiento: 'request_quote',
@@ -1059,9 +1644,16 @@
           ${event.detalle ? `<p>${esc(event.detalle)}</p>` : ''}
           ${event.vin ? `<small>VIN ${esc(event.vin)}</small>` : ''}
         </div>
-      </article>`).join('') : '<p class="timeline-360-empty">No hay eventos en esta categoría.</p>';
+      </article>`).join('') : (
+      active
+        ? '<p class="timeline-360-empty">No hay eventos en esta categoría.</p>'
+        : '<p class="timeline-360-empty">Elige una categoría para ver los eventos.</p>'
+    );
     el('timeline360Filters').querySelectorAll('[data-timeline-filter]').forEach((button) => {
-      button.addEventListener('click', () => renderTimeline360(list, button.dataset.timelineFilter));
+      button.addEventListener('click', () => {
+        const key = button.dataset.timelineFilter;
+        renderTimeline360(list, key === active ? null : key);
+      });
     });
   }
 
@@ -1080,6 +1672,7 @@
     if (h.correo) metaParts.push(h.correo);
     if (h.resumen?.primeraActividad) metaParts.push(`Desde ${h.resumen.primeraActividad}`);
     setText('clientMeta', metaParts.join(' · '));
+    cargarExpedienteProspecto(h.idContacto);
 
     const badges = [];
     if ((h.resumen?.totalLeads || 0) > 0) badges.push(badge('Entró por lead', 'badge-high'));
@@ -1130,110 +1723,6 @@
       });
     }
 
-    const unidadesDistribuidor = h.unidadesDistribuidor || [];
-    setText('unidadesDistribuidorCount', `${unidadesDistribuidor.length} unidad(es)`);
-    el('unidadesDistribuidorTable').innerHTML = unidadesDistribuidor.length
-      ? unidadesDistribuidor.map((u) => `
-        <tr>
-          <td>${dash(u.serie)}</td>
-          <td>${dash(u.modelo)}</td>
-          <td>${dash(u.anModelo)}</td>
-          <td class="cell-num">${Number(u.ordenes || 0)}</td>
-          <td>${dash(u.primeraVisita)}</td>
-          <td>${dash(u.ultimaVisita)}</td>
-          <td>${u.ventaEnDistribuidor
-            ? badge('Venta registrada', 'badge-running')
-            : badge('Sin venta registrada aquí', 'badge-maintenance')}</td>
-          <td>${dash(u.facturaVenta)}</td>
-        </tr>`).join('')
-      : '<tr><td colspan="8" style="text-align:center;color:#94a3b8">Sin unidades adicionales vinculadas en el DMS</td></tr>';
-
-    const compras = h.compras || [];
-    setText('comprasCount', `${compras.length} unidad(es)`);
-    el('comprasTable').innerHTML = compras.length ? compras.map((c) => `
-      <tr>
-        <td>${dash(c.vin)}</td>
-        <td>${dash(c.producto)}</td>
-        <td>${dash(c.modeloSql)}</td>
-        <td>${dash(c.numFactura)}</td>
-        <td>${dash(c.fechaFactura)}</td>
-        <td>${dash(c.vendedor)}</td>
-        <td class="cell-num">${Number(c.totalOrdenes || 0)}</td>
-      </tr>`).join('')
-      : '<tr><td colspan="7" style="text-align:center;color:#94a3b8">Sin compras registradas (sin VIN en ciclos)</td></tr>';
-
-    const contratos = h.contratosFinanciamiento || [];
-    const pvaLabel = (monto) => (Number(monto || 0) > 0 ? money(monto) : '—');
-    setText('financiamientoCount', `${contratos.length} contrato(s)`);
-    el('financiamientoTable').innerHTML = contratos.length ? contratos.map((c) => `
-      <tr>
-        <td>${dash(c.vin)}</td>
-        <td>${dash(c.no_contrato || c.contrato)}</td>
-        <td>${dash(c.unidad)}</td>
-        <td>${dash(c.fecha_compra)}</td>
-        <td class="cell-num">${c.plazo_meses != null ? `${Number(c.plazo_meses)} meses` : '—'}</td>
-        <td>${c.enganche_pct != null ? `${Number(c.enganche_pct).toFixed(2)}%` : '—'}</td>
-        <td class="cell-money">${c.enganche_monto != null ? money(c.enganche_monto) : '—'}</td>
-        <td>${pvaLabel(c.gap_monto)}</td>
-        <td>${pvaLabel(c.garantia_extendida_monto)}</td>
-        <td>${Number(c.onstar_monto || 0) > 0
-          ? `${money(c.onstar_monto)}${c.plazo_onstar ? ` · ${esc(c.plazo_onstar)}` : ''}`
-          : '—'}</td>
-        <td>${pvaLabel(c.mantenimiento_integrado_monto)}</td>
-        <td>${dash(c.aseguradora)}</td>
-        <td>${dash(c.robo_parcial)}</td>
-        <td>${dash(c.especial || c.plan_2 || c.plan)}</td>
-      </tr>`).join('')
-      : '<tr><td colspan="14" style="text-align:center;color:#94a3b8">Sin contratos de financiamiento ligados por VIN</td></tr>';
-
-    const ordenes = h.ordenesServicio || [];
-    setText('ordenesCount', `${ordenes.length} orden(es)`);
-    setText('ordenesImporte', `Importe generado: ${money(h.resumen?.importeTaller || 0)}`);
-    el('ordenesTable').innerHTML = ordenes.length ? ordenes.map((o) => `
-      <tr>
-        <td>${dash(o.orden)}</td>
-        <td>${dash(o.serie)}</td>
-        <td>${dash(o.modelo)}</td>
-        <td>${dash(o.ingreso)}</td>
-        <td>${dash(o.cierre)}</td>
-        <td>${dash(o.asesor)}</td>
-        <td>${dash(o.facturaTaller)}</td>
-        <td class="cell-money">${o.importe ? money(o.importe) : '—'}</td>
-      </tr>`).join('')
-      : `<tr><td colspan="8" style="text-align:center;color:#94a3b8">${h.sqlError ? 'SQL no disponible: ' + esc(h.sqlError) : 'Sin órdenes de servicio para los VIN del cliente'}</td></tr>`;
-
-    const pruebasManejo = h.pruebasManejo || [];
-    setText('pruebasManejoCount', `${pruebasManejo.length} prueba(s)`);
-    el('pruebasManejoTable').innerHTML = pruebasManejo.length ? pruebasManejo.map((p) => {
-      const km = Number(p.kilometraje_final || 0) - Number(p.kilometraje_inicial || 0);
-      return `
-      <tr>
-        <td>${dash(p.fecha)}</td>
-        <td>${dash(p.hora_salida)}</td>
-        <td>${dash(p.auto_interes)}</td>
-        <td>${dash(p.tipo_auto)}</td>
-        <td>${dash(p.vin)}</td>
-        <td>${dash(p.ejecutivo_ventas)}</td>
-        <td>${dash(p.centro_trabajo)}</td>
-        <td class="cell-num">${km >= 0 ? km.toLocaleString('es-MX') : '—'}</td>
-      </tr>`;
-    }).join('')
-      : '<tr><td colspan="8" style="text-align:center;color:#94a3b8">Sin pruebas de manejo registradas</td></tr>';
-
-    const leads = h.leads || [];
-    setText('leadsCount', `${leads.length} lead(s)`);
-    el('leadsTable').innerHTML = leads.length ? leads.map((l) => `
-      <tr>
-        <td>${dash(l.fecha_entrada)}</td>
-        <td>${dash(l.sucursal)}</td>
-        <td>${dash(l.tipo)}</td>
-        <td>${dash(l.canal)}</td>
-        <td>${dash(l.auto_interes)}</td>
-        <td>${dash(l.resultado)}</td>
-        <td>${dash(l.ejecutivo_asignado)}</td>
-        <td>${l.cita_programada === 'SI' ? badge('Cita', 'badge-running') : '—'}</td>
-      </tr>`).join('')
-      : '<tr><td colspan="8" style="text-align:center;color:#94a3b8">Sin leads registrados</td></tr>';
   }
 
   function gotoSection(targetId) {
@@ -1292,7 +1781,7 @@
         };
       }
       case 'financiamiento': {
-        const f = h.ficha360 || {};
+        const f = h.fichaVista || h.ficha360 || {};
         const contratos = h.contratosFinanciamiento || [];
         return {
           title: 'Financiamiento y contrato',
@@ -1301,8 +1790,8 @@
             { titulo: 'Radiografía', rows: [
               { label: 'Número de contrato', value: f.numeroContrato || '—' },
               { label: 'Tipo de compra', value: f.tipoCompra || '—' },
-              { label: 'Plazo contratado', value: f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—' },
-              { label: 'Mensualidades estimadas', value: f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)}` : '—' },
+              { label: 'Mensualidad estimada', value: f.mensualidadEstimada != null ? money(f.mensualidadEstimada) : '—' },
+              { label: 'Plazo y avance', value: f.mensualidadesPagadas != null ? `${Number(f.mensualidadesPagadas)} de ${Number(f.plazoContratado || 0)} meses` : (f.plazoContratado != null ? `${Number(f.plazoContratado)} meses` : '—') },
               { label: 'Saldo estimado', value: f.saldoEstimado != null ? money(f.saldoEstimado) : '—' },
               { label: 'Valor de referencia', value: f.valorEstimadoUnidad != null ? money(f.valorEstimadoUnidad) : '—' },
               { label: 'Seguro', value: f.seguroAuto || '—' },
@@ -1734,6 +2223,7 @@
     client360LastSource = null;
     document.querySelectorAll('.kpi-card--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
     document.querySelectorAll('.client-360-stat.is-open').forEach((c) => c.classList.remove('is-open'));
+    document.querySelectorAll('.vista360-empty__kpi--clickable.is-open').forEach((c) => c.classList.remove('is-open'));
   }
 
   function fillKpiDetailPanel(panelId, kpi, detail, gotoId, sourceEl) {
@@ -1756,7 +2246,9 @@
     if (metaEl) {
       metaEl.textContent = panelId === 'cierresKpiDetail'
         ? 'Cierres de taller'
-        : 'Radiografía 360 · desglose';
+        : (panelId === 'maduracionKpiDetail'
+          ? 'Tiempo de maduración comercial · P-VTA-4'
+          : 'Radiografía 360 · desglose');
     }
 
     const sectionsHtml = (detail.sections || [])
@@ -1790,10 +2282,11 @@
         : '<p class="ops-orders-drawer__hint">Sin información para desglosar</p>';
     }
     if (footer) {
-      if (gotoId) {
+      const target = gotoId ? el(gotoId) : null;
+      if (target) {
         footer.hidden = false;
         footer.innerHTML = `
-          <button type="button" class="chip" data-goto-detail="${esc(gotoId)}">Ver tabla completa
+          <button type="button" class="chip" data-goto-detail="${esc(gotoId)}">Ver en el expediente
             <span class="material-symbols-outlined" style="font-size:15px;vertical-align:-3px">arrow_downward</span>
           </button>`;
         footer.querySelector('[data-goto-detail]')?.addEventListener('click', (e) => {
@@ -1961,6 +2454,13 @@
   });
 
   el('btnEmptyVerCierres')?.addEventListener('click', () => cargarCierresPeriodo());
+  document.querySelectorAll('#emptyState .vista360-empty__mode').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.getAttribute('data-empty-mode');
+      setVista(mode);
+      (mode === 'vendedor' ? el('vendedorInput') : el('searchInput'))?.focus();
+    });
+  });
 
   const params = new URLSearchParams(location.search);
   const initialId = params.get('id');

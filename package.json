@@ -15,7 +15,8 @@
     "dist": "npm --prefix ./desktop run dist",
     "dist:win": "npm --prefix ./desktop run dist:win",
     "publish:win": "npm --prefix ./desktop run publish:win",
-    "dist:mac": "npm --prefix ./desktop run dist:mac"
+    "dist:mac": "npm --prefix ./desktop run dist:mac",
+    "test": "npm test --prefix backend"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

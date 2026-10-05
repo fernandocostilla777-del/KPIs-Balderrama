@@ -8,7 +8,8 @@
     "dev": "node server.js",
     "explore-db": "node scripts/explore-db.js",
     "test:ventas": "node scripts/test-ventas.js",
-    "test:etl": "node scripts/test-etl-contable.js"
+    "test:etl": "node scripts/test-etl-contable.js",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
     "multer": "^1.4.5-lts.2",
     "openai": "^6.46.0",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.23.1",
     "xlsx": "^0.18.5"
   }
 }

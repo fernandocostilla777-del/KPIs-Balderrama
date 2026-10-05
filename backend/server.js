@@ -131,6 +131,12 @@ const server = app.listen(PORT, HOST, () => {
     console.error('[crm-sheets-sync] No se pudo iniciar el scheduler:', err.message);
   }
   try {
+    const { startCiclosLiveSync } = require('./src/services/crmCiclosLiveSync');
+    startCiclosLiveSync();
+  } catch (err) {
+    console.error('[crm-ciclos-live] No se pudo iniciar el refresco:', err.message);
+  }
+  try {
     const { startScheduler: startCloudSync } = require('./src/services/cloudSync/cloudSyncScheduler');
     startCloudSync();
   } catch (err) {
@@ -165,6 +171,21 @@ const server = app.listen(PORT, HOST, () => {
         console.error('[presupuesto-empresa] warmup:', err.message);
       }
     }, 45 * 1000).unref();
+  }
+  // Precalienta Seguimiento 360 (índices VIN/nombre/teléfono y conteos del CRM):
+  // en frío cuestan 15–30 s y bloquean la primera carga de la pantalla.
+  if (process.env.CRM_WARMUP !== 'false') {
+    setTimeout(() => {
+      try {
+        const crm = require('./src/services/crmCiclosService');
+        crm.warmCaches().then(
+          (r) => console.log(`[crm] precalentamiento listo en ${r?.ms ?? '?'} ms`),
+          (err) => console.error('[crm] warmup:', err.message),
+        );
+      } catch (err) {
+        console.error('[crm] warmup:', err.message);
+      }
+    }, 3 * 1000).unref();
   }
 });
 

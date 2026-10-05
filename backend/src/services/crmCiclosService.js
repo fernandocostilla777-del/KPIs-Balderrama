@@ -33,8 +33,49 @@ function getDb() {
     );
   }
   db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
+  // Más páginas en memoria y lectura por mmap: las consultas en frío sobre
+  // crm_actividades (~1M filas) dejan de depender tanto del disco.
+  try {
+    db.pragma('cache_size = -131072'); // 128 MB
+    db.pragma('mmap_size = 536870912'); // 512 MB
+    db.pragma('temp_store = MEMORY');
+  } catch { /* pragmas opcionales */ }
   return db;
 }
+
+/**
+ * Caché corta en memoria para resultados caros que se repiten entre pantallas
+ * (resumen del periodo, cruces al DMS). Se vacía en releaseDb().
+ * compute puede devolver promesa; las llamadas concurrentes comparten la misma.
+ */
+const ttlCaches = new Map();
+function ttlCache(name, key, ttlMs, compute) {
+  if (!ttlCaches.has(name)) ttlCaches.set(name, new Map());
+  const bucket = ttlCaches.get(name);
+  const now = Date.now();
+  const hit = bucket.get(key);
+  if (hit && hit.expires > now) return hit.value;
+  let value;
+  try {
+    value = compute();
+  } catch (err) {
+    bucket.delete(key);
+    throw err;
+  }
+  bucket.set(key, { value, expires: now + ttlMs });
+  if (value && typeof value.then === 'function') {
+    value.catch(() => bucket.delete(key));
+  }
+  if (bucket.size > 300) {
+    for (const [k, v] of bucket) {
+      if (v.expires <= now) bucket.delete(k);
+    }
+    if (bucket.size > 300) bucket.delete(bucket.keys().next().value);
+  }
+  return value;
+}
+
+let crmStatsCache = null;
 
 /** Cierra la conexión y limpia índices en memoria (necesario antes/después de un ETL). */
 function releaseDb() {
@@ -45,7 +86,39 @@ function releaseDb() {
   vinIndexCache = null;
   nameIndexCache = null;
   phoneIndexCache = null;
+  crmStatsCache = null;
+  ttlCaches.clear();
   clearLeadNotDuplicateSqlCache();
+}
+
+const yieldLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Precalienta lo que la primera pantalla paga en frío (índices VIN/nombre/teléfono
+ * y los conteos de /crm/status). Cada paso cede el event loop para no detener
+ * otras peticiones. Se llama al arrancar y después de cada sincronización.
+ */
+async function warmCaches({ log = console.log } = {}) {
+  if (!isAvailable()) return { ok: false, motivo: 'sin base CRM' };
+  const t0 = Date.now();
+  const steps = [
+    ['índice VIN', () => getVinIndex()],
+    ['índice nombre', () => getNameIndex()],
+    ['índice teléfono', () => getPhoneIndex()],
+    ['conteos CRM', () => getCrmStats()],
+    ['maduración P-VTA-4', () => getMaduracionBase(new Date().toISOString().slice(0, 10))],
+  ];
+  for (const [label, fn] of steps) {
+    await yieldLoop();
+    const a = Date.now();
+    try {
+      fn();
+      if (log) log(`[crm] precalentado ${label} en ${Date.now() - a} ms`);
+    } catch (err) {
+      if (log) log(`[crm] precalentar ${label}: ${err.message}`);
+    }
+  }
+  return { ok: true, ms: Date.now() - t0 };
 }
 
 function isAvailable() {
@@ -838,7 +911,142 @@ function getUltimaActividadByIds(ids) {
   return new Map(rows.map((r) => [String(r.id_crm), r.ultima_actividad]));
 }
 
+/** Valor no vacío del registro más reciente de una lista ordenada cronológicamente. */
+function ultimoDato(lista, campo) {
+  for (let i = (lista || []).length - 1; i >= 0; i -= 1) {
+    const v = lista[i]?.[campo];
+    if (v != null && String(v).trim() !== '') return String(v).trim();
+  }
+  return null;
+}
+
+/**
+ * Perfil de calidad de datos por ID CRM: unidades compradas (VIN en ciclos),
+ * actividades, ciclos y si hay teléfono/correo en alguna fuente.
+ * Se usa para priorizar en el inicio de Seguimiento 360 los clientes cuyo
+ * expediente se verá completo.
+ */
+function getPerfilCalidadByIds(ids) {
+  const list = [...new Set((ids || []).map(String).filter(Boolean))];
+  const result = new Map();
+  if (!list.length) return result;
+  const d = getDb();
+  const placeholders = list.map(() => '?').join(',');
+
+  const base = d.prepare(`
+    SELECT id_contacto AS id_crm,
+      COUNT(*) AS actividades,
+      COUNT(DISTINCT id_ciclo) AS ciclos,
+      COUNT(DISTINCT CASE WHEN vin IS NOT NULL AND TRIM(vin) <> '' THEN UPPER(TRIM(vin)) END) AS compras,
+      MAX(CASE WHEN num_factura IS NOT NULL AND TRIM(num_factura) <> '' THEN 1 ELSE 0 END) AS tiene_factura,
+      MAX(CASE WHEN vendedor IS NOT NULL AND TRIM(vendedor) <> '' THEN 1 ELSE 0 END) AS tiene_vendedor,
+      MAX(nombre_contacto) AS nombre_crm
+    FROM crm_actividades
+    WHERE id_contacto IN (${placeholders})
+    GROUP BY id_contacto
+  `).all(...list);
+  for (const r of base) {
+    result.set(String(r.id_crm), {
+      nombreCrm: r.nombre_crm || null,
+      compras: Number(r.compras || 0),
+      actividades: Number(r.actividades || 0),
+      ciclos: Number(r.ciclos || 0),
+      tieneFactura: Number(r.tiene_factura || 0) === 1,
+      tieneVendedor: Number(r.tiene_vendedor || 0) === 1,
+      tieneTelefono: false,
+      tieneCorreo: false,
+    });
+  }
+  const ensure = (id) => {
+    const key = String(id);
+    if (!result.has(key)) {
+      result.set(key, {
+        nombreCrm: null, compras: 0, actividades: 0, ciclos: 0, tieneFactura: false, tieneVendedor: false,
+        tieneTelefono: false, tieneCorreo: false,
+      });
+    }
+    return result.get(key);
+  };
+  if (hasLeadsTable(d)) {
+    const rows = d.prepare(`
+      SELECT id_crm,
+        MAX(CASE WHEN telefono IS NOT NULL AND TRIM(telefono) <> '' THEN 1 ELSE 0 END) AS tel,
+        MAX(CASE WHEN correo IS NOT NULL AND TRIM(correo) <> '' THEN 1 ELSE 0 END) AS correo
+      FROM crm_leads
+      WHERE id_crm IN (${placeholders})
+      GROUP BY id_crm
+    `).all(...list);
+    for (const r of rows) {
+      const p = ensure(r.id_crm);
+      if (Number(r.tel) === 1) p.tieneTelefono = true;
+      if (Number(r.correo) === 1) p.tieneCorreo = true;
+    }
+  }
+  if (hasPruebasManejoTable(d)) {
+    const rows = d.prepare(`
+      SELECT id_crm,
+        MAX(CASE WHEN telefono IS NOT NULL AND TRIM(telefono) <> '' THEN 1 ELSE 0 END) AS tel,
+        MAX(CASE WHEN correo IS NOT NULL AND TRIM(correo) <> '' THEN 1 ELSE 0 END) AS correo
+      FROM crm_pruebas_manejo
+      WHERE id_crm IN (${placeholders})
+      GROUP BY id_crm
+    `).all(...list);
+    for (const r of rows) {
+      const p = ensure(r.id_crm);
+      if (Number(r.tel) === 1) p.tieneTelefono = true;
+      if (Number(r.correo) === 1) p.tieneCorreo = true;
+    }
+  }
+  return result;
+}
+
+/**
+ * Puntaje 0–100 de qué tan completo se verá el 360 de un cliente del inicio.
+ * Pesa sobre todo tener unidades compradas en CRM y datos de contacto.
+ */
+function scoreCalidadCliente(perfil, { telefonoDms = null, nombre = null, nombreCoincide = true } = {}) {
+  if (!perfil) return 0;
+  let score = 0;
+  if (perfil.compras > 0) score += 40;
+  if (perfil.compras > 1) score += 5;
+  if (perfil.tieneFactura) score += 10;
+  if (perfil.tieneTelefono) score += 15;
+  else if (telefonoDms) score += 5;
+  if (perfil.tieneCorreo) score += 5;
+  if (perfil.actividades >= 5) score += 10;
+  else if (perfil.actividades > 0) score += 5;
+  if (perfil.tieneVendedor) score += 5;
+  if (nombre && String(nombre).trim() && String(nombre).trim() !== '(Sin nombre)') score += 5;
+  if (nombreCoincide) score += 5;
+  else score -= 30;
+  return Math.max(0, Math.min(100, score));
+}
+
+/**
+ * ¿El nombre del cliente en el DMS corresponde al contacto del CRM?
+ * Si la serie cambió de dueño, el ID CRM apunta a otra persona y el 360
+ * mostraría datos de alguien más: no debe ofrecerse como ejemplo.
+ */
+function nombresCoinciden(nombreDms, nombreCrm) {
+  if (!nombreDms || !nombreCrm) return false;
+  if (isSamePersonName(nombreDms, nombreCrm)) return true;
+  const ignorar = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'Y', 'SA', 'CV', 'S', 'A', 'C', 'V', 'RL']);
+  const ta = personTokens(nombreDms).filter((t) => t.length > 2 && !ignorar.has(t));
+  const tb = new Set(personTokens(nombreCrm).filter((t) => t.length > 2 && !ignorar.has(t)));
+  const comunes = ta.filter((t) => tb.has(t)).length;
+  return comunes >= 2 || (comunes >= 1 && Math.min(ta.length, tb.size) === 1);
+}
+
 function getCrmStats() {
+  if (crmStatsCache) return crmStatsCache;
+  const stats = computeCrmStats();
+  crmStatsCache = stats;
+  return stats;
+}
+
+// Conteos sobre toda la base (COUNT DISTINCT en ~1M filas). Solo cambian cuando
+// corre un ETL, así que se calculan una vez por conexión y se sirven de caché.
+function computeCrmStats() {
   const d = getDb();
   const stats = {
     actividades: d.prepare('SELECT COUNT(*) AS n FROM crm_actividades').get().n,
@@ -1164,32 +1372,64 @@ async function enrichByVins(vins, {
     return { unidades: [], ordenesServicio: [], error: null };
   }
 
-  const params = {};
-  list.forEach((vin, i) => {
-    params[`vin${i}`] = vin;
-    params[`like${i}`] = `%${vin}`;
-    const suffix = vinSearchSuffix(vin);
-    if (suffix) params[`suf${i}`] = `%${suffix}`;
-  });
-  if (fechaInicio) params.fechaInicio = fechaInicio;
-  if (fechaFin) params.fechaFin = fechaFin;
-  const matchSql = (col) => list.map((vin, i) => {
-    const parts = [
-      `UPPER(LTRIM(RTRIM(${col}))) = @vin${i}`,
-      `UPPER(LTRIM(RTRIM(${col}))) LIKE @like${i}`,
-    ];
-    if (params[`suf${i}`]) {
-      parts.push(`UPPER(LTRIM(RTRIM(${col}))) LIKE @suf${i}`);
-    }
-    return parts.join('\n    OR ');
-  }).join(' OR ');
+  const cacheKey = JSON.stringify([list, maxOrdenes, fechaInicio, fechaFin]);
+  const cached = await ttlCache('enrichByVins', cacheKey, ENRICH_TTL_MS, () => enrichByVinsUncached(list, { maxOrdenes, fechaInicio, fechaFin }));
+  if (cached.error) ttlCacheDelete('enrichByVins', cacheKey);
+  return cached;
+}
+
+const ENRICH_TTL_MS = 5 * 60 * 1000;
+const CIERRES_TTL_MS = 3 * 60 * 1000;
+
+function ttlCacheDelete(name, key) {
+  const bucket = ttlCaches.get(name);
+  if (bucket) bucket.delete(key);
+}
+
+/**
+ * Dos pasadas contra el DMS:
+ *  1) igualdad directa sobre la columna (usa el índice: ~200 ms);
+ *  2) sólo para las series sin resultado, el barrido tolerante con
+ *     UPPER/LTRIM/RTRIM + LIKE por sufijo (recorre la tabla: varios segundos).
+ * Antes siempre se hacía el barrido, aunque la serie estuviera limpia en el DMS.
+ */
+async function enrichByVinsUncached(list, { maxOrdenes, fechaInicio, fechaFin }) {
+  const baseParams = {};
+  if (fechaInicio) baseParams.fechaInicio = fechaInicio;
+  if (fechaFin) baseParams.fechaFin = fechaFin;
   const orderDateSql = [
     fechaInicio ? 'AND CONVERT(DATE, o.ORE_FECHAORD, 103) >= @fechaInicio' : '',
     fechaFin ? 'AND CONVERT(DATE, o.ORE_FECHAORD, 103) <= @fechaFin' : '',
   ].filter(Boolean).join('\n');
 
-  try {
-    const [ventasRows, ordenesRows] = await Promise.all([
+  const buildExact = (vins) => {
+    const params = { ...baseParams };
+    vins.forEach((vin, i) => { params[`vin${i}`] = vin; });
+    const matchSql = (col) => vins.map((_, i) => `${col} = @vin${i}`).join(' OR ');
+    return { params, matchSql };
+  };
+  const buildLoose = (vins) => {
+    const params = { ...baseParams };
+    vins.forEach((vin, i) => {
+      params[`vin${i}`] = vin;
+      params[`like${i}`] = `%${vin}`;
+      const suffix = vinSearchSuffix(vin);
+      if (suffix) params[`suf${i}`] = `%${suffix}`;
+    });
+    const matchSql = (col) => vins.map((vin, i) => {
+      const parts = [
+        `UPPER(LTRIM(RTRIM(${col}))) = @vin${i}`,
+        `UPPER(LTRIM(RTRIM(${col}))) LIKE @like${i}`,
+      ];
+      if (params[`suf${i}`]) {
+        parts.push(`UPPER(LTRIM(RTRIM(${col}))) LIKE @suf${i}`);
+      }
+      return parts.join('\n    OR ');
+    }).join(' OR ');
+    return { params, matchSql };
+  };
+
+  const runQueries = ({ params, matchSql }) => Promise.all([
       query(`
         SELECT
           UPPER(LTRIM(RTRIM(v.VTE_SERIE))) AS serie,
@@ -1252,24 +1492,22 @@ async function enrichByVins(vins, {
           ISNULL(det.iva, 0) AS importeDetIva
         FROM SER_ORDEN o
         LEFT JOIN SER_VEHICULO veh ON veh.VEH_NUMSERIE = o.ORE_NUMSERIE
-        LEFT JOIN (
-          SELECT fos_idorden, MAX(fos_docto) AS factura, SUM(fos_total) AS importe
-          FROM SER_FACORDEN
-          GROUP BY fos_idorden
-        ) fac ON fac.fos_idorden = o.ORE_IDORDEN
-        LEFT JOIN (
-          SELECT TCX_IDORDEN AS idorden, SUM(TCX_TOTAL) AS importe
-          FROM SER_ORDTOTCXP
-          WHERE TCX_STATUS IN ('T', 'A')
-          GROUP BY TCX_IDORDEN
-        ) tcx ON tcx.idorden = o.ORE_IDORDEN
-        LEFT JOIN (
-          SELECT ORD_IDORDEN AS idorden,
-            SUM(ORD_SUBTOTAL) AS subtotal,
-            SUM(ORD_IVATOT) AS iva
-          FROM SER_ORDENDET
-          GROUP BY ORD_IDORDEN
-        ) det ON det.idorden = o.ORE_IDORDEN
+        OUTER APPLY (
+          SELECT MAX(f.fos_docto) AS factura, SUM(f.fos_total) AS importe
+          FROM SER_FACORDEN f
+          WHERE f.fos_idorden = o.ORE_IDORDEN
+        ) fac
+        OUTER APPLY (
+          SELECT SUM(t.TCX_TOTAL) AS importe
+          FROM SER_ORDTOTCXP t
+          WHERE t.TCX_IDORDEN = o.ORE_IDORDEN
+            AND t.TCX_STATUS IN ('T', 'A')
+        ) tcx
+        OUTER APPLY (
+          SELECT SUM(d.ORD_SUBTOTAL) AS subtotal, SUM(d.ORD_IVATOT) AS iva
+          FROM SER_ORDENDET d
+          WHERE d.ORD_IDORDEN = o.ORE_IDORDEN
+        ) det
         LEFT JOIN PNC_PARAMETR asr
           ON asr.PAR_TIPOPARA = 'AS' AND asr.PAR_IDENPARA = o.ORE_IDASESOR
         WHERE (${matchSql('o.ORE_NUMSERIE')})
@@ -1277,6 +1515,20 @@ async function enrichByVins(vins, {
         ORDER BY CONVERT(DATE, o.ORE_FECHAORD, 103) DESC
       `, params),
     ]);
+
+  try {
+    let [ventasRows, ordenesRows] = await runQueries(buildExact(list));
+
+    // Series sin ninguna fila por igualdad: probar el barrido tolerante.
+    const encontradas = new Set();
+    for (const r of ventasRows) encontradas.add(normalizeVin(r.serie));
+    for (const r of ordenesRows) encontradas.add(normalizeVin(r.serie));
+    const faltantes = list.filter((vin) => !encontradas.has(vin));
+    if (faltantes.length) {
+      const [ventasExtra, ordenesExtra] = await runQueries(buildLoose(faltantes));
+      ventasRows = ventasRows.concat(ventasExtra);
+      ordenesRows = ordenesRows.concat(ordenesExtra);
+    }
 
     const ordenesCalculadas = ordenesRows.map((row) => {
       const importeFac = Number(row.importeFac || 0);
@@ -1351,7 +1603,17 @@ async function getCustomerUnitsDms({ nombre, telefono, maxOrdenes = 5000 } = {})
   if (!nombreNormalizado && !telefonoNormalizado) {
     return { unidades: [], error: null };
   }
+  // El filtro por nombre/teléfono recorre PER_PERSONAS completa (~1.5 s);
+  // al reabrir el mismo cliente o cambiar de periodo se reutiliza.
+  const cacheKey = `${nombreNormalizado}|${telefonoNormalizado}|${maxOrdenes}`;
+  const res = await ttlCache('customerUnits', cacheKey, ENRICH_TTL_MS, () => getCustomerUnitsDmsUncached({
+    nombreNormalizado, telefonoNormalizado, maxOrdenes,
+  }));
+  if (res.error) ttlCacheDelete('customerUnits', cacheKey);
+  return res;
+}
 
+async function getCustomerUnitsDmsUncached({ nombreNormalizado, telefonoNormalizado, maxOrdenes }) {
   const params = {};
   const identitySql = [];
   if (nombreNormalizado) {
@@ -1574,8 +1836,110 @@ function buildCliente360({
   pruebas = [],
   quejasCsi = null,
 } = {}) {
-  const unidadActual = pickUnidadActual(unidades);
-  const vinUnidad = normalizeVin(unidadActual?.serie);
+  const ordenesValidas = ordenes.filter((o) => String(o.status || '').trim().toUpperCase() !== 'C');
+
+  const catalogoUnidades = [];
+  const registrarUnidad = (vin, modelo, anModelo, fecha) => {
+    const key = normalizeVin(vin);
+    if (!key) return;
+    const previa = catalogoUnidades.find((u) => matchCrmVinToSerie(u.vin, key));
+    if (previa) {
+      if (!previa.modelo && modelo) previa.modelo = modelo;
+      if (!previa.anModelo && anModelo) previa.anModelo = anModelo;
+      if (fecha && (!previa.fecha || String(fecha) > String(previa.fecha))) previa.fecha = fecha;
+      return;
+    }
+    catalogoUnidades.push({
+      vin: key,
+      modelo: modelo || null,
+      anModelo: anModelo || null,
+      fecha: fecha || null,
+    });
+  };
+  for (const unidad of unidades) {
+    registrarUnidad(unidad.serie, unidad.modelo, unidad.anModelo, unidad.fechaFactura || unidad.ultimaVisita);
+  }
+  for (const compra of compras) {
+    registrarUnidad(compra.vin, compra.modeloSql || compra.producto, null, compra.fechaEntrega || compra.fechaFactura);
+  }
+  for (const contrato of contratos) {
+    registrarUnidad(contrato.vin, contrato.unidad, null, fechaContratoIso(contrato));
+  }
+
+  // Unidad inicial = la más reciente (fecha de factura / contrato / última visita).
+  const masReciente = catalogoUnidades
+    .filter((u) => u.fecha)
+    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0] || null;
+  const vinVigente = masReciente?.vin
+    || normalizeVin(pickUnidadActual(unidades)?.serie)
+    || catalogoUnidades[0]?.vin
+    || null;
+
+  // El número de contrato no depende de la unidad elegida: es el de la vista
+  // completa (unidad vigente por factura), que ya era el correcto.
+  const unidadContrato = pickUnidadActual(unidades);
+  const vinContrato = normalizeVin(unidadContrato?.serie);
+  const contratoFijo = (vinContrato
+    ? [...contratos]
+      .filter((c) => matchCrmVinToSerie(c.vin, vinContrato))
+      .sort((a, b) => fechaContratoIso(b).localeCompare(fechaContratoIso(a)))[0] || null
+    : null)
+    || (vinContrato ? null : [...contratos].sort((a, b) =>
+      fechaContratoIso(b).localeCompare(fechaContratoIso(a))
+    )[0])
+    || null;
+  const numeroContratoFijo = contratoFijo?.no_contrato || contratoFijo?.contrato || null;
+
+  const ultimaActividad = [...timeline].sort((a, b) =>
+    String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
+  const textoIncidencias = timeline.map((t) =>
+    `${t.tipo || ''} ${t.resultado || ''}`).join(' | ');
+  const quejasTimeline = (textoIncidencias.match(/QUEJA|INCIDENCIA|RECLAMO|INCONFORMIDAD/gi) || []).length;
+  const digitalPattern = /DIGITAL|WEB|INTERNET|FACEBOOK|INSTAGRAM|WHATSAPP|CHAT|GOOGLE|PORTAL|EMAIL|CORREO/i;
+  const interaccionesDigitales = leads.filter((l) =>
+    digitalPattern.test(`${l.canal || ''} ${l.tipo || ''} ${l.campana || ''}`)
+  ).length + timeline.filter((t) =>
+    digitalPattern.test(`${t.tipo || ''} ${t.resultado || ''}`)
+  ).length;
+  const historialCompras = (() => {
+    const vins = new Set();
+    const add = (vin) => {
+      const key = normalizeVin(vin);
+      if (!key) return;
+      if ([...vins].some((prev) => matchCrmVinToSerie(prev, key))) return;
+      vins.add(key);
+    };
+    compras.forEach((c) => add(c.vin));
+    contratos.forEach((c) => add(c.vin));
+    unidades.forEach((u) => {
+      if (u.ventaEnDistribuidor || u.facturaVenta) add(u.serie);
+    });
+    return vins.size;
+  })();
+  const quejasDeVin = (vin) => {
+    if (!vin) {
+      return {
+        quejasIncidencias: Number(quejasCsi?.total ?? 0) > 0 ? Number(quejasCsi.total) : quejasTimeline,
+        quejasPosventa: Number(quejasCsi?.totalPosventa || 0),
+        quejasVentas: Number(quejasCsi?.totalVentas || 0),
+        quejasAreaPrincipal: quejasCsi?.areaPrincipal || null,
+      };
+    }
+    const pos = (quejasCsi?.posventa || []).filter((q) => q.serie && matchCrmVinToSerie(vin, q.serie));
+    const ven = (quejasCsi?.ventas || []).filter((q) => q.serie && matchCrmVinToSerie(vin, q.serie));
+    return {
+      quejasIncidencias: pos.length + ven.length,
+      quejasPosventa: pos.length,
+      quejasVentas: ven.length,
+      quejasAreaPrincipal: [...pos, ...ven].map((q) => q.area).find(Boolean) || null,
+    };
+  };
+
+  function consolidadoDeVin(vinObjetivo) {
+  const unidadActual = vinObjetivo
+    ? (unidades.find((u) => matchCrmVinToSerie(u.serie, vinObjetivo)) || null)
+    : null;
+  const vinUnidad = normalizeVin(vinObjetivo);
   const compraDeUnidad = vinUnidad
     ? [...compras]
       .filter((c) => matchCrmVinToSerie(c.vin, vinUnidad))
@@ -1588,20 +1952,19 @@ function buildCliente360({
       .filter((c) => matchCrmVinToSerie(c.vin, vinUnidad))
       .sort((a, b) => fechaContratoIso(b).localeCompare(fechaContratoIso(a)))[0] || null
     : null;
-  const compraActual = compraDeUnidad || [...compras].sort((a, b) =>
+  const compraActual = compraDeUnidad || (vinUnidad ? null : [...compras].sort((a, b) =>
     String(b.fechaEntrega || b.fechaFactura || '').localeCompare(
       String(a.fechaEntrega || a.fechaFactura || '')
-    ))[0] || null;
+    ))[0] || null);
   const contratoActual = contratoDeUnidad || (vinUnidad ? null : [...contratos].sort((a, b) =>
     fechaContratoIso(b).localeCompare(fechaContratoIso(a))
   )[0]) || null;
   const vinActual = vinUnidad || normalizeVin(contratoActual?.vin || compraActual?.vin);
 
-  const ordenesValidas = ordenes.filter((o) => String(o.status || '').trim().toUpperCase() !== 'C');
   const ordenesDeUnidad = vinActual
     ? ordenesValidas.filter((o) => matchCrmVinToSerie(vinActual, o.serie))
     : [];
-  const ordenesParaFicha = ordenesDeUnidad.length ? ordenesDeUnidad : ordenesValidas;
+  const ordenesParaFicha = vinActual ? ordenesDeUnidad : ordenesValidas;
   const ordenesOrdenadas = [...ordenesParaFicha].sort((a, b) =>
     String(toIsoDate(b.ingreso || b.cierre) || '').localeCompare(
       String(toIsoDate(a.ingreso || a.cierre) || '')
@@ -1632,21 +1995,55 @@ function buildCliente360({
   const valorEstimadoUnidad = Number.isFinite(montoFinanciar)
     ? montoFinanciar + (Number.isFinite(enganche) ? enganche : 0)
     : null;
+  const mensualidadEstimada = Number.isFinite(montoFinanciar) && montoFinanciar > 0
+    && Number.isFinite(plazo) && plazo > 0
+    ? Math.round((montoFinanciar / plazo) * 100) / 100
+    : null;
+  const quejas = quejasDeVin(vinActual);
 
-  const ultimaActividad = [...timeline].sort((a, b) =>
-    String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
-  const textoIncidencias = timeline.map((t) =>
-    `${t.tipo || ''} ${t.resultado || ''}`).join(' | ');
-  const quejasTimeline = (textoIncidencias.match(/QUEJA|INCIDENCIA|RECLAMO|INCONFORMIDAD/gi) || []).length;
-  const quejasIncidencias = Number(quejasCsi?.total ?? 0) > 0
-    ? Number(quejasCsi.total)
-    : quejasTimeline;
-  const digitalPattern = /DIGITAL|WEB|INTERNET|FACEBOOK|INSTAGRAM|WHATSAPP|CHAT|GOOGLE|PORTAL|EMAIL|CORREO/i;
-  const interaccionesDigitales = leads.filter((l) =>
-    digitalPattern.test(`${l.canal || ''} ${l.tipo || ''} ${l.campana || ''}`)
-  ).length + timeline.filter((t) =>
-    digitalPattern.test(`${t.tipo || ''} ${t.resultado || ''}`)
-  ).length;
+  return {
+      fechaUltimaCompra: toIsoDate(
+        unidadActual?.fechaFactura
+        || fechaContratoIso(contratoActual)
+        || compraActual?.fechaEntrega
+        || compraActual?.fechaFactura
+      ),
+      modeloActual: unidadActual?.modelo || contratoActual?.unidad
+        || compraActual?.modeloSql || compraActual?.producto || null,
+      anModelo: unidadActual?.anModelo || null,
+      vinActual: vinActual || unidadActual?.serie || null,
+      numeroContrato: numeroContratoFijo,
+      tipoCompra: contratoActual?.tipo_compra || contratoActual?.plan_2
+        || contratoActual?.plan || (contratoActual ? 'Crédito' : null),
+      seguroAuto: contratoActual?.aseguradora || null,
+      plazoContratado: Number.isFinite(plazo) && plazo > 0 ? plazo : null,
+      mensualidadesPagadas,
+      mensualidadEstimada,
+      saldoEstimado,
+      valorEstimadoUnidad,
+      ultimaVisitaTaller: toIsoDate(ultimaOrden?.ingreso || ultimaOrden?.cierre),
+      kilometraje: kmOrden ? Number(kmOrden.kilometraje) : (unidadActual?.kilometraje ?? null),
+      fechaKilometraje: kmOrden
+        ? toIsoDate(kmOrden.ingreso || kmOrden.cierre)
+        : (unidadActual?.fechaKilometraje || null),
+      serviciosRealizados: vinActual ? ordenesDeUnidad.length : ordenesValidas.length,
+      ultimoContactoComercial: toIsoDate(ultimaActividad?.fecha),
+      interaccionesDigitales,
+      quejasIncidencias: quejas.quejasIncidencias,
+      quejasPosventa: quejas.quejasPosventa,
+      quejasVentas: quejas.quejasVentas,
+      quejasAreaPrincipal: quejas.quejasAreaPrincipal,
+      historialCompras,
+      metodologia: {
+        mensualidades: 'Mensualidad estimada = monto financiado entre el plazo, sin intereses. El avance (meses transcurridos de ese plazo) no confirma pagos reales.',
+        saldo: 'Monto financiado amortizado linealmente; no incluye intereses, pagos anticipados ni mora.',
+        valorUnidad: 'Monto financiado más enganche al contratar; no es un avalúo comercial actual.',
+        kilometraje: 'Último kilometraje de la unidad seleccionada, tomado de su orden de taller más reciente.',
+        unidadActual: 'Cada opción es una unidad del cliente; se muestra primero la más reciente.',
+        quejas: 'CSI Posventa y CSI Ventas de la serie seleccionada.',
+      },
+  };
+  }
 
   const eventos = [];
   for (const t of timeline) {
@@ -1731,62 +2128,24 @@ function buildCliente360({
     });
   }
 
+  const porUnidad = catalogoUnidades
+    .map((unidad) => {
+      const ficha = consolidadoDeVin(unidad.vin);
+      return {
+        vin: unidad.vin,
+        modelo: ficha.modeloActual || unidad.modelo || null,
+        anModelo: ficha.anModelo || unidad.anModelo || null,
+        fecha: unidad.fecha || ficha.fechaUltimaCompra || null,
+        ficha,
+      };
+    })
+    .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+  const consolidado = (vinVigente && porUnidad.find((u) => matchCrmVinToSerie(u.vin, vinVigente))?.ficha)
+    || consolidadoDeVin(vinVigente);
+
   return {
-    consolidado: {
-      fechaUltimaCompra: toIsoDate(
-        unidadActual?.fechaFactura
-        || fechaContratoIso(contratoActual)
-        || compraActual?.fechaEntrega
-        || compraActual?.fechaFactura
-      ),
-      modeloActual: unidadActual?.modelo || contratoActual?.unidad
-        || compraActual?.modeloSql || compraActual?.producto || null,
-      anModelo: unidadActual?.anModelo || null,
-      vinActual: vinActual || unidadActual?.serie || null,
-      numeroContrato: contratoActual?.no_contrato || contratoActual?.contrato || null,
-      tipoCompra: contratoActual?.tipo_compra || contratoActual?.plan_2
-        || contratoActual?.plan || (contratoActual ? 'Crédito' : null),
-      seguroAuto: contratoActual?.aseguradora || null,
-      plazoContratado: Number.isFinite(plazo) && plazo > 0 ? plazo : null,
-      mensualidadesPagadas,
-      saldoEstimado,
-      valorEstimadoUnidad,
-      ultimaVisitaTaller: toIsoDate(ultimaOrden?.ingreso || ultimaOrden?.cierre),
-      kilometraje: kmOrden ? Number(kmOrden.kilometraje) : (unidadActual?.kilometraje ?? null),
-      fechaKilometraje: kmOrden
-        ? toIsoDate(kmOrden.ingreso || kmOrden.cierre)
-        : (unidadActual?.fechaKilometraje || null),
-      serviciosRealizados: ordenesValidas.length,
-      ultimoContactoComercial: toIsoDate(ultimaActividad?.fecha),
-      interaccionesDigitales,
-      quejasIncidencias,
-      quejasPosventa: Number(quejasCsi?.totalPosventa || 0),
-      quejasVentas: Number(quejasCsi?.totalVentas || 0),
-      quejasAreaPrincipal: quejasCsi?.areaPrincipal || null,
-      historialCompras: (() => {
-        const vins = new Set();
-        const add = (vin) => {
-          const key = normalizeVin(vin);
-          if (!key) return;
-          if ([...vins].some((prev) => matchCrmVinToSerie(prev, key))) return;
-          vins.add(key);
-        };
-        compras.forEach((c) => add(c.vin));
-        contratos.forEach((c) => add(c.vin));
-        unidades.forEach((u) => {
-          if (u.ventaEnDistribuidor || u.facturaVenta) add(u.serie);
-        });
-        return vins.size;
-      })(),
-      metodologia: {
-        mensualidades: 'Meses transcurridos desde la compra, limitados al plazo; no confirma pagos reales.',
-        saldo: 'Monto financiado amortizado linealmente; no incluye intereses, pagos anticipados ni mora.',
-        valorUnidad: 'Monto financiado más enganche al contratar; no es un avalúo comercial actual.',
-        kilometraje: 'Último kilometraje de la unidad vigente, tomado de su orden de taller más reciente.',
-        unidadActual: 'Unidad vigente = factura de venta más reciente en el DMS del mismo cliente.',
-        quejas: 'CSI Posventa (orden) + CSI Ventas (serie/VIN). Área inferida del texto de la incidencia.',
-      },
-    },
+    consolidado,
+    porUnidad,
     timeline: eventos
       .filter((e) => e.fecha)
       .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
@@ -1880,7 +2239,8 @@ async function getContactHistory(idContacto, {
     const lastSol = solicitudes[solicitudes.length - 1] || null;
     const lastPrueba = pruebasManejo[pruebasManejo.length - 1] || null;
     const nombreCliente = last?.nombre || lastSol?.nombre_cliente || lastPrueba?.nombre_cliente || null;
-    const telefonoCliente = last?.telefono || lastPrueba?.telefono || null;
+    const telefonoCliente = ultimoDato(leads, 'telefono') || ultimoDato(pruebasManejo, 'telefono') || null;
+    const correoCliente = ultimoDato(leads, 'correo') || ultimoDato(pruebasManejo, 'correo') || null;
     const vinsLead = [...new Set(leads.map((l) => normalizeVin(l.vin_comprado)).filter(Boolean))];
     const [sqlEnrich, unidadesDms] = await Promise.all([
       enrichSql && vinsLead.length
@@ -1946,7 +2306,7 @@ async function getContactHistory(idContacto, {
       encontrado: true,
       nombre: nombreCliente,
       telefono: telefonoCliente,
-      correo: last?.correo || null,
+      correo: correoCliente,
       vendedor: vendedorAsignado,
       resumen: {
         totalActividades: 0,
@@ -1978,6 +2338,7 @@ async function getContactHistory(idContacto, {
       timeline: [],
       quejasCsi,
       ficha360: cliente360.consolidado,
+      unidadesRadiografia: cliente360.porUnidad,
       timeline360: cliente360.timeline,
       unidadesSql: unidadesSqlAlt,
       unidadesDistribuidor: unidadesDms.unidades,
@@ -2065,9 +2426,9 @@ async function getContactHistory(idContacto, {
     .sort();
 
   const nombreCliente = rows[rows.length - 1].nombre_contacto;
-  const telefonoCliente = leads.length
-    ? leads[leads.length - 1].telefono
-    : (pruebasManejo[pruebasManejo.length - 1]?.telefono || null);
+  // Último lead / prueba de manejo que sí traiga el dato (el más reciente puede venir vacío).
+  const telefonoCliente = ultimoDato(leads, 'telefono') || ultimoDato(pruebasManejo, 'telefono') || null;
+  const correoCliente = ultimoDato(leads, 'correo') || ultimoDato(pruebasManejo, 'correo') || null;
   const vins = compras.map((c) => c.vin);
   const [sqlEnrich, unidadesDms] = await Promise.all([
     enrichSql && vins.length
@@ -2155,7 +2516,7 @@ async function getContactHistory(idContacto, {
     encontrado: true,
     nombre: nombreCliente,
     telefono: telefonoCliente,
-    correo: leads.length ? leads[leads.length - 1].correo : null,
+    correo: correoCliente,
     vendedor: vendedorAsignado,
     resumen: {
       totalActividades: rows.length,
@@ -2194,6 +2555,7 @@ async function getContactHistory(idContacto, {
     timeline,
     quejasCsi,
     ficha360: cliente360.consolidado,
+    unidadesRadiografia: cliente360.porUnidad,
     timeline360: cliente360.timeline,
     timelineTruncado: rows.length > maxActividades,
     unidadesSql,
@@ -2506,7 +2868,9 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
   }
   const max = Math.min(500, Math.max(1, Number(limit) || 200));
 
-  const rows = await query(`
+  // Las órdenes cerradas del periodo se piden en cada carga de la pantalla;
+  // compartir el resultado unos minutos evita repetir la consulta pesada.
+  const rows = await ttlCache('cierresTaller', `${fechaInicio}|${fechaFin}`, CIERRES_TTL_MS, () => query(`
     SELECT TOP 5000
       o.ORE_IDCLIENTE AS idClienteDms,
       LTRIM(RTRIM(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))) AS cliente,
@@ -2526,22 +2890,22 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
     FROM SER_ORDEN o
     LEFT JOIN PER_PERSONAS c ON c.PER_IDPERSONA = o.ORE_IDCLIENTE
     LEFT JOIN SER_VEHICULO veh ON veh.VEH_NUMSERIE = o.ORE_NUMSERIE
-    LEFT JOIN (
-      SELECT fos_idorden, MAX(fos_docto) AS factura, MAX(fos_qctipoauto) AS autoFac, SUM(fos_total) AS importe
-      FROM SER_FACORDEN
-      GROUP BY fos_idorden
-    ) fac ON fac.fos_idorden = o.ORE_IDORDEN
-    LEFT JOIN (
-      SELECT TCX_IDORDEN AS idorden, SUM(TCX_TOTAL) AS importe
-      FROM SER_ORDTOTCXP
-      WHERE TCX_STATUS IN ('T', 'A')
-      GROUP BY TCX_IDORDEN
-    ) tcx ON tcx.idorden = o.ORE_IDORDEN
-    LEFT JOIN (
-      SELECT ORD_IDORDEN AS idorden, SUM(ORD_SUBTOTAL) AS subtotal, SUM(ORD_IVATOT) AS iva
-      FROM SER_ORDENDET
-      GROUP BY ORD_IDORDEN
-    ) det ON det.idorden = o.ORE_IDORDEN
+    OUTER APPLY (
+      SELECT MAX(f.fos_docto) AS factura, MAX(f.fos_qctipoauto) AS autoFac, SUM(f.fos_total) AS importe
+      FROM SER_FACORDEN f
+      WHERE f.fos_idorden = o.ORE_IDORDEN
+    ) fac
+    OUTER APPLY (
+      SELECT SUM(t.TCX_TOTAL) AS importe
+      FROM SER_ORDTOTCXP t
+      WHERE t.TCX_IDORDEN = o.ORE_IDORDEN
+        AND t.TCX_STATUS IN ('T', 'A')
+    ) tcx
+    OUTER APPLY (
+      SELECT SUM(d.ORD_SUBTOTAL) AS subtotal, SUM(d.ORD_IVATOT) AS iva
+      FROM SER_ORDENDET d
+      WHERE d.ORD_IDORDEN = o.ORE_IDORDEN
+    ) det
     LEFT JOIN PNC_PARAMETR asr
       ON asr.PAR_TIPOPARA = 'AS' AND asr.PAR_IDENPARA = o.ORE_IDASESOR
     WHERE o.ORE_FECHACIE IS NOT NULL
@@ -2552,7 +2916,7 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
       AND UPPER(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))
         NOT LIKE '%AUTOMOTRIZ%BALDERRAMA%PUEBLA%'
     ORDER BY CONVERT(DATE, o.ORE_FECHACIE, 103) DESC
-  `, { fechaInicio, fechaFin });
+  `, { fechaInicio, fechaFin }));
 
   const clientes = new Map();
   let importeTotal = 0;
@@ -2596,9 +2960,9 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
       || null;
   }
 
-  const ultimaActividadById = getUltimaActividadByIds(
-    [...clientes.values()].map((c) => c.idCrm).filter(Boolean)
-  );
+  const idsCrm = [...clientes.values()].map((c) => c.idCrm).filter(Boolean);
+  const ultimaActividadById = getUltimaActividadByIds(idsCrm);
+  const perfilById = getPerfilCalidadByIds(idsCrm);
   for (const cliente of clientes.values()) {
     const fechaCrm = cliente.idCrm
       ? ultimaActividadById.get(String(cliente.idCrm))
@@ -2606,6 +2970,26 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
     if (fechaCrm && (!cliente.ultimaActividad || fechaCrm > cliente.ultimaActividad)) {
       cliente.ultimaActividad = fechaCrm;
     }
+    const perfil = cliente.idCrm ? perfilById.get(String(cliente.idCrm)) : null;
+    const nombreCoincide = perfil ? nombresCoinciden(cliente.cliente, perfil.nombreCrm) : false;
+    const score = scoreCalidadCliente(perfil, {
+      telefonoDms: cliente.telefono, nombre: cliente.cliente, nombreCoincide,
+    });
+    cliente.calidad = {
+      score,
+      nombreCrm: perfil?.nombreCrm || null,
+      nombreCoincide,
+      compras: perfil?.compras || 0,
+      actividades: perfil?.actividades || 0,
+      ciclos: perfil?.ciclos || 0,
+      tieneTelefono: Boolean(perfil?.tieneTelefono),
+      tieneCorreo: Boolean(perfil?.tieneCorreo),
+      tieneFactura: Boolean(perfil?.tieneFactura),
+      // Expediente "completo": el contacto CRM es la misma persona que en el DMS,
+      // tiene unidad comprada, teléfono en CRM y actividad registrada.
+      completo: Boolean(cliente.idCrm && perfil && nombreCoincide && perfil.compras > 0
+        && perfil.tieneTelefono && perfil.actividades > 0),
+    };
   }
 
   const lista = [...clientes.values()]
@@ -2624,6 +3008,7 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
       ordenesCerradas: rows.length,
       clientes: clientes.size,
       clientesConIdCrm: lista.filter((c) => c.idCrm).length,
+      clientesCompletos: lista.filter((c) => c.calidad?.completo).length,
       importeTaller: Math.round(importeTotal * 100) / 100,
     },
     clientes: lista,
@@ -6042,9 +6427,1077 @@ function roundPct(num, den) {
   return Math.round((n / d) * 1000) / 10;
 }
 
+const ESTATUS_CARTERA_ACTIVA = ['Prospección', 'Ofrecimiento', 'Neg. Caliente', 'Pre-pedido', 'Cartera'];
+
+function packedTail(value) {
+  const text = String(value || '');
+  const cut = text.indexOf('|');
+  const tail = cut >= 0 ? text.slice(cut + 1) : text;
+  return tail.trim() || null;
+}
+
+/** Un ciclo = estatus del último movimiento y ejecutivo de la última actividad que sí lo trae. */
+function sqlCicloVigente() {
+  return `
+    SELECT
+      id_ciclo,
+      MAX(CASE WHEN id_contacto IS NOT NULL AND trim(id_contacto) <> ''
+        THEN printf('%s|%s', COALESCE(fecha_estatus, ''), id_contacto) END) AS contacto_key,
+      MAX(CASE WHEN nombre_contacto IS NOT NULL AND trim(nombre_contacto) <> ''
+        THEN printf('%s|%s', COALESCE(fecha_estatus, ''), nombre_contacto) END) AS nombre_key,
+      MAX(CASE WHEN estatus IS NOT NULL AND trim(estatus) <> ''
+        THEN printf('%s|%s', COALESCE(fecha_estatus, ''), estatus) END) AS estatus_key,
+      MAX(CASE WHEN vendedor IS NOT NULL AND trim(vendedor) <> ''
+        THEN printf('%s|%s', COALESCE(fecha_estatus, ''), vendedor) END) AS vendedor_key,
+      MAX(CASE WHEN vin IS NOT NULL AND trim(vin) <> ''
+        THEN printf('%s|%s', COALESCE(fecha_estatus, ''), vin) END) AS vin_key,
+      MAX(fecha_estatus) AS fecha_estatus,
+      MAX(fecha_prog_actividad) AS fecha_prog_actividad,
+      MAX(fecha_resp_actividad) AS fecha_resp_actividad
+    FROM crm_actividades
+    WHERE id_ciclo IS NOT NULL AND trim(id_ciclo) <> ''
+    GROUP BY id_ciclo
+  `;
+}
+
+function hasCiclosLiveTable(d) {
+  return !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crm_ciclos_live'`).get();
+}
+
+function hasActividadesTable(d) {
+  return !!d.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crm_actividades'`).get();
+}
+
+function citaAsistidaSql(alias = '') {
+  const col = `${alias}resultado_actividad`;
+  const txt = `LOWER(COALESCE(${col}, ''))`;
+  return `(
+    ${txt} <> ''
+    AND ${txt} NOT LIKE '%no show%'
+    AND ${txt} NOT LIKE '%noshow%'
+    AND ${txt} NOT LIKE '%cancel%'
+    AND ${txt} NOT LIKE '%no asist%'
+    AND ${txt} NOT LIKE '%no se present%'
+    AND ${txt} NOT LIKE '%reprogram%'
+  )`;
+}
+
+function citaConResultadoSql(alias = '') {
+  return `LOWER(COALESCE(${alias}resultado_actividad, '')) <> ''`;
+}
+
+/**
+ * P-PRO-1 a P-PRO-6 para la pestaña Leads.
+ * P-PRO-6 sale del corte de cartera (HT-PRO-2). Los SLA que piden hora se dejan sin valor.
+ */
+function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {}) {
+  const d = getDb();
+  if (!hasLeadsTable(d)) {
+    throw Object.assign(new Error('Tabla de leads no cargada.'), { status: 503 });
+  }
+  const desde = fechaInicio ? String(fechaInicio).slice(0, 10) : null;
+  const hasta = fechaFin ? String(fechaFin).slice(0, 10) : null;
+  const notDup = getLeadNotDuplicateSql();
+  const where = [notDup];
+  const params = [];
+  if (desde) {
+    where.push('substr(fecha_entrada, 1, 10) >= ?');
+    params.push(desde);
+  }
+  if (hasta) {
+    where.push('substr(fecha_entrada, 1, 10) <= ?');
+    params.push(hasta);
+  }
+  const hoja = d.prepare(`
+    SELECT
+      COUNT(*) AS entrantes,
+      SUM(CASE WHEN resultado IS NOT NULL AND trim(resultado) <> '' THEN 1 ELSE 0 END) AS conPrimeraAtencion,
+      SUM(CASE WHEN upper(trim(COALESCE(asignacion, ''))) = 'SI'
+        OR (ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '') THEN 1 ELSE 0 END) AS asignados,
+      SUM(CASE WHEN upper(trim(COALESCE(contacto, ''))) = 'SI' THEN 1 ELSE 0 END) AS contactadosBdc,
+      SUM(CASE WHEN upper(trim(COALESCE(cita_programada, ''))) IN ('SI', 'VIRTUAL')
+        OR (fecha_cita IS NOT NULL AND trim(fecha_cita) <> '') THEN 1 ELSE 0 END) AS conCita,
+      SUM(CASE WHEN upper(trim(COALESCE(contacto, ''))) = 'SI'
+        AND (upper(trim(COALESCE(cita_programada, ''))) IN ('SI', 'VIRTUAL')
+          OR (fecha_cita IS NOT NULL AND trim(fecha_cita) <> '')) THEN 1 ELSE 0 END) AS contactadosConCita,
+      SUM(CASE WHEN upper(trim(COALESCE(cita_asistida, ''))) = 'SI' THEN 1 ELSE 0 END) AS asistidasHoja,
+      SUM(CASE WHEN cita_programada IS NULL OR trim(cita_programada) = '' THEN 1 ELSE 0 END) AS citaVacia
+    FROM crm_leads
+    WHERE ${where.join(' AND ')}
+  `).get(...params);
+
+  const entrantes = Number(hoja?.entrantes || 0);
+  const conPrimera = Number(hoja?.conPrimeraAtencion || 0);
+  const contactados = Number(hoja?.contactadosBdc || 0);
+  const contactadosConCita = Number(hoja?.contactadosConCita || 0);
+
+  let citas = { programadas: 0, conResultado: 0, asistidas: 0, disponible: false };
+  let cartera = {
+    activa: 0,
+    vigentes: 0,
+    diferida: 0,
+    diferidaConEspera: 0,
+    ultimoEstatus: null,
+    porEjecutivo: [],
+    disponible: false,
+  };
+
+  if (hasActividadesTable(d)) {
+    const citaWhere = [`UPPER(TRIM(COALESCE(tipo_actividad, ''))) = 'CITA'`];
+    const citaParams = [];
+    if (desde) {
+      citaWhere.push('substr(fecha_prog_actividad, 1, 10) >= ?');
+      citaParams.push(desde);
+    }
+    if (hasta) {
+      citaWhere.push('substr(fecha_prog_actividad, 1, 10) <= ?');
+      citaParams.push(hasta);
+    }
+    const citaRow = d.prepare(`
+      SELECT
+        COUNT(DISTINCT id_ciclo) AS programadas,
+        COUNT(DISTINCT CASE WHEN ${citaConResultadoSql()} THEN id_ciclo END) AS conResultado,
+        COUNT(DISTINCT CASE WHEN ${citaAsistidaSql()} THEN id_ciclo END) AS asistidas
+      FROM crm_actividades
+      WHERE ${citaWhere.join(' AND ')}
+    `).get(...citaParams);
+    citas = {
+      programadas: Number(citaRow?.programadas || 0),
+      conResultado: Number(citaRow?.conResultado || 0),
+      asistidas: Number(citaRow?.asistidas || 0),
+      disponible: true,
+    };
+
+    const corte = hasta || new Date().toISOString().slice(0, 10);
+    const activosSql = ESTATUS_CARTERA_ACTIVA.map(() => '?').join(',');
+    const cicloSql = sqlCicloVigente();
+    const carteraRow = d.prepare(`
+      WITH ciclo AS (${cicloSql})
+      SELECT
+        SUM(CASE WHEN substr(estatus_key, instr(estatus_key, '|') + 1) IN (${activosSql}) THEN 1 ELSE 0 END) AS activa,
+        SUM(CASE WHEN substr(estatus_key, instr(estatus_key, '|') + 1) IN (${activosSql})
+          AND substr(COALESCE(fecha_prog_actividad, ''), 1, 10) >= ? THEN 1 ELSE 0 END) AS vigentes,
+        SUM(CASE WHEN substr(estatus_key, instr(estatus_key, '|') + 1) = 'Neg. Diferida' THEN 1 ELSE 0 END) AS diferida,
+        SUM(CASE WHEN substr(estatus_key, instr(estatus_key, '|') + 1) = 'Neg. Diferida'
+          AND substr(COALESCE(fecha_prog_actividad, ''), 1, 10) >= ? THEN 1 ELSE 0 END) AS diferidaConEspera,
+        MAX(CASE WHEN substr(estatus_key, instr(estatus_key, '|') + 1) IN (${activosSql}) THEN fecha_estatus END) AS ultimoEstatus
+      FROM ciclo
+    `).get(...ESTATUS_CARTERA_ACTIVA, ...ESTATUS_CARTERA_ACTIVA, corte, corte, ...ESTATUS_CARTERA_ACTIVA);
+
+    const porEjecutivo = d.prepare(`
+      WITH ciclo AS (${cicloSql}),
+      lead_ej AS (
+        SELECT trim(id_crm) AS id_crm,
+          MAX(CASE WHEN ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '' THEN ejecutivo_asignado END) AS ejecutivo
+        FROM crm_leads
+        WHERE es_duplicado = 0 AND id_crm IS NOT NULL AND trim(id_crm) <> ''
+        GROUP BY trim(id_crm)
+      )
+      SELECT
+        COALESCE(
+          NULLIF(trim(substr(ciclo.vendedor_key, instr(ciclo.vendedor_key, '|') + 1)), ''),
+          NULLIF(trim(lead_ej.ejecutivo), ''),
+          'Sin ejecutivo'
+        ) AS ejecutivo,
+        SUM(CASE WHEN substr(ciclo.estatus_key, instr(ciclo.estatus_key, '|') + 1) IN (${activosSql}) THEN 1 ELSE 0 END) AS cartera,
+        SUM(CASE WHEN substr(ciclo.estatus_key, instr(ciclo.estatus_key, '|') + 1) IN (${activosSql})
+          AND substr(COALESCE(ciclo.fecha_prog_actividad, ''), 1, 10) >= ? THEN 1 ELSE 0 END) AS vigentes
+      FROM ciclo
+      LEFT JOIN lead_ej
+        ON lead_ej.id_crm = substr(ciclo.contacto_key, instr(ciclo.contacto_key, '|') + 1)
+      GROUP BY ejecutivo
+      HAVING cartera > 0
+      ORDER BY (cartera - vigentes) DESC, cartera DESC
+      LIMIT 15
+    `).all(...ESTATUS_CARTERA_ACTIVA, ...ESTATUS_CARTERA_ACTIVA, corte);
+
+    cartera = {
+      activa: Number(carteraRow?.activa || 0),
+      vigentes: Number(carteraRow?.vigentes || 0),
+      diferida: Number(carteraRow?.diferida || 0),
+      diferidaConEspera: Number(carteraRow?.diferidaConEspera || 0),
+      ultimoEstatus: carteraRow?.ultimoEstatus || null,
+      corte,
+      porEjecutivo: porEjecutivo.map((row) => ({
+        ejecutivo: row.ejecutivo,
+        cartera: Number(row.cartera || 0),
+        vigentes: Number(row.vigentes || 0),
+        coberturaPct: roundPct(row.vigentes, row.cartera),
+      })),
+      disponible: true,
+    };
+  }
+
+  const coberturaPct = roundPct(conPrimera, entrantes);
+  const ppro4Pct = roundPct(contactadosConCita, contactados);
+  const ppro5Pct = citas.disponible ? roundPct(citas.asistidas, citas.conResultado) : null;
+  const ppro6Pct = cartera.disponible ? roundPct(cartera.vigentes, cartera.activa) : null;
+
+  return {
+    periodo: { fechaInicio: desde, fechaFin: hasta },
+    indicadores: [
+      {
+        id: 'P-PRO-1A',
+        nombre: 'Cumplimiento del SLA de Primera Atención',
+        componente: 'Cobertura de Primera Atención',
+        valor: coberturaPct,
+        unidad: '%',
+        numerador: conPrimera,
+        denominador: entrantes,
+        meta: 100,
+        disponible: true,
+        detalle: 'Leads del periodo con resultado de la hoja STREGA, sobre entrantes sin duplicado.',
+      },
+      {
+        id: 'P-PRO-1B',
+        nombre: 'Cumplimiento del SLA de Primera Atención',
+        componente: 'Cumplimiento del SLA ≤10 minutos',
+        valor: null,
+        unidad: '%',
+        numerador: null,
+        denominador: entrantes,
+        meta: 100,
+        disponible: false,
+        detalle: 'La hoja no trae hora de entrada ni hora del primer intento. No se promedia con la cobertura.',
+      },
+      {
+        id: 'P-PRO-2',
+        nombre: 'Contacto Efectivo del Ejecutivo',
+        valor: null,
+        unidad: '%',
+        numerador: null,
+        denominador: Number(hoja?.asignados || 0),
+        meta: null,
+        disponible: false,
+        detalle: 'La asignación trae fecha, sin hora, y la columna Contacto es la llamada del centro de contacto. Falta el contacto de doble vía del ejecutivo.',
+      },
+      {
+        id: 'P-PRO-3',
+        nombre: 'CSI de Atención al Prospecto',
+        valor: null,
+        unidad: '%',
+        numerador: null,
+        denominador: null,
+        meta: 90,
+        disponible: false,
+        detalle: 'El archivo CSI Ventas es NPS de entrega, no la calificación 10 de la llamada al prospecto.',
+      },
+      {
+        id: 'P-PRO-4',
+        nombre: 'Conversión Contacto → Cita Programada',
+        valor: ppro4Pct,
+        unidad: '%',
+        numerador: contactadosConCita,
+        denominador: contactados,
+        meta: 25,
+        disponible: contactados > 0,
+        detalle: `${Number(hoja?.citaVacia || 0)} leads del periodo traen la columna de cita vacía. La tasa usa contacto SI y cita SI, virtual o con fecha.`,
+      },
+      {
+        id: 'P-PRO-5',
+        nombre: 'Conversión Cita Programada → Cita Asistida',
+        valor: ppro5Pct,
+        unidad: '%',
+        numerador: citas.asistidas,
+        denominador: citas.conResultado,
+        meta: 60,
+        disponible: citas.disponible && citas.conResultado > 0,
+        detalle: citas.disponible
+          ? `${citas.programadas} primeras citas con fecha en el periodo · ${citas.conResultado} con resultado · ${citas.asistidas} asistidas.`
+          : 'No hay actividades de cita en el CRM local.',
+      },
+      {
+        id: 'P-PRO-6',
+        nombre: 'Cobertura de Gestión de la Cartera Comercial Activa',
+        valor: ppro6Pct,
+        unidad: '%',
+        numerador: cartera.vigentes,
+        denominador: cartera.activa,
+        meta: 100,
+        disponible: cartera.disponible,
+        detalle: cartera.disponible
+          ? `Corte ${cartera.corte}. ${cartera.vigentes} de ${cartera.activa} ciclos activos tienen acción siguiente. Negociación diferida aparte: ${cartera.diferidaConEspera} de ${cartera.diferida} con fecha de espera. Último movimiento de estatus en la cartera: ${cartera.ultimoEstatus || 'sin fecha'}.`
+          : 'No hay ciclos CRM para armar la cartera.',
+      },
+    ],
+    cartera,
+    citas,
+    hoja: {
+      entrantes,
+      conPrimeraAtencion: conPrimera,
+      asignados: Number(hoja?.asignados || 0),
+      contactadosBdc: contactados,
+      asistidasHoja: Number(hoja?.asistidasHoja || 0),
+      citaVacia: Number(hoja?.citaVacia || 0),
+    },
+  };
+}
+
+/** HT-PRO-1: expediente de un prospecto, una fila lógica por ciclo. */
+function getExpedienteProspecto(idContacto) {
+  const d = getDb();
+  const id = String(idContacto || '').trim();
+  if (!id) {
+    throw Object.assign(new Error('idContacto requerido.'), { status: 400 });
+  }
+  const lead = hasLeadsTable(d)
+    ? d.prepare(`
+        SELECT id_crm, nombre, fecha_entrada, resultado, contacto, asignacion,
+          ejecutivo_asignado, fecha_asignacion, cita_programada, fecha_cita, cita_asistida, vin_comprado,
+          canal, campana, auto_interes
+        FROM crm_leads
+        WHERE trim(id_crm) = ? AND es_duplicado = 0
+        ORDER BY fecha_entrada DESC
+        LIMIT 1
+      `).get(id)
+    : null;
+  // Primer lead registrado con este ID: canal y campaña por los que entró originalmente.
+  const origen = hasLeadsTable(d)
+    ? d.prepare(`
+        SELECT canal, campana, fecha_entrada, tipo, auto_interes
+        FROM crm_leads
+        WHERE trim(id_crm) = ?
+        ORDER BY (fecha_entrada IS NULL), fecha_entrada ASC, id ASC
+        LIMIT 1
+      `).get(id)
+    : null;
+
+  let ciclos = [];
+  if (hasActividadesTable(d)) {
+    const corte = new Date().toISOString().slice(0, 10);
+    ciclos = d.prepare(`
+      SELECT
+        id_ciclo,
+        MAX(CASE WHEN nombre_contacto IS NOT NULL AND trim(nombre_contacto) <> ''
+          THEN printf('%s|%s', COALESCE(fecha_estatus, ''), nombre_contacto) END) AS nombre_key,
+        MAX(CASE WHEN estatus IS NOT NULL AND trim(estatus) <> ''
+          THEN printf('%s|%s', COALESCE(fecha_estatus, ''), estatus) END) AS estatus_key,
+        MAX(CASE WHEN vendedor IS NOT NULL AND trim(vendedor) <> ''
+          THEN printf('%s|%s', COALESCE(fecha_estatus, ''), vendedor) END) AS vendedor_key,
+        MAX(CASE WHEN vin IS NOT NULL AND trim(vin) <> ''
+          THEN printf('%s|%s', COALESCE(fecha_estatus, ''), vin) END) AS vin_key,
+        MAX(fecha_estatus) AS fecha_estatus,
+        MAX(fecha_prog_actividad) AS fecha_prog_actividad,
+        MAX(fecha_resp_actividad) AS fecha_resp_actividad
+      FROM crm_actividades
+      WHERE trim(id_contacto) = ?
+        AND id_ciclo IS NOT NULL AND trim(id_ciclo) <> ''
+      GROUP BY id_ciclo
+      ORDER BY fecha_estatus DESC
+      LIMIT 8
+    `).all(id).map((row) => {
+      const estatus = packedTail(row.estatus_key);
+      const prog = row.fecha_prog_actividad;
+      const vigente = ESTATUS_CARTERA_ACTIVA.includes(estatus)
+        && String(prog || '').slice(0, 10) >= corte;
+      return {
+        id_ciclo: row.id_ciclo,
+        nombre_contacto: packedTail(row.nombre_key),
+        estatus,
+        vendedor: packedTail(row.vendedor_key),
+        vin: packedTail(row.vin_key),
+        fecha_estatus: row.fecha_estatus,
+        fecha_prog_actividad: prog,
+        fecha_resp_actividad: row.fecha_resp_actividad,
+        gestion_vigente: vigente ? 1 : 0,
+      };
+    });
+  }
+
+  const activos = ciclos.filter((row) => ESTATUS_CARTERA_ACTIVA.includes(row.estatus));
+  return {
+    idContacto: id,
+    herramienta: 'Expediente Integral del Prospecto (EIP)',
+    prospecto: lead ? {
+      nombre: lead.nombre,
+      fechaEntrada: lead.fecha_entrada,
+      resultado: lead.resultado,
+      contactoBdc: lead.contacto,
+      asignacion: lead.asignacion,
+      ejecutivo: lead.ejecutivo_asignado,
+      fechaAsignacion: lead.fecha_asignacion,
+      citaProgramada: lead.cita_programada,
+      fechaCita: lead.fecha_cita,
+      citaAsistida: lead.cita_asistida,
+      vin: lead.vin_comprado,
+      canal: lead.canal,
+      campana: lead.campana,
+      autoInteres: lead.auto_interes,
+      origen: origen ? {
+        canal: origen.canal,
+        campana: origen.campana,
+        fechaEntrada: origen.fecha_entrada,
+        tipo: origen.tipo,
+        autoInteres: origen.auto_interes,
+      } : null,
+    } : null,
+    ciclos: ciclos.map((row) => ({
+      idCiclo: row.id_ciclo,
+      nombre: row.nombre_contacto,
+      estatus: row.estatus,
+      vendedor: row.vendedor,
+      vin: row.vin,
+      fechaEstatus: row.fecha_estatus,
+      accionSiguiente: row.fecha_prog_actividad,
+      ultimaRespuesta: row.fecha_resp_actividad,
+      gestionVigente: Number(row.gestion_vigente) === 1,
+      enCarteraActiva: ESTATUS_CARTERA_ACTIVA.includes(row.estatus),
+    })),
+    ppro6: {
+      cartera: activos.length,
+      vigentes: activos.filter((row) => Number(row.gestion_vigente) === 1).length,
+    },
+    faltantes: [
+      'Cumplimiento del SLA de Primera Atención: falta la hora de entrada y del primer intento.',
+      'Contacto Efectivo del Ejecutivo: falta la hora del contacto de doble vía.',
+      'CSI de Atención al Prospecto: falta la calificación 10 de la llamada al prospecto.',
+    ],
+  };
+}
+
+/** HT-PRO-2: la cartera de un ejecutivo, con la lista del 1 a 1. */
+function getCarteraEjecutivo({ vendedor, fechaFin = null } = {}) {
+  const d = getDb();
+  const nombre = String(vendedor || '').trim();
+  if (!nombre) {
+    throw Object.assign(new Error('vendedor requerido.'), { status: 400 });
+  }
+  if (!hasActividadesTable(d)) {
+    throw Object.assign(new Error('No hay ciclos CRM para armar la cartera.'), { status: 503 });
+  }
+  const corte = fechaFin ? String(fechaFin).slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const sinEjecutivo = nombre.toLowerCase() === 'sin ejecutivo';
+  const activosSql = ESTATUS_CARTERA_ACTIVA.map(() => '?').join(',');
+  const ejecutivoExpr = `COALESCE(
+    NULLIF(trim(substr(ciclo.vendedor_key, instr(ciclo.vendedor_key, '|') + 1)), ''),
+    NULLIF(trim(lead_ej.ejecutivo), ''),
+    'Sin ejecutivo'
+  )`;
+  const rows = d.prepare(`
+    WITH ciclo AS (${sqlCicloVigente()}),
+    lead_ej AS (
+      SELECT trim(id_crm) AS id_crm,
+        MAX(CASE WHEN ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '' THEN ejecutivo_asignado END) AS ejecutivo
+      FROM crm_leads
+      WHERE es_duplicado = 0 AND id_crm IS NOT NULL AND trim(id_crm) <> ''
+      GROUP BY trim(id_crm)
+    )
+    SELECT ciclo.id_ciclo, ciclo.contacto_key, ciclo.nombre_key, ciclo.estatus_key, ciclo.vin_key,
+      ciclo.fecha_estatus, ciclo.fecha_prog_actividad,
+      CASE WHEN substr(COALESCE(ciclo.fecha_prog_actividad, ''), 1, 10) >= ? THEN 1 ELSE 0 END AS gestion_vigente
+    FROM ciclo
+    LEFT JOIN lead_ej
+      ON lead_ej.id_crm = substr(ciclo.contacto_key, instr(ciclo.contacto_key, '|') + 1)
+    WHERE ${sinEjecutivo ? `${ejecutivoExpr} = 'Sin ejecutivo'` : `LOWER(${ejecutivoExpr}) = LOWER(?)`}
+      AND substr(ciclo.estatus_key, instr(ciclo.estatus_key, '|') + 1) IN (${activosSql})
+    ORDER BY gestion_vigente ASC, ciclo.fecha_estatus DESC
+  `).all(...(sinEjecutivo ? [corte] : [corte, nombre]), ...ESTATUS_CARTERA_ACTIVA);
+
+  const vigentes = rows.filter((row) => Number(row.gestion_vigente) === 1).length;
+  return {
+    herramienta: 'Expediente Integral del Ejecutivo de Ventas (EIEV)',
+    vendedor: nombre,
+    corte,
+    cartera: rows.length,
+    vigentes,
+    sinGestion: rows.length - vigentes,
+    coberturaPct: roundPct(vigentes, rows.length),
+    meta: 100,
+    lista: rows.slice(0, 40).map((row) => ({
+      idCiclo: row.id_ciclo,
+      idContacto: packedTail(row.contacto_key),
+      nombre: packedTail(row.nombre_key),
+      estatus: packedTail(row.estatus_key),
+      vin: packedTail(row.vin_key),
+      fechaEstatus: row.fecha_estatus,
+      accionSiguiente: row.fecha_prog_actividad,
+      gestionVigente: Number(row.gestion_vigente) === 1,
+    })),
+  };
+}
+
+/* ───────────────── P-VTA-4 · Tiempo de Maduración Comercial ───────────────── */
+
+/** Parámetros por confirmar con Gerencia (docs P-VTA-4). */
+const PVTA4 = {
+  agrupaCompraDias: 7,      // compras casi simultáneas = una sola venta
+  carteraMeses: 48,         // compra previa dentro de este plazo = cliente de cartera
+  perdidoDias: 180,         // prospecto sin actividad = perdido
+  maxMaduracionDias: 730,   // > 24 meses se excluye
+  // Un ciclo cerrado en negativo que no tuvo seguimiento dentro de estos días
+  // no cuenta como llegada: no inició el proceso que produjo la venta.
+  cicloMuertoDias: 30,
+  mesesSerie: 12,           // serie mensual mostrada
+  mesesCurva: 24,           // histórico para la curva de maduración
+};
+const PVTA4_TTL_MS = 10 * 60 * 1000;
+// Estatus que cierran un ciclo sin compra. Si el ciclo no tuvo actividad
+// después de abrirse, no cuenta como llegada del cliente.
+// Estatus que no representan una gestión en curso. Un ciclo en estos estatus
+// solo cuenta como llegada si tuvo seguimiento real después de abrirse.
+const ESTATUS_CICLO_CERRADO = new Set([
+  'Descartado', 'Lead Caducado', 'Venta Perdida', 'Neg. Diferida', 'Prospección',
+]);
+
+const PVTA4_EDADES = [
+  { key: '0-7', label: '0–7 d', min: 0, max: 7 },
+  { key: '8-15', label: '8–15 d', min: 8, max: 15 },
+  { key: '16-30', label: '16–30 d', min: 16, max: 30 },
+  { key: '31-60', label: '31–60 d', min: 31, max: 60 },
+  { key: '61-90', label: '61–90 d', min: 61, max: 90 },
+  { key: '91-180', label: '91–180 d', min: 91, max: 180 },
+  { key: '180+', label: '> 180 d', min: 181, max: Infinity },
+];
+
+function isoDay(value) {
+  const iso = toIsoDate(value);
+  return iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null;
+}
+
+function diasEntre(desdeIso, hastaIso) {
+  if (!desdeIso || !hastaIso) return null;
+  const a = Date.UTC(+desdeIso.slice(0, 4), +desdeIso.slice(5, 7) - 1, +desdeIso.slice(8, 10));
+  const b = Date.UTC(+hastaIso.slice(0, 4), +hastaIso.slice(5, 7) - 1, +hastaIso.slice(8, 10));
+  return Math.round((b - a) / 86400000);
+}
+
+function sumarMesesIso(iso, meses) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + meses);
+  return d.toISOString().slice(0, 10);
+}
+
+function sumarDiasIso(iso, dias) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+function estadisticasDias(valores) {
+  const list = valores.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (!list.length) return { n: 0, promedio: null, mediana: null, p25: null, p75: null, min: null, max: null };
+  const q = (p) => list[Math.min(list.length - 1, Math.floor(p * (list.length - 1) + 0.5))];
+  return {
+    n: list.length,
+    promedio: Math.round((list.reduce((s, v) => s + v, 0) / list.length) * 10) / 10,
+    mediana: q(0.5),
+    p25: q(0.25),
+    p75: q(0.75),
+    min: list[0],
+    max: list[list.length - 1],
+  };
+}
+
+/**
+ * Base longitudinal del P-VTA-4: cada venta lograda con su fecha de llegada,
+ * días de maduración y origen (cartera / lead / sin clasificar), más los
+ * prospectos activos con su edad y los prospectos perdidos para la curva.
+ * Se calcula una vez por día y se reutiliza para cualquier periodo.
+ */
+function computeMaduracionBase(hoyIso) {
+  const d = getDb();
+  if (!hasActividadesTable(d)) {
+    throw Object.assign(new Error('No hay ciclos CRM para medir la maduración.'), { status: 503 });
+  }
+  const fechaValida = (col) => `${col} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'`;
+
+  // 1) Ciclos: histórico del Excel fijo (crm_actividades) + ciclos en vivo de
+  // Railway (crm_ciclos_live). Cuando un ciclo existe en ambos, gana el vivo.
+  const cicloSelect = (tabla) => `
+    SELECT
+      trim(id_contacto) AS id_contacto,
+      trim(id_ciclo) AS id_ciclo,
+      MIN(CASE WHEN ${fechaValida('fecha_inicio_ciclo')} THEN substr(fecha_inicio_ciclo, 1, 10) END) AS fic,
+      MIN(CASE WHEN ${fechaValida('fecha_crea_actividad')} THEN substr(fecha_crea_actividad, 1, 10) END) AS crea,
+      MAX(substr(COALESCE(fecha_resp_actividad, fecha_prog_actividad, fecha_crea_actividad, fecha_estatus, fecha_inicio_ciclo), 1, 10)) AS ult,
+      MAX(substr(COALESCE(fecha_resp_actividad, fecha_crea_actividad, fecha_estatus), 1, 10)) AS ult_real,
+      MAX(CASE WHEN estatus IS NOT NULL AND trim(estatus) <> ''
+        THEN printf('%s|%s', COALESCE(fecha_estatus, ''), estatus) END) AS estatus_key,
+      MAX(CASE WHEN nombre_contacto IS NOT NULL AND trim(nombre_contacto) <> '' THEN nombre_contacto END) AS nombre,
+      MAX(CASE WHEN vendedor IS NOT NULL AND trim(vendedor) <> '' THEN vendedor END) AS vendedor,
+      MIN(CASE WHEN ${fechaValida('fecha_factura')} THEN substr(fecha_factura, 1, 10) END) AS ff,
+      MAX(CASE WHEN producto_vendido IS NOT NULL AND trim(producto_vendido) <> '' THEN producto_vendido END) AS producto,
+      COUNT(DISTINCT CASE WHEN trim(COALESCE(vin, '')) <> '' AND ${fechaValida('fecha_factura')} THEN upper(trim(vin)) END) AS unidades
+    FROM ${tabla}
+    WHERE id_contacto IS NOT NULL AND trim(id_contacto) <> ''
+      AND id_ciclo IS NOT NULL AND trim(id_ciclo) <> ''
+    GROUP BY trim(id_contacto), trim(id_ciclo)`;
+  const live = hasCiclosLiveTable(d);
+  const ciclosRows = d.prepare(live
+    ? `${cicloSelect('crm_actividades')}
+       AND trim(id_ciclo) NOT IN (SELECT trim(id_ciclo) FROM crm_ciclos_live WHERE trim(COALESCE(id_ciclo, '')) <> '')
+       UNION ALL
+       ${cicloSelect('crm_ciclos_live')}`
+    : cicloSelect('crm_actividades')).all();
+
+  const contactos = new Map();
+  const getC = (id) => {
+    let c = contactos.get(id);
+    if (!c) {
+      c = { id, nombre: null, ciclos: [], leads: [], huellas: [], ventas: [] };
+      contactos.set(id, c);
+    }
+    return c;
+  };
+  for (const r of ciclosRows) {
+    const c = getC(r.id_contacto);
+    if (!c.nombre && r.nombre) c.nombre = r.nombre;
+    const ciclo = {
+      idCiclo: r.id_ciclo,
+      fic: isoDay(r.fic),
+      crea: isoDay(r.crea),
+      ult: isoDay(r.ult),
+      ultReal: isoDay(r.ult_real),
+      estatus: packedTail(r.estatus_key),
+      vendedor: r.vendedor || null,
+      ff: isoDay(r.ff),
+      producto: r.producto || null,
+      unidades: Number(r.unidades || 0),
+    };
+    c.ciclos.push(ciclo);
+    // Ciclo cerrado en negativo sin seguimiento: no inició el proceso de la venta.
+    // Seguimiento real = actividad distinta al alta del ciclo. Una fecha
+    // programada a futuro no cuenta: el CRM la asigna al crear el ciclo.
+    const referencia = ciclo.ultReal !== undefined ? ciclo.ultReal : ciclo.ult;
+    const muerto = ESTATUS_CICLO_CERRADO.has(ciclo.estatus) && ciclo.fic && (
+      !referencia
+      || diasEntre(ciclo.fic, referencia) <= 0
+      || diasEntre(ciclo.fic, referencia) <= PVTA4.cicloMuertoDias
+    );
+    if (muerto) continue;
+    if (ciclo.fic) c.huellas.push({ fecha: ciclo.fic, fuente: 'ciclo' });
+    // La fecha de creación de la actividad no es una llegada: el CRM reutiliza
+    // actividades de ciclos anteriores y esa fecha puede ser meses previa al
+    // inicio real del ciclo que produjo la venta.
+  }
+
+  // 2) Huellas fuera de los ciclos: leads, pruebas de manejo y solicitudes.
+  if (hasLeadsTable(d)) {
+    for (const r of d.prepare(`
+      SELECT trim(id_crm) AS id, substr(fecha_entrada, 1, 10) AS fecha, canal, campana
+      FROM crm_leads
+      WHERE id_crm IS NOT NULL AND trim(id_crm) <> '' AND ${fechaValida('fecha_entrada')}
+    `).all()) {
+      const fecha = isoDay(r.fecha);
+      if (!fecha) continue;
+      const c = getC(r.id);
+      c.leads.push({ fecha, canal: r.canal || null, campana: r.campana || null });
+      c.huellas.push({ fecha, fuente: 'lead' });
+    }
+  }
+  if (hasPruebasManejoTable(d)) {
+    for (const r of d.prepare(`
+      SELECT trim(id_crm) AS id, substr(fecha, 1, 10) AS fecha
+      FROM crm_pruebas_manejo
+      WHERE id_crm IS NOT NULL AND trim(id_crm) <> '' AND ${fechaValida('fecha')}
+    `).all()) {
+      const fecha = isoDay(r.fecha);
+      if (fecha) getC(r.id).huellas.push({ fecha, fuente: 'prueba' });
+    }
+  }
+  if (hasSolicitudesTable(d)) {
+    for (const r of d.prepare(`
+      SELECT trim(id_crm) AS id, substr(fecha_solicitud, 1, 10) AS fecha
+      FROM crm_solicitudes
+      WHERE id_crm IS NOT NULL AND trim(id_crm) <> '' AND ${fechaValida('fecha_solicitud')}
+    `).all()) {
+      const fecha = isoDay(r.fecha);
+      if (fecha) getC(r.id).huellas.push({ fecha, fuente: 'solicitud' });
+    }
+  }
+
+  const ventas = [];
+  const activos = [];
+  const perdidos = [];
+  for (const c of contactos.values()) {
+    const r = clasificarContactoMaduracion(c, hoyIso);
+    ventas.push(...r.ventas);
+    if (r.activo) activos.push(r.activo);
+    if (r.perdido) perdidos.push(r.perdido);
+  }
+
+  return {
+    hoy: hoyIso,
+    ventas,
+    activos,
+    perdidos,
+    contactos: contactos.size,
+    ciclosEnVivo: live,
+    ciclosEnVivoSync: live
+      ? (d.prepare(`SELECT valor FROM crm_ciclos_live_meta WHERE clave = 'synced_at'`).get()?.valor || null)
+      : null,
+  };
+}
+
+/**
+ * Reglas P-VTA-4 para un contacto (función pura, probada con datos sintéticos):
+ *  - una venta = un ciclo ganador; compras separadas ≤ 7 días se agrupan;
+ *  - la llegada es la primera huella posterior a la compra anterior;
+ *  - origen cartera > lead > sin clasificar;
+ *  - el contacto sin compra posterior queda como activo o perdido.
+ *
+ * @param {{id, nombre, ciclos:[{idCiclo,fic,crea,ult,estatus,vendedor,ff,producto,unidades}], leads:[{fecha,canal,campana}], huellas:[{fecha,fuente}]}} c
+ */
+function clasificarContactoMaduracion(c, hoyIso) {
+  const limiteCartera = PVTA4.carteraMeses * 30.44;
+  const limiteFuturo = sumarDiasIso(hoyIso, 1);
+  const ventas = [];
+  const huellas = (c.huellas || [])
+    .filter((h) => h.fecha && h.fecha >= '2000-01-01' && h.fecha < limiteFuturo)
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const leads = [...(c.leads || [])].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const ciclos = c.ciclos || [];
+
+  // Ventas: ciclos con factura, agrupando compras casi simultáneas.
+  const facturados = ciclos.filter((x) => x.ff && x.ff < limiteFuturo).sort((a, b) => a.ff.localeCompare(b.ff));
+  const grupos = [];
+  for (const ciclo of facturados) {
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && diasEntre(ultimo.ff, ciclo.ff) <= PVTA4.agrupaCompraDias) {
+      ultimo.ciclos.push(ciclo);
+      ultimo.unidades += Math.max(1, ciclo.unidades || 0);
+      continue;
+    }
+    grupos.push({ ff: ciclo.ff, ciclos: [ciclo], unidades: Math.max(1, ciclo.unidades || 0) });
+  }
+
+  let prevFf = null;
+  for (const g of grupos) {
+    const ganador = g.ciclos[0];
+    const enVentana = (fecha) => fecha <= g.ff && (!prevFf || fecha > prevFf);
+    const huellasVentana = huellas.filter((h) => enVentana(h.fecha));
+    let llegada = null;
+    let fuente = null;
+    if (prevFf && ganador.fic && ganador.fic <= prevFf) {
+      // El ciclo ganador ya estaba abierto al facturar la compra anterior.
+      llegada = ganador.fic;
+      fuente = 'ciclo';
+    } else if (huellasVentana.length) {
+      llegada = huellasVentana[0].fecha;
+      fuente = huellasVentana[0].fuente;
+    } else if (ganador.fic) {
+      llegada = ganador.fic;
+      fuente = 'ciclo';
+    }
+    const dias = diasEntre(llegada, g.ff);
+    let excluida = null;
+    if (!llegada) excluida = 'sin fecha de llegada';
+    else if (dias < 0) excluida = 'duración negativa';
+    else if (dias > PVTA4.maxMaduracionDias) excluida = 'mayor a 24 meses';
+
+    const leadsVentana = leads.filter((l) => enVentana(l.fecha));
+    let origen = 'sin_clasificar';
+    if (prevFf && llegada && diasEntre(prevFf, llegada) <= limiteCartera) origen = 'cartera';
+    else if (leadsVentana.length) origen = 'lead';
+    const lead = leadsVentana[0] || null;
+    const ciclosHastaCerrar = ciclos.filter((x) => x.fic && enVentana(x.fic)).length || 1;
+
+    ventas.push({
+      idContacto: c.id,
+      nombre: c.nombre || null,
+      idCiclo: ganador.idCiclo,
+      fechaFactura: g.ff,
+      llegada,
+      llegadaFuente: fuente,
+      dias: excluida ? null : dias,
+      excluida,
+      origen,
+      canal: lead?.canal || null,
+      campana: lead?.campana || null,
+      vendedor: ganador.vendedor || null,
+      producto: ganador.producto || null,
+      unidades: g.unidades,
+      ciclosHastaCerrar,
+      compraPrevia: prevFf,
+    });
+    prevFf = g.ff;
+  }
+
+  // Prospecto sin compra posterior a su última huella: activo o perdido.
+  const ultimaFf = prevFf;
+  const ciclosAbiertos = ciclos.filter((x) => !x.ff && (!ultimaFf || !x.fic || x.fic > ultimaFf));
+  if (!ciclosAbiertos.length) return { ventas, activo: null, perdido: null };
+  const huellasPost = huellas.filter((h) => !ultimaFf || h.fecha > ultimaFf);
+  const llegada = huellasPost[0]?.fecha
+    || ciclosAbiertos.map((x) => x.fic).filter(Boolean).sort()[0]
+    || null;
+  if (!llegada) return { ventas, activo: null, perdido: null };
+  const ultimaAct = ciclosAbiertos.map((x) => x.ult).filter(Boolean).sort().pop() || llegada;
+  const cicloVigente = [...ciclosAbiertos].sort((a, b) =>
+    String(b.ult || b.fic || '').localeCompare(String(a.ult || a.fic || '')))[0];
+  const leadPost = leads.find((l) => !ultimaFf || l.fecha > ultimaFf) || null;
+  const origen = ultimaFf && diasEntre(ultimaFf, llegada) <= limiteCartera
+    ? 'cartera'
+    : (leadPost ? 'lead' : 'sin_clasificar');
+  const sinActividad = diasEntre(ultimaAct, hoyIso);
+  const enCartera = ESTATUS_CARTERA_ACTIVA.includes(cicloVigente.estatus);
+  if (enCartera && sinActividad <= PVTA4.perdidoDias) {
+    return {
+      ventas,
+      perdido: null,
+      activo: {
+        idContacto: c.id,
+        nombre: c.nombre || null,
+        llegada,
+        edad: Math.max(0, diasEntre(llegada, hoyIso)),
+        estatus: cicloVigente.estatus,
+        vendedor: cicloVigente.vendedor || null,
+        ultimaActividad: ultimaAct,
+        origen,
+        canal: leadPost?.canal || null,
+      },
+    };
+  }
+  return {
+    ventas,
+    activo: null,
+    perdido: {
+      llegada,
+      edadAlPerder: Math.max(0, diasEntre(llegada, ultimaAct)),
+      origen,
+    },
+  };
+}
+
+function getMaduracionBase(hoyIso) {
+  return ttlCache('pvta4Base', hoyIso, PVTA4_TTL_MS, () => computeMaduracionBase(hoyIso));
+}
+
+/**
+ * Curva empírica: probabilidad de que un prospecto que seguía abierto a la edad `a`
+ * compre en los siguientes `h` días. Incluye a los perdidos para no sobrestimar.
+ */
+function construirCurva(ventas, perdidos, { desde, hasta }) {
+  const cohorteVentas = ventas.filter((v) => v.dias != null && v.llegada >= desde && v.llegada <= hasta);
+  const cohortePerdidos = perdidos.filter((p) => p.llegada >= desde && p.llegada <= hasta);
+  const porOrigen = (origen) => ({
+    compras: cohorteVentas.filter((v) => !origen || v.origen === origen).map((v) => v.dias),
+    perdidos: cohortePerdidos.filter((p) => !origen || p.origen === origen).map((p) => p.edadAlPerder),
+  });
+  const curvas = {
+    general: porOrigen(null),
+    cartera: porOrigen('cartera'),
+    lead: porOrigen('lead'),
+    sin_clasificar: porOrigen('sin_clasificar'),
+  };
+  const MINIMO_VIVOS = 20;
+  const evaluar = (base, edad, horizonte) => {
+    const vivos = base.compras.filter((x) => x > edad).length + base.perdidos.filter((x) => x > edad).length;
+    if (vivos < MINIMO_VIVOS) return null;
+    const compran = base.compras.filter((x) => x > edad && x <= edad + horizonte).length;
+    return Math.min(1, compran / vivos);
+  };
+  const probabilidad = (origen, edad, horizonte) => {
+    const propia = curvas[origen];
+    const conPropia = propia && propia.compras.length >= 30 ? evaluar(propia, edad, horizonte) : null;
+    if (conPropia != null) return conPropia;
+    return evaluar(curvas.general, edad, horizonte) ?? 0;
+  };
+  return {
+    probabilidad,
+    tamano: {
+      compras: curvas.general.compras.length,
+      perdidos: curvas.general.perdidos.length,
+      desde,
+      hasta,
+    },
+  };
+}
+
+/**
+ * P-VTA-4 para un periodo: días de maduración (promedio, mediana, P75) por origen,
+ * serie mensual, prospectos activos por edad y cobertura del objetivo.
+ */
+function getTiempoMaduracion({ fechaInicio = null, fechaFin = null } = {}) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  let fi = isoDay(fechaInicio);
+  let ff = isoDay(fechaFin);
+  if (!fi || !ff) {
+    fi = `${hoy.slice(0, 7)}-01`;
+    ff = sumarDiasIso(sumarMesesIso(fi, 1), -1);
+  }
+  if (fi > ff) [fi, ff] = [ff, fi];
+  return ttlCache('pvta4', `${fi}|${ff}|${hoy}`, PVTA4_TTL_MS, () => {
+    const base = getMaduracionBase(hoy);
+    const ventasPeriodo = base.ventas.filter((v) => v.fechaFactura >= fi && v.fechaFactura <= ff);
+    const validas = ventasPeriodo.filter((v) => v.dias != null);
+    const excluidas = ventasPeriodo.filter((v) => v.excluida);
+
+    const resumenOrigen = (origen) => {
+      const lista = validas.filter((v) => v.origen === origen);
+      return {
+        ...estadisticasDias(lista.map((v) => v.dias)),
+        mezclaPct: validas.length ? Math.round((lista.length / validas.length) * 1000) / 10 : 0,
+        ciclosHastaCerrar: lista.length
+          ? Math.round((lista.reduce((s, v) => s + v.ciclosHastaCerrar, 0) / lista.length) * 10) / 10
+          : null,
+      };
+    };
+    const general = estadisticasDias(validas.map((v) => v.dias));
+    const origenes = {
+      cartera: resumenOrigen('cartera'),
+      lead: resumenOrigen('lead'),
+      sin_clasificar: resumenOrigen('sin_clasificar'),
+    };
+
+    // Serie mensual (meses completos que terminan en el mes del fin del periodo).
+    const mesFin = `${ff.slice(0, 7)}-01`;
+    const serie = [];
+    for (let i = PVTA4.mesesSerie - 1; i >= 0; i--) {
+      const inicioMes = sumarMesesIso(mesFin, -i);
+      const finMes = sumarDiasIso(sumarMesesIso(inicioMes, 1), -1);
+      const delMes = base.ventas.filter((v) => v.dias != null && v.fechaFactura >= inicioMes && v.fechaFactura <= finMes);
+      const stat = (origen) => estadisticasDias(delMes.filter((v) => !origen || v.origen === origen).map((v) => v.dias));
+      serie.push({
+        mes: inicioMes.slice(0, 7),
+        general: stat(null),
+        cartera: stat('cartera'),
+        lead: stat('lead'),
+        ventas: delMes.length,
+        mezclaCarteraPct: delMes.length
+          ? Math.round((delMes.filter((v) => v.origen === 'cartera').length / delMes.length) * 1000) / 10
+          : null,
+      });
+    }
+    const ultimos3 = serie.slice(-3).flatMap((m) => base.ventas.filter((v) => v.dias != null && v.fechaFactura.slice(0, 7) === m.mes).map((v) => v.dias));
+    const previos9 = serie.slice(0, -3).flatMap((m) => base.ventas.filter((v) => v.dias != null && v.fechaFactura.slice(0, 7) === m.mes).map((v) => v.dias));
+    const movil3 = estadisticasDias(ultimos3);
+    const historico = estadisticasDias(previos9);
+    const anual = estadisticasDias([...previos9, ...ultimos3]);
+
+    // Leads por canal (ventas del periodo con origen lead).
+    const porCanal = new Map();
+    for (const v of validas.filter((x) => x.origen === 'lead')) {
+      const key = v.canal || 'Sin canal';
+      if (!porCanal.has(key)) porCanal.set(key, []);
+      porCanal.get(key).push(v.dias);
+    }
+    const leadsPorCanal = [...porCanal.entries()]
+      .map(([canal, dias]) => ({ canal, ...estadisticasDias(dias) }))
+      .sort((a, b) => b.n - a.n);
+
+    // Prospectos activos por edad. Zona de maduración = rango intercuartil de los
+    // últimos 12 meses (donde cierra la mitad central de las ventas).
+    const zonaDesde = anual.p25 ?? null;
+    const zonaHasta = anual.p75 ?? null;
+    const activosPorEdad = PVTA4_EDADES.map((b) => ({
+      ...b,
+      max: Number.isFinite(b.max) ? b.max : null,
+      n: base.activos.filter((a) => a.edad >= b.min && a.edad <= b.max).length,
+      enZona: zonaDesde != null && zonaHasta != null && b.max >= zonaDesde && b.min <= zonaHasta,
+    }));
+    const activosMaduros = zonaDesde != null ? base.activos.filter((a) => a.edad >= zonaDesde).length : 0;
+    const ultimoCicloAbierto = base.activos.map((a) => a.llegada).sort().pop() || null;
+    const ultimaFactura = base.ventas.map((v) => v.fechaFactura).sort().pop() || null;
+
+    // Cobertura del objetivo (solo tiene sentido si el periodo sigue abierto).
+    const horizonte = Math.max(0, diasEntre(hoy, ff));
+    const curva = construirCurva(base.ventas, base.perdidos, {
+      desde: sumarMesesIso(ff, -PVTA4.mesesCurva),
+      hasta: sumarDiasIso(ff, -PVTA4.perdidoDias),
+    });
+    let objetivo = null;
+    let objetivoFuente = null;
+    try {
+      const goals = require('./salesGoals').getGoals({ fechaInicio: fi, fechaFin: ff });
+      objetivo = Number(goals?.retail) > 0 ? Number(goals.retail) : null;
+      objetivoFuente = objetivo != null ? (goals?.retailSource || null) : null;
+    } catch { /* sin objetivo configurado */ }
+    const facturadas = ventasPeriodo.reduce((s, v) => s + Math.max(1, v.unidades), 0);
+    const faltante = objetivo != null ? Math.max(0, objetivo - facturadas) : null;
+    const prospectos = base.activos
+      .map((a) => ({ ...a, probabilidad: horizonte > 0 ? curva.probabilidad(a.origen, a.edad, horizonte) : 0 }))
+      .sort((a, b) => b.probabilidad - a.probabilidad || b.edad - a.edad);
+    const esperadas = Math.round(prospectos.reduce((s, p) => s + p.probabilidad, 0) * 10) / 10;
+    const cobertura = {
+      aplica: horizonte > 0 && objetivo != null,
+      periodoCerrado: horizonte === 0,
+      horizonteDias: horizonte,
+      objetivo,
+      objetivoFuente,
+      facturadas,
+      faltante,
+      esperadas,
+      pct: faltante != null && faltante > 0 && horizonte > 0
+        ? Math.round((esperadas / faltante) * 1000) / 10
+        : (faltante === 0 ? 100 : null),
+      prospectosActivos: base.activos.length,
+      prospectosMaduros: activosMaduros,
+      prospectosNecesarios: faltante != null && faltante > 0 && esperadas < faltante && base.activos.length && esperadas > 0
+        ? Math.ceil((faltante - esperadas) / (esperadas / base.activos.length))
+        : 0,
+      curva: curva.tamano,
+    };
+
+    const listaVentas = [...validas]
+      .sort((a, b) => b.fechaFactura.localeCompare(a.fechaFactura))
+      .slice(0, 60)
+      .map((v) => ({
+        idContacto: v.idContacto,
+        nombre: v.nombre,
+        fechaFactura: v.fechaFactura,
+        llegada: v.llegada,
+        llegadaFuente: v.llegadaFuente,
+        dias: v.dias,
+        origen: v.origen,
+        canal: v.canal,
+        campana: v.campana,
+        vendedor: v.vendedor,
+        producto: v.producto,
+        unidades: v.unidades,
+        ciclosHastaCerrar: v.ciclosHastaCerrar,
+      }));
+
+    return {
+      clave: 'P-VTA-4',
+      indicador: 'Tiempo de Maduración Comercial',
+      periodo: { fechaInicio: fi, fechaFin: ff, hoy },
+      parametros: { ...PVTA4 },
+      general,
+      origenes,
+      movil3,
+      historico,
+      anual,
+      serie,
+      leadsPorCanal,
+      datos: {
+        contactos: base.contactos,
+        ventasHistoricas: base.ventas.length,
+        ultimaFactura,
+        ultimoCicloAbierto,
+        ciclosEnVivo: base.ciclosEnVivo,
+        ciclosEnVivoSync: base.ciclosEnVivoSync,
+      },
+      excluidas: {
+        total: excluidas.length,
+        motivos: excluidas.reduce((acc, v) => {
+          acc[v.excluida] = (acc[v.excluida] || 0) + 1;
+          return acc;
+        }, {}),
+      },
+      activosPorEdad,
+      zonaMaduracion: { desde: zonaDesde, hasta: zonaHasta },
+      cobertura,
+      prospectos: prospectos.slice(0, 40),
+      ventas: listaVentas,
+      metodologia: {
+        llegada: 'Primera huella del cliente en CRM (lead, ciclo, actividad, prueba de manejo o solicitud) posterior a su compra anterior. Un ciclo descartado, caducado, perdido, diferido o que se quedó en prospección sin seguimiento posterior no cuenta como llegada.',
+        venta: 'Fecha de factura del ciclo; compras separadas por 7 días o menos cuentan como una sola venta.',
+        origen: 'Cartera = compra previa en Balderrama dentro de 48 meses; Lead = registro en STREGA sin compra previa; el resto queda sin clasificar.',
+        cobertura: 'Ventas esperadas = suma de la probabilidad histórica de compra de cada prospecto activo según su edad, en los días que faltan del periodo. Objetivo = meta retail del mes en Ventas.',
+        semaforo: 'Sin meta ni semáforo por definición del catálogo; la cobertura se lee contra 100%.',
+      },
+    };
+  });
+}
+
 module.exports = {
   isAvailable,
   releaseDb,
+  warmCaches,
+  getTiempoMaduracion,
+  clasificarContactoMaduracion,
+  PVTA4,
   getCrmStats,
   searchContacts,
   getContactHistory,
@@ -6065,6 +7518,9 @@ module.exports = {
   resolveIdCrmByTelefono,
   listVendedores,
   getVendedorResumen,
+  getProspeccionIndicadores,
+  getExpedienteProspecto,
+  getCarteraEjecutivo,
   getQuejasCsiSummary,
   getQuejasCsiForPersona,
   classifyEntregasTipoCliente,

@@ -638,6 +638,7 @@ function buildAgeingSlowTable(units, utilidadRows = []) {
       gastosAdicionales,
       utilidadNeta,
       planPisoAcumulado: roundMoney(planPisoAcumulado) || 0,
+      costoDiario: generaInteres ? (roundMoney(PLAN_PISO_FACTOR * Number(unit.importeRemision || 0)) || 0) : 0,
       daysChargeable: planPiso.daysChargeable || 0,
       generaInteres,
       units: 1,
@@ -664,6 +665,160 @@ function buildAgeingSlowTable(units, utilidadRows = []) {
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 
   return { ageingSlowTable, carlineFilters };
+}
+
+function medianNumber(values) {
+  const list = values.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!list.length) return null;
+  const mid = Math.floor(list.length / 2);
+  return list.length % 2 ? list[mid] : Math.round((list[mid - 1] + list[mid]) / 2);
+}
+
+function ageRangeKey(days) {
+  const d = Number(days);
+  if (!Number.isFinite(d)) return null;
+  if (d <= 30) return 'r0';
+  if (d <= 60) return 'r31';
+  if (d <= 90) return 'r61';
+  return 'r90';
+}
+
+function buildAntiguedadPorCarline(table) {
+  const map = new Map();
+  for (const row of table) {
+    const carline = row.carline || 'Sin familia';
+    if (!map.has(carline)) {
+      map.set(carline, { carline, r0: 0, r31: 0, r61: 0, r90: 0, total: 0 });
+    }
+    const entry = map.get(carline);
+    const key = ageRangeKey(row.daysInStock);
+    if (key) entry[key] += 1;
+    entry.total += 1;
+  }
+  return [...map.values()]
+    .map((row) => ({
+      ...row,
+      pct90: row.total ? Math.round((row.r90 / row.total) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.total - a.total || a.carline.localeCompare(b.carline, 'es'));
+}
+
+function buildCoberturaCarline(table, ventasRows) {
+  const disp = new Map();
+  for (const row of table) {
+    const carline = row.carline || 'Sin familia';
+    disp.set(carline, (disp.get(carline) || 0) + 1);
+  }
+  const ventas = new Map();
+  for (const row of ventasRows || []) {
+    const key = String(row.carline || '').trim().toUpperCase();
+    if (!key) continue;
+    ventas.set(key, (ventas.get(key) || 0) + Number(row.n || 0));
+  }
+  const items = [...disp.entries()].map(([carline, disponibles]) => {
+    const vendidas90 = ventas.get(carline.toUpperCase()) || 0;
+    let dias = null;
+    let banda = 'sin_ventas';
+    if (vendidas90 > 0) {
+      dias = Math.round(disponibles / (vendidas90 / 90));
+      if (dias < 20) banda = 'quiebre';
+      else if (dias <= 60) banda = 'sano';
+      else if (dias <= 90) banda = 'alto';
+      else banda = 'sobrestock';
+    }
+    return { carline, disponibles, vendidas90, dias, banda };
+  }).sort((a, b) => (a.dias ?? 9999) - (b.dias ?? 9999) || b.disponibles - a.disponibles);
+
+  const disponibles = items.reduce((s, row) => s + row.disponibles, 0);
+  const vendidas90 = items.reduce((s, row) => s + row.vendidas90, 0);
+  return {
+    ventanaDias: 90,
+    global: vendidas90 > 0 ? Math.round(disponibles / (vendidas90 / 90)) : null,
+    fuera: items.filter((row) => row.banda === 'quiebre' || row.banda === 'sobrestock').length,
+    quiebre: items.filter((row) => row.banda === 'quiebre').map((row) => row.carline),
+    sobrestock: items.filter((row) => row.banda === 'sobrestock').map((row) => row.carline),
+    sinVentas: items.filter((row) => row.banda === 'sin_ventas').map((row) => row.carline),
+    items,
+  };
+}
+
+async function loadVentasCarline90() {
+  try {
+    return await query(`
+      SELECT
+        LTRIM(RTRIM(ISNULL(NULLIF(cat.UNC_FAMILIA, ''), 'Sin familia'))) AS carline,
+        COUNT(*) AS n
+      FROM ADE_VTAFI v
+      INNER JOIN SER_VEHICULO veh
+        ON veh.VEH_NUMSERIE = v.VTE_SERIE
+        AND veh.VEH_NOINVENTA > 0
+      INNER JOIN UNI_CATALOGO cat
+        ON cat.UNC_MODELO = veh.VEH_ANMODELO
+        AND cat.UNC_IDCATALOGO = veh.VEH_CATALOGO
+      WHERE v.VTE_TIPODOCTO = 'A'
+        AND v.VTE_STATUS = 'I'
+        AND CONVERT(date, v.VTE_FECHDOCTO, 103) >= DATEADD(day, -90, CAST(GETDATE() AS date))
+      GROUP BY LTRIM(RTRIM(ISNULL(NULLIF(cat.UNC_FAMILIA, ''), 'Sin familia')))
+    `);
+  } catch (err) {
+    console.error('[inventory] ventas 90 días por carline:', err.message);
+    return [];
+  }
+}
+
+function buildInventarioLectura(table, ventasRows) {
+  const days = table.map((row) => Number(row.daysInStock)).filter((n) => Number.isFinite(n));
+  const plus90 = table.filter((row) => Number(row.daysInStock) > 90);
+  const sobre60 = table.filter((row) => Number(row.daysInStock) >= 60);
+  const candidatas = table
+    .filter((row) => {
+      const utilidad = Number(row.utilidadPromedio);
+      const piso = Number(row.planPisoAcumulado || 0);
+      return utilidad > 0 && piso > 0 && piso / utilidad >= 0.3;
+    })
+    .sort((a, b) => Number(b.planPisoAcumulado) - Number(a.planPisoAcumulado))
+    .slice(0, 15)
+    .map((row) => ({
+      vin: row.vin,
+      carline: row.carline,
+      version: row.version,
+      daysInStock: row.daysInStock,
+      planPisoAcumulado: row.planPisoAcumulado,
+      costoDiario: row.costoDiario,
+      utilidadPromedio: row.utilidadPromedio,
+      pctCosto: row.utilidadPromedio
+        ? Math.round((Number(row.planPisoAcumulado) / Number(row.utilidadPromedio)) * 1000) / 10
+        : null,
+    }));
+  const porCarline = buildAntiguedadPorCarline(table);
+  return {
+    antiguedad: {
+      mediana: medianNumber(days),
+      promedio: days.length ? Math.round(days.reduce((s, n) => s + n, 0) / days.length) : null,
+      plus90: plus90.length,
+      pct90: table.length ? Math.round((plus90.length / table.length) * 1000) / 10 : 0,
+      porCarline,
+      concentrados: porCarline.filter((row) => row.total >= 2 && row.pct90 > 30),
+    },
+    costo: {
+      acumulado60: Math.round(sobre60.reduce((s, row) => s + Number(row.planPisoAcumulado || 0), 0) * 100) / 100,
+      costoDiario60: Math.round(sobre60.reduce((s, row) => s + Number(row.costoDiario || 0), 0) * 100) / 100,
+      unidades60: sobre60.length,
+      top: [...table]
+        .sort((a, b) => Number(b.planPisoAcumulado || 0) - Number(a.planPisoAcumulado || 0))
+        .slice(0, 10)
+        .map((row) => ({
+          vin: row.vin,
+          carline: row.carline,
+          daysInStock: row.daysInStock,
+          planPisoAcumulado: row.planPisoAcumulado,
+          costoDiario: row.costoDiario,
+        })),
+      candidatas,
+      umbralPct: 30,
+    },
+    cobertura: buildCoberturaCarline(table, ventasRows),
+  };
 }
 
 function startOfDay(date) {
@@ -1256,6 +1411,7 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
     : 0;
   const demosConPruebas = demos.filter((u) => Number(u.pruebasManejo || 0) > 0).length;
   const demosPruebasTotal = demos.reduce((s, u) => s + (Number(u.pruebasManejo) || 0), 0);
+  const inventarioLectura = buildInventarioLectura(ageingSlowTable, await loadVentasCarline90());
 
   const payload = {
     summary: {
@@ -1280,7 +1436,25 @@ async function getInventory({ planPisoPeriod = 'all' } = {}) {
       planPisoDiasGracia: PLAN_PISO_DIAS_GRACIA,
       planPisoPeriod: period,
       planPisoPeriodLabel: periodLabel,
+      medianaDias: inventarioLectura.antiguedad.mediana,
+      pct90: inventarioLectura.antiguedad.pct90,
+      plus90: inventarioLectura.antiguedad.plus90,
+      costoDiario60: inventarioLectura.costo.costoDiario60,
+      costoAcumulado60: inventarioLectura.costo.acumulado60,
+      costoCandidatasDetalle: inventarioLectura.costo.candidatas.slice(0, 4).map((row) => ({
+        vin: row.vin,
+        carline: row.carline,
+        pctCosto: row.pctCosto,
+      })),
+      coberturaDias: inventarioLectura.cobertura.global,
+      coberturaFuera: inventarioLectura.cobertura.fuera,
+      antiguedadConcentrada: inventarioLectura.antiguedad.concentrados,
+      costoCandidatas: inventarioLectura.costo.candidatas.length,
+      coberturaQuiebre: inventarioLectura.cobertura.quiebre,
+      coberturaSobrestock: inventarioLectura.cobertura.sobrestock,
+      coberturaSinVentas: inventarioLectura.cobertura.sinVentas,
     },
+    inventarioLectura,
     planPisoMonths,
     ageingChart,
     ageingSlowTable,

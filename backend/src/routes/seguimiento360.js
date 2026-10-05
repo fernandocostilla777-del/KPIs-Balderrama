@@ -36,7 +36,10 @@ router.get('/status', (_req, res, next) => {
         'GET /api/seguimiento-360/cliente/:idContacto',
         'GET /api/seguimiento-360/vendedores',
         'GET /api/seguimiento-360/vendedor?vendedor=',
+        'GET /api/seguimiento-360/expediente/:idContacto',
+        'GET /api/seguimiento-360/cartera?vendedor=',
         'GET /api/seguimiento-360/cierres-taller?fechaInicio=&fechaFin=',
+        'GET /api/seguimiento-360/maduracion?fechaInicio=&fechaFin=',
       ],
     });
   } catch (err) {
@@ -165,6 +168,42 @@ router.get('/vendedor', async (req, res, next) => {
       seccion: 'vendedor',
       ...data,
     });
+  } catch (err) {
+    sendError(res, next, err);
+  }
+});
+
+/** HT-PRO-1 — expediente del prospecto por ID CRM. */
+router.get('/expediente/:idContacto', (req, res, next) => {
+  try {
+    const data = crm().getExpedienteProspecto(req.params.idContacto);
+    res.json({ ok: true, formato: 'seguimiento-360-v1', seccion: 'ht-pro-1', ...data });
+  } catch (err) {
+    sendError(res, next, err);
+  }
+});
+
+/** P-VTA-4 — Tiempo de Maduración Comercial y cobertura del objetivo. */
+router.get('/maduracion', (req, res, next) => {
+  try {
+    const data = crm().getTiempoMaduracion({
+      fechaInicio: req.query.fechaInicio || null,
+      fechaFin: req.query.fechaFin || null,
+    });
+    res.json({ ok: true, formato: 'seguimiento-360-v1', seccion: 'p-vta-4', ...data });
+  } catch (err) {
+    sendError(res, next, err);
+  }
+});
+
+/** HT-PRO-2 — cartera activa y lista 1 a 1 de un ejecutivo. */
+router.get('/cartera', (req, res, next) => {
+  try {
+    const data = crm().getCarteraEjecutivo({
+      vendedor: req.query.vendedor,
+      fechaFin: req.query.fechaFin || null,
+    });
+    res.json({ ok: true, formato: 'seguimiento-360-v1', seccion: 'ht-pro-2', ...data });
   } catch (err) {
     sendError(res, next, err);
   }

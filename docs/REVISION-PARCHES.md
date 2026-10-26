@@ -190,6 +190,9 @@ for f in ../frontend/public/js/*.js; do node --check "$f"; done
 - Sincronización a la nube (`cloudSync/` → `cloud-api`) y réplica (`desktop-cache`) con datos reales.
 - Tiempos de respuesta con datos completos.
 - Íconos y textos encimados con las fuentes cargadas.
+- Tiempo a compra de Leads: antes de leer sus cifras, correr
+  `node backend/scripts/diagnostico-maduracion-leads.js` y revisar el veredicto
+  (Kaplan–Meier, Cox, curación, riesgos competitivos, hitos). Solo imprime conteos.
 
 ## 8. Empaquetar y entregar
 

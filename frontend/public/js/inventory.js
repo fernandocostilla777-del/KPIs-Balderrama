@@ -1163,6 +1163,7 @@ function ensureAutosKpiDrawer() {
       const rangoBtn = summaryEl.querySelector('[data-autos-filter-dim="rango"].is-active');
       if (carlineBtn) ageingCarlineFilter = carlineBtn.dataset.autosFilterValue || 'all';
       if (rangoBtn) ageingRangeFilter = rangoBtn.dataset.autosFilterValue || '';
+      setAgeingVista('tabla');
       renderAgeingCarlineFilterTabs();
       renderAgeingSlowTable();
       document.getElementById('secAnalisisInventario')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1783,6 +1784,46 @@ function extrasBreakdownFromRow(r, fmt) {
   return { previa, publicidad, entrega, gasolina, litros, gastosLibro, extras, items };
 }
 
+function renderInventarioDetalleCell(r, fmt, view) {
+  const det = extrasBreakdownFromRow(r, fmt);
+  const days = view.days;
+  const utilidad = r.utilidadPromedio == null ? null : Number(r.utilidadPromedio);
+  const utilidadNeta = r.utilidadNeta == null ? null : Number(r.utilidadNeta);
+  const retencion = pctRetencion(utilidad, utilidadNeta);
+  const money = (n) => (n == null || !Number.isFinite(Number(n)) ? '—' : fmt.money(n));
+  const payload = encodeURIComponent(JSON.stringify({
+    kicker: 'Detalle de unidad',
+    totalLabel: 'Utilidad neta',
+    vin: view.vin || '',
+    carline: view.carline || '',
+    version: view.version || '',
+    extras: utilidadNeta,
+    totalText: utilidadNeta == null ? '—' : null,
+    items: [
+      { label: 'Días en stock', text: `${Number(days || 0).toLocaleString('es-MX')} días` },
+      { label: 'Subtotal', text: r.precio ? fmt.money(r.precio) : '—' },
+      { label: 'Costo neto', text: money(costoNetoConBonif(r)) },
+      { label: 'Nota crédito s/IVA', text: notaCreditoSinIva(r) > 0 ? fmt.money(notaCreditoSinIva(r)) : 'Sin nota' },
+      { label: 'Utilidad bruta', text: money(utilidad) },
+      ...det.items.map((item) => ({
+        label: item.label,
+        text: fmt.money(item.value),
+        hint: item.hint,
+      })),
+      { label: 'Plan piso', text: fmt.money(Number(r.planPisoAcumulado || 0)) },
+      { label: 'Costo diario', text: Number(r.costoDiario || 0) > 0 ? fmt.money(r.costoDiario) : '—' },
+      {
+        label: '% retención',
+        text: retencion === 'perdida' ? 'Pérdida' : (retencion == null ? '—' : `${retencion}%`),
+      },
+    ],
+  }));
+  return `<button type="button" class="ageing-ficha-trigger" data-extras-payload="${payload}" aria-haspopup="dialog" aria-expanded="false" title="${escapeHtml(view.vin || '')}">
+    <strong class="ageing-slow-vin-text">${escapeHtml(view.vin || '—')}</strong>
+    <span class="ageing-slow-hint">Ver detalle</span>
+  </button>`;
+}
+
 function renderExtrasCell(r, fmt) {
   const det = extrasBreakdownFromRow(r, fmt);
   if (!det.extras) return '<span class="ageing-slow-hint">Sin extra</span>';
@@ -1842,7 +1883,7 @@ function ensureExtrasPopover() {
   extrasPopoverEl = pop;
   document.addEventListener('click', (e) => {
     if (!extrasPopoverEl || extrasPopoverEl.classList.contains('hidden')) return;
-    if (extrasPopoverEl.contains(e.target) || e.target.closest?.('.ageing-extras-trigger')) return;
+    if (extrasPopoverEl.contains(e.target) || e.target.closest?.('.ageing-extras-trigger, .ageing-ficha-trigger')) return;
     closeExtrasPopover();
   });
   document.addEventListener('keydown', (e) => {
@@ -2079,18 +2120,18 @@ function openExtrasPopover(anchor) {
     </div>
     <ul class="extras-popover__list">
       ${items.map((item) => `
-        <li class="${Number(item.value || 0) ? '' : 'is-zero'}">
+        <li class="${item.text != null || Number(item.value || 0) ? '' : 'is-zero'}">
           <span>
             <strong>${escapeHtml(item.label)}</strong>
             ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
           </span>
-          <em>${fmt.money(Number(item.value || 0))}</em>
+          <em>${item.text != null && item.text !== '' ? escapeHtml(String(item.text)) : fmt.money(Number(item.value || 0))}</em>
         </li>
       `).join('')}
     </ul>
     <div class="extras-popover__total">
       <span>${escapeHtml(totalLabel)}${data.hint ? ` · ${escapeHtml(data.hint)}` : ''}</span>
-      <strong>${fmt.money(Number(data.extras || 0))}</strong>
+      <strong>${data.totalText != null && data.totalText !== '' ? escapeHtml(String(data.totalText)) : fmt.money(Number(data.extras || 0))}</strong>
     </div>
   `;
   pop.querySelector('.extras-popover__close')?.addEventListener('click', closeExtrasPopover);
@@ -2105,8 +2146,8 @@ function bindExtrasPopover(root) {
   if (!root || root.dataset.extrasBound === '1') return;
   root.dataset.extrasBound = '1';
   root.addEventListener('click', (e) => {
-    const trigger = e.target.closest('.ageing-extras-trigger');
-    if (!trigger) return;
+    const trigger = e.target.closest('.ageing-extras-trigger, .ageing-ficha-trigger');
+    if (!trigger || !trigger.hasAttribute('data-extras-payload')) return;
     e.preventDefault();
     e.stopPropagation();
     if (extrasPopoverAnchor === trigger) {
@@ -3340,7 +3381,7 @@ function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
     const empty = ageingSlowRows.length
       ? 'Sin coincidencias para el filtro.'
       : 'Sin inventario real (DIS / FIS / SEP) para analizar.';
-    body.innerHTML = `<tr><td colspan="12" class="empty-row">${empty}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="13" class="empty-row">${empty}</td></tr>`;
     return;
   }
 
@@ -3353,6 +3394,7 @@ function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
       : version;
     const vin = r.vin || '—';
     const days = r.daysInStock == null ? Number(r.avgDays || 0) : Number(r.daysInStock);
+    const daysCell = `<strong class="${days >= 90 ? 'ageing-retencion is-neg' : (days >= 60 ? 'ageing-retencion is-warn' : '')}">${days.toLocaleString('es-MX')}</strong>`;
     const utilidad = r.utilidadPromedio == null ? null : Number(r.utilidadPromedio);
     const utilidadNeta = r.utilidadNeta == null ? null : Number(r.utilidadNeta);
     const vendidas = Number(r.unidadesVendidas || 0);
@@ -3391,7 +3433,8 @@ function renderAgeingSlowTable(rows = filteredAgeingSlowRows()) {
     return `<tr class="${rowClass}">
       <td class="ageing-slow-carline"><strong>${escapeHtml(carline)}</strong></td>
       <td class="ageing-slow-version" title="${escapeHtml(versionLabel)}"><span>${escapeHtml(versionLabel)}</span></td>
-      <td class="ageing-slow-vin" title="${escapeHtml(vin)}">${escapeHtml(vin)}</td>
+      <td class="ageing-slow-vin">${renderInventarioDetalleCell(r, fmt, { carline, version: versionLabel, vin, days })}</td>
+      <td class="cell-num">${daysCell}</td>
       <td class="cell-num">${r.precio ? fmt.money(r.precio) : '—'}</td>
       <td class="cell-num">${costoCell}</td>
       <td class="cell-num ageing-slow-nota">${notaCell}</td>
@@ -3793,7 +3836,10 @@ function setAgeingVista(vista) {
   document.getElementById('ageingTablaWrap')?.classList.toggle('hidden', esCobertura);
   document.getElementById('ageingSort')?.classList.toggle('hidden', esCobertura);
   if (invLecturaCharts.cobertura) {
-    requestAnimationFrame(() => invLecturaCharts.cobertura?.resize());
+    requestAnimationFrame(() => {
+      invLecturaCharts.cobertura?.resize();
+      requestAnimationFrame(() => invLecturaCharts.cobertura?.resize());
+    });
   }
 }
 

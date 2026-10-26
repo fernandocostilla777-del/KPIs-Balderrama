@@ -142,12 +142,15 @@ function getDateParamsFromUrl() {
   };
 }
 
+// Solo toca fechaInicio/fechaFin: conserva tab, goto y el #hash de la pestaña
+// (Contabilidad usa ?tab=eeff|balance; Ventas y Postventa usan #financiamiento, #hyp…).
 function syncDateParamsToUrl(fechaInicio, fechaFin) {
-  const params = new URLSearchParams();
-  if (fechaInicio) params.set('fechaInicio', fechaInicio);
-  if (fechaFin) params.set('fechaFin', fechaFin);
-  const qs = params.toString();
-  history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+  const url = new URL(location.href);
+  if (fechaInicio) url.searchParams.set('fechaInicio', fechaInicio);
+  else url.searchParams.delete('fechaInicio');
+  if (fechaFin) url.searchParams.set('fechaFin', fechaFin);
+  else url.searchParams.delete('fechaFin');
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 function formatPeriodLabel(fechaInicio, fechaFin) {

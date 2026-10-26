@@ -164,7 +164,7 @@ router.get('/ventas/comisiones/tipos', (_req, res) => {
   res.json({ tipos: listComisionTypes() });
 });
 
-router.get('/ventas/comisiones', (req, res, next) => {
+router.get('/ventas/comisiones', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin, tipo } = req.query;
     if (!fechaInicio || !fechaFin) {
@@ -174,7 +174,7 @@ router.get('/ventas/comisiones', (req, res, next) => {
     if (kind !== 'fi') {
       return res.status(400).json({ error: `Tipo de comisión no disponible: ${kind}. Use tipo=fi.` });
     }
-    res.json(getComisionesFi({ fechaInicio, fechaFin }));
+    res.json(await getComisionesFi({ fechaInicio, fechaFin }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

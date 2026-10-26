@@ -4017,9 +4017,6 @@ button.alerts-drawer__link:disabled {
   background: var(--surface, #fff);
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.08);
 }
-  font-size: 12px;
-  padding: 8px 14px;
-}
 
 .analytics-block {
   margin-bottom: 28px;
@@ -12845,12 +12842,6 @@ body.ai-chat-expanded .ai-fab {
     grid-template-columns: 1fr;
   }
 }
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  line-height: 1.35;
-}
 
 .data-table--eeff-etl th,
 .data-table--eeff-etl td {
@@ -19309,6 +19300,13 @@ html[data-theme="dark"] .ppto-empresa__table tr.ppto-12m__grupo td {
   line-height: 1.4;
 }
 .inv-lectura__aviso.hidden { display: none; }
+#ageingTablaWrap.ageing-slow-table-wrap {
+  overflow: auto !important;
+  max-height: 560px;
+}
+.ageing-slow-table td.ageing-slow-vin {
+  overflow: visible;
+}
 .ageing-vista-cobertura { margin-top: 4px; }
 .ageing-vista-cobertura .inv-lectura__chart--wide { grid-column: auto; }
 .ageing-vista-cobertura .inv-lectura__canvas { min-height: 320px; }

@@ -342,7 +342,7 @@ export default function Home() {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [months, setMonths] = useState<MonthlyGoals[]>([]);
-  const [activeId, setActiveId] = useState("2026-08");
+  const [activeId, setActiveId] = useState("");
   const [results, setResults] = useState<ResultsPayload | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
   const [syncingCrm, setSyncingCrm] = useState(false);
@@ -383,10 +383,7 @@ export default function Home() {
       const stored = await loadMonths();
       if (cancelled) return;
       setMonths(stored);
-      const prefer =
-        stored.find((item) => item.id === "2026-09")
-        || stored[0];
-      if (prefer?.id) setActiveId(prefer.id);
+      if (stored[0]?.id) setActiveId(stored[0].id);
     })();
     return () => {
       cancelled = true;

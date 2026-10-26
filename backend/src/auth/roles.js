@@ -100,6 +100,7 @@ const ALWAYS_API_PREFIXES = [
   '/auth/summary-kpi-prefs',
   '/auth/password-reset',
   '/health',
+  '/data-source',
   '/ai',
 ];
 

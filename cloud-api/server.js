@@ -13,6 +13,7 @@ const seguimiento360Routes = require('./src/routes/seguimiento360');
 const inventoryRoutes = require('./src/routes/inventory');
 const desktopUpdatesRoutes = require('./src/routes/desktopUpdates');
 const iemcFinancieroRoutes = require('./src/routes/iemcFinanciero');
+const desktopCacheRoutes = require('./src/routes/desktopCache');
 const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
 const { ensureCrmCiclosTable } = require('./src/services/crmCiclosCloudService');
 const { ensureCrmTables } = require('./src/services/crmCiclosCloud');
@@ -54,7 +55,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, X-Read-Key');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   return next();
@@ -73,6 +74,7 @@ app.use('/api/crm', crmRoutes);
 app.use('/api/seguimiento-360', seguimiento360Routes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/iemc-financiero', iemcFinancieroRoutes);
+app.use('/api/desktop-cache', desktopCacheRoutes);
 app.use('/desktop-updates', desktopUpdatesRoutes);
 
 app.use((err, _req, res, _next) => {
@@ -102,6 +104,8 @@ async function ensureSchema() {
   await ensureIemcFinancieroTables();
   const { ensureTable: ensureOfficeCommands } = require('./src/services/officeCommandsStore');
   await ensureOfficeCommands();
+  const { ensureDesktopCacheTable } = require('./src/services/desktopCacheStore');
+  await ensureDesktopCacheTable();
 }
 
 ensureSchema()
@@ -115,6 +119,7 @@ ensureSchema()
       console.log(`  → POST http://localhost:${PORT}/api/crm/ingest`);
       console.log(`  → GET  http://localhost:${PORT}/api/iemc-financiero/periodos`);
       console.log(`  → GET  http://localhost:${PORT}/desktop-updates/status`);
+      console.log(`  → GET  http://localhost:${PORT}/api/desktop-cache (réplica)`);
       console.log('');
     });
   })

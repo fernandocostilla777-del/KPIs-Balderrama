@@ -18451,3 +18451,301 @@ td.deptos-col-aporte { display: flex; align-items: center; gap: 8px; }
   #kpiDeptosAporte .section-head-row { flex-wrap: wrap; gap: 8px; }
   #kpiDeptosAporte .section-head-row .btn-glass { padding: 6px 12px; }
 }
+
+/* ── Ventas · Leads con la lectura de KPIs-VECSA (parche 0008) ─────────────
+   Mismos bloques numerados que VECSA; colores de Balderrama. */
+/* ── Leads (Ventas): embudo en una fila y bloques sin repetir ───────────── */
+.ld-embudo {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.ld-embudo__paso {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  padding: 14px 14px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  color: #0f172a;
+  position: relative;
+}
+.ld-embudo__paso + .ld-embudo__paso::before {
+  content: '›';
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #94a3b8;
+  font-size: 18px;
+  line-height: 1;
+}
+.ld-embudo__paso:hover,
+.ld-embudo__paso.is-active { border-color: rgba(28, 105, 212, 0.55); background: #F5F9FF; }
+.ld-embudo__label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #475569; }
+.ld-embudo__valor { font-size: 1.7rem; line-height: 1.1; color: #1e3fd8; }
+.ld-embudo__barra { display: block; height: 6px; border-radius: 99px; background: #E6EEF8; overflow: hidden; }
+.ld-embudo__barra > span { display: block; height: 100%; border-radius: 99px; background: #2d5bff; }
+.ld-embudo__tasa { font-size: 12px; color: #475569; }
+.ld-embudo__nota { margin: 10px 2px 0; font-size: 12.5px; color: #475569; }
+.ld-embudo__nota strong { color: #0f172a; }
+.ld-cartera-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ld-alertas-vacio {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: #ffffff;
+  font-size: 13px;
+  color: #475569;
+}
+.ld-leads-pair-grid.ld-leads-pair-grid--una { grid-template-columns: minmax(0, 1fr); }
+.cell-muted { color: #94a3b8; font-weight: 500; font-size: 12px; }
+@media (max-width: 900px) {
+  .ld-embudo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ld-embudo__paso + .ld-embudo__paso::before { display: none; }
+  .ld-cartera-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+#ldPproGrid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+/* Tablas de campañas lado a lado: que quepa la columna de % sin cortarse. */
+#ldCampGrid .data-table th,
+#ldCampGrid .data-table td { padding-left: 10px; padding-right: 10px; }
+#ldCampGrid .data-table th,
+#ldCampGrid .data-table td:first-child { white-space: normal; }
+
+/* ── Leads · lectura por bloques numerados (1 Resultado … 6 Detalle) ───────── */
+.ld-page__head { margin: 2px 0 18px; }
+.ld-resultado {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: stretch;
+  margin: 0;
+}
+.ld-resultado__titular {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 22px 4px 4px;
+  border-right: 1px solid rgba(148, 163, 184, 0.28);
+}
+.ld-resultado__kicker { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #475569; }
+.ld-resultado__pct { font-size: 2.6rem; line-height: 1; color: #1e3fd8; font-weight: 800; }
+.ld-resultado__frase { margin: 6px 0 0; font-size: 14px; color: #0f172a; }
+.ld-resultado__nota { margin: 2px 0 0; font-size: 12px; color: #64748b; }
+.ld-resultado__embudo { display: grid; gap: 12px; min-width: 0; }
+.ld-resultado .ld-embudo__paso { background: #F8FAFD; }
+.ld-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ld-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+.ld-chip strong { color: #1e3fd8; font-size: 15px; }
+.ld-chip small { color: #64748b; font-size: 12px; }
+.ld-chip:hover, .ld-chip.is-active { border-color: rgba(28, 105, 212, 0.55); background: #F5F9FF; }
+
+.ld-origen { padding: 16px 18px; }
+.ld-origen__barra { display: flex; height: 14px; border-radius: 99px; overflow: hidden; background: #E9F2FE; gap: 2px; }
+.ld-origen__barra > span { display: block; height: 100%; min-width: 4px; }
+.ld-origen__lista {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px 18px;
+}
+.ld-origen__lista li { display: grid; grid-template-columns: 10px 1fr auto auto; align-items: baseline; gap: 4px 8px; font-size: 13px; color: #334155; }
+.ld-origen__punto { width: 10px; height: 10px; border-radius: 3px; align-self: center; }
+.ld-origen__nombre { font-weight: 600; color: #0f172a; }
+.ld-origen__pct { color: #64748b; font-size: 12px; }
+.ld-origen__conv { grid-column: 2 / -1; color: #64748b; font-size: 12px; }
+
+.ld-group-head { flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.ld-col-mix { width: 170px; }
+.ld-mix { display: flex; align-items: center; gap: 8px; }
+.ld-mix__bar { flex: 1; height: 6px; border-radius: 99px; background: #E6EEF8; overflow: hidden; }
+.ld-mix__bar > span { display: block; height: 100%; background: #2d5bff; border-radius: 99px; }
+.ld-mix__txt { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; color: #334155; }
+
+.ld-ppro-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.ld-ppro {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: #F8FAFD;
+  cursor: help;
+}
+.ld-ppro__nombre { font-size: 12px; font-weight: 700; color: #475569; }
+.ld-ppro__valor { font-size: 1.5rem; color: #1e3fd8; }
+.ld-ppro--cumple .ld-ppro__valor { color: #1e3fd8; }
+.ld-ppro__sub { font-size: 12px; color: #64748b; }
+.ld-alerta-bloque { min-width: 0; }
+#secProspeccionPpro .ld-alertas-vacio { margin-top: 12px; background: #F8FAFD; }
+
+.ld-details { margin-top: 10px; }
+.ld-details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e3fd8;
+  padding: 6px 2px;
+  list-style: none;
+}
+.ld-details > summary::before { content: '▸ '; }
+.ld-details[open] > summary::before { content: '▾ '; }
+
+.ld-super { display: flex; flex-direction: column; gap: 14px; }
+.ld-super-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ld-super-kpi {
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.ld-super-kpi strong { display: block; font-size: 1.55rem; color: #2d5bff; letter-spacing: -0.03em; }
+.ld-super-kpi span { color: #5d6d7e; font-size: 0.82rem; }
+.ld-super-chart { height: 280px; background: #fff; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 12px; padding: 8px 8px 0; }
+.ld-super-factor { display: grid; grid-template-columns: minmax(150px, 210px) 130px minmax(0, 1fr) 104px; gap: 10px; align-items: center; margin: 6px 0; }
+.ld-super-factor--head { margin: 0 0 2px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #64748b; }
+.ld-super-factor__name { font-size: 0.82rem; color: #1e293b; display: grid; line-height: 1.25; }
+.ld-super-factor__name small { font-size: 11px; color: #64748b; }
+.ld-super-compra { font-size: 12.5px; color: #475569; padding: 4px 8px; border-radius: 8px; background: #f4f7fb; white-space: nowrap; }
+.ld-super-compra strong { font-size: 14px; color: #1e3fd8; }
+.ld-super-compra.is-menos strong { color: #475569; }
+.ld-super-compra.is-tenue { opacity: .55; }
+.ld-super-factor__track { position: relative; height: 22px; background: #f4f7fb; border-radius: 999px; }
+.ld-super-factor__one { position: absolute; top: 0; bottom: 0; width: 1px; background: #6b7785; }
+.ld-super-factor__bar { position: absolute; top: 8px; height: 6px; border-radius: 999px; background: #81C4FF; }
+.ld-super-factor__dot { position: absolute; top: 5px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #2d5bff; }
+.ld-super-factor.is-frena .ld-super-factor__bar { background: #c5ced6; }
+.ld-super-factor.is-frena .ld-super-factor__dot { background: #5d6d7e; }
+.ld-super-factor.is-tenue .ld-super-factor__bar,
+.ld-super-factor.is-tenue .ld-super-factor__dot { opacity: 0.45; }
+@media (max-width: 800px) {
+  .ld-super-kpis { grid-template-columns: 1fr; }
+  .ld-super-factor { grid-template-columns: minmax(0, 1fr) auto; }
+  .ld-super-factor--head { display: none; }
+  .ld-super-factor { row-gap: 4px; margin: 10px 0; }
+}
+
+@media (max-width: 900px) {
+  .ld-resultado { grid-template-columns: minmax(0, 1fr); }
+  .ld-resultado__titular { border-right: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.28); padding: 0 0 12px; }
+  .ld-col-mix { width: 120px; }
+}
+
+/* Leads · aviso de periodo reciente y separación de los bloques de largo plazo */
+.ld-resultado__aviso {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #EEF5FF;
+  color: #0C447C;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Las etiquetas de seguimiento y perdidos no se estiran con la altura del titular */
+.ld-resultado__embudo { align-content: start; }
+.ld-chips { align-items: flex-start; }
+.ld-chip { align-self: flex-start; }
+/* En celular el detalle de la etiqueta baja de renglón en lugar de partir el texto */
+.ld-chip { flex-wrap: wrap; text-align: left; }
+.ld-chip > span { white-space: nowrap; }
+
+/* En columna (celular), el buscador no debe tomar 240px de alto por su flex-basis */
+@media (max-width: 900px) {
+  .kpi-detail-toolbar .kpi-detail-search { flex: 0 0 auto; max-width: none; }
+}
+
+.ld-super-compra.is-top { background: #eef2ff; box-shadow: inset 0 0 0 1.5px #1e3fd8; }
+.ld-super-factor.is-top-rapidez .ld-super-factor__track { background: #eef2ff; box-shadow: inset 0 0 0 1.5px #1e3fd8; }
+.ld-super-factor__dia { font-size: 12.5px; color: #475569; white-space: nowrap; }
+.ld-super-factor__dia strong { font-size: 14px; color: #1e293b; }
+.ld-super-factor.is-tenue .ld-super-factor__dia { opacity: .6; }
+.ld-super-factor__track--vacio { display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; color: #64748b; }
+
+/* Después de cada hito (Tiempo a compra) */
+.ld-hitos { margin: 0; }
+.ld-hitos__tabla td, .ld-hitos__tabla th { white-space: nowrap; }
+.ld-hito__pct { display: flex; align-items: center; gap: 10px; min-width: 220px; }
+.ld-hito__bar { flex: 1; height: 8px; border-radius: 999px; background: #EEF4FB; overflow: hidden; }
+.ld-hito__bar i { display: block; height: 100%; border-radius: 999px; background: #2d5bff; }
+.ld-hito__pct strong { min-width: 48px; text-align: right; color: #1e3fd8; }
+.ld-hito--ref td { color: #64748b; background: #f8fafc; }
+.ld-hito--ref .ld-hito__bar i { background: #94a3b8; }
+.ld-hito--ref .ld-hito__pct strong { color: #475569; }
+.ld-hito__flag { display: block; font-size: 11px; color: #64748b; white-space: normal; }
+.ld-hito--vacio td { color: #94a3b8; }
+@media (max-width: 640px) {
+  .ld-hitos__tabla thead { display: none; }
+  .ld-hitos__tabla, .ld-hitos__tabla tbody, .ld-hitos__tabla tr { display: block; width: 100%; }
+  .ld-hitos__tabla tr { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+  .ld-hitos__tabla td { display: inline-block; border: 0; padding: 2px 10px 2px 0; white-space: normal; text-align: left; }
+  .ld-hitos__tabla td:first-child { display: block; font-weight: 600; color: #1e293b; }
+  .ld-hitos__tabla td.ld-hito__pct { display: flex; width: 100%; min-width: 0; padding: 6px 0; }
+  .ld-hitos__tabla td[data-label]:not(.ld-hito__pct)::before { content: attr(data-label) " "; color: #64748b; font-size: 12px; }
+  .ld-hito--ref td:first-child { color: #64748b; font-weight: 500; }
+}
+@media (max-width: 640px) {
+  .ld-hito--ref { background: #f8fafc; }
+  .ld-hito--ref td { background: transparent; }
+}
+
+/* ===== Leads: lectura rápida ===== */
+/* Ventana de tiempo en la etiqueta del bloque (sustituye la banda de "largo plazo") */
+.ld-ventana {
+  display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid rgba(37, 99, 235, 0.35); background: #eef2ff; color: #1e3fd8;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .02em; text-transform: none; vertical-align: 1px;
+}
+/* Tiempo a compra: pestañas, una línea de lectura y método plegado */
+.ld-super-tabs { margin: 14px 0 10px; padding: 0; }
+.ld-super-tabs .eeff-tab { padding: 7px 14px; font-size: 12.5px; }
+.ld-super-cap { margin: 0 0 10px; font-size: 13px; color: #334155; }
+.ld-super-nota { margin: 8px 0 0; font-size: 12px; color: #64748b; }
+.ld-como { margin: 8px 0 0; font-size: 12.5px; color: #475569; }
+.ld-como summary { cursor: pointer; color: #2d5bff; font-weight: 600; }
+.ld-como p { margin: 6px 0 0; max-width: 900px; line-height: 1.45; }
+.ld-hitos__tabla th small { display: block; font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; color: #94a3b8; }
+.ld-super-chart { height: 300px; }
+/* Tendencia: una sola tarjeta (la gráfica ya va dentro del panel; sin caja dentro de caja) */
+.ld-conv-mes-chart-card { box-shadow: none; border: 0; background: transparent; padding: 4px 0 0; min-height: 0; backdrop-filter: none; -webkit-backdrop-filter: none; }
+
+/* Celular: el embudo del bloque 1 en renglones (paso y % a la izquierda, número a la derecha) */
+@media (max-width: 640px) {
+  .ld-embudo { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .ld-embudo__paso {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "label valor" "tasa valor" "barra barra";
+    padding: 8px 12px; gap: 2px 10px; border-radius: 10px;
+  }
+  .ld-embudo__label { grid-area: label; }
+  .ld-embudo__tasa { grid-area: tasa; font-size: 11.5px; }
+  .ld-embudo__valor { grid-area: valor; align-self: center; font-size: 1.35rem; }
+  .ld-embudo__barra { grid-area: barra; margin-top: 4px; height: 4px; }
+}
+/* Celular: tarjetas de Tiempo a compra en renglón (número a la izquierda, lectura a la derecha) */
+@media (max-width: 640px) {
+  .ld-super-kpis { gap: 6px; }
+  .ld-super-kpi { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+  .ld-super-kpi strong { font-size: 1.25rem; min-width: 74px; }
+  .ld-super-kpi span { font-size: 12px; line-height: 1.3; }
+}

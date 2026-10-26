@@ -140,6 +140,8 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
   (`julianday`, `instr`, `printf`, `GLOB`…), y con prueba que compare el resultado
   de SQLite contra el de PostgreSQL.
 - Sin base cargada, el servicio responde «sin datos», no un error.
+- **Pendiente etapa 2:** `crmCiclosService.js` y `leadsSupervivenciaService.js` (Leads y
+  tiempo a compra) todavía abren `crm-ciclos.db` directo y usan `julianday`.
 - Correr las pruebas también con PostgreSQL:
   `CRM_PG_URL_TEST=postgresql://… npm test` (sin la variable, esas pruebas se omiten).
 

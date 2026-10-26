@@ -2710,6 +2710,35 @@ function esNombreLeadSospechoso(nombre) {
  */
 function buildAlertasConversionCompras(d, { whereSql, params, compraSql, limit = 40 }) {
   const max = Math.min(80, Math.max(10, Number(limit) || 40));
+  const conCiclo = actividadesDisponibles();
+  const nombreCompraSql = conCiclo
+    ? `(
+        SELECT a.nombre_contacto FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      )`
+    : 'NULL';
+  const vinSql = conCiclo
+    ? `(
+        SELECT a.vin FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+        LIMIT 1
+      )`
+    : 'NULLIF(trim(vin_comprado), \'\')';
+  const fechaCicloSql = conCiclo
+    ? `(
+          SELECT COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus)
+          FROM crm_actividades a
+          WHERE a.id_contacto = crm_leads.id_crm
+            AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+          ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
+          LIMIT 1
+        )`
+    : 'NULL';
   const rows = d.prepare(`
     SELECT
       id_crm AS idCrm,
@@ -2718,30 +2747,11 @@ function buildAlertasConversionCompras(d, { whereSql, params, compraSql, limit =
       campana,
       ejecutivo_asignado AS ejecutivo,
       resultado,
-      (
-        SELECT a.nombre_contacto FROM crm_actividades a
-        WHERE a.id_contacto = crm_leads.id_crm
-          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
-        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
-        LIMIT 1
-      ) AS nombreCompra,
-      (
-        SELECT a.vin FROM crm_actividades a
-        WHERE a.id_contacto = crm_leads.id_crm
-          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
-        ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
-        LIMIT 1
-      ) AS vin,
+      ${nombreCompraSql} AS nombreCompra,
+      ${vinSql} AS vin,
       COALESCE(
         NULLIF(trim(fecha_factura), ''),
-        (
-          SELECT COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus)
-          FROM crm_actividades a
-          WHERE a.id_contacto = crm_leads.id_crm
-            AND a.vin IS NOT NULL AND trim(a.vin) <> ''
-          ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
-          LIMIT 1
-        )
+        ${fechaCicloSql}
       ) AS fechaCompra
     FROM crm_leads
     ${whereSql}
@@ -3180,6 +3190,68 @@ function getLeadsSummary({
   };
 }
 
+function actividadesDisponibles() {
+  try {
+    return hasActividadesTable(getDb());
+  } catch {
+    return false;
+  }
+}
+
+/** Fecha efectiva (AAAA-MM-DD) de una actividad de compra en crm_actividades. */
+function fechaEfectivaActividadSql(alias = 'a') {
+  return `substr(COALESCE(
+    NULLIF(trim(${alias}.fecha_factura), ''),
+    NULLIF(trim(${alias}.fecha_entrega), ''),
+    NULLIF(trim(${alias}.fecha_estatus), ''),
+    NULLIF(trim(${alias}.fecha_inicio_ciclo), '')
+  ), 1, 10)`;
+}
+
+/**
+ * Compra del lead: VIN en la hoja de leads, o una actividad con VIN del mismo ID CRM
+ * fechada en o después de la entrada. Una compra anterior a la entrada es de otro ciclo
+ * (cliente que regresa) y no convierte este lead.
+ */
+function compraLeadSql() {
+  const vin = `(vin_comprado IS NOT NULL AND trim(vin_comprado) <> '')`;
+  const fAct = fechaEfectivaActividadSql('a');
+  const ciclo = actividadesDisponibles()
+    ? ` OR EXISTS (
+        SELECT 1 FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+          AND ${fAct} >= substr(crm_leads.fecha_entrada, 1, 10)
+      )`
+    : '';
+  return `CASE WHEN (${vin}${ciclo}) THEN 1 ELSE 0 END`;
+}
+
+/**
+ * Fecha de compra: la de la hoja de leads o, si no trae, la PRIMERA actividad con VIN en o
+ * después de la entrada (antes tomaba la más reciente: una recompra posterior sacaba al lead
+ * de la ventana de 90 días y alargaba el tiempo a compra).
+ */
+function fechaCompraLeadSql() {
+  const fAct = fechaEfectivaActividadSql('a');
+  const ciclo = actividadesDisponibles()
+    ? `, (
+        SELECT ${fAct}
+        FROM crm_actividades a
+        WHERE a.id_contacto = crm_leads.id_crm
+          AND a.vin IS NOT NULL AND trim(a.vin) <> ''
+          AND ${fAct} >= substr(crm_leads.fecha_entrada, 1, 10)
+        ORDER BY ${fAct} ASC
+        LIMIT 1
+      )`
+    : '';
+  return `COALESCE(
+    NULLIF(substr(trim(crm_leads.fecha_factura), 1, 10), ''),
+    NULLIF(substr(trim(crm_leads.fecha_entrega), 1, 10), '')
+    ${ciclo}
+  )`;
+}
+
 const COMPRA_LEAD_SQL = `
   CASE WHEN (
     (vin_comprado IS NOT NULL AND trim(vin_comprado) <> '')
@@ -3307,7 +3379,7 @@ function getLeadSeguimientoSinCompraSql() {
     /* tablas aún no disponibles */
   }
   return `(
-    (${COMPRA_LEAD_SQL}) = 0
+    (${compraLeadSql()}) = 0
     AND NOT ${getLeadDescartadoSql()}
     AND (${engagement.join('\n    OR ')})
   )`;
@@ -3340,9 +3412,10 @@ function buildSeguimientoVidaActivaQuery({ notDupSql, hasta, vidaDias = null }) 
     'substr(fecha_entrada, 1, 10) <= ?',
     getLeadSeguimientoSinCompraSql(),
   ];
+  const params = [desdeVida, refHasta];
   return {
     whereSql: `WHERE ${where.join(' AND ')}`,
-    params: [desdeVida, refHasta],
+    params,
     desdeVida,
     refHasta,
     vidaDias: vida,
@@ -3363,6 +3436,9 @@ const FECHA_COMPRA_LEAD_SQL = `
   )
 `;
 
+/** Ventana de referencia para ver la conversión después de la vida útil del lead (90 d). */
+const CONVERSION_REFERENCIA_DIAS = 180;
+
 /**
  * Compra válida para campañas documentadas: VIN + fecha de compra
  * dentro de LEAD_VIDA_DIAS desde fecha_entrada.
@@ -3371,12 +3447,12 @@ function buildCompraLeadDentroVidaSql(dias = 90) {
   const life = Math.max(1, Number(dias) || 90);
   return `
     CASE WHEN (
-      (${COMPRA_LEAD_SQL}) = 1
+      (${compraLeadSql()}) = 1
       AND crm_leads.fecha_entrada IS NOT NULL
       AND trim(crm_leads.fecha_entrada) <> ''
-      AND (${FECHA_COMPRA_LEAD_SQL}) IS NOT NULL
-      AND julianday(${FECHA_COMPRA_LEAD_SQL}) >= julianday(crm_leads.fecha_entrada)
-      AND (julianday(${FECHA_COMPRA_LEAD_SQL}) - julianday(crm_leads.fecha_entrada)) <= ${life}
+      AND (${fechaCompraLeadSql()}) IS NOT NULL
+      AND julianday(${fechaCompraLeadSql()}) >= julianday(crm_leads.fecha_entrada)
+      AND (julianday(${fechaCompraLeadSql()}) - julianday(crm_leads.fecha_entrada)) <= ${life}
     ) THEN 1 ELSE 0 END
   `;
 }
@@ -3444,9 +3520,8 @@ function aggregateFuerzaVentas(rows = []) {
   const pct = (num, den) => (den ? Math.round((num / den) * 10000) / 100 : 0);
 
   const known = FUERZA_VENTAS_ORDER
-    .map((name) => map.get(name) || {
-      grupo: name, leads: 0, contactados: 0, citas: 0, cotizados: 0, compras: 0,
-    })
+    .map((name) => map.get(name))
+    .filter((r) => r && (r.leads > 0 || r.compras > 0))
     .map((r) => ({
       ...r,
       conversionPct: pct(r.compras, r.leads),
@@ -3494,7 +3569,7 @@ function aggregateFuerzaVentas(rows = []) {
 /** Filtro SQL adicional por KPI del embudo de leads (misma lógica que summary). */
 function leadKpiExtraWhere(kpi, { compraSql = null } = {}) {
   const key = String(kpi || '').trim();
-  const compra = compraSql || COMPRA_LEAD_SQL;
+  const compra = compraSql || compraLeadSql();
   const cotizadoSql = `(cotizacion IS NOT NULL AND trim(cotizacion) <> '' AND upper(trim(cotizacion)) NOT IN ('NO','N','0'))`;
   switch (key) {
     case 'contactados':
@@ -3609,22 +3684,22 @@ function queryLeadsDetalleRows(d, { whereSql, params, limit }) {
       vin_comprado AS vinComprado,
       fecha_factura AS fechaFactura,
       estatus_compra AS estatusCompra,
-      ${COMPRA_LEAD_SQL} AS conCompra,
+      ${compraLeadSql()} AS conCompra,
       CASE WHEN (${pruebaSql}) THEN 1 ELSE 0 END AS conPruebaManejo,
       CASE WHEN (${solSql}) THEN 1 ELSE 0 END AS conSolicitud,
-      (
+      ${actividadesDisponibles() ? `(
         SELECT a.vin FROM crm_actividades a
         WHERE a.id_contacto = crm_leads.id_crm
           AND a.vin IS NOT NULL AND trim(a.vin) <> ''
         ORDER BY COALESCE(a.fecha_factura, a.fecha_entrega, a.fecha_estatus, a.fecha_inicio_ciclo) DESC
         LIMIT 1
-      ) AS vinCiclo,
-      (
+      )` : 'NULL'} AS vinCiclo,
+      ${actividadesDisponibles() ? `(
         SELECT a.estatus FROM crm_actividades a
         WHERE a.id_contacto = crm_leads.id_crm
         ORDER BY COALESCE(a.fecha_estatus, a.fecha_inicio_ciclo) DESC
         LIMIT 1
-      ) AS estatusCiclo
+      )` : 'NULL'} AS estatusCiclo
     FROM crm_leads
     ${whereSql}
     ORDER BY fecha_entrada DESC, id_crm DESC
@@ -3814,14 +3889,16 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     d.prepare(`SELECT COUNT(*) AS n FROM crm_leads ${seguimientoVidaQ.whereSql}`)
       .get(...seguimientoVidaQ.params)?.n || 0,
   );
+  const pipelineWhere = [
+    notDupSql,
+    `fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''`,
+    'substr(fecha_entrada, 1, 10) >= ?',
+    'substr(fecha_entrada, 1, 10) <= ?',
+  ];
+  const pipelineParams = [seguimientoVidaQ.desdeVida, seguimientoVidaQ.refHasta];
   const pipelineVivo = Number(
-    d.prepare(`
-      SELECT COUNT(*) AS n FROM crm_leads
-      WHERE (${notDupSql})
-        AND fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''
-        AND substr(fecha_entrada, 1, 10) >= ?
-        AND substr(fecha_entrada, 1, 10) <= ?
-    `).get(...seguimientoVidaQ.params)?.n || 0,
+    d.prepare(`SELECT COUNT(*) AS n FROM crm_leads WHERE ${pipelineWhere.join(' AND ')}`)
+      .get(...pipelineParams)?.n || 0,
   );
 
   const n = (k) => Number(totales?.[k] || 0);
@@ -3899,6 +3976,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   }));
 
   const porCanal = groupQuery('canal');
+  // Fuente del lead (columna tipo de la hoja STREGA): lead digital, visita a piso, cartera, base de datos…
+  const porFuente = groupQuery('tipo', 12);
   const porEjecutivo = groupQuery('ejecutivo_asignado', 25);
   const porResultado = groupQuery('resultado', 15);
   const porSucursal = groupQuery('sucursal', 15);
@@ -3930,19 +4009,25 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     classifyCampanaConversion,
   } = require('../config/campanasConversion');
 
-  const COMPRA_LEAD_90D_SQL = COMPRA_ATRIBUIBLE_SQL;
+  // Regla de la campaña: compra ≤ LEAD_VIDA_DIAS (90). La de 180 días es referencia para ver
+  // cuánto convierte el lead después de su vida útil; no cambia la regla.
+  const COMPRA_LEAD_180D_SQL = buildCompraLeadDentroVidaSql(CONVERSION_REFERENCIA_DIAS);
+  const hoyCampanas = formatIsoDate(new Date());
 
   const campanaAggRows = d.prepare(`
     SELECT
       COALESCE(NULLIF(trim(campana), ''), '(sin campaña)') AS campana,
       COUNT(*) AS leads,
       SUM(CASE WHEN contacto = 'SI' THEN 1 ELSE 0 END) AS contactados,
-      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS compras,
-      SUM(${COMPRA_LEAD_90D_SQL}) AS vendidos
+      SUM(${compraLeadSql()}) AS compras,
+      SUM(${COMPRA_ATRIBUIBLE_SQL}) AS vendidos,
+      SUM(${COMPRA_LEAD_180D_SQL}) AS vendidos180,
+      SUM(CASE WHEN julianday(?) - julianday(substr(fecha_entrada, 1, 10)) >= ${CONVERSION_REFERENCIA_DIAS}
+        THEN 1 ELSE 0 END) AS maduros180
     FROM crm_leads
     ${whereSql}
     GROUP BY campana
-  `).all(...params);
+  `).all(hoyCampanas, ...params);
 
   const campanasMap = Object.fromEntries(
     CAMPANAS_CONVERSION.map((c) => [c.key, {
@@ -3953,6 +4038,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       contactados: 0,
       vendidos: 0,
       vendidosFueraVida: 0,
+      vendidos180: 0,
+      maduros180: 0,
       conversionPct: 0,
       matchedNames: [],
       dinamica: false,
@@ -3962,27 +4049,32 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   for (const row of campanaAggRows) {
     const cls = classifyCampanaConversion(row.campana);
     if (!cls.tipo || !cls.key) continue;
-    if (!campanasMap[cls.key]) {
-      campanasMap[cls.key] = {
-        key: cls.key,
-        campana: cls.label,
+    const { key } = cls;
+    if (!campanasMap[key]) {
+      campanasMap[key] = {
+        key,
+        campana: cls.label || row.campana,
         tipo: cls.tipo,
         total: 0,
         contactados: 0,
         vendidos: 0,
         vendidosFueraVida: 0,
+        vendidos180: 0,
+        maduros180: 0,
         conversionPct: 0,
         matchedNames: [],
         dinamica: !!cls.dinamica,
       };
     }
-    const bucket = campanasMap[cls.key];
+    const bucket = campanasMap[key];
     const compras = Number(row.compras || 0);
     const vendidos = Number(row.vendidos || 0);
     bucket.total += Number(row.leads || 0);
     bucket.contactados += Number(row.contactados || 0);
     bucket.vendidos += vendidos;
     bucket.vendidosFueraVida += Math.max(0, compras - vendidos);
+    bucket.vendidos180 += Number(row.vendidos180 || 0);
+    bucket.maduros180 += Number(row.maduros180 || 0);
     if (row.campana && !bucket.matchedNames.includes(row.campana)) {
       bucket.matchedNames.push(String(row.campana));
     }
@@ -3991,6 +4083,8 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   const campanasConversion = Object.values(campanasMap)
     .map((b) => {
       b.conversionPct = pct(b.vendidos, b.total);
+      b.conversion180Pct = pct(b.vendidos180, b.total);
+      b.pctMaduros180 = pct(b.maduros180, b.total);
       return b;
     })
     .filter((b) => Number(b.total || 0) > 0 || !b.dinamica)
@@ -4005,10 +4099,15 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       a.contactados += Number(r.contactados || 0);
       a.vendidos += Number(r.vendidos || 0);
       a.vendidosFueraVida += Number(r.vendidosFueraVida || 0);
+      a.vendidos180 += Number(r.vendidos180 || 0);
+      a.maduros180 += Number(r.maduros180 || 0);
       return a;
-    }, { total: 0, contactados: 0, vendidos: 0, vendidosFueraVida: 0 });
+    }, { total: 0, contactados: 0, vendidos: 0, vendidosFueraVida: 0, vendidos180: 0, maduros180: 0 });
     acc.conversionPct = pct(acc.vendidos, acc.total);
+    acc.conversion180Pct = pct(acc.vendidos180, acc.total);
+    acc.pctMaduros180 = pct(acc.maduros180, acc.total);
     acc.vidaDias = LEAD_VIDA_DIAS;
+    acc.referenciaDias = CONVERSION_REFERENCIA_DIAS;
     return acc;
   };
 
@@ -4078,8 +4177,7 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   }
 
   for (const row of mesCampanaRows) {
-    const cls = classifyCampanaConversion(row.campana);
-    if (cls.tipo !== 'reactiva') continue;
+    if (classifyCampanaConversion(row.campana).tipo !== 'reactiva') continue;
     const mes = String(row.mes || '');
     const bucket = mesBuckets.get(mes);
     if (!bucket) continue;
@@ -4121,10 +4219,14 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       AND (${notDupSql})
       AND substr(fecha_entrada, 1, 10) >= ?
       AND substr(fecha_entrada, 1, 10) <= ?
-      AND (${COMPRA_LEAD_SQL}) = 0
+      AND (${compraLeadSql()}) = 0
     ORDER BY fecha_entrada ASC
     LIMIT 3000
-  `).all(hoyIso, String(caducarDesde).slice(0, 10), String(caducarHasta).slice(0, 10));
+  `).all(
+    hoyIso,
+    String(caducarDesde).slice(0, 10),
+    String(caducarHasta).slice(0, 10),
+  );
 
   const campanasCaducarAll = candidatosCaducar
     .map((r) => {
@@ -4246,6 +4348,7 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     summary,
     funnel,
     porCanal,
+    porFuente,
     porEjecutivo,
     porResultado,
     porSucursal,
@@ -6630,7 +6733,15 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
 
   const coberturaPct = roundPct(conPrimera, entrantes);
   const ppro4Pct = roundPct(contactadosConCita, contactados);
-  const ppro5Pct = citas.disponible ? roundPct(citas.asistidas, citas.conResultado) : null;
+  // Sin actividades de cita en el CRM, la hoja de leads trae "cita programada" y
+  // "cita asistida": se usa como respaldo para no dejar el indicador sin dato.
+  const citasCrm = citas.disponible && citas.conResultado > 0;
+  const citasHoja = Number(hoja?.conCita || 0);
+  const asistidasHoja = Number(hoja?.asistidasHoja || 0);
+  const citasDesdeHoja = !citasCrm && citasHoja > 0;
+  const ppro5Pct = citasCrm
+    ? roundPct(citas.asistidas, citas.conResultado)
+    : (citasDesdeHoja ? roundPct(asistidasHoja, citasHoja) : null);
   const ppro6Pct = cartera.disponible ? roundPct(cartera.vigentes, cartera.activa) : null;
 
   return {
@@ -6646,7 +6757,7 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
         denominador: entrantes,
         meta: 100,
         disponible: true,
-        detalle: 'Leads del periodo con resultado de la hoja STREGA, sobre entrantes sin duplicado.',
+        detalle: 'Leads del periodo con resultado registrado en la hoja de leads, sobre entrantes sin duplicado.',
       },
       {
         id: 'P-PRO-1B',
@@ -6698,13 +6809,16 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
         nombre: 'Conversión Cita Programada → Cita Asistida',
         valor: ppro5Pct,
         unidad: '%',
-        numerador: citas.asistidas,
-        denominador: citas.conResultado,
+        numerador: citasCrm ? citas.asistidas : (citasDesdeHoja ? asistidasHoja : null),
+        denominador: citasCrm ? citas.conResultado : (citasDesdeHoja ? citasHoja : 0),
         meta: 60,
-        disponible: citas.disponible && citas.conResultado > 0,
-        detalle: citas.disponible
+        disponible: citasCrm || citasDesdeHoja,
+        fuente: citasCrm ? 'crm_actividades' : (citasDesdeHoja ? 'crm_leads' : null),
+        detalle: citasCrm
           ? `${citas.programadas} primeras citas con fecha en el periodo · ${citas.conResultado} con resultado · ${citas.asistidas} asistidas.`
-          : 'No hay actividades de cita en el CRM local.',
+          : (citasDesdeHoja
+            ? `Desde la hoja de leads: ${citasHoja} leads con cita programada · ${asistidasHoja} asistieron (el CRM no trae actividades de cita).`
+            : 'Ni el CRM ni la hoja de leads traen citas en el periodo.'),
       },
       {
         id: 'P-PRO-6',
@@ -7508,6 +7622,7 @@ module.exports = {
   getSeguimiento360Summary,
   resolveCrmPeriod,
   getLeadNotDuplicateSql,
+  getLeadDescartadoSql,
   getCierresTallerPeriodo,
   exportCloudSyncRecords,
   enrichByVins,
@@ -7519,6 +7634,9 @@ module.exports = {
   listVendedores,
   getVendedorResumen,
   getProspeccionIndicadores,
+  compraLeadSql,
+  fechaCompraLeadSql,
+  getCompraLeadAtribuibleSql,
   getExpedienteProspecto,
   getCarteraEjecutivo,
   getQuejasCsiSummary,

@@ -36,7 +36,7 @@ const RUTAS_CON_FECHAS = [
 ];
 
 /** Rutas que solo llevan la fecha de corte (fechaFin). */
-const RUTAS_CORTE = ['/contabilidad/balance'];
+const RUTAS_CORTE = ['/contabilidad/balance', '/ventas/leads/supervivencia'];
 
 /** Rutas sin periodo, con los parámetros fijos que usa el frontend. */
 const RUTAS_FIJAS = [

@@ -208,6 +208,21 @@ router.get('/ventas/financiamiento/pagos-gmf', (req, res, next) => {
   }
 });
 
+// Tiempo a compra de los últimos 12 meses hasta fechaFin (Kaplan–Meier). Sin datos personales.
+router.get('/ventas/leads/supervivencia', (req, res, next) => {
+  try {
+    const { getSupervivencia } = require('../services/leadsSupervivenciaService');
+    const { fechaFin, horizonte } = req.query;
+    if (!fechaFin) {
+      return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(getSupervivencia({ fechaFin, horizonte }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.get('/ventas/leads/prospeccion', (req, res, next) => {
   try {
     const crm = require('../services/crmCiclosService');

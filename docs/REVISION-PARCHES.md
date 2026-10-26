@@ -118,6 +118,16 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 - `POST /ai/insights` debe quedar debajo de 100 kB (`express.json()` sin límite
   explícito en `backend/server.js`).
 
+### Base del CRM (SQLite → PostgreSQL)
+- Los servicios leen el CRM por `src/db/crmStore.js`, nunca abriendo
+  `crm-ciclos.db` directo. Ver `docs/MIGRACION-CRM-POSTGRES.md`.
+- Consulta nueva o migrada: marcadores `?`, sin funciones propias de SQLite
+  (`julianday`, `instr`, `printf`, `GLOB`…), y con prueba que compare el resultado
+  de SQLite contra el de PostgreSQL.
+- Sin base cargada, el servicio responde «sin datos», no un error.
+- Correr las pruebas también con PostgreSQL:
+  `CRM_PG_URL_TEST=postgresql://… npm test` (sin la variable, esas pruebas se omiten).
+
 ### Datos personales
 - Nada con nombre, teléfono, correo, RFC o VIN de clientes en el repositorio.
   **Pendiente:** `backend/data/forecast-source.csv` hoy trae nombres de clientes,

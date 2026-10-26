@@ -5,6 +5,27 @@
  */
 const { syncCrmSheets, ALL_ETLS } = require('../../scripts/sync-crm-sheets');
 const crmCiclos = require('./crmCiclosService');
+const crmStore = require('../db/crmStore');
+
+/**
+ * Mientras dure la migración por etapas, los ETL siguen escribiendo en SQLite.
+ * Con CRM_DB=postgres se refresca la copia de PostgreSQL al terminar cada carga
+ * (intercambio por tabla: el tablero nunca ve tablas vacías). Si falla, la
+ * sincronización no se marca como fallida; el error queda en el resultado.
+ */
+async function refreshPostgresCopy() {
+  if (crmStore.motor() !== 'postgres') return null;
+  try {
+    const { migrarTodo } = require('../../scripts/migrar-crm-a-postgres');
+    const r = await migrarTodo({ log: null });
+    const fallas = r.tablas.filter((t) => !t.ok).map((t) => t.table);
+    if (fallas.length) console.warn(`[crm-sheets-sync] PostgreSQL: no cuadró ${fallas.join(', ')}; se conservan los datos anteriores`);
+    return { ok: r.ok, tablas: r.tablas.length, fallas };
+  } catch (err) {
+    console.warn('[crm-sheets-sync] No se pudo refrescar PostgreSQL:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
 
 const MAX_TIMER_MS = 12 * 60 * 60 * 1000;
 /** Sync diarios + cierre Objetivos Web a las 19:50. */
@@ -243,6 +264,8 @@ async function runSync({ reason = 'manual', skipCloud = false, etls, fullObjetiv
       crmCiclos.warmCaches({ log: null }).catch(() => { /* informativo */ });
     }
 
+    const postgres = await refreshPostgresCopy();
+
     let cloud = null;
     if (!skipCloud) {
       try {
@@ -259,6 +282,7 @@ async function runSync({ reason = 'manual', skipCloud = false, etls, fullObjetiv
       reason,
       fullObjetivos: useFull,
       etls: useFull ? ALL_ETLS : (etlList || ALL_ETLS),
+      postgres,
       cloud,
     };
     state.lastFinishedAt = new Date().toISOString();

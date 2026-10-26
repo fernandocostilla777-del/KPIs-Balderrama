@@ -9,8 +9,7 @@
  * - Split: F&I Serdan 80% / pool AFI 20%; Fernando (Zacatelco) 100%.
  * - AFI: el 20% se reparte por % de contratos.
  */
-const path = require('path');
-const Database = require('better-sqlite3');
+const crmStore = require('../db/crmStore');
 
 const RULES = {
   maf: {
@@ -85,22 +84,18 @@ function inPeriod(fecha, fi, ff) {
   return true;
 }
 
-function loadContracts(fechaInicio, fechaFin) {
-  const dbPath = path.join(__dirname, '../../data/crm-ciclos.db');
-  const db = new Database(dbPath, { readonly: true });
-  try {
-    const has = db.prepare(
-      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_financiamiento'",
-    ).get();
-    if (!has) throw new Error('Tabla crm_financiamiento no encontrada.');
-    return db.prepare(`
-      SELECT *
-      FROM crm_financiamiento
-      WHERE COALESCE(fecha_compra, fecha, fecha_timbrado) IS NOT NULL
-    `).all().filter((r) => inPeriod(rowDate(r), fechaInicio, fechaFin));
-  } finally {
-    db.close();
-  }
+/**
+ * Contratos del periodo. Sin base o sin tabla cargada regresa null para que la
+ * pantalla diga «sin datos» en lugar de un error.
+ */
+async function loadContracts(fechaInicio, fechaFin) {
+  if (!crmStore.disponible() || !(await crmStore.tableExists('crm_financiamiento'))) return null;
+  const rows = await crmStore.all(`
+    SELECT *
+    FROM crm_financiamiento
+    WHERE COALESCE(fecha_compra, fecha, fecha_timbrado) IS NOT NULL
+  `);
+  return rows.filter((r) => inPeriod(rowDate(r), fechaInicio, fechaFin));
 }
 
 function calcConcept({ monto, vendorShareOfMonto, fiShareOfBase, vendorOverride = null }) {
@@ -210,12 +205,14 @@ function accumulate(bucket, c) {
   bucket.totalFi = roundMoney(bucket.totalFi + c.totalFi);
 }
 
-function getComisionesFi({ fechaInicio, fechaFin } = {}) {
+async function getComisionesFi({ fechaInicio, fechaFin } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw new Error('fechaInicio y fechaFin son requeridos.');
   }
 
-  const rows = loadContracts(fechaInicio, fechaFin);
+  const cargados = await loadContracts(fechaInicio, fechaFin);
+  const sinDatos = cargados === null;
+  const rows = cargados || [];
   const detalle = rows.map((r) => calcContract(r, RULES));
 
   const byFi = new Map();
@@ -329,8 +326,10 @@ function getComisionesFi({ fechaInicio, fechaFin } = {}) {
     tipo: 'fi',
     label: 'Comisiones F&I',
     periodo: { fechaInicio, fechaFin },
+    sinDatos,
     rules: RULES,
     notas: [
+      ...(sinDatos ? ['Sin datos: la base de financiamiento del CRM no está cargada en este equipo.'] : []),
       'Lógica alineada al Summary del Excel de comisiones F&I (BASE − asesor, F&I = 10% de BASE).',
       'La comisión GMF sobre MAF se estima (CRM trae MAF para comisión, no el % GMF del Q).',
       'Renovaciones, UDIS bancos y bono triunfadores no están en CRM: quedan fuera de este cálculo.',

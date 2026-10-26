@@ -659,6 +659,31 @@ router.get('/contabilidad/punto-equilibrio', async (req, res, next) => {
   }
 });
 
+// Contabilidad con el formato de VECSA y el cálculo de Balderrama.
+router.get('/contabilidad/estado-resultados', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    const { getEstadoResultadosFormato } = require('../services/contabilidadFormatoService');
+    res.json(await getEstadoResultadosFormato({ fechaInicio, fechaFin }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/contabilidad/balance', async (req, res, next) => {
+  try {
+    const { fechaFin } = req.query;
+    if (!fechaFin) return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
+    const { getBalanceFormato } = require('../services/contabilidadFormatoService');
+    res.json(await getBalanceFormato({ fechaFin }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/contabilidad/analisis-financiero', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;

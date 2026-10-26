@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="/css/dashboard.css?v=166" rel="stylesheet"/>
+<link href="/css/contabilidad.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
@@ -100,11 +101,168 @@
 </div>
 </section>
 
-<nav class="contabilidad-tabs" id="contabilidadMainTabs" aria-label="Secciones de contabilidad">
+<nav class="contabilidad-tabs ctb-tabs" id="contabilidadMainTabs" aria-label="Secciones de contabilidad">
 <button type="button" class="contabilidad-tab" data-tab="catalogo" hidden aria-hidden="true">Catálogo de cuentas</button>
-<button type="button" class="contabilidad-tab active" data-tab="balance">Balance General</button>
-<button type="button" class="contabilidad-tab" data-tab="eeff">EEFF</button>
+<button type="button" class="contabilidad-tab active" data-tab="er">Estado de resultados</button>
+<button type="button" class="contabilidad-tab" data-tab="analisis">Análisis</button>
+<button type="button" class="contabilidad-tab" data-tab="balance">Balance General</button>
+<button type="button" class="contabilidad-tab" data-tab="eeff">Departamentos y presupuesto</button>
 </nav>
+
+<p id="ctbAviso" class="ctb-aviso hidden" role="status" aria-live="polite"></p>
+
+<!-- ═══ Estado de resultados (formato VECSA, cálculo Balderrama) ═══ -->
+<div id="panelCtbEr" class="ctb-panel">
+<section class="section-panel dashboard-section ctb-resumen kpi-insight-anchor" id="kpiErResultado" aria-labelledby="erTitulo">
+<div class="ctb-resumen__titular">
+<span class="ctb-kicker" id="erKicker">Utilidad del periodo</span>
+<strong class="ctb-resumen__cifra" id="erCifra">—</strong>
+<p class="ctb-resumen__frase" id="erFrase"></p>
+<p class="ctb-resumen__nota" id="erPeriodo"></p>
+</div>
+<div class="ctb-kpis" id="erKpis" aria-label="Totales del estado de resultados"></div>
+</section>
+
+<section class="section-panel dashboard-section ctb-revision hidden" id="erRevision" aria-label="Revisión de la balanza">
+<details>
+<summary id="erRevisionResumen"></summary>
+<div id="erRevisionDetalle" class="ctb-revision__detalle"></div>
+</details>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="erTitulo">Estado de resultados</h3>
+<p class="section-subtitle" id="erNota">Balanza CON_CTAS · mapeo del EEFF SUMMARY</p>
+</div>
+<div class="ctb-head__acciones">
+<button type="button" class="ctb-boton" id="erExpandir" aria-pressed="false">Ver cuentas</button>
+<label class="ctb-check"><input type="checkbox" id="erCeros"/> Renglones en cero</label>
+</div>
+</div>
+<div class="ctb-tabla-wrap">
+<table class="data-table ctb-er">
+<thead>
+<tr>
+<th scope="col">Concepto</th>
+<th scope="col" class="cell-money">Importe</th>
+<th scope="col" class="cell-num">% ventas</th>
+</tr>
+</thead>
+<tbody id="erTabla"></tbody>
+</table>
+</div>
+</section>
+</div>
+
+<!-- ═══ Análisis ═══ -->
+<div id="panelCtbAnalisis" class="ctb-panel hidden">
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErLineas" aria-labelledby="anLineasTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anLineasTitulo">Utilidad por línea de negocio</h3>
+<p class="section-subtitle" id="anLineasNota">Venta, costo y utilidad bruta de cada línea. La suma es la utilidad bruta de la agencia.</p>
+</div>
+</div>
+<div class="ctb-tabla-wrap">
+<table class="data-table ctb-lineas">
+<thead>
+<tr>
+<th scope="col">Línea</th>
+<th scope="col" class="cell-money">Ventas</th>
+<th scope="col" class="cell-money">Utilidad bruta</th>
+<th scope="col" class="cell-num">Margen</th>
+<th scope="col" class="ctb-col-barra">Aporte a la utilidad bruta</th>
+</tr>
+</thead>
+<tbody id="anLineas"></tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErGastos" aria-labelledby="anGastosTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anGastosTitulo">Gastos por departamento</h3>
+<p class="section-subtitle" id="anGastosNota">Cuánto de la utilidad bruta consume cada departamento.</p>
+</div>
+</div>
+<div id="anGastos" class="ctb-gastos"></div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErTendencia" aria-labelledby="anTendenciaTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anTendenciaTitulo">Tendencia del año</h3>
+<p class="section-subtitle">Mes por mes, de enero al mes consultado.</p>
+</div>
+</div>
+<div class="ctb-grafica"><canvas id="anTendencia" aria-label="Tendencia mensual"></canvas></div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErAnio" aria-labelledby="anAnioTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anAnioTitulo">Año contra año</h3>
+<p class="section-subtitle" id="anAnioNota">Mismo periodo del año anterior.</p>
+</div>
+</div>
+<div id="anAnio" class="ctb-anio"></div>
+<div class="ctb-grafica" id="anAnioGraficaWrap"><canvas id="anAnioGrafica" aria-label="Cada mes contra el mismo mes del año anterior"></canvas></div>
+<p class="ctb-nota" id="anAnioCorte">De enero al mes del corte. El acumulado se compara con el mismo tramo del año anterior.</p>
+<div class="ctb-tabla-wrap ctb-comp-wrap">
+<table class="data-table ctb-comp" id="anAnioTabla"></table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErEquilibrio" aria-labelledby="anEquilibrioTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anEquilibrioTitulo">Punto de equilibrio</h3>
+<p class="section-subtitle">Ventas necesarias para cubrir los gastos fijos con el margen de contribución del periodo.</p>
+</div>
+</div>
+<div id="anEquilibrio" class="ctb-equilibrio"></div>
+</section>
+</div>
+
+<!-- ═══ Balance General ═══ -->
+<div id="panelCtbBalance" class="ctb-panel hidden">
+<section class="section-panel dashboard-section ctb-resumen" aria-labelledby="bgTitulo">
+<div class="ctb-resumen__titular">
+<span class="ctb-kicker" id="bgTitulo">Balance General</span>
+<strong class="ctb-resumen__cifra ctb-resumen__cifra--sm" id="bgCorte">—</strong>
+<p class="ctb-resumen__frase" id="bgCuadre"></p>
+<p class="ctb-resumen__nota" id="bgNota"></p>
+</div>
+<div class="ctb-kpis" id="bgKpis" aria-label="Totales del balance"></div>
+</section>
+
+<section class="section-panel dashboard-section" aria-labelledby="bgIndTitulo">
+<h3 class="section-title" id="bgIndTitulo">Indicadores</h3>
+<div id="bgIndicadores" class="ctb-indicadores"></div>
+</section>
+
+<section class="section-panel dashboard-section" aria-labelledby="bgEstTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="bgEstTitulo">Estructura</h3>
+<p class="section-subtitle">Grupo y cuenta de mayor del catálogo de Balderrama.</p>
+</div>
+</div>
+<div class="ctb-estructura">
+<div id="bgActivo" class="ctb-estructura__col"></div>
+<div id="bgPasivoCapital" class="ctb-estructura__col"></div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section" aria-labelledby="bgConTitulo">
+<h3 class="section-title" id="bgConTitulo">Resultado del ejercicio</h3>
+<p class="section-subtitle">El resultado de la balanza (cuentas 04 a 09) contra el estado de resultados de enero al corte.</p>
+<div id="bgConciliacion" class="ctb-conciliacion"></div>
+</section>
+</div>
 
 <div id="panelContabilidadCatalogo" class="contabilidad-main-panel hidden" hidden aria-hidden="true">
 
@@ -235,7 +393,8 @@
 
 </div>
 
-<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid">
+<!-- Balance anterior: lo reemplaza el Balance General con formato VECSA (panelCtbBalance). -->
+<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid hidden" aria-hidden="true">
 
 <section class="bg-balance-head dashboard-section">
 <div class="bg-balance-head__row">
@@ -596,6 +755,7 @@ Exportar CSV
 <script src="/js/assistant-bubble.js?v=6"></script>
 <script src="/js/eeff.js?v=31"></script>
 <script src="/js/analisisFinanciero.js?v=11"></script>
-<script src="/js/contabilidad.js?v=75"></script>
+<script src="/js/contabilidad-formato.js?v=1"></script>
+<script src="/js/contabilidad.js?v=77"></script>
 </body>
 </html>

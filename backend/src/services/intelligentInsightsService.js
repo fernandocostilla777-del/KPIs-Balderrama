@@ -477,6 +477,166 @@ function buildVentasInsights(payload = {}) {
   return insights;
 }
 
+/* ───────────────── Estado de resultados (formato VECSA) ───────────────── */
+
+function pesosEr(n) {
+  return Number(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
+}
+
+/**
+ * Alertas del estado de resultados con formato VECSA (adaptadas de KPIs-VECSA).
+ * Rojo solo para lo grave: pérdida, gastos mayores que la utilidad bruta, ventas debajo
+ * del equilibrio, o un grupo de negocio completo vendiendo abajo del costo. Lo que el
+ * resto del negocio compensa, o un control de la balanza, va como aviso.
+ */
+function buildEstadoResultadosInsights(er = {}) {
+  if (!er || er.disponible === false) return [];
+  const list = [];
+  const t = er.totales || {};
+  const ventas = Number(t.ventas || 0);
+  const ub = Number(t.utilidadBruta || 0);
+  const gastos = Number(t.gastos || 0);
+  const neta = Number(t.utilidadNeta || 0);
+  const periodo = `Periodo: ${er.fechaInicio || '—'} a ${er.fechaFin || '—'}`;
+
+  if (neta < 0) {
+    const alerta = {
+      id: 'er-perdida',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Pérdida en el periodo',
+      summary: `La utilidad del periodo es ${pesosEr(neta)}.`,
+      analysis: 'La utilidad bruta y el resultado financiero no alcanzan a cubrir los gastos del periodo.',
+      recommendations: [
+        'Revisar qué línea vende abajo del costo.',
+        'Ver qué departamento se lleva la mayor parte de la utilidad bruta.',
+      ],
+      metrics: { utilidadNeta: neta, ventas, utilidadBruta: ub },
+      chatPrompt: chatPrompt('Contabilidad', 'Pérdida en el periodo', [
+        periodo, `Utilidad del periodo: ${pesosEr(neta)}`, `Ventas: ${pesosEr(ventas)}`, `Utilidad bruta: ${pesosEr(ub)}`,
+      ], 'Explica la pérdida con las líneas y los gastos por departamento del estado de resultados. No inventes cifras.'),
+    };
+    push(list, { ...alerta, kpiId: 'kpiErResultado' });
+    push(list, { ...alerta, id: 'er-perdida-tendencia', kpiId: 'kpiErTendencia' });
+  }
+
+  const lineas = er.lineas || [];
+  const abajo = lineas.filter((l) => Number(l.utilidad) < 0);
+  if (abajo.length) {
+    const grupoEnPerdida = abajo.some((l) => lineas
+      .filter((x) => x.grupo === l.grupo)
+      .reduce((sum, x) => sum + Number(x.utilidad || 0), 0) < 0);
+    push(list, {
+      id: 'er-linea-bajo-costo',
+      kpiId: 'kpiErLineas',
+      module: 'contabilidad',
+      severity: grupoEnPerdida ? 'critical' : 'warning',
+      title: abajo.length === 1 ? `${abajo[0].label} vende abajo del costo` : 'Hay líneas que venden abajo del costo',
+      summary: abajo.map((l) => `${l.label}: ${pesosEr(l.utilidad)}`).join(' · '),
+      analysis: grupoEnPerdida
+        ? 'El grupo de negocio completo queda con utilidad bruta negativa.'
+        : 'Las otras líneas del mismo grupo compensan la pérdida; conviene vigilar que no crezca.',
+      recommendations: [
+        'Revisar el costo y el precio de esas unidades u órdenes antes de buscar el ahorro en gastos.',
+      ],
+      metrics: { lineas: abajo.map((l) => ({ label: l.label, utilidad: l.utilidad })) },
+      chatPrompt: chatPrompt('Contabilidad', 'Líneas bajo el costo', abajo.map((l) => `${l.label}: venta ${pesosEr(l.ventas)}, utilidad bruta ${pesosEr(l.utilidad)}`)),
+    });
+  }
+
+  if (ub > 0 && -gastos >= ub) {
+    const rubro = [...(er.gastos || [])].sort((a, b) => Number(a.importe) - Number(b.importe))[0];
+    push(list, {
+      id: 'er-gastos-superan-ub',
+      kpiId: 'kpiErGastos',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Los gastos se comen la utilidad bruta',
+      summary: `Gastos ${pesosEr(-gastos)} contra utilidad bruta ${pesosEr(ub)}.`,
+      analysis: rubro ? `El departamento más grande es ${rubro.label} (${pesosEr(-Number(rubro.importe))}).` : 'Los gastos del periodo superan lo que deja la venta después del costo.',
+      recommendations: ['Empezar por el departamento con más gasto.'],
+      metrics: { gastos, utilidadBruta: ub },
+      chatPrompt: chatPrompt('Contabilidad', 'Gastos mayores que la utilidad bruta', [
+        `Gastos: ${pesosEr(-gastos)}`, `Utilidad bruta: ${pesosEr(ub)}`, rubro ? `Mayor: ${rubro.label} ${pesosEr(-Number(rubro.importe))}` : '',
+      ].filter(Boolean)),
+    });
+  }
+
+  const eq = er.equilibrio;
+  if (eq && eq.ventas > 0 && eq.ventasEquilibrio == null) {
+    push(list, {
+      id: 'er-equilibrio-no-calculable',
+      kpiId: 'kpiErEquilibrio',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'No hay punto de equilibrio',
+      summary: `Margen de contribución ${eq.margenContribucionPct == null ? 'sin dato' : `${eq.margenContribucionPct} %`}.`,
+      analysis: 'Con este margen, vender más no cubre los gastos fijos. Primero hay que recuperar contribución.',
+      recommendations: ['Revisar la utilidad bruta y los costos variables antes de recortar gastos fijos.'],
+      metrics: { margenContribucionPct: eq.margenContribucionPct, ventas: eq.ventas },
+      chatPrompt: chatPrompt('Contabilidad', 'Punto de equilibrio no calculable', [`Ventas: ${pesosEr(eq.ventas)}`, `Contribución: ${pesosEr(eq.contribucion)}`]),
+    });
+  } else if (eq && eq.holgura < 0) {
+    push(list, {
+      id: 'er-bajo-equilibrio',
+      kpiId: 'kpiErEquilibrio',
+      module: 'contabilidad',
+      severity: 'critical',
+      title: 'Ventas debajo del punto de equilibrio',
+      summary: `Faltan ${pesosEr(-eq.holgura)} de ventas para cubrir los gastos fijos.`,
+      analysis: `Las ventas del periodo son ${pesosEr(eq.ventas)} y el equilibrio está en ${pesosEr(eq.ventasEquilibrio)}.`,
+      recommendations: ['Subir la contribución (precio, mezcla o costo) o bajar los gastos fijos.'],
+      metrics: { ventas: eq.ventas, equilibrio: eq.ventasEquilibrio, holgura: eq.holgura },
+      chatPrompt: chatPrompt('Contabilidad', 'Debajo del punto de equilibrio', [`Ventas: ${pesosEr(eq.ventas)}`, `Equilibrio: ${pesosEr(eq.ventasEquilibrio)}`]),
+    });
+  }
+
+  const rubroAnio = er.comparativo?.hayAnterior
+    ? (er.comparativo.rubros || []).find((r) => r.key === er.comparativo.metrica)
+    : null;
+  if (rubroAnio && rubroAnio.variacionPct != null && rubroAnio.diferencia < 0) {
+    push(list, {
+      id: 'er-anio-abajo',
+      kpiId: 'kpiErAnio',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: `${er.comparativo.metricaLabel} debajo del año anterior`,
+      summary: `${pesosEr(rubroAnio.actual)} contra ${pesosEr(rubroAnio.anterior)} del mismo periodo (${rubroAnio.variacionPct} %).`,
+      analysis: 'La comparación es el periodo consultado contra las mismas fechas del año anterior.',
+      recommendations: ['Ver qué mes del año se separa del mismo mes del año pasado.'],
+      metrics: { actual: rubroAnio.actual, anterior: rubroAnio.anterior, variacionPct: rubroAnio.variacionPct },
+      chatPrompt: chatPrompt('Contabilidad', 'Año contra año a la baja', [`Actual: ${pesosEr(rubroAnio.actual)}`, `Año anterior: ${pesosEr(rubroAnio.anterior)}`]),
+    });
+  }
+
+  const sin = er.cuentasSinRenglon || [];
+  const fuera = er.gastosFueraDelEstado || [];
+  if (sin.length || fuera.length) {
+    const montoSin = sin.reduce((sum, c) => sum + Number(c.importe || 0), 0);
+    const montoFuera = fuera.reduce((sum, g) => sum + Number(g.importe || 0), 0);
+    push(list, {
+      id: 'er-revision-balanza',
+      kpiId: 'kpiErResultado',
+      module: 'contabilidad',
+      severity: 'warning',
+      title: 'Hay saldos que el estado de resultados no toma',
+      summary: [
+        sin.length ? `${sin.length} cuenta(s) sin renglón por ${pesosEr(montoSin)}` : '',
+        fuera.length ? `${fuera.map((g) => `GPO ${g.gpo}`).join(', ')} con gasto fuera del estado por ${pesosEr(montoFuera)}` : '',
+      ].filter(Boolean).join(' · '),
+      analysis: 'Son movimientos de la balanza que el mapeo del EEFF SUMMARY no asigna a ningún renglón. La utilidad del periodo no los incluye.',
+      recommendations: ['Confirmar con Contraloría si esas cuentas deben sumar en algún renglón del libro.'],
+      metrics: { cuentasSinRenglon: sin.length, montoSinRenglon: montoSin, departamentosFuera: fuera.length, montoFuera },
+      chatPrompt: chatPrompt('Contabilidad', 'Revisión de la balanza', [
+        ...sin.slice(0, 8).map((c) => `${c.cuenta} ${c.descripcion || ''}: ${pesosEr(c.importe)}`),
+        ...fuera.map((g) => `GPO ${g.gpo} ${g.label}: ${pesosEr(g.importe)}`),
+      ]),
+    });
+  }
+
+  return list;
+}
+
 /* ───────────────── Contabilidad ───────────────── */
 
 function buildContabilidadInsights(payload = {}) {
@@ -2748,7 +2908,11 @@ function buildInsights({ module, roleId, ...rest } = {}) {
   let insights = [];
   if (mod === 'ventas' || mod === 'sales') insights = buildVentasInsights(rest);
   else if (mod === 'contabilidad' || mod === 'eeff' || mod === 'accounting') {
-    insights = buildContabilidadInsights(rest);
+    // Formato VECSA (estado de resultados) + las alertas de «Departamentos y presupuesto».
+    insights = [
+      ...(rest.estadoResultados ? buildEstadoResultadosInsights(rest.estadoResultados) : []),
+      ...buildContabilidadInsights(rest),
+    ];
   } else if (mod === 'overview' || mod === 'tablero' || mod === 'index') {
     insights = buildOverviewInsights(rest);
   } else if (mod === 'inventory' || mod === 'inventario') insights = buildInventoryInsights(rest);
@@ -2774,6 +2938,7 @@ module.exports = {
   buildInsights,
   buildVentasInsights,
   buildContabilidadInsights,
+  buildEstadoResultadosInsights,
   buildLiquidezInsights,
   buildAnalisisFinancieroInsights,
   buildOverviewInsights,

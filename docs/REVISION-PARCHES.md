@@ -96,8 +96,20 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 ## 4. Cifras, permisos y alertas
 
 ### Cifras (Contabilidad / EEFF)
+- **Formato VECSA, cálculo Balderrama.** Estado de resultados, Análisis y Balance
+  salen de `contabilidadFormatoService.js`, que solo ordena lo que ya calculan
+  `eeffSummaryService`, `balanceGeneralService` y `breakEvenService`. Una regla
+  contable nueva va en esos servicios o en `eeffSummaryConfig.js`, no en el formato.
+- **Signo de presentación:** ingresos en positivo; costo y gastos en negativo.
 - Totales que deben cuadrar: líneas de negocio = utilidad bruta; rubros =
-  total de gastos; activo = pasivo + capital + resultado.
+  total de gastos; activo = pasivo + capital + resultado. Lo vigila
+  `contabilidad-formato.test.js`.
+- **No esconder lo que no cuadra:** cuentas con saldo sin renglón, cuentas en dos
+  renglones y departamentos (GPO) con gasto fuera del estado se señalan en
+  «Revisión de la balanza» y en su alerta.
+- **Cuadre contra el libro (oficina):**
+  `node backend/scripts/cuadra-estado-resultados.js --libro "<EEFF.xlsx>" --desde AAAA-MM-DD --hasta AAAA-MM-DD`.
+  La primera vez, confirmar qué renglón tomó para cada concepto.
 - Real contra presupuesto: el periodo debe ser 2026 (`presupuesto-2026.xlsx`);
   si no, alerta clara y botón «Usar acumulado 2026».
 - El mes en curso está abierto: decirlo en pantalla.

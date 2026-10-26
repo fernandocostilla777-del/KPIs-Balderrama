@@ -312,17 +312,22 @@ async function loadResultadoEjercicio(cierre) {
     includePeriod13: cierre.includePeriod13,
   });
   const rows = await query(`
-    SELECT SUM(${signedExpr}) AS resultadoFirmado
+    SELECT LEFT(RTRIM(CTA_NUMCTA), 2) AS prefijo, SUM(${signedExpr}) AS resultadoFirmado
     FROM [${table}]
     WHERE CTA_ACUMDET = 'ACUM'
       AND LEFT(RTRIM(CTA_NUMCTA), 2) IN ('04', '06', '07', '08', '09')
       AND RTRIM(CTA_NUMCTA) LIKE '%-0000-0000-0000'
+    GROUP BY LEFT(RTRIM(CTA_NUMCTA), 2)
   `);
   // Utilidad Contpaq = −Σ saldos firmados de PyG (ingresos ACRE restan en el firmado).
-  const firmado = Number(rows[0]?.resultadoFirmado || 0);
+  // Agrupado por grupo de cuenta solo para la conciliación; el total es el mismo.
+  const firmado = rows.reduce((s, r) => s + Number(r.resultadoFirmado || 0), 0);
   return {
     value: round2(-firmado),
     available: true,
+    porPrefijo: rows
+      .map((r) => ({ prefijo: String(r.prefijo), importe: round2(-Number(r.resultadoFirmado || 0)) }))
+      .sort((a, b) => a.prefijo.localeCompare(b.prefijo)),
   };
 }
 
@@ -453,6 +458,7 @@ async function getBalanceGeneral({ fechaFin, includeComparativo = true } = {}) {
     majorAccounts,
     lines,
     resultadoEjercicio: resultadoEjercicio.available ? resultadoEjercicio.value : null,
+    resultadoPorPrefijo: resultadoEjercicio.porPrefijo || [],
     totals: {
       activoTotal,
       pasivoTotal,

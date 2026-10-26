@@ -1,32 +1,41 @@
 let selectedDailyFecha = null;
-let activeMainTab = 'balance';
+let activeMainTab = 'er';
 let bgKpiState = { items: [], activeId: null, fmt: null };
+
+// Pestañas: er · analisis · balance (formato VECSA, contabilidad-formato.js) y
+// eeff = «Departamentos y presupuesto» (CMI, ventas, postventa, comparativa PPTO).
+const TABS_FORMATO = new Set(['er', 'analisis', 'balance']);
 
 function getMainTabFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const tab = params.get('tab');
-  if (tab === 'eeff' || tab === 'analisis' || tab === 'analisis-financiero') return 'eeff';
-  if (tab === 'catalogo') return 'balance'; // catálogo oculto de momento
+  if (tab === 'eeff' || tab === 'departamentos' || tab === 'analisis-financiero') return 'eeff';
+  if (tab === 'analisis') return 'analisis';
   if (tab === 'balance') return 'balance';
-  return 'balance';
+  return 'er'; // catálogo oculto de momento
 }
 
 function switchMainTab(tab) {
   // Catálogo de cuentas oculto temporalmente
-  if (tab === 'catalogo') tab = 'balance';
-  // CMI financiero vive en EEFF (no en un tab aparte)
-  if (tab === 'analisis' || tab === 'analisis-financiero') tab = 'eeff';
+  if (tab === 'catalogo') tab = 'er';
+  // CMI financiero vive en «Departamentos y presupuesto»
+  if (tab === 'analisis-financiero' || tab === 'departamentos') tab = 'eeff';
   activeMainTab = tab;
-  if (tab !== 'balance') closeBgKpiFloat();
+  closeBgKpiFloat();
   if (tab !== 'eeff') window.EeffSummary?.closeKpiFloat?.();
   document.querySelectorAll('.contabilidad-tab').forEach((el) => {
-    el.classList.toggle('active', el.dataset.tab === tab);
+    const on = el.dataset.tab === tab;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  document.getElementById('panelContabilidadCatalogo')?.classList.toggle('hidden', tab !== 'catalogo');
-  document.getElementById('panelContabilidadBalance')?.classList.toggle('hidden', tab !== 'balance');
+  document.getElementById('panelContabilidadCatalogo')?.classList.add('hidden');
+  // Balance anterior: lo reemplaza el Balance General con formato VECSA.
+  document.getElementById('panelContabilidadBalance')?.classList.add('hidden');
   document.getElementById('panelContabilidadEeff')?.classList.toggle('hidden', tab !== 'eeff');
+  window.ContabilidadFormato?.mostrar?.(tab);
+  // Sucursal y área solo filtran el catálogo de cuentas (oculto).
   const scopePill = document.getElementById('pillScope');
-  if (scopePill) scopePill.style.display = tab === 'eeff' ? 'none' : '';
+  if (scopePill) scopePill.style.display = 'none';
 
   if (tab === 'eeff' && window.EeffSummary?.getComparativa2026DefaultRange) {
     const fi = document.getElementById('fechaInicio');
@@ -47,9 +56,9 @@ function switchMainTab(tab) {
   }
 
   const url = new URL(window.location.href);
-  if (tab === 'eeff' || tab === 'balance') url.searchParams.set('tab', tab);
-  else url.searchParams.delete('tab');
-  window.history.replaceState({}, '', url.pathname + url.search);
+  if (tab === 'er') url.searchParams.delete('tab');
+  else url.searchParams.set('tab', tab);
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 }
 
 function moneyClass(value) {
@@ -2206,11 +2215,15 @@ window.applyContabilidadInsights = function applyContabilidadInsights() {
   const base = window.__contaInsightBase || {};
   const af = window.AnalisisFinanciero?.getData?.();
   const hasAf = Boolean(af?.kpis?.length);
-  if (!base.fechaInicio && !hasAf) return;
+  const estadoResultados = window.ContabilidadFormato?.getEstado?.() || null;
+  const hasEr = Boolean(estadoResultados?.disponible);
+  // Basta con cualquiera de las tres fuentes: si una carga falla, las demás alertas siguen.
+  if (!base.fechaInicio && !hasAf && !hasEr) return;
   window.KpiInsights.apply('contabilidad', {
-    fechaInicio: base.fechaInicio || af?.periodo?.fechaInicio,
-    fechaFin: base.fechaFin || af?.periodo?.fechaFin,
+    fechaInicio: base.fechaInicio || af?.periodo?.fechaInicio || estadoResultados?.fechaInicio,
+    fechaFin: base.fechaFin || af?.periodo?.fechaFin || estadoResultados?.fechaFin,
     ...base,
+    estadoResultados: estadoResultados?.disponible ? estadoResultados : null,
     analisisFinanciero: hasAf
       ? {
           periodo: af.periodo,
@@ -2224,6 +2237,7 @@ window.applyContabilidadInsights = function applyContabilidadInsights() {
 async function onConsultContabilidad(fechaInicio, fechaFin) {
   const { setText } = Dashboard;
   const tasks = [
+    window.ContabilidadFormato?.load?.(fechaInicio, fechaFin) ?? Promise.resolve(),
     loadContabilidad(fechaInicio, fechaFin),
     window.EeffSummary?.load(fechaInicio, fechaFin) ?? Promise.resolve(),
     window.AnalisisFinanciero?.load?.(fechaInicio, fechaFin) ?? Promise.resolve(),
@@ -2277,6 +2291,7 @@ document.addEventListener('keydown', (e) => {
 
 switchMainTab(getMainTabFromUrl());
 
+const contaSinFechas = !Dashboard.getDateParamsFromUrl().fechaInicio;
 Dashboard.initDateFilter({
   onConsult: onConsultContabilidad,
   getInitialRange(fromUrl) {
@@ -2289,9 +2304,15 @@ Dashboard.initDateFilter({
       return window.EeffSummary.getComparativa2026DefaultRange();
     }
     if (fromUrl.fechaInicio && fromUrl.fechaFin) return fromUrl;
+    // Contabilidad cierra el mes después: por omisión, el último mes cerrado.
+    if (TABS_FORMATO.has(getMainTabFromUrl())) {
+      const [a, b] = Dashboard.getDatePresetRange('mes-anterior');
+      return { fechaInicio: Dashboard.formatDateInput(a), fechaFin: Dashboard.formatDateInput(b) };
+    }
     return Dashboard.getDefaultDateRange();
   },
 });
+if (contaSinFechas && TABS_FORMATO.has(getMainTabFromUrl())) Dashboard.setActivePresetChip?.('mes-anterior');
 
 ['filtroSucursal', 'filtroArea', 'filtroIncludeFi'].forEach((id) => {
   document.getElementById(id)?.addEventListener('change', () => {

@@ -32,7 +32,11 @@ const RUTAS_CON_FECHAS = [
   '/post-sales/refacciones',
   '/post-sales/hyp/aseguradoras-cobranza',
   '/post-sales/hyp/garantias-cobranza',
+  '/contabilidad/estado-resultados',
 ];
+
+/** Rutas que solo llevan la fecha de corte (fechaFin). */
+const RUTAS_CORTE = ['/contabilidad/balance'];
 
 /** Rutas sin periodo, con los parámetros fijos que usa el frontend. */
 const RUTAS_FIJAS = [
@@ -80,6 +84,9 @@ function seedItems(now = new Date()) {
   for (const range of monthRanges(now)) {
     for (const ruta of RUTAS_CON_FECHAS) {
       items.push({ ruta, consulta: normalizeQuery(new URLSearchParams(range)) });
+    }
+    for (const ruta of RUTAS_CORTE) {
+      items.push({ ruta, consulta: normalizeQuery(new URLSearchParams({ fechaFin: range.fechaFin })) });
     }
   }
   for (const { ruta, params } of RUTAS_FIJAS) {

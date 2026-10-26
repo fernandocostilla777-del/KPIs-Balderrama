@@ -53,8 +53,8 @@ test('consultar fechas reemplaza el periodo anterior sin duplicarlo', () => {
   assert.equal(ctx.location.searchParams.get('tab'), 'balance');
 });
 
-test('dashboard.css no tiene llaves sobrantes ni bloques sin cerrar', () => {
-  const css = read('css/dashboard.css')
+for (const hoja of fs.readdirSync(path.join(PUB, 'css')).filter((n) => n.endsWith('.css'))) test(`${hoja} no tiene llaves sobrantes ni bloques sin cerrar`, () => {
+  const css = read(`css/${hoja}`)
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
     .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '""');
   let profundidad = 0;

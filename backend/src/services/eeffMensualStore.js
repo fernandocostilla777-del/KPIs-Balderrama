@@ -121,6 +121,10 @@ function flattenPnl(payload) {
     gastosAdministracion: Number(edo.gastosAdministracion || 0),
     sumaGastos: Number(edo.sumaGastos || 0),
     utilidadOperacion: Number(edo.utilidadOperacion || 0),
+    productosFinancieros: Number(edo.productosFinancieros || 0),
+    gastosFinancieros: Number(edo.gastosFinancieros || 0),
+    utilidadFinanciera: Number(edo.utilidadFinanciera || 0),
+    utilidad: Number(edo.utilidad || 0),
   };
 }
 
@@ -216,7 +220,9 @@ function refreshInBackground(year, mes) {
 async function getEeffMes(year, mes, { fresh = false } = {}) {
   loadDisk();
   const key = monthKey(year, mes);
-  const hit = memory.get(key);
+  let hit = memory.get(key);
+  // Meses guardados antes de que el aplanado trajera la utilidad del periodo: recalcular.
+  if (hit && hit.data?.available && hit.data?.pnl && !('utilidad' in hit.data.pnl)) hit = null;
   if (!fresh && hit) {
     if (Date.now() - hit.at < hit.ttl) return { mes, year, key, ...hit.data };
     if (isClosed(year, mes) && hit.data?.available) {

@@ -57,6 +57,7 @@ const PAGE_AI_TOOLS = {
     'consultar_riesgos_oportunidades',
   ],
   contabilidad: [
+    'consultar_estado_resultados',
     'consultar_contabilidad',
     'consultar_riesgos_oportunidades',
   ],

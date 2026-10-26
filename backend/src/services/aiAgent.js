@@ -31,7 +31,8 @@ const WEB_MODULE_RULES = `
 - Post-venta → consultar_postventa
 - Lista de precios / planes Chevrolet / Precio de Venta GMMX → consultar_lista_precios
 - Excel → generar_excel
-- Contabilidad / EEFF → consultar_contabilidad
+- Utilidad, gastos, margen, equilibrio o año contra año → consultar_estado_resultados (mismas cifras que la pantalla)
+- Contabilidad por sucursal/área, VTASMEN → consultar_contabilidad
 - Pronóstico → consultar_pronostico
 - Objetivos → consultar_objetivos_ventas
 - CRM 360 → buscar_cliente_crm → historico_cliente_crm
@@ -154,6 +155,45 @@ function getClient() {
 
 function isConfigured() {
   return Boolean(process.env.OPENAI_API_KEY);
+}
+
+// ── Voz de Balvo (adaptada de KPIs-VECSA) ─────────────────────────────────
+const SPEECH_VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
+
+/** Lee en voz alta una respuesta (MP3). */
+async function synthesizeSpeech(text, voice) {
+  const phrase = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 3500);
+  if (!phrase) {
+    const err = new Error('No hay texto para leer.');
+    err.status = 400;
+    throw err;
+  }
+  const chosen = SPEECH_VOICES.includes(voice) ? voice : 'echo';
+  const speech = await getClient().audio.speech.create({
+    model: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
+    voice: chosen,
+    input: phrase,
+    instructions: 'Habla en español de México, con tono claro, cercano y profesional.',
+  });
+  return Buffer.from(await speech.arrayBuffer());
+}
+
+/** Convierte a texto lo que el usuario dijo por el micrófono. */
+async function transcribeAudio(buffer, mimeType = 'audio/webm') {
+  if (!buffer?.length) {
+    const err = new Error('No llegó audio.');
+    err.status = 400;
+    throw err;
+  }
+  const ext = /ogg/.test(mimeType) ? 'ogg' : /mp4|m4a/.test(mimeType) ? 'm4a' : /wav/.test(mimeType) ? 'wav' : 'webm';
+  const file = await OpenAI.toFile(buffer, `voz.${ext}`, { type: mimeType });
+  const result = await getClient().audio.transcriptions.create({
+    model: process.env.OPENAI_STT_MODEL || 'gpt-4o-mini-transcribe',
+    file,
+    language: 'es',
+    prompt: 'Conversación sobre KPIs de Balderrama Chevrolet: ventas, SOFIA, GMF, inventario, postventa, leads, contabilidad.',
+  });
+  return String(result?.text || '').trim();
 }
 
 function collectExports(toolSnapshots) {
@@ -436,6 +476,9 @@ async function runChat(messages, { roleId = null, username = null } = {}) {
 
 module.exports = {
   isConfigured,
+  synthesizeSpeech,
+  transcribeAudio,
+  SPEECH_VOICES,
   runChat,
   DEFAULT_MODEL,
   buildWebSystemPrompt,

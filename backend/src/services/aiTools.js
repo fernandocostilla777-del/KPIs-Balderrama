@@ -390,8 +390,27 @@ const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'consultar_estado_resultados',
+      description:
+        'Estado de resultados de Contabilidad, con las mismas cifras de la pantalla: ventas, costo, utilidad bruta, '
+        + 'gastos por departamento, utilidad del periodo, utilidad por línea de negocio, punto de equilibrio, '
+        + 'tendencia mes a mes, año contra año del mismo periodo, revisión de la balanza y sus alertas. '
+        + 'Úsala para cualquier pregunta de utilidad, gastos, margen, equilibrio o comparación con el año anterior.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fechaInicio: { type: 'string', description: 'Fecha inicio YYYY-MM-DD' },
+          fechaFin: { type: 'string', description: 'Fecha fin YYYY-MM-DD' },
+        },
+        required: ['fechaInicio', 'fechaFin'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'consultar_contabilidad',
-      description: 'Contabilidad y EEFF: estados financieros, VTASMEN autos nuevos, utilidades y desglose por sucursal/área.',
+      description: 'Contabilidad por sucursal o área y VTASMEN autos nuevos (catálogo de cuentas). Para utilidad, gastos, margen o año anterior usa consultar_estado_resultados.',
       parameters: {
         type: 'object',
         properties: {
@@ -1430,6 +1449,34 @@ async function executeTool(name, args = {}, context = {}) {
     case 'consultar_lista_precios':
       result = await shapeListaPreciosForAi(args);
       break;
+    case 'consultar_estado_resultados': {
+      // Mismas cifras y alertas que Contabilidad › Estado de resultados.
+      const { getEstadoResultadosFormato } = require('./contabilidadFormatoService');
+      const { buildEstadoResultadosInsights } = require('./intelligentInsightsService');
+      const er = await getEstadoResultadosFormato({ fechaInicio: args.fechaInicio, fechaFin: args.fechaFin });
+      result = {
+        disponible: er.disponible,
+        nota: er.nota,
+        signo: 'Ingresos en positivo; costo y gastos en negativo (signo de la balanza).',
+        periodo: { fechaInicio: er.fechaInicio, fechaFin: er.fechaFin },
+        totales: er.totales,
+        margenes: er.margenes,
+        lineas: er.lineas,
+        gastos: (er.gastos || []).map((g) => ({ label: g.label, importe: g.importe, pctUtilidadBruta: g.pctUtilidadBruta, pctVentas: g.pctVentas })),
+        gastosFueraDelEstado: er.gastosFueraDelEstado,
+        equilibrio: er.equilibrio,
+        serie: (er.serie || []).map((m) => ({ mes: m.etiqueta, ...m.totales })),
+        anioContraAnio: er.comparativo ? {
+          anio: er.comparativo.anio,
+          anioAnterior: er.comparativo.anioAnterior,
+          hayAnterior: er.comparativo.hayAnterior,
+          rubros: er.comparativo.rubros,
+        } : null,
+        cuentasSinRenglon: (er.cuentasSinRenglon || []).slice(0, 15),
+        alertas: buildEstadoResultadosInsights(er).map((x) => ({ titulo: x.title, severidad: x.severity, resumen: x.summary })),
+      };
+      break;
+    }
     case 'consultar_contabilidad':
       result = await getContabilidad(args);
       break;

@@ -25,7 +25,7 @@ const { getAnalisisComercial } = require('../services/analisisComercialService')
 const { getContabilidad } = require('../services/contabilidadService');
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
-const { isConfigured, runChat, DEFAULT_MODEL } = require('../services/aiAgent');
+const { isConfigured, runChat, synthesizeSpeech, transcribeAudio, DEFAULT_MODEL } = require('../services/aiAgent');
 const { canManageUsers } = require('../auth/roles');
 const { isAuthEnabled } = require('../auth/session');
 const { requireSession } = require('../auth/middleware');
@@ -1038,6 +1038,36 @@ router.get('/ai/kpi-catalog', (req, res) => {
     res.json({ ok: true, count: items.length, items });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Voz de Balvo: leer la respuesta y escuchar al usuario (OpenAI).
+router.post('/ai/speech', async (req, res) => {
+  try {
+    if (!isConfigured()) {
+      return res.status(503).json({ error: 'La voz de OpenAI no está configurada. Agrega OPENAI_API_KEY.' });
+    }
+    const audio = await synthesizeSpeech(req.body?.text, req.body?.voice);
+    res.set('Content-Type', 'audio/mpeg');
+    res.set('Cache-Control', 'no-store');
+    res.send(audio);
+  } catch (err) {
+    console.error('[AI speech]', err.message);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo generar la voz' });
+  }
+});
+
+router.post('/ai/transcribe', express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '15mb' }), async (req, res) => {
+  try {
+    if (!isConfigured()) {
+      return res.status(503).json({ error: 'La voz de OpenAI no está configurada. Agrega OPENAI_API_KEY.' });
+    }
+    const mime = String(req.headers['content-type'] || 'audio/webm').split(';')[0];
+    const text = await transcribeAudio(Buffer.isBuffer(req.body) ? req.body : null, mime);
+    res.json({ text });
+  } catch (err) {
+    console.error('[AI transcribe]', err.message);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo transcribir el audio' });
   }
 });
 

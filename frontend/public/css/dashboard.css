@@ -18315,3 +18315,37 @@ html[data-theme="dark"] .ppto-empresa__table tr.ppto-12m__grupo td {
   .vendidos-resumen__cards { grid-template-columns: 1fr; }
   .vendidos-resumen__cap { flex-direction: column; }
 }
+
+/* ── Ventas · limpieza de lectura (parche 0006) ─────────────────────────── */
+/* Resultado del periodo: 6 tarjetas en 3×2 (o en un renglón en pantallas anchas), sin una sola colgando. */
+@media (min-width: 640px) {
+  .kpi-grid--yoy:has(> :nth-child(6):last-child) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1360px) {
+  .kpi-grid--yoy:has(> :nth-child(6):last-child) {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+/* Carry over es <button>: mismo título que las demás tarjetas. */
+button.kpi-card--yoy { text-align: left; font: inherit; }
+/* Composición: con el aviso de «sin datos» visible no se deja la caja vacía de la gráfica. */
+#acAntiguedadEmpty:not(.hidden) + .chart-card,
+#acTipoClienteEmpty:not(.hidden) + .chart-card { display: none; }
+/* Celular: los encabezados de utilidad por carline se parten en dos renglones en lugar de cortarse. */
+@media (max-width: 639px) {
+  .carline-utilidad-table thead th { white-space: normal; line-height: 1.25; }
+  .carline-utilidad-table .col-carline { width: 22%; }
+  .carline-utilidad-table .col-version { width: 30%; }
+  .carline-utilidad-table .col-util { width: 25%; }
+  .carline-utilidad-table .col-mb { width: 23%; }
+  /* Las 6 tarjetas del resultado en 2 columnas: el periodo completo cabe en una pantalla y media, no en tres.
+     !important porque la regla general de ≤480 px fuerza una columna en todas las cuadrículas de KPIs. */
+  .kpi-grid--yoy:has(> :nth-child(6):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px;
+  }
+  .kpi-grid--yoy:has(> :nth-child(6):last-child) .kpi-card { padding: 14px 12px; min-width: 0; }
+  .kpi-grid--yoy:has(> :nth-child(6):last-child) .kpi-value { font-size: 1.6rem; }
+}

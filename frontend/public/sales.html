@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=167" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=168" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
@@ -140,20 +140,17 @@ Comisiones
 <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
 </button>
 </div>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
+<div class="kpi-card kpi-card--violet kpi-card--yoy" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
+<div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
+<div id="kpiCobertura" class="kpi-value">—</div>
+<p id="kpiCoberturaSub" class="kpi-subtitle">Contra el objetivo SOFIA</p>
+</div>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--yoy kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
 <div class="kpi-card-head"><span class="kpi-title">Carry over para facturar</span><span class="material-symbols-outlined kpi-icon">pending_actions</span></div>
 <div id="kpiCarryOver" class="kpi-value">0</div>
 <p id="kpiCarryOverSub" class="kpi-subtitle">Apartadas SEP · clic para % y detalle</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 </button>
-<div class="kpi-card kpi-card--violet kpi-card--yoy" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
-<div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
-<div id="kpiCobertura" class="kpi-value">—</div>
-<div class="kpi-yoy" data-kpi-yoy="numeradorCobertura" hidden>
-  <span class="kpi-yoy-badge" data-yoy-badge></span>
-  <span class="kpi-yoy-prior" data-yoy-prior></span>
-</div>
-</div>
 </section>
 <p id="ventasDemosNota" class="liquidez-note ventas-demos-nota hidden" aria-live="polite"></p>
 
@@ -345,11 +342,6 @@ Comisiones
 <div id="kpiMenorMes" class="kpi-subtitle" style="font-size:16px;font-weight:700;color:#0f172a;margin-top:14px">-</div>
 <div class="kpi-accent"></div>
 </div>
-<div class="kpi-card kpi-card--violet">
-<span class="kpi-title">Acumulado anual</span>
-<div id="kpiAcumuladoAnio" class="kpi-value">0</div>
-<div class="kpi-accent"></div>
-</div>
 </section>
 
 <section class="chart-grid">
@@ -426,10 +418,6 @@ Comisiones
 </section>
 
 <section id="chartsMensuales" class="hidden">
-<div class="section-panel dashboard-section">
-<h3 class="section-title">Comparativo mensual · Acumulado del año</h3>
-<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartMesTotal"></canvas></div></div>
-</div>
 <div class="chart-grid">
 <div class="section-panel"><h3 class="section-title">Flotillas vs venta retail por mes</h3><div class="chart-card"><div class="chart-wrap"><canvas id="chartMesFlotilla"></canvas></div></div></div>
 <div class="section-panel"><h3 class="section-title">Tipo de venta retail por mes</h3><div class="chart-card"><div class="chart-wrap"><canvas id="chartMesTipo"></canvas></div></div></div>
@@ -1279,6 +1267,6 @@ Exportar CSV
 <script src="/js/afluencia.js?v=18"></script>
 <script src="/js/comisiones.js?v=2"></script>
 <script src="/js/analisisComercial.js?v=20"></script>
-<script src="/js/sales.js?v=125"></script>
+<script src="/js/sales.js?v=126"></script>
 </body>
 </html>

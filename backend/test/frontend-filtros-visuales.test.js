@@ -84,3 +84,11 @@ test('cada .css/.js propio usa la misma ?v= en todas las páginas', () => {
     .map(([a, v]) => `${a}: ${[...v].join(', ')}`);
   assert.deepEqual(disparejas, [], 'versiones distintas por página: algunas sirven el archivo viejo del caché');
 });
+
+test('Ventas lee el periodo de la URL al arrancar y lo guarda al consultar', () => {
+  const src = read('js/sales.js').replace(/\r\n/g, '\n');
+  const boot = src.slice(src.indexOf('async function boot()'));
+  assert.match(boot.slice(0, boot.indexOf('await consultar()')), /getDateParamsFromUrl\(\)/, 'boot debe tomar fechaInicio/fechaFin de la URL');
+  const consultar = src.slice(src.indexOf('async function consultar('), src.indexOf('async function consultar(') + 600);
+  assert.match(consultar, /syncDateParamsToUrl/, 'consultar debe guardar el periodo en la URL');
+});

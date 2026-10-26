@@ -33,7 +33,7 @@ function compareLines(realLines, budgetLines) {
       real?.label || budget?.label || key,
       Number(real?.value || 0),
       Number(budget?.value || 0),
-      { highlight: real?.highlight || budget?.highlight, level: real?.level },
+      { highlight: real?.highlight || budget?.highlight, level: real?.level, group: real?.group || budget?.group },
     );
   });
 }

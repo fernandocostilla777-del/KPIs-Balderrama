@@ -18349,3 +18349,105 @@ button.kpi-card--yoy { text-align: left; font: inherit; }
   .kpi-grid--yoy:has(> :nth-child(6):last-child) .kpi-card { padding: 14px 12px; min-width: 0; }
   .kpi-grid--yoy:has(> :nth-child(6):last-child) .kpi-value { font-size: 1.6rem; }
 }
+
+/* ── Contabilidad · Departamentos y presupuesto (parche 0007) ───────────── */
+/* Tablas cortas: se ven completas, sin el tope de 440 px. */
+.table-scroll.table-scroll--auto { max-height: none; }
+#panelContabilidadEeff > .eeff-tabs { margin-bottom: 16px; }
+#panelContabilidadEeff .eeff-panel > * + * { margin-top: 16px; }
+.eeff-edo-kpi-row--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#eeffEdoFinOverview > .section-title { margin-bottom: 12px; }
+.deptos-frase {
+  margin: 4px 0 14px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-primary, #1e293b);
+}
+.deptos-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent, #2d5bff);
+  cursor: pointer;
+  text-align: left;
+}
+.deptos-link:hover { text-decoration: underline; }
+.deptos-fila--ajuste td { color: #64748b; font-style: italic; }
+.deptos-col-aporte { min-width: 180px; }
+td.deptos-col-aporte { display: flex; align-items: center; gap: 8px; }
+.deptos-barra {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.22);
+  overflow: hidden;
+}
+.deptos-barra i { display: block; height: 100%; background: #2d5bff; border-radius: 4px; }
+.deptos-barra i.is-neg { background: #dc2626; }
+.deptos-barra__pct { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+.deptos-nota { margin-top: 10px; }
+.data-table tr.row-subtotal td { border-top: 1px solid rgba(148, 163, 184, 0.45); background: rgba(241, 245, 249, 0.7); }
+/* Punto de equilibrio: cobertura con regla en 100 % (la mitad de la barra). */
+.pe-cobertura { white-space: nowrap; }
+.pe-cobertura__barra {
+  position: relative;
+  display: inline-block;
+  width: 72px;
+  height: 8px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.22);
+  overflow: hidden;
+}
+.pe-cobertura__barra i { position: absolute; inset: 0 auto 0 0; background: currentColor; opacity: 0.75; }
+.pe-cobertura__barra b { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #1e293b; }
+.pe-detalle { margin-top: 14px; }
+.pe-detalle > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent, #2d5bff);
+  padding: 6px 0;
+}
+.pe-detalle[open] > summary { margin-bottom: 8px; }
+@media (max-width: 1200px) {
+  .eeff-edo-kpi-row--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .eeff-edo-kpi-row--3 { grid-template-columns: 1fr; }
+  #panelContabilidadEeff > .eeff-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  #panelContabilidadEeff > .eeff-tabs .eeff-tab { flex: 0 0 auto; }
+  .deptos-col-aporte { min-width: 130px; }
+}
+/* Real vs presupuesto: las tablas de detalle van a todo el ancho para que se vea la variación. */
+.cmp-detalle { display: grid; grid-template-columns: 1fr; gap: 16px; }
+/* Celular: la lectura corta de cada tabla (departamento, resultado y aporte / cobertura); el detalle completo, en escritorio. */
+@media (max-width: 639px) {
+  .deptos-tabla th:nth-child(2), .deptos-tabla td:nth-child(2),
+  .deptos-tabla th:nth-child(3), .deptos-tabla td:nth-child(3),
+  .deptos-tabla th:nth-child(4), .deptos-tabla td:nth-child(4),
+  .deptos-tabla th:nth-child(5), .deptos-tabla td:nth-child(5),
+  .deptos-tabla th:nth-child(7), .deptos-tabla td:nth-child(7),
+  .pe-tabla th:nth-child(2), .pe-tabla td:nth-child(2),
+  .pe-tabla th:nth-child(3), .pe-tabla td:nth-child(3),
+  .pe-tabla th:nth-child(4), .pe-tabla td:nth-child(4) { display: none; }
+  .deptos-tabla th, .pe-tabla th { white-space: normal; }
+  .deptos-tabla td, .pe-tabla td { padding-left: 8px; padding-right: 8px; font-size: 13px; }
+  td.deptos-col-aporte { gap: 6px; }
+  .deptos-col-aporte { min-width: 0; }
+  .deptos-barra__pct { min-width: 44px; }
+  .pe-cobertura__barra { width: 44px; margin-right: 4px; }
+}
+@media (max-width: 639px) {
+  .deptos-barra, .pe-cobertura__barra { display: none; }
+  .deptos-tabla th.deptos-col-aporte { font-size: 0; }
+  .deptos-tabla th.deptos-col-aporte::after { content: 'Aporte'; font-size: 11px; }
+}
+@media (max-width: 639px) {
+  .deptos-tabla td:first-child, .pe-tabla td:first-child { white-space: normal; }
+  .deptos-tabla td, .pe-tabla td { font-size: 12px; }
+  #kpiDeptosAporte .section-head-row { flex-wrap: wrap; gap: 8px; }
+  #kpiDeptosAporte .section-head-row .btn-glass { padding: 6px 12px; }
+}

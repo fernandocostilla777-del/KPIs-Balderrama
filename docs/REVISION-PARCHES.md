@@ -46,7 +46,7 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 |---|---|---|
 | Resumen (`index.html`) | — | `initDateFilter` |
 | Ventas (`sales.html`) | `#financiamiento`, `#leads`, `#afluencia`, `#comisiones` o `?tab=` | propio de `sales.js` |
-| Contabilidad | `?tab=eeff` / `?tab=balance` | `initDateFilter` |
+| Contabilidad | `?tab=analisis` / `?tab=balance` / `?tab=eeff&vista=` (seminuevos, ventas, postventa, comparativa) | `initDateFilter` |
 | Postventa | `#hyp`, `#refacciones`, `#servicio` | `initDateFilter` |
 | Inventario | `?tab=postventa`, `seminuevos`, `cierre` | propio |
 | Pronóstico | `?tab=` | propio |
@@ -66,7 +66,10 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 - Arriba, los KPIs que el perfil necesita para decidir; abajo, el detalle.
 - En tablas por mes, **el acumulado y la variación van junto al concepto**,
   antes de los meses, para que se vean sin desplazar.
-- Sin cifras repetidas entre el titular y las tarjetas.
+- Sin cifras repetidas entre el titular y las tarjetas, ni entre pestañas: lo que ya
+  está en Estado de resultados o Análisis no se vuelve a pintar en Departamentos.
+- En real contra presupuesto, el color dice si la variación **favorece**: en costos
+  y gastos, quedar abajo del presupuesto es verde.
 - Cada KPI con su unidad y su comparativo (`$X · var. ±Y%`), con
   `fmt.money` y el signo explícito.
 - Textos de negocio, no nombres de hojas de Excel ni de tablas SQL.

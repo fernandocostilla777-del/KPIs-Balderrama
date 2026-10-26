@@ -9,6 +9,8 @@ const os = require('os');
 const apiRoutes = require('./src/routes/api');
 const authRoutes = require('./src/routes/auth');
 const { attachSession, requireAuthApi } = require('./src/auth/middleware');
+const dataSource = require('./src/services/dataSource');
+const { replicaMiddleware } = require('./src/services/cloudReplica/replicaMiddleware');
 const { isAuthEnabled } = require('./src/auth/session');
 const { buildOpenApiSpec } = require('./src/openapi');
 
@@ -115,15 +117,31 @@ app.get(['/api/docs', '/api/docs/'], (_req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
-app.use('/api', requireAuthApi, apiRoutes);
+// Origen de datos (SQL Server o réplica en la nube) y estado de la publicación.
+app.get('/api/data-source', requireAuthApi, (_req, res) => {
+  const replica = require('./src/services/cloudReplica/replicaPublisher').getStatus();
+  res.json({ ...dataSource.getStatus(), replica });
+});
+// Sin SQL Server, los GET se responden con la réplica (después de revisar permisos).
+app.use('/api', requireAuthApi, replicaMiddleware, apiRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error('[API Error]', err.message);
   res.status(500).json({ error: 'Error al consultar la base de datos', detail: err.message });
 });
 
+dataSource.start().catch((err) => console.error('[data-source]', err.message));
+
 const server = app.listen(PORT, HOST, () => {
   printStartupUrls();
+  // Publicar la réplica solo desde el servidor de la oficina, no desde el escritorio.
+  if (!desktopManaged) {
+    try {
+      require('./src/services/cloudReplica/replicaPublisher').start(PORT);
+    } catch (err) {
+      console.error('[cloud-replica] No se pudo iniciar el publicador:', err.message);
+    }
+  }
   try {
     const { startScheduler } = require('./src/services/crmSheetsSync');
     startScheduler();

@@ -128,6 +128,18 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 - Correr las pruebas también con PostgreSQL:
   `CRM_PG_URL_TEST=postgresql://… npm test` (sin la variable, esas pruebas se omiten).
 
+### Modo nube (réplica)
+- **Ruta nueva con fechas** que se use al abrir una pantalla: agregarla a
+  `RUTAS_CON_FECHAS` (o `RUTAS_FIJAS` con sus parámetros exactos) en
+  `cloudReplica/replicaPublisher.js`. La consulta publicada debe ser igual a la
+  que manda el frontend; si no, se publica algo que nadie lee.
+- **Vista de un cliente individual** (nombre, teléfono, historial): agregarla a
+  `PREFIJOS_EXCLUIDOS` en `replicaKey.js` **y** en `cloud-api/.../desktopCacheStore.js`.
+  Una prueba vigila que coincidan.
+- **Ruta que no depende de SQL Server:** agregarla a `LOCAL_PREFIXES` en
+  `replicaMiddleware.js` para no ir a la nube sin necesidad.
+- Ver `docs/REPLICA-NUBE.md`.
+
 ### Datos personales
 - Nada con nombre, teléfono, correo, RFC o VIN de clientes en el repositorio.
   **Pendiente:** `backend/data/forecast-source.csv` hoy trae nombres de clientes,
@@ -158,7 +170,7 @@ for f in ../frontend/public/js/*.js; do node --check "$f"; done
 ## 7. Lo que solo se valida en la oficina
 
 - Cifras contra SQL Server real y el libro de Excel de Contraloría.
-- Sincronización a la nube (`cloudSync/` → `cloud-api`) con datos reales.
+- Sincronización a la nube (`cloudSync/` → `cloud-api`) y réplica (`desktop-cache`) con datos reales.
 - Tiempos de respuesta con datos completos.
 - Íconos y textos encimados con las fuentes cargadas.
 

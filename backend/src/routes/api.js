@@ -340,6 +340,37 @@ router.get('/ventas/monitoreo-cholula', async (req, res, next) => {
   }
 });
 
+router.get('/ventas/monitoreo-cholula/clientes', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaFin) {
+      return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
+    }
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(await monitoreo.getCarteraCholula({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.put('/ventas/monitoreo-cholula/clientes/:idCrm', (req, res, next) => {
+  try {
+    // Las etiquetas viven en el servidor de la oficina; fuera de la red no se guardan
+    // para no tener dos copias distintas.
+    if (require('../services/dataSource').isCloud()) {
+      return res.status(503).json({ error: 'Las etiquetas de clientes solo se guardan conectado a la red de la oficina.' });
+    }
+    const { etiqueta, motivo, nota } = req.body || {};
+    const autor = req.session?.username || 'usuario';
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(monitoreo.etiquetarClienteCholula(req.params.idCrm, { etiqueta, motivo, nota, autor }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.get('/ventas/afluencia', (req, res, next) => {
   try {
     const { fechaInicio, fechaFin, limit } = req.query;

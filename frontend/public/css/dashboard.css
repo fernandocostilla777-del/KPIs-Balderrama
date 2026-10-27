@@ -18940,3 +18940,139 @@ td.deptos-col-aporte { display: flex; align-items: center; gap: 8px; }
   .cv-ventas { gap: 6px; }
   .cv-ventas .cv-var { padding: 1px 5px; font-size: 10.5px; }
 }
+
+/* ── Ventas · Vendedores Cholula · Seguimiento de clientes ───────────────── */
+.cc { margin-top: 28px; padding-top: 22px; border-top: 1px solid #e6ebf3; }
+.cc-head { align-items: flex-start; }
+.cc-head .cv-leyenda { margin-top: 3px; }
+.cc-filtros { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 10px 0 12px; }
+.cc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid #dfe5ee; background: #ffffff;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: #475569; cursor: pointer;
+}
+.cc-chip b { font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+.cc-chip:hover { border-color: #b9c6ff; }
+.cc-chip.is-on { background: #2d5bff; border-color: #2d5bff; color: #ffffff; }
+.cc-chip.is-on b { color: #ffffff; }
+.cc-chip--alerta.is-on { background: #fffbeb; border-color: #f59e0b; color: #92400e; }
+.cc-chip--alerta.is-on b { color: #92400e; }
+.cc-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.cc-dot--caliente { background: #2d5bff; }
+.cc-dot--seguimiento { background: #93c5fd; }
+.cc-dot--frio { background: #94a3b8; }
+.cc-dot--no_compra { background: #334155; }
+.cc-dot--compro { background: #0f9d76; }
+.cc-dot--alerta { background: #f59e0b; }
+.cc-chip.is-on .cc-dot { box-shadow: 0 0 0 2px #ffffff; }
+.cc-busqueda { display: flex; flex-wrap: wrap; gap: 8px; }
+.cc-campo { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #475569; }
+.cc-campo select, .cc-campo input {
+  height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid #dfe5ee;
+  background: #ffffff; font: inherit; font-size: 13px; color: #0f172a;
+}
+.cc-campo--texto { position: relative; }
+.cc-campo--texto .material-symbols-outlined { position: absolute; left: 9px; font-size: 18px; color: #94a3b8; pointer-events: none; }
+.cc-campo--texto input { padding-left: 32px; width: 220px; }
+.cc-tabla td { vertical-align: top; }
+.cc-cliente strong { display: block; font-weight: 600; color: #0f172a; }
+.cc-sub { display: block; margin-top: 2px; font-size: 11.5px; color: #64748b; }
+.cc-sub a { color: inherit; text-decoration: none; border-bottom: 1px dotted #94a3b8; }
+.cc-solo-movil { display: none; }
+.cc-gris { color: #94a3b8; }
+.cc-seg { font-weight: 600; color: #334155; white-space: nowrap; }
+.cc-seg.cc-alerta { color: #92400e; }
+.cc-seg.cc-alerta::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #f59e0b; vertical-align: 1px; }
+.cc-avance { white-space: nowrap; }
+.cc-avance .cv-paso { margin-right: 3px; }
+.cc-col-etiqueta { width: 1%; white-space: nowrap; }
+.cc-nota { max-width: 240px; white-space: normal; }
+.cc-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid transparent;
+  font: inherit; font-size: 12px; font-weight: 700; line-height: 1.3; white-space: nowrap;
+}
+button.cc-pill { cursor: pointer; }
+button.cc-pill .material-symbols-outlined { font-size: 16px; margin-right: -4px; opacity: 0.7; }
+.cc-pill small { font-size: 10.5px; font-weight: 600; opacity: 0.8; }
+.cc-pill--caliente { background: #2d5bff; color: #ffffff; }
+.cc-pill--seguimiento { background: #eef2ff; color: #1e3fd8; border-color: #c7d2fe; }
+.cc-pill--frio { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+.cc-pill--no_compra { background: #ffffff; color: #334155; border-color: #94a3b8; }
+.cc-pill--compro { background: #ecfdf3; color: #05603a; border-color: #a7f3d0; }
+/* Sugerida: misma familia de color, sin relleno y con borde punteado. */
+.cc-pill.is-sugerida { background: #ffffff; border-style: dashed; font-weight: 600; }
+.cc-pill--caliente.is-sugerida { color: #1e3fd8; border-color: #2d5bff; }
+.cc-pill--seguimiento.is-sugerida { color: #1e3fd8; border-color: #93c5fd; }
+.cc-pill--frio.is-sugerida { color: #64748b; border-color: #cbd5e1; }
+.cc-tabla tbody tr.cc-fila.is-open { background: #f5f7ff; }
+.cc-tabla tbody tr.cc-fila.is-open td:first-child { box-shadow: inset 3px 0 0 #2d5bff; }
+.cc-editor-fila td { background: #f5f7ff; padding-top: 0; }
+.cc-editor { display: grid; gap: 12px; padding: 12px 4px 4px; }
+.cc-editor__opciones { display: flex; flex-wrap: wrap; gap: 8px; }
+.cc-opcion {
+  padding: 7px 14px; border-radius: 999px; border: 1px solid #dfe5ee; background: #ffffff;
+  font: inherit; font-size: 13px; font-weight: 600; color: #334155; cursor: pointer;
+}
+.cc-opcion:not(.is-on) { background: #ffffff; color: #334155; border-color: #dfe5ee; }
+.cc-opcion.is-on { box-shadow: 0 0 0 3px rgba(45, 91, 255, 0.18); }
+.cc-campo--motivo, .cc-campo--nota { display: grid; gap: 4px; font-weight: 600; }
+.cc-campo--nota input { width: min(520px, 100%); }
+.cc-campo small { font-weight: 500; color: #94a3b8; }
+.cc-editor__acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cc-quitar { margin-left: auto; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: #64748b; cursor: pointer; text-decoration: underline; }
+.cc-error { margin: 0; font-size: 12.5px; font-weight: 600; color: #92400e; }
+.cc-hist { font-size: 12.5px; color: #475569; }
+.cc-hist > summary { cursor: pointer; font-weight: 600; color: #1e3fd8; }
+.cc-hist ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.cc-hist li { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; }
+.cc-hist__fecha, .cc-hist__autor { color: #64748b; font-variant-numeric: tabular-nums; }
+.cc-mas {
+  display: block; margin: 12px auto 0; padding: 8px 16px; border-radius: 10px;
+  border: 1px solid #dfe5ee; background: #ffffff; font: inherit; font-size: 13px; font-weight: 600; color: #1e3fd8; cursor: pointer;
+}
+.cc-mas[hidden] { display: none; }
+@media (max-width: 1100px) {
+  .cc-col-vend { display: none; }
+  .cc-solo-movil { display: block; }
+}
+/* Celular: cliente, último seguimiento y etiqueta; el resto en la línea del cliente. */
+@media (max-width: 639px) {
+  .cc-tabla .cc-col-op { display: none; }
+  .cc-tabla td, .cc-tabla th { padding-left: 8px; padding-right: 8px; font-size: 13px; }
+  .cc-tabla th { white-space: normal; }
+  .cc-busqueda, .cc-campo, .cc-campo select, .cc-campo--texto input { width: 100%; }
+  .cc-campo select { flex: 1; }
+  .cc-nota { max-width: 140px; }
+  .cc-seg { white-space: normal; }
+  .cc-hist li { grid-template-columns: 1fr; gap: 0; }
+  .cc-quitar { margin-left: 0; }
+}
+.cc-campo--motivo select { width: min(320px, 100%); }
+.cc-btn {
+  height: 34px; padding: 0 16px; border-radius: 10px; border: 1px solid #dfe5ee; background: #ffffff;
+  font: inherit; font-size: 13px; font-weight: 600; color: #334155; cursor: pointer;
+}
+.cc-btn--primario { background: #2d5bff; border-color: #2d5bff; color: #ffffff; }
+.cc-btn[disabled] { opacity: 0.5; cursor: default; }
+.cc-opcion.cc-pill--no_compra.is-on { border-color: #334155; color: #0f172a; }
+/* Celular: cada cliente como tarjeta (nombre y seguimiento a la izquierda, etiqueta a la derecha). */
+@media (max-width: 639px) {
+  .cc-tabla thead { display: none; }
+  .cc-tabla, .cc-tabla tbody { display: block; width: 100%; }
+  .cc-tabla tr.cc-fila {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px;
+    padding: 12px 8px; border-bottom: 1px solid #eef2f7;
+  }
+  .cc-tabla tr.cc-fila td { display: block; padding: 0; border: 0; white-space: normal; min-width: 0; }
+  .cc-tabla tr.cc-fila td.cc-col-op, .cc-tabla tr.cc-fila td.cc-col-vend { display: none; }
+  .cc-tabla td.cc-cliente { grid-column: 1; grid-row: 1; }
+  .cc-tabla td.cc-col-seg { grid-column: 1; grid-row: 2; }
+  .cc-tabla td.cc-col-etiqueta { grid-column: 2; grid-row: 1 / span 2; width: auto; text-align: right; white-space: normal; }
+  .cc-tabla td.cc-col-etiqueta .cc-nota { margin-left: auto; text-align: right; }
+  .cc-tabla tr.cc-editor-fila, .cc-tabla tr.cc-editor-fila td { display: block; padding: 0 8px 12px; }
+  .cc-tabla tr td.empty-row { display: block; }
+  .cc-sub a { white-space: nowrap; }
+}

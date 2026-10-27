@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=175" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=176" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=2"></script>
 </head>
@@ -1149,6 +1149,38 @@ Ver unidades
 </table>
 </div>
 <div id="cholVendDetalle" class="cv-detalle" hidden></div>
+
+<section id="cholCartera" class="cc" aria-labelledby="cholCarteraTitulo">
+<header class="cv-tabla-head cc-head">
+<div>
+<h3 class="cv-subtitulo" id="cholCarteraTitulo">Seguimiento de clientes</h3>
+<p class="cv-leyenda" id="cholCarteraSub">Cargando clientes…</p>
+</div>
+<details class="cv-como">
+<summary>¿Cómo se etiqueta?</summary>
+<p id="cholCarteraNota"></p>
+</details>
+</header>
+<div id="cholCarteraFiltros" class="cc-filtros"></div>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table cc-tabla" id="cholCarteraTable">
+<thead>
+<tr>
+<th>Cliente</th>
+<th class="cc-col-vend">Vendedor</th>
+<th class="cc-col-op">Entró</th>
+<th>Último seguimiento</th>
+<th class="cc-col-op">Avance</th>
+<th class="cc-col-etiqueta">Etiqueta</th>
+</tr>
+</thead>
+<tbody id="cholCarteraBody">
+<tr><td colspan="6" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
+</tbody>
+</table>
+</div>
+<button type="button" id="cholCarteraMas" class="cc-mas" hidden></button>
+</section>
 </section>
 </div>
 
@@ -1288,6 +1320,6 @@ Exportar CSV
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/sales.js?v=132"></script>
+<script src="/js/sales.js?v=133"></script>
 </body>
 </html>

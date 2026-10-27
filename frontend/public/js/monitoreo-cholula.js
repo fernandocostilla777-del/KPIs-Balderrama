@@ -272,9 +272,11 @@
       abierto = null;
       pintarTabla(lastPayload);
       pintarDetalle(null);
+      verCarteraDe(null);
       return;
     }
     abierto = key;
+    verCarteraDe(key);
     pestanaDetalle = 'ventas';
     pintarTabla(lastPayload);
     const caja = document.getElementById('cholVendDetalle');
@@ -287,6 +289,26 @@
     const data = await api(`/ventas/monitoreo-cholula?${q}`);
     if (abierto !== key) return;
     pintarDetalle(data);
+  }
+
+  let carteraLista = null;
+  function cartera() {
+    if (!carteraLista) {
+      carteraLista = new Promise((resolve) => {
+        if (window.CarteraCholula) return resolve(window.CarteraCholula);
+        const tag = document.createElement('script');
+        tag.src = '/js/cartera-cholula.js?v=1';
+        tag.onload = () => resolve(window.CarteraCholula || null);
+        tag.onerror = () => resolve(null);
+        document.body.appendChild(tag);
+      });
+    }
+    return carteraLista;
+  }
+
+  function verCarteraDe(key) {
+    const fila = (lastPayload?.vendedores || []).find((v) => v.key === key);
+    cartera().then((c) => c?.verVendedor(key, fila?.vendedor || ''));
   }
 
   function pintarTodo(data) {
@@ -302,6 +324,7 @@
     const key = `${fi}|${ff}`;
     if (!opts.force && cacheKey === key && lastPayload) {
       pintarTodo(lastPayload);
+      cartera().then((c) => c?.load(fi, ff));
       return lastPayload;
     }
     if (inflight && inflight.key === key) return inflight.promise;
@@ -313,6 +336,10 @@
       cacheKey = key;
       lastPayload = data;
       pintarTodo(data);
+      cartera().then((c) => {
+        c?.verVendedor(null);
+        return c?.load(fi, ff, { force: !!opts.force });
+      });
       return data;
     }).catch((err) => {
       setTexto('cholVendSubtitle', err.message || 'No se pudo cargar el monitoreo.');
@@ -330,6 +357,7 @@
       abierto = null;
       pintarTabla(lastPayload);
       pintarDetalle(null);
+      verCarteraDe(null);
       return;
     }
     const pestana = e.target.closest('[data-cv-pestana]');

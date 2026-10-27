@@ -14,9 +14,10 @@ const {
   getLeadNotDuplicateSql,
 } = require('./crmCiclosService');
 const { LEAD_VIDA_DIAS } = require('../config/campanasConversion');
+const seguimientoStore = require('./seguimientoClientesStore');
 
 const SUCURSAL = PERFILES.cholula;
-const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
 const CAMPOS = [
   'ventas',
   'ventasAnterior',
@@ -657,9 +658,254 @@ async function getMonitoreoCholulaDetalle({ fechaInicio, fechaFin, vendedor } = 
   }
 }
 
+// ── Cartera de clientes: seguimiento uno a uno ─────────────────────────────
+
+/** Días sin seguimiento a partir de los cuales un cliente activo se marca. */
+const DIAS_SIN_SEGUIMIENTO = 7;
+/** Actividad reciente que cuenta para sugerir «En seguimiento». */
+const DIAS_ACTIVIDAD_RECIENTE = 15;
+const ORDEN_ETIQUETA = { caliente: 0, seguimiento: 1, frio: 2, no_compra: 3, compro: 4 };
+
+function diasEntre(desdeIso, hastaIso) {
+  if (!desdeIso || !hastaIso) return null;
+  const [y1, m1, d1] = desdeIso.split('-').map(Number);
+  const [y2, m2, d2] = hastaIso.split('-').map(Number);
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+}
+
+function esSi(v) {
+  return String(v || '').trim().toUpperCase() === 'SI';
+}
+
+function tieneCotizacion(v) {
+  const s = String(v || '').trim().toUpperCase();
+  return !!s && !['NO', 'N', '0'].includes(s);
+}
+
+/**
+ * Etiqueta que se propone cuando nadie la ha puesto. Solo orienta: no se guarda.
+ * Compró sale del CRM y manda sobre cualquier etiqueta.
+ */
+function etiquetaSugerida({ compra, citaAsistida, cotizacion, contacto, diasSinSeguimiento }) {
+  if (compra) return 'compro';
+  if (citaAsistida || cotizacion) return 'caliente';
+  if (diasSinSeguimiento != null && diasSinSeguimiento <= DIAS_ACTIVIDAD_RECIENTE) return 'seguimiento';
+  if (contacto && diasSinSeguimiento == null) return 'seguimiento';
+  return 'frio';
+}
+
+function grupoDeEjecutivo(grupos, nombre) {
+  const plano = clavePlana(nombre);
+  if (!plano) return null;
+  return grupos.find((g) => g.aliases.includes(plano) || mismoNombre(g.vendedor, nombre)) || null;
+}
+
+async function gruposDelPeriodo(fechaInicio, fechaFin) {
+  if (!fechaInicio) return [];
+  try {
+    const data = await getMonitoreoCholula({ fechaInicio, fechaFin });
+    return data.vendedores || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Leads de Cholula que siguen dentro de su vida (LEAD_VIDA_DIAS) al cierre del periodo,
+ * con sus pasos en el CRM, el último seguimiento y la etiqueta del equipo.
+ */
+async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
+  const hasta = fechaIso(fechaFin);
+  const desdeVida = restarDias(hasta, LEAD_VIDA_DIAS - 1);
+  const grupos = await gruposDelPeriodo(fechaInicio ? fechaIso(fechaInicio) : null, hasta);
+
+  const d = abrirCrm();
+  let filas = [];
+  const ultimos = new Map();
+  try {
+    if (hayTabla(d, 'crm_leads')) {
+      const compra = getCompraLeadAtribuibleSql(LEAD_VIDA_DIAS);
+      const noDup = getLeadNotDuplicateSql();
+      const filtro = `
+        (${noDup})
+        AND id_crm IS NOT NULL AND trim(CAST(id_crm AS TEXT)) <> ''
+        AND substr(fecha_entrada, 1, 10) >= ?
+        AND substr(fecha_entrada, 1, 10) <= ?
+        AND ${predCholula(['sucursal', 'fuerza_ventas'])}`;
+      filas = d.prepare(`
+        SELECT
+          trim(CAST(id_crm AS TEXT)) AS idCrm,
+          nombre AS cliente,
+          telefono,
+          campana,
+          auto_interes AS auto,
+          substr(fecha_entrada, 1, 10) AS fecha,
+          TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo,
+          contacto,
+          cita_programada AS cita,
+          cita_asistida AS asistio,
+          cotizacion,
+          ${compra} AS compra
+        FROM crm_leads
+        WHERE ${filtro}
+        ORDER BY fecha_entrada DESC
+      `).all(desdeVida, hasta);
+
+      if (hayTabla(d, 'crm_actividades')) {
+        const fechaAct = `substr(COALESCE(fecha_resp_actividad, fecha_crea_actividad, fecha_prog_actividad, fecha_estatus), 1, 10)`;
+        const acts = d.prepare(`
+          SELECT trim(CAST(id_contacto AS TEXT)) AS idCrm, MAX(${fechaAct}) AS ultima, COUNT(*) AS n
+          FROM crm_actividades
+          WHERE ${fechaAct} <= ?
+            AND trim(CAST(id_contacto AS TEXT)) IN (
+              SELECT trim(CAST(id_crm AS TEXT)) FROM crm_leads WHERE ${filtro}
+            )
+          GROUP BY trim(CAST(id_contacto AS TEXT))
+        `).all(hasta, desdeVida, hasta);
+        for (const a of acts) ultimos.set(a.idCrm, { ultima: a.ultima || null, n: Number(a.n || 0) });
+      }
+    }
+  } finally {
+    d.close();
+  }
+
+  // Un cliente por id_crm (el registro más reciente).
+  const vistos = new Set();
+  filas = filas.filter((f) => (vistos.has(f.idCrm) ? false : vistos.add(f.idCrm)));
+
+  const guardadas = seguimientoStore.leerEtiquetas(filas.map((f) => f.idCrm));
+  const clientes = filas.map((f) => {
+    const act = ultimos.get(f.idCrm) || null;
+    const ultimoSeguimiento = act?.ultima || null;
+    const diasSinSeguimiento = ultimoSeguimiento ? Math.max(0, diasEntre(ultimoSeguimiento, hasta)) : null;
+    const pasos = {
+      contacto: esSi(f.contacto),
+      cita: esSi(f.cita),
+      asistio: esSi(f.asistio),
+      cotizacion: tieneCotizacion(f.cotizacion),
+      compra: Number(f.compra) > 0,
+    };
+    const guardada = guardadas[f.idCrm] || null;
+    let etiqueta;
+    if (pasos.compra) {
+      etiqueta = { clave: 'compro', origen: 'crm' };
+    } else if (guardada?.etiqueta) {
+      etiqueta = {
+        clave: guardada.etiqueta,
+        origen: 'equipo',
+        motivo: guardada.motivo || null,
+        motivoLabel: guardada.motivo ? seguimientoStore.MOTIVOS_NO_COMPRA[guardada.motivo] || guardada.motivo : null,
+        nota: guardada.nota || null,
+        autor: guardada.autor || null,
+        actualizado: guardada.actualizado || null,
+      };
+    } else {
+      etiqueta = {
+        clave: etiquetaSugerida({
+          compra: false,
+          citaAsistida: pasos.asistio,
+          cotizacion: pasos.cotizacion,
+          contacto: pasos.contacto,
+          diasSinSeguimiento,
+        }),
+        origen: 'sugerida',
+      };
+    }
+    const activo = etiqueta.clave === 'caliente' || etiqueta.clave === 'seguimiento';
+    const diasVida = diasEntre(f.fecha, hasta);
+    const grupo = grupoDeEjecutivo(grupos, f.ejecutivo);
+    return {
+      idCrm: f.idCrm,
+      cliente: nombreVisible(f.cliente) || 'Sin nombre',
+      telefono: f.telefono || '',
+      vendedor: grupo ? grupo.vendedor : (f.ejecutivo ? nombreVisible(f.ejecutivo) : 'Sin asignar'),
+      vendedorKey: grupo ? grupo.key : personTokenKey(f.ejecutivo || 'Sin asignar'),
+      campana: f.campana || '',
+      auto: f.auto || '',
+      fechaEntrada: f.fecha,
+      diasVida,
+      diasRestantes: Math.max(0, LEAD_VIDA_DIAS - 1 - diasVida),
+      ultimoSeguimiento,
+      diasSinSeguimiento,
+      seguimientos: act?.n || 0,
+      pasos,
+      etiqueta,
+      historial: (guardada?.historial || []).slice(0, 5).map((h) => ({
+        ...h,
+        motivoLabel: h.motivo ? seguimientoStore.MOTIVOS_NO_COMPRA[h.motivo] || h.motivo : null,
+      })),
+      alertaSeguimiento: activo && (diasSinSeguimiento == null || diasSinSeguimiento > DIAS_SIN_SEGUIMIENTO),
+    };
+  });
+
+  clientes.sort((a, b) => (
+    (ORDEN_ETIQUETA[a.etiqueta.clave] - ORDEN_ETIQUETA[b.etiqueta.clave])
+    || (Number(b.alertaSeguimiento) - Number(a.alertaSeguimiento))
+    || String(b.fechaEntrada).localeCompare(String(a.fechaEntrada))
+  ));
+
+  const resumen = { total: clientes.length, sinEtiqueta: 0, alertas: 0 };
+  for (const clave of Object.keys(seguimientoStore.ETIQUETAS)) resumen[clave] = 0;
+  for (const c of clientes) {
+    resumen[c.etiqueta.clave] += 1;
+    if (c.etiqueta.origen === 'sugerida') resumen.sinEtiqueta += 1;
+    if (c.alertaSeguimiento) resumen.alertas += 1;
+  }
+
+  return {
+    sucursal: SUCURSAL.label,
+    fechaCorte: hasta,
+    desdeVida,
+    vidaDias: LEAD_VIDA_DIAS,
+    diasSinSeguimiento: DIAS_SIN_SEGUIMIENTO,
+    etiquetas: Object.entries(seguimientoStore.ETIQUETAS).map(([clave, e]) => ({
+      clave,
+      ...e,
+      manual: seguimientoStore.ETIQUETAS_MANUALES.includes(clave),
+    })),
+    motivos: Object.entries(seguimientoStore.MOTIVOS_NO_COMPRA).map(([clave, label]) => ({ clave, label })),
+    resumen,
+    clientes,
+    nota: `Clientes que entraron como lead de Cholula en los últimos ${LEAD_VIDA_DIAS} días al ${hasta}. `
+      + '«Compró» se pone solo cuando el CRM registra la compra. Sin etiqueta del equipo se muestra una sugerida: '
+      + 'caliente si asistió a cita o cotizó; en seguimiento si tuvo actividad en los últimos '
+      + `${DIAS_ACTIVIDAD_RECIENTE} días; frío en otro caso. Se marca a los clientes calientes o en seguimiento `
+      + `con más de ${DIAS_SIN_SEGUIMIENTO} días sin seguimiento registrado.`,
+  };
+}
+
+/** Guarda la etiqueta de un cliente, solo si es un lead de Cholula. */
+function etiquetarClienteCholula(idCrm, { etiqueta, motivo, nota, autor } = {}) {
+  const key = String(idCrm || '').trim();
+  const d = abrirCrm();
+  let existe = null;
+  try {
+    existe = hayTabla(d, 'crm_leads')
+      ? d.prepare(`
+          SELECT 1 AS ok FROM crm_leads
+          WHERE trim(CAST(id_crm AS TEXT)) = ?
+            AND ${predCholula(['sucursal', 'fuerza_ventas'])}
+          LIMIT 1
+        `).get(key)
+      : null;
+  } finally {
+    d.close();
+  }
+  if (!existe) {
+    const err = new Error('Ese cliente no es un lead de Cholula.');
+    err.status = 404;
+    throw err;
+  }
+  const guardado = seguimientoStore.etiquetar(key, { etiqueta, motivo, nota, autor });
+  return { idCrm: key, etiqueta: guardado };
+}
+
 module.exports = {
   getMonitoreoCholula,
   getMonitoreoCholulaDetalle,
+  getCarteraCholula,
+  etiquetarClienteCholula,
+  etiquetaSugerida,
   fusionar,
   nombreVisible,
   periodoAnterior,

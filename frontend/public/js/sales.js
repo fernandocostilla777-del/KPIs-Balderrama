@@ -3385,7 +3385,7 @@
     leads: '/js/leads.js?v=37',
     afluencia: '/js/afluencia.js?v=18',
     comisiones: '/js/comisiones.js?v=2',
-    vendedores: '/js/monitoreo-cholula.js?v=1',
+    vendedores: '/js/monitoreo-cholula.js?v=2',
   };
   const scriptListo = {};
   const tabListo = {};

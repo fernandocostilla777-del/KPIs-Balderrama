@@ -19,6 +19,7 @@ const SUCURSAL = PERFILES.cholula;
 const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
 const CAMPOS = [
   'ventas',
+  'ventasAnterior',
   'ventasRetail',
   'ventasFlotilla',
   'leads',
@@ -54,6 +55,31 @@ function restarDias(iso, dias) {
   return `${dt.getFullYear()}-${mm}-${dd}`;
 }
 
+function ultimoDiaMes(y, m) {
+  return new Date(y, m, 0).getDate();
+}
+
+/**
+ * Periodo anterior comparable: si el periodo son meses completos, los mismos meses justo antes
+ * (septiembre → agosto); si no, el mismo número de días inmediatamente antes.
+ */
+function periodoAnterior(desde, hasta) {
+  const [y1, m1, d1] = desde.split('-').map(Number);
+  const [y2, m2, d2] = hasta.split('-').map(Number);
+  const pad = (n) => String(n).padStart(2, '0');
+  if (d1 === 1 && d2 === ultimoDiaMes(y2, m2)) {
+    const meses = (y2 - y1) * 12 + (m2 - m1) + 1;
+    const fin = new Date(y1, m1 - 1, 0);
+    const ini = new Date(fin.getFullYear(), fin.getMonth() - meses + 1, 1);
+    return {
+      fechaInicio: `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}-01`,
+      fechaFin: `${fin.getFullYear()}-${pad(fin.getMonth() + 1)}-${pad(fin.getDate())}`,
+    };
+  }
+  const dias = Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000) + 1;
+  return { fechaInicio: restarDias(desde, dias), fechaFin: restarDias(desde, 1) };
+}
+
 function personTokens(v) {
   const s = String(v || '')
     .normalize('NFD')
@@ -87,6 +113,14 @@ function mismoNombre(a, b) {
   return corto.every((t) => set.has(t));
 }
 
+const MINUSCULAS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
+/** «ORTEGA SALAS LUIS» → «Ortega Salas Luis»; un nombre ya escrito en mayúsculas y minúsculas se respeta. */
+function nombreVisible(nombre) {
+  const s = String(nombre || '').replace(/\s+/g, ' ').trim();
+  if (!s || s !== s.toUpperCase()) return s;
+  return s.toLowerCase().split(' ').map((p, i) => (i > 0 && MINUSCULAS.has(p) ? p : p.charAt(0).toUpperCase() + p.slice(1))).join(' ');
+}
+
 function filaBase(nombre) {
   const vendedor = clavePlana(nombre) === 'SIN ASIGNAR'
     ? 'Sin asignar'
@@ -116,6 +150,13 @@ function fusionar(filas) {
     if (personTokens(fila.vendedor).length > personTokens(destino.vendedor).length) {
       destino.vendedor = fila.vendedor;
       destino.key = personTokenKey(fila.vendedor);
+    } else if (
+      personTokens(fila.vendedor).length === personTokens(destino.vendedor).length
+      && destino.vendedor === destino.vendedor.toUpperCase()
+      && fila.vendedor !== fila.vendedor.toUpperCase()
+    ) {
+      // Mismo nombre: se prefiere como lo escribe el CRM (con acentos y minúsculas) al del DMS.
+      destino.vendedor = fila.vendedor;
     }
   }
   const usadas = new Set();
@@ -130,8 +171,10 @@ function fusionar(filas) {
     grupo.key = key;
     usadas.add(key);
   }
+  for (const grupo of grupos) grupo.vendedor = nombreVisible(grupo.vendedor);
   grupos.sort((a, b) => (
-    b.ventas - a.ventas
+    Number(a.vendedor === 'Sin asignar') - Number(b.vendedor === 'Sin asignar')
+    || b.ventas - a.ventas
     || b.leads - a.leads
     || b.pruebas - a.pruebas
     || a.vendedor.localeCompare(b.vendedor, 'es')
@@ -143,6 +186,20 @@ function tomar(mapa, nombre) {
   const clave = clavePlana(nombre);
   if (!mapa.has(clave)) mapa.set(clave, filaBase(nombre));
   return mapa.get(clave);
+}
+
+const pct = (num, den) => (Number(den) > 0 ? Math.round((Number(num) / Number(den)) * 1000) / 10 : null);
+
+/** Tasas de cada vendedor (y de la sucursal): mismas definiciones que la pestaña Leads. */
+function conTasas(fila) {
+  return {
+    ...fila,
+    pctContacto: pct(fila.contactados, fila.leads),
+    pctCita: pct(fila.citas, fila.contactados),
+    pctCierreLead: pct(fila.comprasLead, fila.leads),
+    pctAprobacion: pct(fila.solicitudesAprobadas, fila.solicitudes),
+    variacionVentasPct: Number(fila.ventasAnterior) > 0 ? pct(Number(fila.ventas) - Number(fila.ventasAnterior), fila.ventasAnterior) : null,
+  };
 }
 
 function sumarTotales(vendedores) {
@@ -353,7 +410,19 @@ function notaPeriodo() {
     + 'Las pruebas se cuentan por centro o fuerza Cholula. '
     + 'Las solicitudes entran si su fuerza es Cholula o si el lead ligado es de Cholula. '
     + `Una compra de lead cuenta si la factura cayó dentro de ${LEAD_VIDA_DIAS} días de la entrada. `
-    + 'Los seguimientos son actividades del periodo sobre leads de Cholula que entraron en los 120 días previos al cierre.';
+    + 'Los seguimientos son actividades del periodo sobre leads de Cholula que entraron en los 120 días previos al cierre. '
+    + 'Contacto = contactados ÷ leads; cita = citas ÷ contactados; lead → compra = compras de lead ÷ leads; '
+    + 'aprobación = solicitudes aprobadas ÷ solicitudes. El periodo anterior es el mes (o los días) inmediatamente antes.';
+}
+
+/** Ventas del periodo anterior de cada vendedor (por los mismos alias y nombres que su fila). */
+function aplicarVentasAnteriores(vendedores, filasAnteriores) {
+  for (const fila of filasAnteriores) {
+    const grupo = vendedores.find((g) => (
+      g.aliases.includes(clavePlana(fila.VENDEDOR)) || mismoNombre(g.vendedor, fila.VENDEDOR)
+    ));
+    if (grupo) grupo.ventasAnterior += 1;
+  }
 }
 
 async function getMonitoreoCholula({ fechaInicio, fechaFin } = {}) {
@@ -361,15 +430,36 @@ async function getMonitoreoCholula({ fechaInicio, fechaFin } = {}) {
   const hasta = fechaIso(fechaFin);
   const clave = `${desde}|${hasta}`;
   const mapa = leerCrm(desde, hasta);
-  const ventas = await leerVentas(desde, hasta);
+  const anterior = periodoAnterior(desde, hasta);
+  const [ventas, ventasPrevias] = await Promise.all([
+    leerVentas(desde, hasta),
+    leerVentas(anterior.fechaInicio, anterior.fechaFin),
+  ]);
   aplicarVentas(mapa, ventas.filas);
-  const vendedores = fusionar([...mapa.values()]);
+  const grupos = fusionar([...mapa.values()]);
+  aplicarVentasAnteriores(grupos, ventasPrevias.filas);
+  const vendedores = grupos.map(conTasas);
+  const conNombre = vendedores.filter((f) => f.vendedor !== 'Sin asignar');
+  const sinAsignar = vendedores.find((f) => f.vendedor === 'Sin asignar') || null;
+  const totales = conTasas(sumarTotales(vendedores));
+  // Promedio por vendedor (sin «Sin asignar»): referencia para leer cada fila.
+  totales.promedioVentas = conNombre.length ? Math.round((totales.ventas / conNombre.length) * 10) / 10 : null;
+  totales.promedioLeads = conNombre.length ? Math.round((totales.leads / conNombre.length) * 10) / 10 : null;
   const data = {
     sucursal: SUCURSAL.label,
     canal: SUCURSAL.canalVenta,
     filtros: { fechaInicio: desde, fechaFin: hasta },
-    totales: sumarTotales(vendedores),
+    periodoAnterior: anterior,
+    totales,
     vendedores,
+    sinAsignar: sinAsignar ? {
+      leads: sinAsignar.leads,
+      visitas: sinAsignar.visitas,
+      pruebas: sinAsignar.pruebas,
+      solicitudes: sinAsignar.solicitudes,
+      ventas: sinAsignar.ventas,
+      key: sinAsignar.key,
+    } : null,
     ventasError: ventas.error,
     nota: notaPeriodo(),
   };
@@ -571,6 +661,9 @@ module.exports = {
   getMonitoreoCholula,
   getMonitoreoCholulaDetalle,
   fusionar,
+  nombreVisible,
+  periodoAnterior,
+  conTasas,
   personTokenKey,
   mismoNombre,
 };

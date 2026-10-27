@@ -18809,3 +18809,134 @@ td.deptos-col-aporte { display: flex; align-items: center; gap: 8px; }
 .ld-chip--cerrada strong { color: #64748b; }
 .ld-chip--abierta:hover, .ld-chip--abierta.is-active { border-color: rgba(4, 120, 87, 0.45); background: #f0fdf4; }
 .ld-chip--cerrada:hover, .ld-chip--cerrada.is-active { border-color: rgba(100, 116, 139, 0.55); background: #f8fafc; }
+
+/* ── Ventas · Vendedores Cholula ─────────────────────────────────────────── */
+.cv-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.cv-head .section-title { margin: 0 0 4px; }
+.cv-head .section-subtitle { margin: 0; }
+.cv-como { max-width: 520px; font-size: 13px; color: #475569; }
+.cv-como > summary { cursor: pointer; font-weight: 600; color: #1e3fd8; list-style: none; }
+.cv-como > summary::-webkit-details-marker { display: none; }
+.cv-como[open] > summary { margin-bottom: 6px; }
+.cv-como p { margin: 0; line-height: 1.5; }
+.cv-aviso {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.cv-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 18px 0 22px; }
+.cv-kpi {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #e6ebf3;
+  border-top: 3px solid #2d5bff;
+}
+.cv-kpi--green { border-top-color: #0f9d76; }
+.cv-kpi--violet { border-top-color: #7c3aed; }
+.cv-kpi--slate { border-top-color: #64748b; }
+.cv-kpi__titulo { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+.cv-kpi__valor { display: flex; align-items: center; gap: 8px; font-size: 1.7rem; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+.cv-kpi__sub { font-size: 12.5px; color: #64748b; line-height: 1.35; }
+.cv-var {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.cv-var--sube { color: #05603a; background: #ecfdf3; }
+.cv-var--baja { color: #92400e; background: #fffbeb; }
+.cv-var--igual { color: #475569; background: #f1f5f9; }
+.cv-tabla-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 8px; }
+.cv-subtitulo { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; }
+.cv-leyenda { margin: 0; font-size: 12px; color: #64748b; }
+.cv-punto { display: inline-block; width: 8px; height: 8px; margin: 0 4px 0 8px; border-radius: 50%; vertical-align: 1px; }
+.cv-punto--arriba { background: #2d5bff; }
+.cv-punto--abajo { background: #f59e0b; }
+.cv-tabla th.num, .cv-tabla td.num { text-align: right; }
+.cv-tabla tbody tr.cv-fila { cursor: pointer; }
+.cv-tabla tbody tr.cv-fila:hover { background: #f8fafc; }
+.cv-tabla tbody tr.is-open { background: #eef2ff; }
+.cv-tabla tbody tr.is-open td:first-child { box-shadow: inset 3px 0 0 #2d5bff; }
+.cv-nombre { font-weight: 600; color: #0f172a; white-space: nowrap; }
+.cv-nombre__sub { display: block; font-size: 11px; font-weight: 500; color: #64748b; }
+.cv-col-ventas { min-width: 190px; }
+.cv-ventas { display: flex; align-items: center; gap: 8px; }
+.cv-ventas strong { min-width: 22px; text-align: right; font-variant-numeric: tabular-nums; }
+.cv-barra { flex: 0 0 90px; height: 8px; border-radius: 4px; background: #e8edf5; overflow: hidden; }
+.cv-barra i { display: block; height: 100%; border-radius: 4px; background: #2d5bff; }
+.cv-tasa { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.cv-tasa--arriba::before,
+.cv-tasa--abajo::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+.cv-tasa--arriba { color: #1e3fd8; font-weight: 700; }
+.cv-tasa--arriba::before { background: #2d5bff; }
+.cv-tasa--abajo { color: #92400e; font-weight: 700; }
+.cv-tasa--abajo::before { background: #f59e0b; }
+.cv-de { margin-left: 4px; font-size: 11.5px; color: #64748b; font-weight: 500; }
+.cv-tabla tfoot .cv-total td { font-weight: 700; background: #f1f5ff; border-top: 2px solid #c7d2fe; }
+.cv-detalle {
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid #dfe5ee;
+  background: #fbfcff;
+}
+.cv-detalle__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.cv-detalle__kicker { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; }
+.cv-detalle__nombre { margin: 2px 0 0; font-size: 19px; font-weight: 800; color: #0f172a; }
+.cv-minis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.cv-mini { display: grid; gap: 3px; padding: 12px 14px; border-radius: 12px; background: #ffffff; border: 1px solid #e6ebf3; }
+.cv-mini__titulo { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+.cv-mini strong { display: flex; align-items: center; gap: 8px; font-size: 1.35rem; font-weight: 800; color: #0f172a; }
+.cv-mini strong.cv-tasa--arriba { color: #1e3fd8; }
+.cv-mini strong.cv-tasa--abajo { color: #92400e; }
+.cv-mini__sub { font-size: 12px; color: #64748b; }
+.cv-pestanas { margin-bottom: 10px; flex-wrap: wrap; }
+.cv-pestanas .eeff-tab[disabled] { opacity: 0.45; cursor: default; }
+.cv-cuenta { margin-left: 4px; font-weight: 600; opacity: 0.7; }
+.cv-paso {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+.cv-paso.is-ok { color: #1e3fd8; background: #eef2ff; }
+.cv-estatus { font-size: 12px; font-weight: 600; color: #475569; }
+.cv-estatus.is-ok { color: #05603a; }
+.cv-vacio { margin: 8px 0 0; font-size: 13px; color: #64748b; }
+@media (max-width: 1100px) {
+  .cv-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cv-minis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Celular: la lectura corta del ranking (vendedor, ventas, leads y lead → compra); el resto en el detalle. */
+@media (max-width: 639px) {
+  .cv-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .cv-kpi { padding: 12px; }
+  .cv-kpi__valor { font-size: 1.4rem; }
+  .cv-tabla .cv-col-op { display: none; }
+  .cv-col-ventas { min-width: 0; }
+  .cv-barra { display: none; }
+  .cv-tabla td.cv-nombre, .cv-tabla th { white-space: normal; }
+  .cv-tabla td, .cv-tabla th { padding-left: 8px; padding-right: 8px; font-size: 13px; }
+  .cv-minis { grid-template-columns: 1fr 1fr; }
+  .cv-detalle { padding: 14px 12px; }
+  .cv-kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .cv-prom { display: none; }
+  .cv-ventas { gap: 6px; }
+  .cv-ventas .cv-var { padding: 1px 5px; font-size: 10.5px; }
+}

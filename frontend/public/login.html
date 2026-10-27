@@ -6,25 +6,23 @@
 <title>Iniciar sesión | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=172" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=173" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
 <body class="login-body">
 <main class="login-shell">
-  <section class="login-card">
-    <div class="login-brand">
-      <img src="/img/Imagen2.png" alt="BALDERRAMA" class="login-logo"/>
-    </div>
+  <section class="login-card" aria-label="Iniciar sesión">
+    <img src="/img/Imagen2.png" alt="Chevrolet Balderrama" class="login-logo"/>
 
     <form id="loginForm" class="login-form" autocomplete="on">
       <label class="login-field">
-        <span>Usuario</span>
-        <input type="text" id="username" name="username" required autocomplete="username" placeholder="admin, direccion, gerencia⬦"/>
+        <span class="sr-only">Usuario</span>
+        <input type="text" id="username" name="username" required autocomplete="username" placeholder="Usuario"/>
       </label>
       <label class="login-field">
-        <span>Contraseña</span>
+        <span class="sr-only">Contraseña</span>
         <div class="login-password-wrap">
-          <input type="password" id="password" name="password" required autocomplete="current-password"/>
+          <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Contraseña"/>
           <button type="button" class="login-password-toggle" id="btnTogglePassword" aria-label="Mostrar contraseña" aria-pressed="false" title="Mostrar contraseña">
             <span class="material-symbols-outlined" data-password-icon>visibility</span>
           </button>
@@ -33,7 +31,6 @@
       <p id="loginError" class="login-error hidden" role="alert"></p>
       <p id="loginSuccess" class="login-success hidden" role="status"></p>
       <button type="submit" class="login-submit" id="btnLogin">
-        <span class="material-symbols-outlined">login</span>
         <span>Ingresar</span>
       </button>
       <button type="button" class="login-text-btn" id="btnForgot">¿Olvidaste tu contraseña?</button>
@@ -41,39 +38,37 @@
 
     <form id="resetForm" class="login-form hidden" autocomplete="off">
       <h2 class="login-panel-title">Restablecer contraseña</h2>
-      <p class="login-lead">Pide un código de 6 dígitos. Administración lo recibe en Mensajes y te lo comparte.</p>
+      <p class="login-lead">Administración te comparte el código.</p>
       <label class="login-field">
-        <span>Usuario</span>
-        <input type="text" id="resetUsername" name="resetUsername" required autocomplete="username" placeholder="Tu usuario"/>
+        <span class="sr-only">Usuario</span>
+        <input type="text" id="resetUsername" name="resetUsername" required autocomplete="username" placeholder="Usuario"/>
       </label>
       <button type="button" class="login-submit login-submit--ghost" id="btnRequestCode">
-        <span class="material-symbols-outlined">forward_to_inbox</span>
         <span>Enviar código</span>
       </button>
       <p id="resetInfo" class="login-success hidden" role="status"></p>
       <label class="login-field">
-        <span>Código de 6 dígitos</span>
-        <input type="text" id="resetCode" name="resetCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="000000"/>
+        <span class="sr-only">Código de 6 dígitos</span>
+        <input type="text" id="resetCode" name="resetCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="Código de 6 dígitos"/>
       </label>
       <label class="login-field">
-        <span>Nueva contraseña</span>
+        <span class="sr-only">Nueva contraseña</span>
         <div class="login-password-wrap">
-          <input type="password" id="resetPassword" name="resetPassword" autocomplete="new-password" minlength="8"/>
+          <input type="password" id="resetPassword" name="resetPassword" autocomplete="new-password" minlength="8" placeholder="Nueva contraseña"/>
           <button type="button" class="login-password-toggle" id="btnToggleResetPassword" aria-label="Mostrar contraseña" aria-pressed="false" title="Mostrar contraseña">
             <span class="material-symbols-outlined" data-reset-password-icon>visibility</span>
           </button>
         </div>
       </label>
       <label class="login-field">
-        <span>Confirmar contraseña</span>
-        <input type="password" id="resetPassword2" name="resetPassword2" autocomplete="new-password" minlength="8"/>
+        <span class="sr-only">Confirmar contraseña</span>
+        <input type="password" id="resetPassword2" name="resetPassword2" autocomplete="new-password" minlength="8" placeholder="Confirmar contraseña"/>
       </label>
       <p id="resetError" class="login-error hidden" role="alert"></p>
       <button type="submit" class="login-submit" id="btnResetPassword">
-        <span class="material-symbols-outlined">lock_reset</span>
-        <span>Guardar nueva contraseña</span>
+        <span>Guardar contraseña</span>
       </button>
-      <button type="button" class="login-text-btn" id="btnBackLogin">Volver a iniciar sesión</button>
+      <button type="button" class="login-text-btn" id="btnBackLogin">Volver</button>
     </form>
   </section>
 </main>

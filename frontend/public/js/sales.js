@@ -620,9 +620,23 @@
     const baseLabels = (Dashboard.chartDataLabels || (() => ({ display: true })))(kind);
     const prev = config.options?.plugins?.datalabels || {};
     config.options = config.options || {};
+    // Legibilidad: en barras apiladas solo se etiqueta el segmento que pesa al menos 12 % de su
+    // columna; en líneas con 3 o más series no se etiquetan puntos (el tooltip da el valor).
+    const muchasLineas = kind === 'line' && (config.data?.datasets?.length || 0) >= 3;
+    const display = prev.display === false || muchasLineas
+      ? false
+      : (kind === 'barStacked'
+        ? (ctx) => {
+          const v = Number(ctx.dataset.data[ctx.dataIndex]) || 0;
+          if (v <= 0) return false;
+          const total = ctx.chart.data.datasets.reduce((sum, ds, i) => (
+            ctx.chart.isDatasetVisible(i) ? sum + (Number(ds.data[ctx.dataIndex]) || 0) : sum), 0);
+          return total > 0 && v / total >= 0.12;
+        }
+        : true);
     config.options.plugins = {
       ...(config.options.plugins || {}),
-      datalabels: { ...baseLabels, ...prev, display: prev.display === false ? false : true },
+      datalabels: { ...baseLabels, ...prev, display },
     };
     const already = Array.isArray(config.plugins) && config.plugins.includes(ChartDataLabels);
     if (!already) {
@@ -1072,16 +1086,17 @@
     };
 
     if (!goal || goal <= 0) {
+      // Sin objetivo el anillo va gris: pintarlo completo parecía un 100 % de avance.
       chartData = {
-        labels: ['Avance', 'Sin objetivo'],
+        labels: ['Sin objetivo'],
         datasets: [{
-          data: safeActual > 0 ? [safeActual, 0.0001] : [0.0001, 1],
-          backgroundColor: [mainColor, trackColor],
+          data: [1],
+          backgroundColor: [trackColor],
           ...doughnutStyle,
         }],
       };
       pctEl.textContent = '—';
-      countsEl.textContent = formatGoalCounts(safeActual, 0, unitLabel);
+      countsEl.textContent = `${formatGoalCounts(safeActual, 0, unitLabel)} · sin objetivo`;
       panelEl?.classList.remove('goal-chart-panel--complete');
     } else if (safeActual >= goal) {
       const excess = safeActual - goal;
@@ -1140,15 +1155,19 @@
     const noTimbradas = resumenActual.totalUnidadesFacturadasNoTimbradas ?? Math.max(0, facturadas - reportadas);
     const numerador = resumenActual.numeradorCobertura ?? (reportadas + noTimbradas);
 
+    const sub = document.getElementById('kpiCoberturaSub');
     if (!goal) {
-      els.kpiCobertura.textContent = String(numerador);
+      // Sin objetivo no hay cobertura: mostrar el conteo repetiría la tarjeta de SOFIA.
+      els.kpiCobertura.textContent = '—';
+      if (sub) sub.textContent = `Defina el objetivo SOFIA · ${numerador} reportadas + sin timbrar`;
       els.kpiCardCobertura?.classList.remove('kpi-card--complete');
       setKpiBarFill('cobertura', 0);
       return;
     }
 
     const pct = (numerador / goal) * 100;
-    els.kpiCobertura.textContent = pct > 999 ? '+999.00%' : `${pct.toFixed(2)}%`;
+    els.kpiCobertura.textContent = pct > 999 ? '+999 %' : `${pct.toFixed(1)} %`;
+    if (sub) sub.textContent = `${numerador} de ${goal} del objetivo SOFIA`;
     els.kpiCardCobertura?.classList.toggle('kpi-card--complete', numerador >= goal);
     setKpiBarFill('cobertura', (numerador / goal) * 100);
     renderCarryOverKpi();
@@ -1195,7 +1214,6 @@
     els.kpiPromedioMes.textContent = promedioMensual;
     els.kpiMejorMes.textContent = mesMaximo ? `${mesMaximo.label} (${mesMaximo.count})` : '-';
     els.kpiMenorMes.textContent = mesMinimo ? `${mesMinimo.label} (${mesMinimo.count})` : '-';
-    els.kpiAcumuladoAnio.textContent = resumen.totalVentas;
 
     createChart('mesFlotilla', 'chartMesFlotilla', {
       type: 'bar',
@@ -1248,7 +1266,10 @@
     }
 
     destroyChart('mesEntregasSofia', 'chartMesEntregasSofia');
-    if (comparativo.porMesEntregasSofia) {
+    // Sin entregas en ningún mes, la gráfica solo muestra ejes vacíos: se oculta el bloque.
+    const sofiaMesConDatos = (comparativo.porMesEntregasSofia?.data || []).some((v) => Number(v) > 0);
+    document.getElementById('chartMesEntregasSofia')?.closest('.section-panel')?.classList.toggle('hidden', !sofiaMesConDatos);
+    if (sofiaMesConDatos) {
       createChart('mesEntregasSofia', 'chartMesEntregasSofia', {
         type: 'bar',
         data: {
@@ -3345,6 +3366,8 @@
     const fechaInicio = els.fechaInicio.value;
     const fechaFin = els.fechaFin.value;
     if (!fechaInicio || !fechaFin) { setStatus('Seleccione ambas fechas', 'error'); return; }
+    // Guardar el periodo en la URL (conserva la pestaña #financiamiento, #leads…).
+    Dashboard.syncDateParamsToUrl?.(fechaInicio, fechaFin);
 
     // Recargar pestaña activa de inmediato con el periodo elegido.
     // Antes Leads/Afluencia esperaban a /api/ventas; si fallaba o tardaba, quedaban en mes en curso.
@@ -3784,7 +3807,6 @@
       kpiPromedioMes: document.getElementById('kpiPromedioMes'),
       kpiMejorMes: document.getElementById('kpiMejorMes'),
       kpiMenorMes: document.getElementById('kpiMenorMes'),
-      kpiAcumuladoAnio: document.getElementById('kpiAcumuladoAnio'),
       goalRetailInput: document.getElementById('goalRetailInput'),
       goalSofiaInput: document.getElementById('goalSofiaInput'),
       goalRetailPanel: document.getElementById('goalRetailPanel'),
@@ -4130,8 +4152,17 @@
       window.AfluenciaVentas?.init?.();
       window.ComisionesVentas?.init?.();
       compactFilters = Dashboard.initCompactFilters();
-      setDefaultDates();
-      Dashboard.setActivePresetChip('mes-actual');
+      // El periodo viene de la URL si existe (enlace compartido, recarga, «ir a» desde otra pantalla).
+      const desdeUrl = Dashboard.getDateParamsFromUrl();
+      if (desdeUrl.fechaInicio && desdeUrl.fechaFin) {
+        els.fechaInicio.value = desdeUrl.fechaInicio;
+        els.fechaFin.value = desdeUrl.fechaFin;
+        document.querySelectorAll('[data-preset]').forEach((b) => b.classList.remove('active', 'chip--active'));
+        Dashboard.updateCompactFilterLabels?.();
+      } else {
+        setDefaultDates();
+        Dashboard.setActivePresetChip('mes-actual');
+      }
       await ensureSofiaLiveOnBoot();
       await switchSalesTab(getSalesTabFromUrl());
       await consultar();

@@ -25,7 +25,7 @@ const { getAnalisisComercial } = require('../services/analisisComercialService')
 const { getContabilidad } = require('../services/contabilidadService');
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
-const { isConfigured, runChat, DEFAULT_MODEL } = require('../services/aiAgent');
+const { isConfigured, runChat, synthesizeSpeech, transcribeAudio, DEFAULT_MODEL } = require('../services/aiAgent');
 const { canManageUsers } = require('../auth/roles');
 const { isAuthEnabled } = require('../auth/session');
 const { requireSession } = require('../auth/middleware');
@@ -202,6 +202,21 @@ router.get('/ventas/financiamiento/pagos-gmf', (req, res, next) => {
       return res.status(400).json({ error: 'Indique vin o contrato.' });
     }
     res.json(getPagosGmf({ vin, contrato }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Tiempo a compra de los últimos 12 meses hasta fechaFin (Kaplan–Meier). Sin datos personales.
+router.get('/ventas/leads/supervivencia', (req, res, next) => {
+  try {
+    const { getSupervivencia } = require('../services/leadsSupervivenciaService');
+    const { fechaFin, horizonte } = req.query;
+    if (!fechaFin) {
+      return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
+    }
+    res.json(getSupervivencia({ fechaFin, horizonte }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -659,6 +674,31 @@ router.get('/contabilidad/punto-equilibrio', async (req, res, next) => {
   }
 });
 
+// Contabilidad con el formato de VECSA y el cálculo de Balderrama.
+router.get('/contabilidad/estado-resultados', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    const { getEstadoResultadosFormato } = require('../services/contabilidadFormatoService');
+    res.json(await getEstadoResultadosFormato({ fechaInicio, fechaFin }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/contabilidad/balance', async (req, res, next) => {
+  try {
+    const { fechaFin } = req.query;
+    if (!fechaFin) return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
+    const { getBalanceFormato } = require('../services/contabilidadFormatoService');
+    res.json(await getBalanceFormato({ fechaFin }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/contabilidad/analisis-financiero', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
@@ -1013,6 +1053,36 @@ router.get('/ai/kpi-catalog', (req, res) => {
     res.json({ ok: true, count: items.length, items });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Voz de Balvo: leer la respuesta y escuchar al usuario (OpenAI).
+router.post('/ai/speech', async (req, res) => {
+  try {
+    if (!isConfigured()) {
+      return res.status(503).json({ error: 'La voz de OpenAI no está configurada. Agrega OPENAI_API_KEY.' });
+    }
+    const audio = await synthesizeSpeech(req.body?.text, req.body?.voice);
+    res.set('Content-Type', 'audio/mpeg');
+    res.set('Cache-Control', 'no-store');
+    res.send(audio);
+  } catch (err) {
+    console.error('[AI speech]', err.message);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo generar la voz' });
+  }
+});
+
+router.post('/ai/transcribe', express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '15mb' }), async (req, res) => {
+  try {
+    if (!isConfigured()) {
+      return res.status(503).json({ error: 'La voz de OpenAI no está configurada. Agrega OPENAI_API_KEY.' });
+    }
+    const mime = String(req.headers['content-type'] || 'audio/webm').split(';')[0];
+    const text = await transcribeAudio(Buffer.isBuffer(req.body) ? req.body : null, mime);
+    res.json({ text });
+  } catch (err) {
+    console.error('[AI transcribe]', err.message);
+    res.status(err.status || 500).json({ error: err.message || 'No se pudo transcribir el audio' });
   }
 });
 

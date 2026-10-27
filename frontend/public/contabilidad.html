@@ -6,7 +6,9 @@
 <title>Contabilidad | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=166" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=172" rel="stylesheet"/>
+<link href="/css/balvo.css?v=1" rel="stylesheet"/>
+<link href="/css/contabilidad.css?v=4" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="contabilidad">
@@ -100,11 +102,182 @@
 </div>
 </section>
 
-<nav class="contabilidad-tabs" id="contabilidadMainTabs" aria-label="Secciones de contabilidad">
+<nav class="contabilidad-tabs ctb-tabs" id="contabilidadMainTabs" aria-label="Secciones de contabilidad">
 <button type="button" class="contabilidad-tab" data-tab="catalogo" hidden aria-hidden="true">Catálogo de cuentas</button>
-<button type="button" class="contabilidad-tab active" data-tab="balance">Balance General</button>
-<button type="button" class="contabilidad-tab" data-tab="eeff">EEFF</button>
+<button type="button" class="contabilidad-tab active" data-tab="er">Estado de resultados</button>
+<button type="button" class="contabilidad-tab" data-tab="analisis">Análisis</button>
+<button type="button" class="contabilidad-tab" data-tab="balance">Balance General</button>
+<button type="button" class="contabilidad-tab" data-tab="eeff">Departamentos y presupuesto</button>
 </nav>
+
+<p id="ctbAviso" class="ctb-aviso hidden" role="status" aria-live="polite"></p>
+
+<!-- ═══ Estado de resultados (formato VECSA, cálculo Balderrama) ═══ -->
+<div id="panelCtbEr" class="ctb-panel">
+<section class="section-panel dashboard-section ctb-resumen kpi-insight-anchor" id="kpiErResultado" aria-labelledby="erTitulo">
+<div class="ctb-resumen__titular">
+<span class="ctb-kicker" id="erKicker">Utilidad del periodo</span>
+<strong class="ctb-resumen__cifra" id="erCifra">—</strong>
+<p class="ctb-resumen__frase" id="erFrase"></p>
+<p class="ctb-resumen__nota" id="erPeriodo"></p>
+</div>
+<div class="ctb-kpis" id="erKpis" aria-label="Totales del estado de resultados"></div>
+</section>
+
+<section class="section-panel dashboard-section ctb-revision hidden" id="erRevision" aria-label="Revisión de la balanza">
+<details>
+<summary id="erRevisionResumen"></summary>
+<div id="erRevisionDetalle" class="ctb-revision__detalle"></div>
+</details>
+</section>
+
+<section class="section-panel table-panel dashboard-section">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="erTitulo">Estado de resultados</h3>
+<p class="section-subtitle" id="erNota">Balanza CON_CTAS · mapeo del EEFF SUMMARY</p>
+</div>
+<div class="ctb-head__acciones">
+<button type="button" class="ctb-boton" id="erExpandir" aria-pressed="false">Ver cuentas</button>
+<label class="ctb-check"><input type="checkbox" id="erCeros"/> Renglones en cero</label>
+</div>
+</div>
+<div class="ctb-tabla-wrap">
+<table class="data-table ctb-er">
+<thead>
+<tr>
+<th scope="col">Concepto</th>
+<th scope="col" class="cell-money">Importe</th>
+<th scope="col" class="cell-num">% ventas</th>
+</tr>
+</thead>
+<tbody id="erTabla"></tbody>
+</table>
+</div>
+</section>
+</div>
+
+<!-- ═══ Análisis ═══ -->
+<div id="panelCtbAnalisis" class="ctb-panel hidden">
+<div class="ctb-sucursal" id="anSucursalBar">
+<span class="ctb-sucursal__label">Sucursal</span>
+<div class="ctb-sucursal__chips" id="anSucursalChips" role="group" aria-label="Filtrar el análisis por sucursal">
+<button type="button" class="chip active" data-sucursal="todas">Todas</button>
+<button type="button" class="chip" data-sucursal="piso">Piso</button>
+<button type="button" class="chip" data-sucursal="foraneos">Foráneos</button>
+<button type="button" class="chip" data-sucursal="suauto">SuAuto</button>
+<button type="button" class="chip" data-sucursal="cholula">Cholula</button>
+<button type="button" class="chip" data-sucursal="zacatelco">Zacatelco</button>
+<button type="button" class="chip" data-sucursal="casa">Casa</button>
+<button type="button" class="chip" data-sucursal="flotillas">Flotillas</button>
+<button type="button" class="chip" data-sucursal="intercambios">Intercambios</button>
+</div>
+</div>
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErLineas" aria-labelledby="anLineasTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anLineasTitulo">Utilidad por línea de negocio</h3>
+<p class="section-subtitle" id="anLineasNota">Venta, costo y utilidad bruta de cada línea. La suma es la utilidad bruta de la agencia.</p>
+</div>
+</div>
+<div class="ctb-tabla-wrap">
+<table class="data-table ctb-lineas">
+<thead>
+<tr>
+<th scope="col">Línea</th>
+<th scope="col" class="cell-money">Ventas</th>
+<th scope="col" class="cell-money">Utilidad bruta</th>
+<th scope="col" class="cell-num">Margen</th>
+<th scope="col" class="ctb-col-barra">Aporte a la utilidad bruta</th>
+</tr>
+</thead>
+<tbody id="anLineas"></tbody>
+</table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErGastos" aria-labelledby="anGastosTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anGastosTitulo">Gastos por departamento</h3>
+<p class="section-subtitle" id="anGastosNota">Cuánto de la utilidad bruta consume cada departamento.</p>
+</div>
+</div>
+<div id="anGastos" class="ctb-gastos"></div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErTendencia" aria-labelledby="anTendenciaTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anTendenciaTitulo">Tendencia del año</h3>
+<p class="section-subtitle">Mes por mes, de enero al mes consultado.</p>
+</div>
+</div>
+<div class="ctb-grafica"><canvas id="anTendencia" aria-label="Tendencia mensual"></canvas></div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErAnio" aria-labelledby="anAnioTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anAnioTitulo">Año contra año</h3>
+<p class="section-subtitle" id="anAnioNota">Mismo periodo del año anterior.</p>
+</div>
+</div>
+<div id="anAnio" class="ctb-anio"></div>
+<div class="ctb-grafica" id="anAnioGraficaWrap"><canvas id="anAnioGrafica" aria-label="Cada mes contra el mismo mes del año anterior"></canvas></div>
+<p class="ctb-nota" id="anAnioCorte">De enero al mes del corte. El acumulado se compara con el mismo tramo del año anterior.</p>
+<div class="ctb-tabla-wrap ctb-comp-wrap">
+<table class="data-table ctb-comp" id="anAnioTabla"></table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiErEquilibrio" aria-labelledby="anEquilibrioTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="anEquilibrioTitulo">Punto de equilibrio</h3>
+<p class="section-subtitle">Ventas necesarias para cubrir los gastos fijos con el margen de contribución del periodo.</p>
+</div>
+</div>
+<div id="anEquilibrio" class="ctb-equilibrio"></div>
+</section>
+</div>
+
+<!-- ═══ Balance General ═══ -->
+<div id="panelCtbBalance" class="ctb-panel hidden">
+<section class="section-panel dashboard-section ctb-resumen" aria-labelledby="bgTitulo">
+<div class="ctb-resumen__titular">
+<span class="ctb-kicker" id="bgTitulo">Balance General</span>
+<strong class="ctb-resumen__cifra ctb-resumen__cifra--sm" id="bgCorte">—</strong>
+<p class="ctb-resumen__frase" id="bgCuadre"></p>
+<p class="ctb-resumen__nota" id="bgNota"></p>
+</div>
+<div class="ctb-kpis" id="bgKpis" aria-label="Totales del balance"></div>
+</section>
+
+<section class="section-panel dashboard-section" aria-labelledby="bgIndTitulo">
+<h3 class="section-title" id="bgIndTitulo">Indicadores</h3>
+<div id="bgIndicadores" class="ctb-indicadores"></div>
+</section>
+
+<section class="section-panel dashboard-section" aria-labelledby="bgEstTitulo">
+<div class="ctb-head">
+<div>
+<h3 class="section-title" id="bgEstTitulo">Estructura</h3>
+<p class="section-subtitle">Grupo y cuenta de mayor del catálogo de Balderrama.</p>
+</div>
+</div>
+<div class="ctb-estructura">
+<div id="bgActivo" class="ctb-estructura__col"></div>
+<div id="bgPasivoCapital" class="ctb-estructura__col"></div>
+</div>
+</section>
+
+<section class="section-panel dashboard-section" aria-labelledby="bgConTitulo">
+<h3 class="section-title" id="bgConTitulo">Resultado del ejercicio</h3>
+<p class="section-subtitle">El resultado de la balanza (cuentas 04 a 09) contra el estado de resultados de enero al corte.</p>
+<div id="bgConciliacion" class="ctb-conciliacion"></div>
+</section>
+</div>
 
 <div id="panelContabilidadCatalogo" class="contabilidad-main-panel hidden" hidden aria-hidden="true">
 
@@ -235,7 +408,8 @@
 
 </div>
 
-<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid">
+<!-- Balance anterior: lo reemplaza el Balance General con formato VECSA (panelCtbBalance). -->
+<div id="panelContabilidadBalance" class="contabilidad-main-panel bg-balance-liquid hidden" aria-hidden="true">
 
 <section class="bg-balance-head dashboard-section">
 <div class="bg-balance-head__row">
@@ -302,126 +476,114 @@
 
 <div id="panelContabilidadEeff" class="contabilidad-main-panel hidden">
 
-<section class="eeff-edo-overview af-overview" id="afOverview" aria-label="CMI financiero Ventas nuevos" style="margin-bottom:16px">
-  <div class="section-head-row" style="margin-bottom:14px">
-    <div>
-      <h3 class="section-title">CMI financiero · Ventas nuevos</h3>
-      <p class="section-subtitle">6 bloques · F-1…F-7.1 · periodo <span id="afPeriodLabel">—</span></p>
-    </div>
-    <span id="afLoading" class="pe-mode-badge hidden">Cargando…</span>
-  </div>
-  <p id="afEmpty" class="liquidez-note hidden" aria-live="polite"></p>
-  <div class="eeff-edo-kpi-row af-kpi-row" id="afKpiPrimary"></div>
-  <div id="afKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
-  <p class="eeff-edo-footnote" id="afFootnote">
-    <span class="material-symbols-outlined" aria-hidden="true">info</span>
-    Clic en un KPI para ver fórmula, numerador/denominador, componentes y meta · cifras en MXN
-  </p>
-</section>
-
-<nav class="eeff-tabs" id="eeffTabs" aria-label="Categorías EEFF">
-<button type="button" class="eeff-tab active" data-categoria="estadoFinanciero">Edo. Financiero</button>
-<button type="button" class="eeff-tab" data-categoria="ventas">Ventas</button>
-<button type="button" class="eeff-tab" data-categoria="postventa">PostVenta</button>
-<button type="button" class="eeff-tab" data-categoria="comparativa">Comparativa PPTO</button>
+<nav class="eeff-tabs" id="eeffTabs" aria-label="Departamentos y presupuesto">
+<button type="button" class="eeff-tab active" data-categoria="estadoFinanciero">Por departamento</button>
+<button type="button" class="eeff-tab" data-categoria="ventas">Autos nuevos</button>
+<button type="button" class="eeff-tab" data-categoria="seminuevos">Seminuevos</button>
+<button type="button" class="eeff-tab" data-categoria="postventa">Postventa</button>
+<button type="button" class="eeff-tab" data-categoria="comparativa">Real vs presupuesto</button>
 </nav>
 
+<!-- 1 · Por departamento: quién genera la utilidad, si cubre sus gastos fijos y lo que no está en el estado de resultados -->
 <section id="panelEdoFin" class="eeff-panel" data-panel="estadoFinanciero">
-<section id="eeffEdoFinOverview" class="eeff-edo-overview" aria-label="Resumen estado financiero">
-<div class="eeff-edo-kpi-row eeff-edo-kpi-row--5" id="kpiEdoFinPrimary"></div>
-<div class="eeff-edo-kpi-row eeff-edo-kpi-row--4" id="kpiEdoFinSecondary"></div>
-<div id="eeffKpiDetailEdoFin" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
-<article id="eeffEdoFinPanorama" class="eeff-panorama" aria-live="polite"></article>
-<p class="eeff-edo-footnote">
-<span class="material-symbols-outlined" aria-hidden="true">info</span>
-Cifras en MXN · Porcentajes calculados sobre ventas totales
-</p>
-</section>
-
-<section class="section-panel dashboard-section" id="panelPuntoEquilibrio">
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiDeptosAporte" aria-labelledby="deptosTitulo">
 <div class="section-head-row">
 <div>
-<h3 class="section-title">Punto de equilibrio operativo</h3>
-<p class="section-subtitle" id="peTemporalLabel">PE = Gastos fijos ÷ Margen de contribución % · preliminar (costos variables = TOTAL COSTOS · fijos = gastos depto)</p>
+<h3 class="section-title" id="deptosTitulo">Qué departamento genera la utilidad</h3>
+<p class="section-subtitle" id="deptosPeriodo">Utilidad de operación de cada departamento, con su parte de la administración.</p>
 </div>
-<span id="peModeBadge" class="pe-mode-badge">—</span>
+<button type="button" class="btn-glass" data-ir-tab="er" title="Abrir el estado de resultados completo">Ver estado de resultados</button>
 </div>
-
-<div class="kpi-grid kpi-grid--eeff pe-segment-grid" id="peSegmentCards" aria-label="Punto de equilibrio por departamento"></div>
-
-<div class="kpi-grid kpi-grid--eeff" style="margin-top:12px">
-<div class="kpi-card kpi-card--eeff kpi-card--blue" id="kpiCardPuntoEquilibrio">
-<div class="kpi-card-head"><span class="kpi-title">Punto de equilibrio agencia</span><span class="material-symbols-outlined kpi-icon">flag</span></div>
-<div id="kpiPuntoEquilibrio" class="kpi-value money">—</div>
-<p id="kpiPuntoEquilibrioSub" class="kpi-subtitle">Gastos fijos ÷ margen de contribución %</p>
-</div>
-</div>
-
-<div class="chart-grid pe-detail-grid">
-<div class="section-panel table-panel">
-<h3 class="section-title">Detalle agencia</h3>
-<p class="section-subtitle" id="peAgenciaSubtitle">Cálculo consolidado del periodo</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
-<tbody id="peAgenciaTable"></tbody>
-</table>
-</div>
-</div>
-<div class="section-panel table-panel">
-<h3 class="section-title">Por departamento</h3>
-<p class="section-subtitle">Nuevos · Seminuevos · Postventa · Agencia</p>
-<div class="table-scroll">
-<table class="data-table">
+<p class="deptos-frase" id="deptosFrase" aria-live="polite"></p>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table deptos-tabla">
 <thead>
 <tr>
 <th>Departamento</th>
 <th class="cell-money">Ventas</th>
-<th class="cell-money">MC %</th>
+<th class="cell-money">Utilidad bruta</th>
+<th class="cell-num">Margen bruto</th>
+<th class="cell-money">Gastos</th>
+<th class="cell-money">Utilidad de operación</th>
+<th class="cell-num">Margen op.</th>
+<th class="deptos-col-aporte">Aporte a la utilidad de operación</th>
+</tr>
+</thead>
+<tbody id="deptosTabla"></tbody>
+<tfoot id="deptosPie"></tfoot>
+</table>
+</div>
+<p class="section-subtitle deptos-nota" id="deptosNota"></p>
+</section>
+
+<section class="section-panel dashboard-section kpi-insight-anchor" id="kpiCardPuntoEquilibrio" aria-labelledby="peTitulo">
+<div class="section-head-row">
+<div>
+<h3 class="section-title" id="peTitulo">Punto de equilibrio por departamento</h3>
+<p class="section-subtitle" id="peTemporalLabel">Ventas que necesita cada departamento para cubrir sus gastos fijos con su margen de contribución.</p>
+</div>
+<span id="peModeBadge" class="pe-mode-badge">—</span>
+</div>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table pe-tabla">
+<thead>
+<tr>
+<th>Departamento</th>
+<th class="cell-money">Ventas</th>
+<th class="cell-num">Margen de contribución</th>
 <th class="cell-money">Gastos fijos</th>
-<th class="cell-money">Punto equilibrio</th>
+<th class="cell-money">Punto de equilibrio</th>
 <th class="cell-num">Cobertura</th>
 </tr>
 </thead>
 <tbody id="peSegmentosTable"></tbody>
 </table>
 </div>
-<div id="peAgenciaInsight" class="liquidez-note pe-insight-note hidden" aria-live="polite"></div>
-</div>
-</div>
-<p class="section-subtitle pe-methodology-note" id="peMethodologyNote"></p>
-</section>
-
-<div class="section-panel table-panel">
-<h3 class="section-title">Estado de resultados acumulado</h3>
-<p class="section-subtitle">Saldos al cierre · estructura de estado de resultados</p>
-<div class="table-scroll">
+<details class="pe-detalle">
+<summary>Cálculo de la agencia y lectura</summary>
+<p class="section-subtitle" id="peAgenciaSubtitle">Cálculo consolidado del periodo</p>
+<div class="chart-grid pe-detail-grid">
+<div class="table-scroll table-scroll--auto">
 <table class="data-table">
 <thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
-<tbody id="edoFinTable"></tbody>
+<tbody id="peAgenciaTable"></tbody>
 </table>
 </div>
+<div id="peAgenciaInsight" class="liquidez-note pe-insight-note hidden" aria-live="polite"></div>
 </div>
+<p class="section-subtitle pe-methodology-note" id="peMethodologyNote"></p>
+</details>
 </section>
 
+<section id="eeffEdoFinOverview" class="eeff-edo-overview" aria-labelledby="deptosAgenciaTitulo">
+<h3 class="section-title" id="deptosAgenciaTitulo">Agencia · indicadores que no están en el estado de resultados</h3>
+<div class="eeff-edo-kpi-row eeff-edo-kpi-row--3" id="kpiEdoFinPrimary"></div>
+<div id="eeffKpiDetailEdoFin" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+<p class="eeff-edo-footnote">
+<span class="material-symbols-outlined" aria-hidden="true">info</span>
+Cifras en MXN · clic en un indicador para ver cómo se calcula
+</p>
+</section>
+</section>
+
+<!-- 2 · Autos nuevos: canal, sucursal y el CMI de GM -->
 <section id="panelVentas" class="eeff-panel hidden" data-panel="ventas">
 <section class="kpi-grid kpi-grid--eeff" id="kpiVentas"></section>
 <div id="eeffKpiDetailVentas" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
-<div class="chart-grid">
-<div class="section-panel table-panel">
-<h3 class="section-title">Menudeo</h3>
-<p class="section-subtitle">Piso · Zacatelco · Foráneos · Cholula · SuAuto</p>
-<div class="table-scroll">
+<div class="section-panel table-panel dashboard-section">
+<h3 class="section-title">Autos nuevos por canal y sucursal</h3>
+<p class="section-subtitle">Menudeo por sucursal, flotillas e intercambios. El total es el de autos nuevos en el estado de resultados.</p>
+<div class="table-scroll table-scroll--auto">
 <table class="data-table data-table--eeff-vtasmen">
 <thead>
 <tr>
-<th>Sucursal</th>
+<th>Canal / sucursal</th>
 <th class="cell-money">Ventas</th>
 <th class="cell-money">Costo</th>
 <th class="cell-money">Util. bruta</th>
 <th class="cell-money">Gastos</th>
 <th class="cell-money">Util. operación</th>
-<th class="cell-num">Margen %</th>
+<th class="cell-num">Margen op.</th>
 </tr>
 </thead>
 <tbody id="menudeoTable"></tbody>
@@ -429,36 +591,24 @@ Cifras en MXN · Porcentajes calculados sobre ventas totales
 </table>
 </div>
 </div>
-<div class="section-panel table-panel">
-<h3 class="section-title">Flotillas e Intercambios</h3>
-<p class="section-subtitle">Divisiones que completan el total de ventas autos nuevos</p>
-<div class="table-scroll">
-<table class="data-table data-table--eeff-vtasmen">
-<thead>
-<tr>
-<th>División</th>
-<th class="cell-money">Ventas</th>
-<th class="cell-money">Costo</th>
-<th class="cell-money">Util. bruta</th>
-<th class="cell-money">Gastos</th>
-<th class="cell-money">Util. operación</th>
-</tr>
-</thead>
-<tbody id="otrasDivisionesTable"></tbody>
-<tfoot id="otrasDivisionesFoot"></tfoot>
-</table>
+
+<section class="eeff-edo-overview af-overview" id="afOverview" aria-label="CMI financiero de autos nuevos">
+<div class="section-head-row" style="margin-bottom:14px">
+<div>
+<h3 class="section-title">CMI financiero · autos nuevos</h3>
+<p class="section-subtitle">Indicadores F-1 a F-7.1 · periodo <span id="afPeriodLabel">—</span></p>
 </div>
+<span id="afLoading" class="pe-mode-badge hidden">Cargando…</span>
 </div>
-</div>
-<div class="section-panel table-panel dashboard-section">
-<h3 class="section-title">Total ventas autos nuevos</h3>
-<div class="table-scroll">
-<table class="data-table">
-<thead><tr><th>Concepto</th><th class="cell-money">Importe</th></tr></thead>
-<tbody id="totalVentasTable"></tbody>
-</table>
-</div>
-</div>
+<p id="afEmpty" class="liquidez-note hidden" aria-live="polite"></p>
+<div class="eeff-edo-kpi-row af-kpi-row" id="afKpiPrimary"></div>
+<div id="afKpiDetail" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+<p class="eeff-edo-footnote" id="afFootnote">
+<span class="material-symbols-outlined" aria-hidden="true">info</span>
+Clic en un KPI para ver fórmula, numerador/denominador, componentes y meta · cifras en MXN
+</p>
+</section>
+
 <div class="section-panel table-panel dashboard-section">
 <h3 class="section-title">Ventas diarias</h3>
 <p class="section-subtitle">Unidades facturadas por día · operativo (clic en fila para detalle)</p>
@@ -482,13 +632,39 @@ Cifras en MXN · Porcentajes calculados sobre ventas totales
 </div>
 </section>
 
+<!-- 3 · Seminuevos -->
+<section id="panelSeminuevos" class="eeff-panel hidden" data-panel="seminuevos">
+<section class="kpi-grid kpi-grid--eeff" id="kpiSeminuevos"></section>
+<div id="eeffKpiDetailSeminuevos" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Seminuevos por línea</h3>
+<p class="section-subtitle">Contabilidad registra los gastos de seminuevos al total del departamento, no por línea.</p>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table data-table--eeff-vtasmen">
+<thead>
+<tr>
+<th>Línea</th>
+<th class="cell-money">Ventas</th>
+<th class="cell-money">Costo</th>
+<th class="cell-money">Util. bruta</th>
+<th class="cell-num">Margen bruto</th>
+</tr>
+</thead>
+<tbody id="seminuevosTable"></tbody>
+<tfoot id="seminuevosFoot"></tfoot>
+</table>
+</div>
+</div>
+</section>
+
+<!-- 4 · Postventa -->
 <section id="panelPostventa" class="eeff-panel hidden" data-panel="postventa">
 <section class="kpi-grid kpi-grid--eeff" id="kpiPostventa"></section>
 <div id="eeffKpiDetailPostventa" class="eeff-kpi-detail-panel hidden" aria-live="polite"></div>
 <div class="section-panel table-panel">
-<h3 class="section-title">PostVenta · Servicio + Refacciones + HYP</h3>
-<p class="section-subtitle">Acumulado de las tres áreas de postventa</p>
-<div class="table-scroll">
+<h3 class="section-title">Postventa por área</h3>
+<p class="section-subtitle">Servicio, refacciones y hojalatería y pintura</p>
+<div class="table-scroll table-scroll--auto">
 <table class="data-table data-table--eeff-vtasmen">
 <thead>
 <tr>
@@ -499,7 +675,7 @@ Cifras en MXN · Porcentajes calculados sobre ventas totales
 <th class="cell-money">Gastos dept.</th>
 <th class="cell-money">Gastos admin.</th>
 <th class="cell-money">Util. operación</th>
-<th class="cell-num">Margen %</th>
+<th class="cell-num">Margen op.</th>
 </tr>
 </thead>
 <tbody id="postventaTable"></tbody>
@@ -509,6 +685,7 @@ Cifras en MXN · Porcentajes calculados sobre ventas totales
 </div>
 </section>
 
+<!-- 5 · Real vs presupuesto -->
 <section id="panelComparativa" class="eeff-panel hidden" data-panel="comparativa">
 <div id="comparativaAlert" class="comparativa-alert hidden" role="status"></div>
 <section class="kpi-grid kpi-grid--eeff" id="kpiComparativa"></section>
@@ -516,7 +693,7 @@ Cifras en MXN · Porcentajes calculados sobre ventas totales
 <div class="section-panel table-panel">
 <div class="section-panel-head" style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px">
 <div>
-<h3 class="section-title">Estado de resultados · Real vs Presupuesto 2026</h3>
+<h3 class="section-title">Estado de resultados · real contra presupuesto 2026</h3>
 <p class="section-subtitle" id="comparativaSubtitle">Acumulado del periodo seleccionado</p>
 </div>
 <button type="button" id="btnExportComparativa" class="btn-glass" title="Descargar CSV para acta / correo">
@@ -525,8 +702,8 @@ Exportar CSV
 </button>
 </div>
 <p class="comparativa-legend" aria-label="Leyenda de variaciones">
-<span class="comparativa-legend__item"><span class="comparativa-legend__swatch comparativa-legend__swatch--pos"></span> Verde: por encima del PPTO</span>
-<span class="comparativa-legend__item"><span class="comparativa-legend__swatch comparativa-legend__swatch--neg"></span> Rojo: por debajo del PPTO</span>
+<span class="comparativa-legend__item"><span class="comparativa-legend__swatch comparativa-legend__swatch--pos"></span> Verde: a favor (más ingreso o utilidad, o menos costo o gasto que el presupuesto)</span>
+<span class="comparativa-legend__item"><span class="comparativa-legend__swatch comparativa-legend__swatch--neg"></span> Rojo: en contra</span>
 <span class="comparativa-legend__item">Var. $ = Real − Presupuesto</span>
 </p>
 <div class="table-scroll">
@@ -544,14 +721,14 @@ Exportar CSV
 </table>
 </div>
 </div>
-<div class="chart-grid">
+<div class="cmp-detalle">
 <div class="section-panel table-panel">
-<h3 class="section-title">Ventas · Menudeo</h3>
-<div class="table-scroll">
+<h3 class="section-title">Autos nuevos · ventas por canal</h3>
+<div class="table-scroll table-scroll--auto">
 <table class="data-table data-table--eeff-compare">
 <thead>
 <tr>
-<th>Sucursal</th>
+<th>Canal / sucursal</th>
 <th class="cell-money">Real</th>
 <th class="cell-money">PPTO</th>
 <th class="cell-money">Var. $</th>
@@ -563,15 +740,15 @@ Exportar CSV
 </div>
 </div>
 <div class="section-panel table-panel">
-<h3 class="section-title">PostVenta · por área</h3>
-<div class="table-scroll">
+<h3 class="section-title">Postventa · ventas por área</h3>
+<div class="table-scroll table-scroll--auto">
 <table class="data-table data-table--eeff-compare">
 <thead>
 <tr>
 <th>Área</th>
-<th class="cell-money">Real ventas</th>
-<th class="cell-money">PPTO ventas</th>
-<th class="cell-money">Var. ventas</th>
+<th class="cell-money">Real</th>
+<th class="cell-money">PPTO</th>
+<th class="cell-money">Var. $</th>
 <th class="cell-num">Var. %</th>
 </tr>
 </thead>
@@ -593,9 +770,10 @@ Exportar CSV
 <script src="/js/topbar.js?v=23"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
-<script src="/js/assistant-bubble.js?v=6"></script>
-<script src="/js/eeff.js?v=31"></script>
+<script src="/js/assistant-bubble.js?v=20"></script>
+<script src="/js/eeff.js?v=32"></script>
 <script src="/js/analisisFinanciero.js?v=11"></script>
-<script src="/js/contabilidad.js?v=75"></script>
+<script src="/js/contabilidad-formato.js?v=4"></script>
+<script src="/js/contabilidad.js?v=78"></script>
 </body>
 </html>

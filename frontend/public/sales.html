@@ -6,7 +6,8 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=166" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=172" rel="stylesheet"/>
+<link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="sales">
@@ -139,20 +140,17 @@ Comisiones
 <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
 </button>
 </div>
-<button type="button" class="kpi-card kpi-card--rose kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
+<div class="kpi-card kpi-card--violet kpi-card--yoy" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
+<div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
+<div id="kpiCobertura" class="kpi-value">—</div>
+<p id="kpiCoberturaSub" class="kpi-subtitle">Contra el objetivo SOFIA</p>
+</div>
+<button type="button" class="kpi-card kpi-card--rose kpi-card--yoy kpi-card--interactive" id="kpiCardCarryOver" aria-expanded="false" aria-controls="ventasKpiDrawer" title="Unidades apartadas (SEP). Clic para ver % simulado y detalle.">
 <div class="kpi-card-head"><span class="kpi-title">Carry over para facturar</span><span class="material-symbols-outlined kpi-icon">pending_actions</span></div>
 <div id="kpiCarryOver" class="kpi-value">0</div>
 <p id="kpiCarryOverSub" class="kpi-subtitle">Apartadas SEP · clic para % y detalle</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 </button>
-<div class="kpi-card kpi-card--violet kpi-card--yoy" id="kpiCardCobertura" title="Cobertura = (reportadas SOFIA + sin timbrar) / objetivo SOFIA. Excluye FLOT y FLOTGMF con contrato flotilla (Sheets col. AO).">
-<div class="kpi-card-head"><span class="kpi-title">Cobertura</span><span class="material-symbols-outlined kpi-icon">donut_large</span></div>
-<div id="kpiCobertura" class="kpi-value">—</div>
-<div class="kpi-yoy" data-kpi-yoy="numeradorCobertura" hidden>
-  <span class="kpi-yoy-badge" data-yoy-badge></span>
-  <span class="kpi-yoy-prior" data-yoy-prior></span>
-</div>
-</div>
 </section>
 <p id="ventasDemosNota" class="liquidez-note ventas-demos-nota hidden" aria-live="polite"></p>
 
@@ -344,11 +342,6 @@ Comisiones
 <div id="kpiMenorMes" class="kpi-subtitle" style="font-size:16px;font-weight:700;color:#0f172a;margin-top:14px">-</div>
 <div class="kpi-accent"></div>
 </div>
-<div class="kpi-card kpi-card--violet">
-<span class="kpi-title">Acumulado anual</span>
-<div id="kpiAcumuladoAnio" class="kpi-value">0</div>
-<div class="kpi-accent"></div>
-</div>
 </section>
 
 <section class="chart-grid">
@@ -425,10 +418,6 @@ Comisiones
 </section>
 
 <section id="chartsMensuales" class="hidden">
-<div class="section-panel dashboard-section">
-<h3 class="section-title">Comparativo mensual · Acumulado del año</h3>
-<div class="chart-card"><div class="chart-wrap chart-wrap-lg"><canvas id="chartMesTotal"></canvas></div></div>
-</div>
 <div class="chart-grid">
 <div class="section-panel"><h3 class="section-title">Flotillas vs venta retail por mes</h3><div class="chart-card"><div class="chart-wrap"><canvas id="chartMesFlotilla"></canvas></div></div></div>
 <div class="section-panel"><h3 class="section-title">Tipo de venta retail por mes</h3><div class="chart-card"><div class="chart-wrap"><canvas id="chartMesTipo"></canvas></div></div></div>
@@ -700,22 +689,93 @@ Ver unidades
 
 <div id="panelVentasLeads" class="sales-main-panel hidden" data-sales-panel="leads" hidden>
 
-<section id="secLeads" class="section-panel dashboard-section fi-section ld-section" aria-label="Leads">
-<div class="fi-section-header">
-<div>
-<h2 class="section-title" style="margin-bottom:6px">Leads</h2>
-<p id="ldSubtitle" class="section-subtitle" style="margin:0">Seguimiento de conversión de oportunidades a ventas (cohorte por fecha de entrada · compra = VIN en CRM).</p>
-</div>
-</div>
+<section id="secLeads" class="ld-page" aria-label="Leads">
+<header class="ld-page__head">
+<h2 class="section-title" style="margin-bottom:4px">Leads</h2>
+<p id="ldSubtitle" class="section-subtitle" style="margin:0">Cuántos leads del periodo llegaron a compra y dónde se quedan. Un lead cuenta como compra si su VIN se factura dentro de 90 días.</p>
+</header>
 
-<section id="secProspeccionPpro" class="section-panel dashboard-section" aria-label="Proceso de Prospección" style="margin-bottom:16px">
-<div class="fi-section-header" style="margin-bottom:10px">
+<div id="ldPeriodoVacio" class="ld-periodo-vacio hidden" role="status" aria-live="polite"></div>
+
+<!-- 1 · Resultado: el embudo responde "¿cuántos compraron y dónde se pierden?" -->
+<section class="ventas-act" aria-labelledby="ldAct1">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldAct1">1 · Resultado del periodo</span>
+<p class="ventas-act__sub">De los leads que entraron, cuántos avanzan en cada paso hasta la compra</p>
+</div>
+<div id="ldKpiOperational" class="fi-kpi-root"></div>
+<section id="ldKpiDetail" class="kpi-detail-panel kpi-detail-panel--fi hidden" aria-labelledby="ldDetailTitle">
+<div class="kpi-detail-header">
 <div>
-<h3 class="section-title" style="margin-bottom:4px">Proceso de Prospección</h3>
-<p id="ldPproNota" class="section-subtitle" style="margin:0">La Cobertura de Gestión de la Cartera Comercial Activa se lee por ejecutivo en el Expediente Integral del Ejecutivo de Ventas.</p>
+<h3 id="ldDetailTitle" class="section-title" style="margin-bottom:6px">Detalle</h3>
+<div id="ldDetailResumen" class="section-subtitle" style="margin:0"></div>
 </div>
+<button type="button" id="btnCerrarLdDetail" class="btn-glass btn-icon-close" aria-label="Cerrar detalle de leads">
+<span class="material-symbols-outlined">close</span>
+</button>
 </div>
-<div id="ldPproGrid" class="kpi-grid"></div>
+</section>
+</section>
+
+<!-- 2 · Origen: de dónde vienen y quién los convierte -->
+<section class="ventas-act" aria-labelledby="ldAct2">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldAct2">2 · De dónde vienen y quién los convierte</span>
+<p class="ventas-act__sub">Los mismos leads del periodo, repartidos por fuente, canal, fuerza de ventas, ejecutivo o vehículo</p>
+</div>
+<div id="ldOrigen" class="section-panel dashboard-section ld-origen" style="margin-bottom:12px"></div>
+<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
+<div class="table-header-row ld-group-head">
+<p id="ldGroupMeta" class="section-subtitle" style="margin:0">Los mismos leads del periodo, agrupados de distinta forma.</p>
+<nav class="eeff-tabs" id="ldGroupTabs" aria-label="Agrupar leads">
+<button type="button" class="eeff-tab active" data-ld-group="canal" aria-pressed="true">Canal</button>
+<button type="button" class="eeff-tab" data-ld-group="fuerza" aria-pressed="false">Fuerza de ventas</button>
+<button type="button" class="eeff-tab" data-ld-group="ejecutivo" aria-pressed="false">Ejecutivo</button>
+<button type="button" class="eeff-tab" data-ld-group="vehiculo" aria-pressed="false">Vehículo</button>
+</nav>
+</div>
+<div class="table-scroll">
+<table class="data-table ld-group-table">
+<thead>
+<tr>
+<th>Grupo</th>
+<th class="cell-num">Leads</th>
+<th class="ld-col-mix">% del total</th>
+<th class="cell-num">Contactados</th>
+<th class="cell-num">Citas</th>
+<th class="cell-num">Cotizados</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">Conv. %</th>
+</tr>
+</thead>
+<tbody id="ldGroupsBody">
+<tr class="empty-row"><td colspan="8">Consulte un periodo para ver la conversión.</td></tr>
+</tbody>
+<tfoot id="ldGroupsFoot"></tfoot>
+</table>
+</div>
+</section>
+</section>
+
+<!-- 3 · Tiempo a compra: últimos 12 meses, no el mes consultado -->
+<section class="ventas-act" id="ldSupervivencia" aria-labelledby="ldActTiempo">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldActTiempo">3 · Tiempo a compra <span class="ld-ventana" title="No cambia con el periodo de arriba">Últimos 12 meses</span></span>
+<p id="ldSuperNota" class="ventas-act__sub">Cuántos días tarda la compra y qué la acelera</p>
+</div>
+<div id="ldSuperBody" class="ld-super">
+<p class="section-subtitle" style="margin:0">Consulte un periodo.</p>
+</div>
+</section>
+
+<!-- 4 · Calidad de la atención: proceso de prospección y alertas -->
+<section class="ventas-act" id="secProspeccionPpro" aria-labelledby="ldAct5">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldAct5">4 · Calidad de la atención</span>
+<p id="ldPproNota" class="ventas-act__sub">Cómo se atiende al lead: intento de contacto, citas y cartera</p>
+</div>
+<section class="section-panel dashboard-section" style="margin-bottom:0">
+<div id="ldPproGrid" class="ld-ppro-grid"></div>
 <div class="table-scroll" style="margin-top:12px">
 <table class="data-table">
 <thead>
@@ -732,146 +792,11 @@ Ver unidades
 </tbody>
 </table>
 </div>
-</section>
-
-<div id="ldKpiOperational" class="fi-kpi-root"></div>
-
-<div id="ldPeriodoVacio" class="ld-periodo-vacio hidden" role="status" aria-live="polite"></div>
-
-<section id="ldKpiDetail" class="kpi-detail-panel kpi-detail-panel--fi hidden" aria-labelledby="ldDetailTitle">
-<div class="kpi-detail-header">
-<div>
-<h3 id="ldDetailTitle" class="section-title" style="margin-bottom:6px">Detalle</h3>
-<div id="ldDetailResumen" class="section-subtitle" style="margin:0"></div>
-</div>
-<button type="button" id="btnCerrarLdDetail" class="btn-glass btn-icon-close" aria-label="Cerrar detalle de leads">
-<span class="material-symbols-outlined">close</span>
-</button>
-</div>
-</section>
-
-<section class="section-panel dashboard-section" id="ldOnePager" aria-label="Reporte leads campañas One Pager">
-<div class="fi-section-header" style="margin-bottom:12px">
-<div>
-<h3 class="section-title" style="margin-bottom:6px">Reporte leads · campañas</h3>
-<p id="ldOnePagerResumen" class="section-subtitle" style="margin:0">Estilo One Pager · reactivas / proactivas · conversión por campaña, mes y vehículo (compra ≤90d desde entrada)</p>
-</div>
-</div>
-
-<div class="chart-grid ld-leads-pair-grid" style="margin-bottom:14px">
-<section class="section-panel dashboard-section" style="margin:0">
-<h4 class="kpi-group-title">Campañas reactivas</h4>
-<div class="kpi-grid" id="ldKpiReactivas"></div>
-</section>
-<section class="section-panel dashboard-section" style="margin:0">
-<h4 class="kpi-group-title">Campañas proactivas</h4>
-<div class="kpi-grid" id="ldKpiProactivas"></div>
-</section>
-</div>
-
-<div class="chart-grid ld-leads-pair-grid">
-<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
-<div class="table-header-row">
-<h4 class="section-title" style="margin-bottom:0;font-size:1rem">Conversión por campaña · reactivas</h4>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead>
-<tr>
-<th>Campaña</th>
-<th class="cell-num">Total leads</th>
-<th class="cell-num">Convertidos</th>
-<th class="cell-num">% Conv</th>
-</tr>
-</thead>
-<tbody id="ldReactivaCampBody">
-<tr class="empty-row"><td colspan="4">Consulte un periodo.</td></tr>
-</tbody>
-<tfoot id="ldReactivaCampFoot"></tfoot>
-</table>
-</div>
-</section>
-
-<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
-<div class="table-header-row">
-<h4 class="section-title" style="margin-bottom:0;font-size:1rem">Conversión por campaña · proactivas</h4>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead>
-<tr>
-<th>Campaña</th>
-<th class="cell-num">Total leads</th>
-<th class="cell-num">Convertidos</th>
-<th class="cell-num">% Conv</th>
-</tr>
-</thead>
-<tbody id="ldProactivaCampBody">
-<tr class="empty-row"><td colspan="4">Consulte un periodo.</td></tr>
-</tbody>
-<tfoot id="ldProactivaCampFoot"></tfoot>
-</table>
-</div>
-</section>
-</div>
-
-<section class="section-panel table-panel dashboard-section" style="margin-top:14px;margin-bottom:0" aria-label="Conversión por mes">
-<div class="table-header-row" style="flex-wrap:wrap;gap:8px;align-items:flex-end;justify-content:space-between">
-<div>
-<h4 class="section-title" style="margin-bottom:0;font-size:1rem">Conversión por mes</h4>
-<p id="ldConvMesMeta" class="section-subtitle" style="margin:4px 0 0">Año calendario completo</p>
-</div>
-</div>
-<div class="ld-conv-mes-layout">
-<div class="table-scroll ld-conv-mes-table">
-<table class="data-table">
-<thead>
-<tr>
-<th>Mes</th>
-<th class="cell-num">Total leads</th>
-<th class="cell-num">Convertidos</th>
-<th class="cell-num">% Conv</th>
-</tr>
-</thead>
-<tbody id="ldConvMesBody">
-<tr class="empty-row"><td colspan="4">Consulte un periodo.</td></tr>
-</tbody>
-</table>
-</div>
-<div class="chart-card ld-conv-mes-chart-card">
-<div class="chart-wrap chart-wrap-lg">
-<canvas id="ldConvMesChart" aria-label="Conversión por mes: barras y línea"></canvas>
-</div>
-</div>
-</div>
-</section>
-
-<section class="section-panel table-panel dashboard-section" style="margin-top:14px;margin-bottom:0">
-<div class="table-header-row">
-<h4 class="section-title" style="margin-bottom:0;font-size:1rem">Conversión por vehículo</h4>
-</div>
-<div class="table-scroll">
-<table class="data-table">
-<thead>
-<tr>
-<th>Vehículo</th>
-<th class="cell-num">Total leads</th>
-<th class="cell-num">Convertidos</th>
-<th class="cell-num">% Conv</th>
-</tr>
-</thead>
-<tbody id="ldConvVehiculoBody">
-<tr class="empty-row"><td colspan="4">Consulte un periodo.</td></tr>
-</tbody>
-</table>
-</div>
-</section>
-</section>
-
-<div class="chart-grid ld-leads-pair-grid">
-<section class="section-panel dashboard-section" style="margin-bottom:0;margin-top:0">
+<p id="ldAlertasVacio" class="ld-alertas-vacio hidden" role="status"></p>
+<div class="chart-grid ld-leads-pair-grid" id="ldAlertasGrid">
+<div class="ld-alerta-bloque">
 <div class="ld-caducar-head" style="margin-bottom:8px">
-<h3 class="section-title" style="margin-bottom:0">Alertas de conversión</h3>
+<h4 class="ld-caducar-title">Alertas de conversión</h4>
 <p id="ldAlertasConversionMeta" class="section-subtitle" style="margin:4px 0 0"></p>
 </div>
 <div id="ldAlertasConversion" class="ld-conv-alert-panel" aria-live="polite" style="margin:0">
@@ -879,9 +804,8 @@ Ver unidades
 <p class="section-subtitle" style="margin:0">Consulte un periodo.</p>
 </div>
 </div>
-</section>
-
-<section class="section-panel dashboard-section" style="margin-bottom:0;margin-top:0">
+</div>
+<div class="ld-alerta-bloque">
 <div id="ldCampanasCaducar" class="ld-caducar-panel" aria-live="polite" style="margin:0">
 <div class="ld-caducar-head">
 <h4 class="ld-caducar-title">Alertas de caducidad</h4>
@@ -891,70 +815,110 @@ Ver unidades
 <p class="section-subtitle" style="margin:0">Consulte un periodo para ver perfiles por caducar.</p>
 </div>
 </div>
+</div>
+</div>
 </section>
-</div>
+</section>
 
-<div class="chart-grid ld-leads-pair-grid">
-<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
-<div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between">
-<div>
-<h3 class="section-title" style="margin-bottom:0">Dispersión por fuerza de ventas</h3>
-<p id="ldFuerzaResumen" class="section-subtitle" style="margin:4px 0 0">Oportunidades / leads asignados por fuerza de ventas</p>
+<!-- 5 · Tendencia: gráfica a todo lo ancho; la tabla queda a un clic -->
+<section class="ventas-act" aria-labelledby="ldAct4">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldAct4">5 · Tendencia del One Pager <span class="ld-ventana" id="ldVentanaAnio" title="Año de la planta: octubre a septiembre. No cambia con el mes consultado">oct – sep</span></span>
+<p id="ldConvMesMeta" class="ventas-act__sub">Octubre a septiembre, como lo publica Chevrolet</p>
+</div>
+<section class="section-panel dashboard-section" style="margin-bottom:0" aria-label="Conversión por mes">
+<div class="chart-card ld-conv-mes-chart-card">
+<div class="chart-wrap" style="height:280px">
+<canvas id="ldConvMesChart" aria-label="Leads y conversión por mes"></canvas>
 </div>
 </div>
+<details class="ld-details">
+<summary>Ver la tabla por mes</summary>
 <div class="table-scroll">
 <table class="data-table">
 <thead>
 <tr>
-<th>Fuerza de ventas</th>
-<th class="cell-num">Oportunidades</th>
-<th class="cell-num">% mix</th>
-<th class="cell-num">Contactados</th>
-<th class="cell-num">Citas</th>
+<th>Mes</th>
+<th class="cell-num">Leads reactivas</th>
+<th class="cell-num">Compras</th>
+<th class="cell-num">Conv. %</th>
+<th class="cell-num">Leads proactivas</th>
 <th class="cell-num">Compras</th>
 <th class="cell-num">Conv. %</th>
 </tr>
 </thead>
-<tbody id="ldFuerzaBody">
-<tr class="empty-row"><td colspan="7">Consulte un periodo para ver la dispersión.</td></tr>
+<tbody id="ldConvMesBody">
+<tr class="empty-row"><td colspan="7">Consulte un periodo.</td></tr>
 </tbody>
-<tfoot id="ldFuerzaFoot"></tfoot>
 </table>
 </div>
+</details>
+</section>
 </section>
 
+<!-- 6 · Campañas: reactivas (catálogo GM y sitio de la agencia) y proactivas (GMF, Equity Mining, AMDGM) -->
+<section class="ventas-act" id="ldOnePager" aria-labelledby="ldAct3">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldAct3">6 · Campañas del One Pager</span>
+<p id="ldOnePagerResumen" class="ventas-act__sub">Mismo año de la planta (octubre a septiembre). La compra cuenta si ocurre dentro de 90 días desde la entrada</p>
+</div>
+<div class="chart-grid ld-leads-pair-grid" id="ldCampGrid" style="margin-top:0">
 <section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
-<div class="table-header-row" style="flex-wrap:wrap;gap:10px">
-<h3 class="section-title" style="margin-bottom:0">Conversión por grupo</h3>
-<nav class="eeff-tabs" id="ldGroupTabs" aria-label="Agrupar leads">
-<button type="button" class="eeff-tab active" data-ld-group="canal" aria-pressed="true">Canal</button>
-<button type="button" class="eeff-tab" data-ld-group="ejecutivo" aria-pressed="false">Ejecutivo</button>
-<button type="button" class="eeff-tab" data-ld-group="sucursal" aria-pressed="false">Sucursal</button>
-<button type="button" class="eeff-tab" data-ld-group="resultado" aria-pressed="false">Resultado</button>
-</nav>
+<div class="table-header-row">
+<h4 class="section-title" style="margin-bottom:0;font-size:1rem" id="ldReactivaTitulo">Reactivas · el cliente llega</h4>
+<p class="section-subtitle" style="margin:2px 0 0">Campañas de GM, Chevrolet y del sitio de la agencia</p>
 </div>
 <div class="table-scroll">
 <table class="data-table">
 <thead>
 <tr>
-<th>Grupo</th>
+<th>Campaña</th>
 <th class="cell-num">Leads</th>
-<th class="cell-num">Contactados</th>
-<th class="cell-num">Citas</th>
-<th class="cell-num">Cotizados</th>
-<th class="cell-num">Compras</th>
-<th class="cell-num">Conv. %</th>
+<th class="cell-num" title="Compra dentro de 90 días desde la entrada (regla de la campaña)">Compras ≤90 d</th>
+<th class="cell-num">Conv. 90 d</th>
+<th class="cell-num ld-ref" title="Referencia: compra dentro de 180 días. No cambia la regla de 90 días.">Conv. 180 d</th>
 </tr>
 </thead>
-<tbody id="ldGroupsBody">
-<tr class="empty-row"><td colspan="7">Consulte un periodo para ver la conversión.</td></tr>
+<tbody id="ldReactivaCampBody">
+<tr class="empty-row"><td colspan="5">Consulte un periodo.</td></tr>
 </tbody>
+<tfoot id="ldReactivaCampFoot"></tfoot>
+</table>
+</div>
+</section>
+<section class="section-panel table-panel dashboard-section" style="margin-bottom:0" id="ldProactivaSection">
+<div class="table-header-row">
+<h4 class="section-title" style="margin-bottom:0;font-size:1rem" id="ldProactivaTitulo">Proactivas · la agencia sale a buscar</h4>
+<p class="section-subtitle" style="margin:2px 0 0">GMF Retención y Lealtad, Equity Mining, leasing y AMDGM</p>
+</div>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Campaña</th>
+<th class="cell-num">Leads</th>
+<th class="cell-num" title="Compra dentro de 90 días desde la entrada (regla de la campaña)">Compras ≤90 d</th>
+<th class="cell-num">Conv. 90 d</th>
+<th class="cell-num ld-ref" title="Referencia: compra dentro de 180 días. No cambia la regla de 90 días.">Conv. 180 d</th>
+</tr>
+</thead>
+<tbody id="ldProactivaCampBody">
+<tr class="empty-row"><td colspan="5">Consulte un periodo.</td></tr>
+</tbody>
+<tfoot id="ldProactivaCampFoot"></tfoot>
 </table>
 </div>
 </section>
 </div>
+</section>
 
-<section class="section-panel table-panel dashboard-section">
+<!-- 7 · Detalle -->
+<section class="ventas-act" aria-labelledby="ldAct6" style="margin-bottom:0">
+<div class="ventas-act__head">
+<span class="ventas-act__label" id="ldAct6">7 · Detalle de leads</span>
+<p class="ventas-act__sub">Busque un cliente, ejecutivo, VIN o ID CRM; un clic abre su ficha</p>
+</div>
+<section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
 <div class="kpi-detail-toolbar">
 <label class="kpi-detail-search" for="buscarLdPreview">
 <span class="material-symbols-outlined kpi-detail-search-icon" aria-hidden="true">search</span>
@@ -982,6 +946,7 @@ Ver unidades
 </tbody>
 </table>
 </div>
+</section>
 </section>
 </section>
 
@@ -1272,12 +1237,12 @@ Exportar CSV
 <script src="/js/topbar.js?v=23"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
-<script src="/js/assistant-bubble.js?v=6"></script>
+<script src="/js/assistant-bubble.js?v=20"></script>
 <script src="/js/financiamiento.js?v=64"></script>
-<script src="/js/leads.js?v=33"></script>
+<script src="/js/leads.js?v=36"></script>
 <script src="/js/afluencia.js?v=18"></script>
 <script src="/js/comisiones.js?v=2"></script>
 <script src="/js/analisisComercial.js?v=20"></script>
-<script src="/js/sales.js?v=125"></script>
+<script src="/js/sales.js?v=126"></script>
 </body>
 </html>

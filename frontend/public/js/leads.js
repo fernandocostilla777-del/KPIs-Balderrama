@@ -18,7 +18,11 @@
     /** Detalle completo por KPI (servidor), independiente del preview truncado. */
     kpiDetalleCache: {},
     kpiDetalleMeta: {},
+    supervivencia: null,
+    /** Pestaña visible dentro de Tiempo a compra. */
+    superTab: 'hitos',
   };
+  let superChart = null;
 
   const els = {};
   let leadsDrawerUi = null;
@@ -387,6 +391,18 @@
         icon: 'hourglass_empty',
         filter: (r) => /DESCART|DESIST|PERDIDO|NO CONTESTA|NO EXISTE|EQUIVOCADO|FUERA AREA|NO PIDIO|CUELGA/i.test(String(r.resultado || '')),
       },
+      aunPuedenConvertir: {
+        title: 'Aún pueden convertir',
+        hint: `${num(s.aunPuedenConvertir)} del periodo, al ${formatDate(s.vidaRefFecha)} · les quedan ${num(s.vidaDias || 90)} días o menos y no hay compra que cuente`,
+        icon: 'schedule',
+        filter: (r) => !r.conCompra && (diasRestantesLead(r.fechaEntrada) ?? -1) >= 0,
+      },
+      yaNoCuentan: {
+        title: 'Ya no cuentan',
+        hint: `${num(s.yaNoCuentan)} del periodo pasaron ${num(s.vidaDias || 90)} días sin compra dentro de ese plazo`,
+        icon: 'event_busy',
+        filter: (r) => !r.conCompra && (diasRestantesLead(r.fechaEntrada) ?? 0) < 0,
+      },
       convCompra: {
         title: 'Lead → compra',
         hint: `Conversión de cohorte: ${pct(s.conversionCompraPct)} (${num(s.compras)} / ${num(s.leads)})`,
@@ -417,15 +433,50 @@
     };
   }
 
+  const VIDA_LEAD_DIAS = 90;
+
+  function diasVividosLead(fechaEntrada) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fechaEntrada || ''));
+    if (!m) return null;
+    const entrada = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const ahora = new Date();
+    const hoy = Date.UTC(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+    return Math.round((hoy - entrada) / 86400000);
+  }
+
+  function diasRestantesLead(fechaEntrada) {
+    const vividos = diasVividosLead(fechaEntrada);
+    if (vividos == null) return null;
+    return VIDA_LEAD_DIAS - vividos;
+  }
+
+  function ordenarPorVida(rows, kpiKey) {
+    if (kpiKey !== 'aunPuedenConvertir') return rows;
+    return rows.slice().sort((a, b) => String(a.fechaEntrada || '').localeCompare(String(b.fechaEntrada || '')));
+  }
+
+  function vidaBadge(fechaEntrada) {
+    if (state.openKpi === 'aunPuedenConvertir') {
+      const d = diasRestantesLead(fechaEntrada);
+      if (d == null) return '';
+      const cls = d <= 14 ? 'ld-badge--warn' : 'ld-badge--ok';
+      return `<span class="ld-badge ${cls}">${num(d)} d</span>`;
+    }
+    if (state.openKpi === 'yaNoCuentan') {
+      return '<span class="ld-badge">ya no cuenta</span>';
+    }
+    return '';
+  }
+
   function rowsForKpi(key) {
     const meta = kpiMeta(key);
     const cached = state.kpiDetalleCache?.[key];
-    if (Array.isArray(cached) && cached.length) return cached;
+    if (Array.isArray(cached) && cached.length) return ordenarPorVida(cached, key);
     const embedded = state.data?.detallePorKpi?.[key];
-    if (Array.isArray(embedded)) return embedded;
+    if (Array.isArray(embedded)) return ordenarPorVida(embedded, key);
     let rows = detalle().filter(meta.filter);
     if (meta.highlight === 'compras') rows = rows.filter((r) => r.conCompra);
-    return rows;
+    return ordenarPorVida(rows, key);
   }
 
   async function fetchKpiDetalle(kpiKey) {
@@ -487,7 +538,7 @@
           continue;
         }
 
-        const rows = Array.isArray(data.detalle) ? data.detalle : [];
+        const rows = ordenarPorVida(Array.isArray(data.detalle) ? data.detalle : [], kpiKey);
         state.kpiDetalleCache[kpiKey] = rows;
         state.kpiDetalleMeta[kpiKey] = {
           total: Number(data.total != null ? data.total : rows.length),
@@ -636,28 +687,41 @@
     if (!pack || pack.error) {
       grid.innerHTML = `<p class="section-subtitle">${escapeHtml(pack?.error || 'Sin indicadores de prospección.')}</p>`;
       body.innerHTML = '<tr class="empty-row"><td colspan="5">Sin cartera.</td></tr>';
+      body.closest('.table-scroll')?.classList.add('hidden');
       return;
     }
-    const cards = pack.indicadores || [];
-    if (nota && pack.cartera?.ultimoEstatus) {
-      nota.textContent = `La Cobertura de Gestión de la Cartera Comercial Activa mide los ciclos activos con acción siguiente al corte. Último movimiento de estatus en esa cartera: ${pack.cartera.ultimoEstatus}.`;
+    const todos = pack.indicadores || [];
+    const repetidos = new Set(['P-PRO-4']);
+    const cards = todos.filter((item) => item.disponible && item.valor != null && !repetidos.has(item.id));
+    if (nota) {
+      nota.textContent = pack.cartera?.ultimoEstatus
+        ? `Cómo se atiende al lead: intento de contacto, citas y cartera (último movimiento de cartera: ${formatDate(pack.cartera.ultimoEstatus)})`
+        : 'Cómo se atiende al lead: intento de contacto, citas y cartera';
     }
+    // P-PRO-1A cuenta cualquier resultado capturado (incluye "no contesta"); con el nombre del
+    // catálogo parecía contradecir a Contactados del bloque 1, que solo cuenta contacto = SI.
+    const NOMBRE_PANTALLA = { 'P-PRO-1A': 'Con intento de contacto' };
+    const SUFIJO_NUMS = { 'P-PRO-1A': ' con resultado capturado' };
     grid.innerHTML = cards.map((item) => {
-      const value = item.disponible && item.valor != null ? pct(item.valor) : 'Sin dato';
-      const tone = !item.disponible ? 'slate' : (item.meta != null && item.valor != null && item.valor >= item.meta ? 'green' : 'amber');
+      const value = pct(item.valor);
+      // Azul en todos: la meta se lee en el texto ("meta 60 % ✓"), sin un tercer color.
+      const cumple = item.meta != null && item.valor >= item.meta;
+      const tone = cumple ? 'cumple' : 'blue';
       const nums = item.numerador != null && item.denominador != null
-        ? `${num(item.numerador)} de ${num(item.denominador)}`
+        ? `${num(item.numerador)} de ${num(item.denominador)}${SUFIJO_NUMS[item.id] || ''}`
         : (item.denominador != null ? `Universo ${num(item.denominador)}` : '');
+      const meta = item.meta != null ? `meta ${pct(item.meta)}${cumple ? ' ✓' : ''}` : '';
       return `
-        <article class="kpi-card kpi-card--${tone}">
-          <div class="kpi-card-head"><span class="kpi-title">${escapeHtml(item.nombre)}</span></div>
-          <div class="kpi-value">${value}</div>
-          <p class="kpi-subtitle">${escapeHtml([item.componente, nums].filter(Boolean).join(' · '))}</p>
-          <p class="kpi-subtitle">${escapeHtml(item.detalle || '')}</p>
-          <div class="kpi-accent"></div>
+        <article class="ld-ppro ld-ppro--${tone}" title="${escapeHtml([item.componente || item.nombre, item.detalle].filter(Boolean).join(': '))}">
+          <span class="ld-ppro__nombre">${escapeHtml(NOMBRE_PANTALLA[item.id] || item.componente || item.nombre)}</span>
+          <strong class="ld-ppro__valor">${value}</strong>
+          <span class="ld-ppro__sub">${escapeHtml([nums, meta].filter(Boolean).join(' · '))}</span>
         </article>`;
     }).join('');
     const rows = pack.cartera?.porEjecutivo || [];
+    // Sin cartera en el CRM la tabla no aporta: se oculta en vez de mostrarla vacía.
+    const tablaWrap = body.closest('.table-scroll');
+    if (tablaWrap) tablaWrap.classList.toggle('hidden', !rows.length);
     body.innerHTML = rows.length
       ? rows.map((row) => {
         const q = new URLSearchParams({ vendedor: row.ejecutivo });
@@ -674,29 +738,93 @@
       : '<tr class="empty-row"><td colspan="5">Sin cartera activa en el CRM.</td></tr>';
   }
 
+  function pctDe(a, b) {
+    const x = Number(a || 0);
+    const y = Number(b || 0);
+    return y > 0 ? (x / y) * 100 : null;
+  }
+
+  /**
+   * Embudo del periodo en una sola fila: cada paso muestra cuántos llegan y qué % pasó
+   * desde el paso anterior. Duplicados, cartera viva y perdidos van aparte porque no
+   * son pasos del embudo (los duplicados no entran; la cartera viva usa otra ventana).
+   */
+  /**
+   * Con el periodo todavía abierto (o recién cerrado) la conversión sale baja porque muchas
+   * compras llegan semanas después de la entrada. Se avisa con el día en que ocurre la mitad
+   * de las compras, que sale del bloque Tiempo a compra.
+   */
+  function notaPeriodoAbierto() {
+    const t50 = Number(state.supervivencia?.tiempo?.t50);
+    if (!state.fechaFin || !Number.isFinite(t50) || t50 <= 0) return '';
+    const hoy = new Date();
+    const fin = new Date(`${String(state.fechaFin).slice(0, 10)}T23:59:59`);
+    const diasDesdeFin = Math.floor((hoy - fin) / 86400000);
+    if (diasDesdeFin > t50) return '';
+    return `<p class="ld-resultado__aviso">Periodo reciente: la mitad de las compras llega después del día ${num(t50)} desde la entrada, así que esta conversión todavía va a subir.</p>`;
+  }
+
   function renderKpis() {
     if (!els.kpiRoot) return;
     const s = summary();
+    const leads = Number(s.leadsUnicos ?? s.leads ?? 0);
+    const pasos = [
+      { key: 'leadsUnicos', label: 'Leads', value: leads, prev: null },
+      { key: 'contactados', label: 'Contactados', value: s.contactados, prev: leads, de: 'de los leads' },
+      { key: 'citas', label: 'Citas', value: s.citas, prev: s.contactados, de: 'de contactados' },
+      { key: 'cotizados', label: 'Cotizados', value: s.cotizados, prev: s.citas, de: 'de las citas' },
+      { key: 'compras', label: 'Compras', value: s.compras, prev: s.cotizados, de: 'de cotizados' },
+    ];
+    const max = Math.max(leads, 1);
+    const paso = (p) => {
+      const ratio = p.prev == null ? null : pctDe(p.value, p.prev);
+      const width = Math.max(4, (Number(p.value || 0) / max) * 100);
+      const active = state.openKpi === p.key ? ' is-active' : '';
+      return `
+        <button type="button" class="ld-embudo__paso${active}" data-ld-kpi="${p.key}" title="Ver los leads de este paso">
+          <span class="ld-embudo__label">${escapeHtml(p.label)}</span>
+          <strong class="ld-embudo__valor">${num(p.value)}</strong>
+          <span class="ld-embudo__barra" aria-hidden="true"><span style="width:${width}%"></span></span>
+          <span class="ld-embudo__tasa">${ratio == null ? `${pct(100)} del periodo` : `${pct(ratio)} ${p.de}`}</span>
+        </button>`;
+    };
+    const vida = num(s.seguimientoVidaDias || 90);
+    const ventana = s.seguimientoVentanaDesde && s.seguimientoVentanaHasta
+      ? `${formatDate(s.seguimientoVentanaDesde)} – ${formatDate(s.seguimientoVentanaHasta)}`
+      : `últimos ${vida} días`;
+    const registros = num(s.leadsTotales || (leads + Number(s.leadsDuplicados || 0)));
+    const chip = (key, label, value, sub) => {
+      const active = state.openKpi === key ? ' is-active' : '';
+      return `<button type="button" class="ld-chip${active}" data-ld-kpi="${key}" title="Ver estos leads">
+          <strong>${value}</strong><span>${escapeHtml(label)}</span><small>${escapeHtml(sub)}</small>
+        </button>`;
+    };
     els.kpiRoot.innerHTML = `
-      <div class="kpi-group">
-        <h4 class="kpi-group-title">Embudo de conversión</h4>
-        <div class="kpi-grid" id="ldKpiGrid">
-          ${kpiCard('leadsUnicos', 'Leads únicos', num(s.leadsUnicos ?? s.leads), `${num(s.leadsTotales || ((s.leadsUnicos ?? s.leads) + (s.leadsDuplicados || 0)))} totales en periodo`, 'blue', 'person')}
-          ${kpiCard('leadsDuplicados', 'Duplicados', num(s.leadsDuplicados), `${pct(s.pctDuplicados)} del bruto`, 'rose', 'content_copy')}
-          ${kpiCard('contactados', 'Contactados', num(s.contactados), pct(s.conversionContactoPct) + ' del total', 'slate', 'call')}
-          ${kpiCard('citas', 'Citas', num(s.citas), pct(s.conversionCitaPct) + ' del total', 'amber', 'event')}
-          ${kpiCard('cotizados', 'Cotizados', num(s.cotizados), pct(s.conversionCotizacionPct) + ' del total', 'violet', 'request_quote')}
-          ${kpiCard('compras', 'Compras', num(s.compras), pct(s.conversionCompraPct) + ' · origen ≤90d', 'green', 'sell')}
-          ${kpiCard('seguimientoSinCompra', 'En seguimiento', num(s.seguimientoSinCompra), `seguimiento · PM · solicitud · ≤${num(s.seguimientoVidaDias || 90)}d`, 'amber', 'track_changes')}
-          ${kpiCard('sinCompra', 'Sin compra', num(s.sinCompra), 'Oportunidades perdidas', 'rose', 'hourglass_empty')}
+      <div class="section-panel dashboard-section ld-resultado">
+        <div class="ld-resultado__titular">
+          <span class="ld-resultado__kicker">Conversión a compra</span>
+          <strong class="ld-resultado__pct">${pct(s.conversionCompraPct)}</strong>
+          <p class="ld-resultado__frase"><strong>${num(s.compras)}</strong> compras de <strong>${num(leads)}</strong> leads del periodo</p>
+          <p class="ld-resultado__nota">Cita → compra ${pct(s.conversionCitaACompraPct)} · ${num(s.leadsDuplicados)} duplicados fuera (${registros} registros)</p>
+          ${notaPeriodoAbierto()}
         </div>
-      </div>
-      <div class="kpi-group" style="margin-top:14px">
-        <h4 class="kpi-group-title">Tasas clave</h4>
-        <div class="kpi-grid">
-          ${kpiCard('convCompra', 'Lead → compra', pct(s.conversionCompraPct), 'Conversión de cohorte', 'green', 'trending_up')}
-          ${kpiCard('convCitaCompra', 'Cita → compra', pct(s.conversionCitaACompraPct), 'Eficiencia de citas', 'violet', 'conversion_path')}
-          ${kpiCard('convContactoCompra', 'Contacto → compra', pct(s.conversionContactoACompraPct), 'Sobre contactados', 'blue', 'handshake')}
+        <div class="ld-resultado__embudo">
+          <div class="ld-embudo">${pasos.map(paso).join('')}</div>
+          <div class="ld-chips">
+            ${chip('seguimientoSinCompra', 'en seguimiento', num(s.seguimientoSinCompra), `vivos sin compra · entraron del ${ventana}`)}
+            ${chip('sinCompra', 'perdidos', num(s.sinCompra), `${pct(pctDe(s.sinCompra, leads))} de los leads del periodo`)}
+          </div>
+          <div class="ld-vida">
+            <p class="ld-vida__nota">Vida de 90 días, al ${escapeHtml(formatDate(s.vidaRefFecha || new Date().toISOString().slice(0, 10)))}. Del periodo, quién todavía puede comprar y quién ya no entra al One Pager.</p>
+            <div class="ld-chips">
+              <button type="button" class="ld-chip ld-chip--abierta${state.openKpi === 'aunPuedenConvertir' ? ' is-active' : ''}" data-ld-kpi="aunPuedenConvertir" title="Ver los leads que todavía pueden convertir">
+                <strong>${num(s.aunPuedenConvertir)}</strong><span>aún pueden convertir</span><small>les quedan 90 días o menos</small>
+              </button>
+              <button type="button" class="ld-chip ld-chip--cerrada${state.openKpi === 'yaNoCuentan' ? ' is-active' : ''}" data-ld-kpi="yaNoCuentan" title="Ver los leads que ya no cuentan como conversión">
+                <strong>${num(s.yaNoCuentan)}</strong><span>ya no cuentan</span><small>pasaron 90 días sin compra</small>
+              </button>
+            </div>
+          </div>
         </div>
       </div>`;
   }
@@ -773,10 +901,37 @@
     }).join('');
   }
 
+  function fuenteLabel(raw) {
+    const c = String(raw || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+    const t = String(raw || '').trim();
+    if (!t || t === '(sin dato)') return 'Sin fuente';
+    const ACENTOS = { TELEFONO: 'Teléfono', LLAMADA: 'Llamada', REDES: 'Redes', VISITAAPISO: 'Visita a piso' };
+    if (ACENTOS[c]) return ACENTOS[c];
+    return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+  }
+
+  const RESULTADO_ACENTOS = { DESISTIO: 'Desistió', 'NO CONTESTO': 'No contestó', CANCELO: 'Canceló' };
+  function resultadoLabel(r) {
+    const t = String(r?.resultado || '').trim().toUpperCase();
+    if (!t) return 'Sin resultado';
+    return RESULTADO_ACENTOS[t] || (t.charAt(0) + t.slice(1).toLowerCase());
+  }
+
   function groupRows() {
     const key = state.groupView;
+    if (key === 'fuente') {
+      return (state.data?.porFuente || []).map((r) => ({ ...r, grupo: fuenteLabel(r.grupo) }))
+        .sort((a, b) => Number(b.leads || 0) - Number(a.leads || 0));
+    }
+    if (key === 'fuerza') {
+      return (state.data?.porFuerzaVentas?.filas || []).filter((r) => Number(r.leads || 0) > 0 || Number(r.compras || 0) > 0);
+    }
+    if (key === 'vehiculo') {
+      return (state.data?.conversionPorVehiculo || [])
+        .filter((r) => Number(r.total || 0) > 0)
+        .map((r) => ({ grupo: r.vehiculo, leads: r.total, compras: r.convertidos, conversionPct: r.conversionPct }));
+    }
     if (key === 'ejecutivo') return state.data?.porEjecutivo || [];
-    if (key === 'resultado') return state.data?.porResultado || [];
     if (key === 'sucursal') return state.data?.porSucursal || [];
     return state.data?.porCanal || [];
   }
@@ -793,18 +948,18 @@
     if (els.fuerzaResumen) {
       if (tot && rows.length) {
         els.fuerzaResumen.textContent =
-          `${rows.length} fuerzas · ${num(tot.leads)} oportunidades · conv. ${pct(tot.conversionPct)}`;
+          `${rows.length} fuerzas de ventas · ${num(tot.leads)} oportunidades · conv. ${pct(tot.conversionPct)}`;
       } else {
         els.fuerzaResumen.textContent = periodLeads === 0
           ? 'Sin oportunidades en el periodo seleccionado'
-          : 'Oportunidades / leads asignados por fuerza de ventas';
+          : 'Leads del periodo por fuerza de ventas (columna O de la hoja STREGA)';
       }
     }
 
     if (!rows.length) {
       els.fuerzaBody.innerHTML = periodLeads === 0
         ? '<tr class="empty-row"><td colspan="7">Sin leads en este periodo. Elija un rango con cobertura CRM.</td></tr>'
-        : '<tr class="empty-row"><td colspan="7">Sin datos de fuerza de ventas en el periodo.</td></tr>';
+        : '<tr class="empty-row"><td colspan="7">Sin leads con fuerza de ventas en el periodo.</td></tr>';
       if (els.fuerzaFoot) els.fuerzaFoot.innerHTML = '';
       return;
     }
@@ -835,26 +990,91 @@
     }
   }
 
+  const GROUP_META = {
+    fuente: 'Por fuente del lead (columna tipo de la hoja STREGA).',
+    canal: 'Por canal de origen del lead.',
+    fuerza: 'Por fuerza de ventas: Matriz piso, Foráneo digital, Cholula, Zacatelco, Seminuevos, Flotillas y SuAuto (solo las que traen leads).',
+    ejecutivo: 'Por ejecutivo asignado.',
+    vehiculo: 'Por vehículo de interés (este corte solo trae leads y compras).',
+    sucursal: 'Por sucursal.',
+  };
+
+  function renderOrigen() {
+    const el = document.getElementById('ldOrigen');
+    if (!el) return;
+    const periodLeads = Number(summary().leads || 0);
+    const rows = (state.data?.porFuente || []).filter((r) => Number(r.leads || 0) > 0)
+      .map((r) => ({ ...r, grupo: fuenteLabel(r.grupo) }))
+      .sort((a, b) => Number(b.leads || 0) - Number(a.leads || 0));
+    if (!periodLeads || !rows.length) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.classList.remove('hidden');
+    const total = rows.reduce((acc, r) => acc + Number(r.leads || 0), 0);
+    const tonos = ['#1e3fd8', '#2d5bff', '#6b8cff', '#a3b6ff', '#cdd8ff', '#e8edff'];
+    el.innerHTML = `
+      <div class="ld-origen__barra" role="img" aria-label="Leads por fuente">
+        ${rows.map((r, i) => `<span style="width:${pctDe(r.leads, total)}%;background:${tonos[i % tonos.length]}" title="${escapeHtml(r.grupo)}: ${num(r.leads)}"></span>`).join('')}
+      </div>
+      <ul class="ld-origen__lista">
+        ${rows.map((r, i) => `
+          <li>
+            <span class="ld-origen__punto" style="background:${tonos[i % tonos.length]}"></span>
+            <span class="ld-origen__nombre">${escapeHtml(r.grupo)}</span>
+            <strong>${num(r.leads)}</strong>
+            <span class="ld-origen__pct">${pct(pctDe(r.leads, total))}</span>
+            <span class="ld-origen__conv">${num(r.compras)} ${Number(r.compras) === 1 ? "compra" : "compras"} · ${pct(r.conversionPct)} conv.</span>
+          </li>`).join('')}
+      </ul>`;
+  }
+
+  function syncGroupTabs() {
+    if (!els.groupTabs) return;
+    els.groupTabs.querySelectorAll('[data-ld-group]').forEach((b) => {
+      const on = b.getAttribute('data-ld-group') === state.groupView;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
   function renderGroups() {
     if (!els.groupsBody) return;
+    syncGroupTabs();
     const periodLeads = Number(summary().leads || 0);
     const rows = periodLeads === 0 ? [] : groupRows();
+    const meta = document.getElementById('ldGroupMeta');
+    if (meta) meta.textContent = `${GROUP_META[state.groupView] || ''} Suman los ${num(periodLeads)} leads del periodo.`;
+    const foot = document.getElementById('ldGroupsFoot');
+    const total = rows.reduce((acc, r) => acc + Number(r.leads || 0), 0);
+    const cell = (v) => (v == null ? '<span class="cell-muted">—</span>' : num(v));
     els.groupsBody.innerHTML = rows.length
       ? rows.map((r) => `
         <tr>
           <td>${escapeHtml(r.grupo)}</td>
           <td class="cell-num">${num(r.leads)}</td>
-          <td class="cell-num">${num(r.contactados)}</td>
-          <td class="cell-num">${num(r.citas)}</td>
-          <td class="cell-num">${num(r.cotizados)}</td>
+          <td class="ld-col-mix"><span class="ld-mix"><span class="ld-mix__bar"><span style="width:${Math.max(2, pctDe(r.leads, total) || 0)}%"></span></span><span class="ld-mix__txt">${pct(pctDe(r.leads, total))}</span></span></td>
+          <td class="cell-num">${cell(r.contactados)}</td>
+          <td class="cell-num">${cell(r.citas)}</td>
+          <td class="cell-num">${cell(r.cotizados)}</td>
           <td class="cell-num">${num(r.compras)}</td>
           <td class="cell-num">${pct(r.conversionPct)}</td>
         </tr>`).join('')
-      : `<tr class="empty-row"><td colspan="7">${
+      : `<tr class="empty-row"><td colspan="8">${
         periodLeads === 0
           ? 'Sin leads en este periodo. Elija un rango con cobertura CRM.'
           : 'Sin agrupaciones en el periodo.'
       }</td></tr>`;
+    if (foot) {
+      const compras = rows.reduce((acc, r) => acc + Number(r.compras || 0), 0);
+      // Total de una etapa solo si todas las filas la traen; si alguna viene sin dato, se deja vacío.
+      const totEtapa = (k) => (rows.every((r) => r[k] != null)
+        ? num(rows.reduce((acc, r) => acc + Number(r[k] || 0), 0))
+        : '');
+      foot.innerHTML = rows.length
+        ? `<tr><th>Total</th><th class="cell-num">${num(total)}</th><th class="ld-col-mix">100%</th><th class="cell-num">${totEtapa('contactados')}</th><th class="cell-num">${totEtapa('citas')}</th><th class="cell-num">${totEtapa('cotizados')}</th><th class="cell-num">${num(compras)}</th><th class="cell-num">${pct(pctDe(compras, total))}</th></tr>`
+        : '';
+    }
   }
 
   function renderCampanasConversion() {
@@ -915,13 +1135,23 @@
     }
   }
 
+  // Conv. 180 d: referencia de cuánto convierte el lead después de su vida útil (90 d).
+  // Si parte de los leads aún no cumple 180 días, la cifra puede subir: se marca con «*».
+  function conv180Celda(r) {
+    if (r?.conversion180Pct == null) return '—';
+    const maduros = Number(r.pctMaduros180 ?? 100);
+    if (maduros >= 100) return pct(r.conversion180Pct);
+    const titulo = `${pct(100 - maduros)} de los leads aún no cumple 180 días; la cifra puede subir`;
+    return `${pct(r.conversion180Pct)}<span class="ld-parcial" title="${escapeHtml(titulo)}">*</span>`;
+  }
+
   function renderCampanaTipoTable(bodyEl, footEl, rows, tot) {
     if (!bodyEl) return;
     const periodLeads = Number(summary().leads || 0);
-    const visible = periodLeads === 0 ? [] : (rows || []).filter((r) => Number(r.total || 0) > 0);
+    const visible = (rows || []).filter((r) => Number(r.total || 0) > 0);
     if (!visible.length) {
-      bodyEl.innerHTML = `<tr class="empty-row"><td colspan="4">${
-        periodLeads === 0 ? 'Sin leads en este periodo.' : 'Sin campañas con volumen en el periodo.'
+      bodyEl.innerHTML = `<tr class="empty-row"><td colspan="5">${
+        periodLeads === 0 ? 'Sin campañas en el año de la planta (octubre a septiembre).' : 'Sin campañas con volumen en el año de la planta.'
       }</td></tr>`;
       if (footEl) footEl.innerHTML = '';
       return;
@@ -932,6 +1162,7 @@
         <td class="cell-num">${num(r.total)}</td>
         <td class="cell-num">${num(r.vendidos)}</td>
         <td class="cell-num">${pct(r.conversionPct)}</td>
+        <td class="cell-num ld-ref">${conv180Celda(r)}</td>
       </tr>
     `).join('');
     if (footEl && tot) {
@@ -941,6 +1172,7 @@
           <th class="cell-num">${num(tot.total)}</th>
           <th class="cell-num">${num(tot.vendidos)}</th>
           <th class="cell-num">${pct(tot.conversionPct)}</th>
+          <th class="cell-num ld-ref">${conv180Celda(tot)}</th>
         </tr>`;
     }
   }
@@ -948,6 +1180,14 @@
   let convMesChart = null;
 
   const MES_LABELS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+  function mesAunPuedeConvertir(mesKey) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(mesKey || ''));
+    if (!m) return false;
+    const cierreMes = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0));
+    const vida = new Date(cierreMes.getTime() + 90 * 24 * 60 * 60 * 1000);
+    return vida.toISOString().slice(0, 10) >= new Date().toISOString().slice(0, 10);
+  }
 
   function mesLabelCorto(mesKey) {
     const m = String(mesKey || '');
@@ -974,45 +1214,28 @@
     const convertidos = rows.map((r) => Number(r.convertidos || 0));
     const convPct = rows.map((r) => Number(r.conversionPct || 0));
 
+    // Un solo eje: con pocas compras al mes, una línea de % en un segundo eje sube y baja
+    // de 0 a 20 % y parece una tendencia que no existe.
     convMesChart = new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: {
         labels,
         datasets: [
           {
-            type: 'bar',
-            label: 'Leads reactivas',
+            label: 'Leads de campañas reactivas',
             data: leads,
-            backgroundColor: 'rgba(37, 99, 235, 0.45)',
-            borderColor: '#2563eb',
+            backgroundColor: 'rgba(107, 140, 255, 0.35)',
+            borderColor: '#6b8cff',
             borderWidth: 1,
             borderRadius: 5,
-            yAxisID: 'y',
-            order: 2,
+            maxBarThickness: 28,
           },
           {
-            type: 'bar',
-            label: 'Convertidos',
+            label: 'Compras',
             data: convertidos,
-            backgroundColor: 'rgba(16, 185, 129, 0.55)',
-            borderColor: '#059669',
-            borderWidth: 1,
+            backgroundColor: '#1e3fd8',
             borderRadius: 5,
-            yAxisID: 'y',
-            order: 2,
-          },
-          {
-            type: 'line',
-            label: '% Conv',
-            data: convPct,
-            borderColor: '#be123c',
-            backgroundColor: 'rgba(190, 18, 60, 0.12)',
-            borderWidth: 2.5,
-            pointRadius: 3.5,
-            pointHoverRadius: 5,
-            tension: 0.25,
-            yAxisID: 'y1',
-            order: 1,
+            maxBarThickness: 28,
           },
         ],
       },
@@ -1021,44 +1244,26 @@
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: {
-            display: true,
-            position: 'bottom',
-            labels: { boxWidth: 10, font: { size: 11 } },
-          },
+          legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
           tooltip: {
             callbacks: {
               label(ctx) {
                 const v = Number(ctx.parsed.y);
-                if (ctx.dataset.yAxisID === 'y1') {
-                  return `${ctx.dataset.label}: ${Number.isFinite(v) ? `${v.toFixed(2)}%` : '—'}`;
-                }
                 return `${ctx.dataset.label}: ${Number.isFinite(v) ? v.toLocaleString('es-MX') : '—'}`;
+              },
+              afterBody(items) {
+                const i = items?.[0]?.dataIndex;
+                return i == null ? '' : `Conversión: ${convPct[i].toFixed(1)} %`;
               },
             },
           },
         },
         scales: {
-          x: {
-            grid: { display: false },
-            ticks: { font: { size: 11 } },
-          },
+          x: { grid: { display: false }, ticks: { font: { size: 11 } } },
           y: {
             beginAtZero: true,
-            position: 'left',
             ticks: { precision: 0, font: { size: 11 } },
             grid: { color: 'rgba(148, 163, 184, 0.25)' },
-            title: { display: true, text: 'Volumen', font: { size: 11 } },
-          },
-          y1: {
-            beginAtZero: true,
-            position: 'right',
-            grid: { drawOnChartArea: false },
-            ticks: {
-              font: { size: 11 },
-              callback: (v) => `${v}%`,
-            },
-            title: { display: true, text: '% Conv', font: { size: 11 } },
           },
         },
       },
@@ -1084,42 +1289,44 @@
     const porVeh = state.data?.conversionPorVehiculo || [];
     const periodLeads = Number(summary().leads || 0);
 
-    renderOnePagerKpis(els.kpiReactivas, totR, 'reactivas');
-    renderOnePagerKpis(els.kpiProactivas, totP, 'proactivas');
+    // Sin leads proactivos la tabla de proactivas quedaría vacía: se oculta y la de
+    // reactivas ocupa el ancho completo.
+    const hayProactivas = Number(totP?.total || 0) > 0;
+    document.getElementById('ldProactivaSection')?.classList.toggle('hidden', !hayProactivas);
+    document.getElementById('ldCampGrid')?.classList.toggle('ld-leads-pair-grid--una', !hayProactivas);
     renderCampanaTipoTable(els.reactivaCampBody, els.reactivaCampFoot, reactivas, totR);
     renderCampanaTipoTable(els.proactivaCampBody, els.proactivaCampFoot, proactivas, totP);
 
+    const ventana = state.data?.conversionPorMesMeta || {};
+    const etiqueta = ventana.etiqueta || 'octubre a septiembre';
     if (els.onePagerResumen) {
-      if (periodLeads === 0) {
-        els.onePagerResumen.textContent = 'Sin leads en el periodo · elija un rango con cobertura CRM';
-      } else {
-        els.onePagerResumen.textContent =
-          `Reactivas ${num(totR?.total)} leads · ${pct(totR?.conversionPct)} conv · Proactivas ${num(totP?.total)} leads · ${pct(totP?.conversionPct)} conv`;
-      }
+      const nCamp = reactivas.filter((r) => Number(r.total || 0) > 0).length + proactivas.filter((r) => Number(r.total || 0) > 0).length;
+      els.onePagerResumen.textContent = nCamp
+        ? `${num(nCamp)} campañas en ${etiqueta} · compra dentro de 90 días desde la entrada · 180 d solo como referencia · no sigue el mes consultado`
+        : `Sin campañas en ${etiqueta}`;
     }
 
     if (els.convMesBody) {
       const meta = els.convMesMeta || document.getElementById('ldConvMesMeta');
-      const anio = state.data?.conversionPorMesMeta?.anio
-        || (porMes[0]?.anio)
-        || Number(String(state.fechaFin || state.fechaInicio || '').slice(0, 4))
-        || null;
-      if (meta) {
-        meta.textContent = anio
-          ? `Año ${anio} · solo campañas reactivas`
-          : 'Solo campañas reactivas · año calendario';
-      }
+      if (meta) meta.textContent = `Reactivas y proactivas · ${etiqueta} · un mes sigue abierto 90 días después de cerrar, así que los últimos meses aún pueden sumar compras`;
+      const chipAnio = document.getElementById('ldVentanaAnio');
+      if (chipAnio) chipAnio.textContent = etiqueta;
 
-      const rows = porMes.length ? porMes : [];
+      // Meses que aún no empiezan: fuera de la tabla y sin punto en la gráfica (no son 0 %).
+      const mesHoy = new Date().toISOString().slice(0, 7);
+      const rows = porMes.filter((r) => String(r.mes || '') <= mesHoy);
       els.convMesBody.innerHTML = rows.length
         ? rows.map((r) => `
           <tr>
-            <td><strong>${escapeHtml(mesLabelCorto(r.mes))} ${escapeHtml(String(r.mes || '').slice(0, 4))}</strong></td>
+            <td><strong>${escapeHtml(mesLabelCorto(r.mes))} ${escapeHtml(String(r.mes || '').slice(0, 4))}</strong>${mesAunPuedeConvertir(r.mes) ? ' <span class="cell-muted">puede subir</span>' : ''}</td>
             <td class="cell-num">${num(r.total)}</td>
             <td class="cell-num">${num(r.convertidos)}</td>
             <td class="cell-num">${pct(r.conversionPct)}</td>
+            <td class="cell-num">${num(r.proactivas)}</td>
+            <td class="cell-num">${num(r.proactivasConvertidos)}</td>
+            <td class="cell-num">${pct(r.proactivasPct)}</td>
           </tr>`).join('')
-        : `<tr class="empty-row"><td colspan="4">Sin datos mensuales.</td></tr>`;
+        : `<tr class="empty-row"><td colspan="7">Sin datos mensuales.</td></tr>`;
       renderConvMesChart(rows);
     } else {
       destroyConvMesChart();
@@ -1219,7 +1426,7 @@
           <td>${escapeHtml(dash(r.ejecutivo))}</td>
           <td>${escapeHtml(dash(r.canal))}</td>
           <td>${escapeHtml(dash(r.autoInteres))}</td>
-          <td>${etapaBadge(r.etapa, r.conCompra)}</td>
+          <td>${etapaBadge(r.etapa, r.conCompra)}${vidaBadge(r.fechaEntrada)}</td>
           <td class="mono">${escapeHtml(dash(r.vin))}</td>
           <td>${escapeHtml(dash(r.resultado || r.estatusCiclo))}</td>
           <td class="mono">${escapeHtml(dash(r.idCrm))}</td>
@@ -1233,7 +1440,7 @@
     const stamp = new Date().toISOString().slice(0, 10);
     const headers = [
       'Entrada', 'Cliente', 'Telefono', 'Ejecutivo', 'Canal', 'Sucursal',
-      'Interes', 'Etapa', 'VIN', 'Resultado', 'ID_CRM', 'Cita', 'Contactado', 'Compra',
+      'Interes', 'Etapa', 'Dias_restantes', 'VIN', 'Resultado', 'ID_CRM', 'Cita', 'Contactado', 'Compra',
     ];
     const lines = rows.map((r) => [
       r.fechaEntrada || '',
@@ -1244,6 +1451,7 @@
       r.sucursal || '',
       r.autoInteres || '',
       r.conCompra ? 'compra' : (r.etapa || ''),
+      diasRestantesLead(r.fechaEntrada) ?? '',
       r.vin || '',
       r.resultado || r.estatusCiclo || '',
       r.idCrm || '',
@@ -1402,6 +1610,7 @@
         return etapa === value;
       }
       if (dim === 'interes') return String(r.autoInteres || 'Sin interés') === value;
+      if (dim === 'resultado') return resultadoLabel(r) === value;
       return true;
     }
 
@@ -1440,7 +1649,13 @@
       const citas = rows.filter((r) => r.cita).length;
       const contactados = rows.filter((r) => r.contactado).length;
 
+      // Los motivos (desistió, descartado, no existe…) van primero al abrir "perdidos".
+      const porResultado = countByField(rows, resultadoLabel);
+      const esPerdidos = currentMeta.kpi === 'sinCompra';
+      const bloqueResultado = block(esPerdidos ? 'Motivo de pérdida' : 'Por resultado', 'resultado', porResultado);
+
       summaryEl.innerHTML = `
+        ${esPerdidos ? bloqueResultado : ''}
         <div class="ops-orders-drawer__group">
           <h5>Resumen</h5>
           <div class="ops-orders-drawer__row"><span class="lbl">Leads</span><span class="val">${rows.length}</span></div>
@@ -1454,6 +1669,7 @@
         ${block('Por sucursal', 'sucursal', countByField(rows, (r) => r.sucursal || 'Sin sucursal'))}
         ${block('Por etapa', 'etapa', countByField(rows, (r) => (r.conCompra ? 'Compra' : (r.etapa === 'cita' ? 'Cita' : (r.etapa === 'contacto' ? 'Contacto' : 'Lead')))))}
         ${block('Auto de interés', 'interes', countByField(rows, (r) => r.autoInteres || 'Sin interés'))}
+        ${esPerdidos ? '' : bloqueResultado}
       `;
     }
 
@@ -1515,6 +1731,7 @@
             <div class="ops-orders-drawer__item-head">
               <strong>${escapeHtml(dash(r.nombre))}</strong>
               ${etapaBadge(r.etapa, r.conCompra)}
+              ${vidaBadge(r.fechaEntrada)}
             </div>
             <p class="ops-orders-drawer__msg">${escapeHtml(dash(r.ejecutivo))} · ${escapeHtml(dash(r.canal))}</p>
             <div class="ops-orders-drawer__facts">
@@ -1712,9 +1929,340 @@
     const fi = state.fechaInicio || '—';
     const ff = state.fechaFin || '—';
     const s = summary();
-    els.subtitle.textContent = s.leads != null
-      ? `Cohorte ${fi} → ${ff} · ${num(s.leadsUnicos ?? s.leads)} únicos · ${num(s.leadsDuplicados)} duplicados · ${num(s.leadsTotales || ((s.leadsUnicos ?? s.leads) + (s.leadsDuplicados || 0)))} totales · conversión a compra ${pct(s.conversionCompraPct)}`
-      : 'Seguimiento de conversión de oportunidades a ventas (VIN vinculado en CRM · sin duplicados de columna AB).';
+    void s;
+    els.subtitle.textContent = `Leads que entraron del ${formatDate(fi)} al ${formatDate(ff)}: cuántos llegaron a compra y dónde se quedan. Un lead cuenta como compra si su VIN se factura dentro de 90 días.`;
+  }
+
+  function renderAlertasJuntas() {
+    const grid = document.getElementById('ldAlertasGrid');
+    const vacio = document.getElementById('ldAlertasVacio');
+    if (!grid || !vacio) return;
+    const periodLeads = Number(summary().leads || 0);
+    const nConv = (state.data?.alertasConversionCompras?.items || []).length;
+    const nCad = (state.data?.campanasCaducarAlertas || []).length;
+    const sinAlertas = periodLeads > 0 && !nConv && !nCad;
+    grid.classList.toggle('hidden', sinAlertas);
+    vacio.classList.toggle('hidden', !sinAlertas);
+    if (sinAlertas) {
+      const umbral = num(state.data?.campanasCaducarResumen?.umbralDias || 14);
+      vacio.textContent = `Sin alertas: ninguna compra con nombre distinto al del lead y ningún lead por vencer en los próximos ${umbral} días.`;
+    }
+  }
+
+  const SUPER_COLORES = ['#1e3fd8', '#0f9d76', '#e08a00', '#8b5cf6', '#dc4c64', '#64748b'];
+
+  function destruirSuperChart() {
+    if (superChart) {
+      try { superChart.destroy(); } catch { /* ignore */ }
+      superChart = null;
+    }
+  }
+
+  function renderSuperChart(curvas) {
+    const canvas = document.getElementById('ldSuperChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    destruirSuperChart();
+    superChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        datasets: [
+          ...(state.supervivencia?.curvaGeneral?.length ? [{
+            label: 'Todas',
+            data: state.supervivencia.curvaGeneral.map((p) => ({ x: p.dia, y: Math.round(p.f * 1000) / 10 })),
+            borderColor: '#94a3b8',
+            backgroundColor: '#94a3b8',
+            borderDash: [6, 4],
+            stepped: true,
+            pointRadius: 0,
+            borderWidth: 2,
+            tension: 0,
+          }] : []),
+          ...(curvas || []).map((c, i) => ({
+          label: c.grupo,
+          data: (c.puntos || []).map((p) => ({ x: p.dia, y: Math.round(p.f * 1000) / 10 })),
+          borderColor: SUPER_COLORES[i % SUPER_COLORES.length],
+          backgroundColor: SUPER_COLORES[i % SUPER_COLORES.length],
+          stepped: true,
+          pointRadius: 0,
+          borderWidth: 2,
+          tension: 0,
+        })),
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        layout: { padding: { right: 100 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y} % al día ${c.parsed.x}` } },
+        },
+        scales: {
+          x: { type: 'linear', min: 0, max: 180, title: { display: true, text: 'Días desde que entró' }, ticks: { font: { size: 11 } } },
+          y: { min: 0, title: { display: true, text: '% que ya compró' }, ticks: { font: { size: 11 } } },
+        },
+      },
+      plugins: [{
+        // Nombre al final de cada línea (sin leyenda aparte); se separan si quedan encimados.
+        id: 'etiquetaFinal',
+        afterDatasetsDraw(chart) {
+          const ctx = chart.ctx;
+          const { right } = chart.chartArea;
+          const items = chart.data.datasets.map((ds, i) => {
+            const meta = chart.getDatasetMeta(i);
+            const last = meta.data[meta.data.length - 1];
+            return last ? { y: last.y, x: last.x, texto: ds.label, color: ds.borderColor } : null;
+          }).filter(Boolean).sort((p, q) => p.y - q.y);
+          for (let i = 1; i < items.length; i += 1) {
+            if (items[i].y - items[i - 1].y < 13) items[i].y = items[i - 1].y + 13;
+          }
+          ctx.save();
+          ctx.font = '600 11px Inter, system-ui, sans-serif';
+          ctx.textBaseline = 'middle';
+          // Texto en gris oscuro (los azules claros no se leen sobre blanco) con su marca de color.
+          items.forEach((it) => {
+            const x0 = Math.min(it.x, right) + 5;
+            ctx.strokeStyle = it.color;
+            ctx.lineWidth = 3;
+            ctx.setLineDash(it.texto === 'Todas' ? [3, 2] : []);
+            ctx.beginPath();
+            ctx.moveTo(x0, it.y);
+            ctx.lineTo(x0 + 10, it.y);
+            ctx.stroke();
+            ctx.fillStyle = '#334155';
+            ctx.fillText(it.texto, x0 + 14, it.y);
+          });
+          ctx.restore();
+        },
+      }, {
+        id: 'dia90',
+        afterDraw(chart) {
+          const x = chart.scales.x.getPixelForValue(90);
+          const { top, bottom } = chart.chartArea;
+          const ctx = chart.ctx;
+          ctx.save();
+          ctx.strokeStyle = '#6b7785';
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+          ctx.stroke();
+          ctx.restore();
+        },
+      }],
+    });
+  }
+
+  function etiquetaSuper(v) {
+    let t = String(v || '');
+    if (t && t === t.toUpperCase()) t = t.charAt(0) + t.slice(1).toLowerCase();
+    return t
+      .replace(/\bcredito\b/gi, (m) => (m[0] === 'C' ? 'Crédito' : 'crédito'))
+      .replace(/\bmas\b/gi, (m) => (m[0] === 'M' ? 'Más' : 'más'))
+      .replace(/\bdia\b/gi, (m) => (m[0] === 'D' ? 'Día' : 'día'));
+  }
+
+  /**
+   * Después de cada hito: el reloj arranca el día de la cita, la prueba o la solicitud.
+   * La primera fila es la referencia (lead frío al día 14).
+   */
+  function renderSuperHitos(hitos) {
+    const filas = hitos?.filas || [];
+    if (!filas.length) return '';
+    const H = hitos.horizonteDias || 90;
+    const maxPct = Math.max(1, ...filas.map((f) => Number(f.pct) || 0));
+    const nombreTabla = { prueba: 'pruebas de manejo', solicitud: 'solicitudes de crédito' };
+    const cuerpo = filas.map((f) => {
+      const ref = f.clave === 'referencia';
+      if (f.sinDatos) {
+        return `<tr class="ld-hito--vacio"><td>${escapeHtml(f.etiqueta)}</td><td colspan="4">Sin tabla de ${escapeHtml(nombreTabla[f.clave] || 'este hito')} cargada</td></tr>`;
+      }
+      const flag = !ref && f.pctMismoDia != null && f.pctMismoDia >= 30
+        ? `<small class="ld-hito__flag" title="Puede ser registro del mismo trámite de compra">${num(f.pctMismoDia)} % de sus compras, el mismo día${f.pctProspectivo != null ? ` · sin ellas: ${pct(f.pctProspectivo)}` : ''}</small>`
+        : '';
+      const pctCell = f.suficiente
+        ? `<span class="ld-hito__bar" title="Intervalo 95 %: ${f.ic95 ? f.ic95.join('–') : '—'} %"><i style="width:${Math.max(2, (Number(f.pct) / maxPct) * 100)}%"></i></span><strong>${pct(f.pct)}</strong>`
+        : `<span class="cell-muted">Menos de 20 leads</span>`;
+      return `<tr class="${ref ? 'ld-hito--ref' : ''}">
+        <td>${escapeHtml(f.etiqueta)}${flag}</td>
+        <td class="cell-num" data-label="Leads">${num(f.leads)}</td>
+        <td class="cell-num" data-label="Llegan al hito, día">${f.diasAlHito == null ? '—' : num(f.diasAlHito)}</td>
+        <td class="ld-hito__pct" data-label="Compran en ${num(H)} días">${pctCell}</td>
+        <td class="cell-num" data-label="Mitad de las compras, días después">${f.diaMitad == null ? '—' : num(f.diaMitad)}</td>
+      </tr>`;
+    }).join('');
+
+    const cob = hitos.cobertura || {};
+    const notas = [];
+    const cruce = (c, nombre) => {
+      if (!c?.disponible || !c.registros) return;
+      if (c.conLead / c.registros < 0.8) {
+        notas.push(`${nombre}: ${num(c.conLead)} de ${num(c.registros)} registros del año cruzan con un lead por ID CRM; el resto no entra`);
+      }
+    };
+    cruce(cob.pruebas, 'Pruebas de manejo');
+    cruce(cob.solicitudes, 'Solicitudes de crédito');
+    if (cob.citas?.sinFecha) notas.push(`${num(cob.citas.sinFecha)} citas asistidas sin fecha de cita no entran`);
+
+    return `
+      <div class="ld-hitos">
+        <p class="ld-super-cap">Qué tanto compran los leads después de cada paso, contando desde el día del hito.</p>
+        <div class="table-scroll">
+          <table class="data-table ld-hitos__tabla">
+            <thead><tr>
+              <th>Hito</th>
+              <th class="cell-num">Leads</th>
+              <th class="cell-num">Llegan al hito<small>días desde la entrada</small></th>
+              <th>Compran en ${num(H)} días</th>
+              <th class="cell-num">Mitad de las compras<small>días después del hito</small></th>
+            </tr></thead>
+            <tbody>${cuerpo}</tbody>
+          </table>
+        </div>
+        ${notas.length ? `<p class="ld-super-nota">${notas.map((n) => escapeHtml(n)).join(' · ')}</p>` : ''}
+        <details class="ld-como">
+          <summary>¿Cómo se calcula?</summary>
+          <p>El reloj arranca el día de la cita asistida, la primera prueba de manejo o la primera solicitud de crédito. Cuenta la compra (factura) en los ${num(H)} días siguientes; los hitos recientes que aún no cumplen ${num(H)} días se ajustan con Kaplan–Meier en lugar de contar como "no compró". Quien ya había comprado antes del hito no entra. La fila gris es la referencia: leads que al día 14 seguían sin comprar y sin cita, prueba ni solicitud. Un mismo lead puede estar en varias filas (cita, luego prueba, luego solicitud): las filas no se suman y no miden el efecto aislado de cada paso; quien llega a un hito ya venía con más intención.</p>
+        </details>
+      </div>`;
+  }
+
+  function renderSuperFactores(factores, destacados = {}) {
+    const lista = factores || [];
+    if (!lista.length) return '';
+    const vals = lista.flatMap((f) => [f.cocienteTiempo, ...(f.ic95 || [])]).filter((n) => n > 0);
+    const lo = Math.log(Math.max(0.05, Math.min(0.35, ...vals)));
+    const hi = Math.log(Math.min(20, Math.max(2.8, ...vals)));
+    const clamp = (v) => Math.min(Math.max(v, Math.exp(lo)), Math.exp(hi));
+    const pos = (v) => `${((Math.log(clamp(v)) - lo) / (hi - lo)) * 100}%`;
+    const fila = (f) => {
+          const conTiempo = f.cocienteTiempo != null && f.cocienteTiempo > 0;
+          const frena = conTiempo && f.cocienteTiempo > 1;
+          const clave = `${f.factor}|${f.nivel}`;
+          const topCompra = destacados?.compra === clave;
+          const topRapidez = destacados?.rapidez === clave;
+          const cls = `${frena ? 'is-frena' : ''}${f.concluyente ? '' : ' is-tenue'}${topRapidez ? ' is-top-rapidez' : ''}`;
+          const ic = f.ic95 || (conTiempo ? [f.cocienteTiempo, f.cocienteTiempo] : null);
+          const pc = f.probCompra || {};
+          const dm = f.diaMitad || {};
+          const compraCls = `${f.concluyenteCompra ? (pc.nivel >= pc.base ? 'is-mas' : 'is-menos') : 'is-tenue'}${topCompra ? ' is-top' : ''}`;
+          const tituloCompra = f.razonCompra == null
+            ? 'Sin compras para comparar'
+            : `${f.razonCompra} veces la base (intervalo 95 %: ${(f.ic95Compra || []).join('–')})`;
+          const track = conTiempo
+            ? `<span class="ld-super-factor__track" title="Cociente de días ${f.cocienteTiempo} (intervalo 95 %: ${ic ? ic.join('–') : '—'})">
+              <i class="ld-super-factor__one" style="left:${pos(1)}"></i>
+              ${ic ? `<i class="ld-super-factor__bar" style="left:${pos(Math.min(ic[0], ic[1]))};width:calc(${pos(Math.max(ic[0], ic[1]))} - ${pos(Math.min(ic[0], ic[1]))})"></i>` : ''}
+              <i class="ld-super-factor__dot" style="left:${pos(f.cocienteTiempo)}"></i>
+            </span>`
+            : `<span class="ld-super-factor__track ld-super-factor__track--vacio">Menos de 10 compras: no alcanza para medir rapidez</span>`;
+          return `<div class="ld-super-factor ${cls}">
+            <span class="ld-super-factor__name">${escapeHtml(etiquetaSuper(f.nivel))}<small>vs ${escapeHtml(etiquetaSuper(f.base))} · ${num(f.compras)} compras</small></span>
+            <span class="ld-super-compra ${compraCls}" title="${escapeHtml(tituloCompra)}">
+              <strong>${pc.nivel == null ? '—' : `${pc.nivel} %`}</strong> vs ${pc.base == null ? '—' : `${pc.base} %`}
+            </span>
+            ${track}
+            <span class="ld-super-factor__dia">${conTiempo && dm.nivel != null ? `<strong>Día ${num(dm.nivel)}</strong> vs ${num(dm.base)}` : '—'}</span>
+          </div>`;
+    };
+    const claros = lista.filter((f) => f.concluyente || f.concluyenteCompra);
+    const tenues = lista.filter((f) => !(f.concluyente || f.concluyenteCompra));
+    const cabeza = `<div class="ld-super-factor ld-super-factor--head">
+          <span>Al entrar el lead…</span><span>Compran en 180 días</span><span>Entre los que compran, ¿más rápido?</span><span>Mitad de las compras</span>
+        </div>`;
+    return `
+      <div class="ld-super-factores">
+        <p class="ld-super-cap">Características que se conocen cuando entra el lead, cada una contra su base. El borde azul marca la de más efecto.</p>
+        ${claros.length ? cabeza + claros.map(fila).join('') : '<p class="ld-super-nota">Ninguna característica marca una diferencia clara con el volumen actual.</p>'}
+        ${tenues.length ? `<details class="ld-como">
+          <summary>Ver ${num(tenues.length)} sin diferencia clara</summary>
+          ${claros.length ? '' : cabeza}${tenues.map(fila).join('')}
+        </details>` : ''}
+        <details class="ld-como">
+          <summary>¿Cómo se calcula?</summary>
+          <p>"Compran en 180 días" sale de las curvas de Kaplan–Meier de cada grupo. "Mitad de las compras" es el día en que el grupo ya juntó la mitad de sus compras; el punto a la izquierda de la línea vertical significa que compran más rápido que la base. La barra es el intervalo de 95 %: si cruza la línea, la diferencia no es clara y la fila se ve tenue.</p>
+        </details>
+      </div>`;
+  }
+
+  const SUPER_TABS = [
+    { k: 'hitos', t: 'Después de cada hito' },
+    { k: 'curva', t: 'Curva por fuente' },
+    { k: 'factores', t: 'Al entrar' },
+  ];
+
+  function mostrarSuperTab(root, tab) {
+    state.superTab = tab;
+    root.querySelectorAll('[data-ld-super-tab]').forEach((b) => {
+      const on = b.getAttribute('data-ld-super-tab') === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    root.querySelectorAll('[data-ld-super-panel]').forEach((p) => {
+      p.hidden = p.getAttribute('data-ld-super-panel') !== tab;
+    });
+    // Chart.js necesita el lienzo visible para medirlo.
+    if (tab === 'curva' && (state.supervivencia?.curvas || []).length) renderSuperChart(state.supervivencia.curvas);
+    else destruirSuperChart();
+  }
+
+  function renderSupervivencia() {
+    const root = document.getElementById('ldSuperBody');
+    const nota = document.getElementById('ldSuperNota');
+    if (!root) return;
+    const data = state.supervivencia;
+    if (!data || data.loading) {
+      destruirSuperChart();
+      root.innerHTML = '<p class="section-subtitle" style="margin:0">Calculando con los últimos 12 meses…</p>';
+      return;
+    }
+    if (data.error) {
+      destruirSuperChart();
+      root.innerHTML = `<p class="section-subtitle" style="margin:0">${escapeHtml(data.error)}</p>`;
+      return;
+    }
+    const t = data.tiempo || {};
+    const m = data.muestra || {};
+    const v = data.ventana || {};
+    if (nota) {
+      nota.textContent = v.desde
+        ? `Del ${formatDate(v.desde)} al ${formatDate(v.hasta)} · ${num(m.leads)} leads · ${num(m.compras)} compras`
+        : `${num(m.leads)} leads · ${num(m.compras)} compras`;
+    }
+    const curvas = data.curvas || [];
+    const disponibles = {
+      hitos: (data.hitos?.filas || []).some((f) => f.leads > 0),
+      curva: curvas.length > 0,
+      factores: (data.factores || []).length > 0,
+    };
+    let tab = state.superTab;
+    if (!disponibles[tab]) tab = SUPER_TABS.find((x) => disponibles[x.k])?.k || 'curva';
+    const avisos = (data.avisos || []).length
+      ? `<p class="ld-super-nota">${data.avisos.map((a) => escapeHtml(a)).join(' · ')}</p>`
+      : '';
+
+    root.innerHTML = `
+      <div class="ld-super-kpis">
+        <div class="ld-super-kpi"><strong>${t.t50 == null ? '—' : `Día ${num(t.t50)}`}</strong><span>Ya ocurrió la mitad de las compras</span></div>
+        <div class="ld-super-kpi"><strong>${t.t80 == null ? '—' : `Día ${num(t.t80)}`}</strong><span>Ya ocurrieron 8 de cada 10 compras</span></div>
+        <div class="ld-super-kpi"><strong>${t.pctDespues90 == null ? '—' : `${pct(t.pctDespues90)}`}</strong><span>De las compras llegan después del día 90 y quedan fuera de la conversión de arriba</span></div>
+      </div>
+      <nav class="eeff-tabs ld-super-tabs" role="tablist" aria-label="Detalle de tiempo a compra">
+        ${SUPER_TABS.filter((x) => disponibles[x.k]).map((x) => `<button type="button" role="tab" class="eeff-tab" data-ld-super-tab="${x.k}">${x.t}</button>`).join('')}
+      </nav>
+      <div data-ld-super-panel="hitos">${renderSuperHitos(data.hitos)}</div>
+      <div data-ld-super-panel="curva">
+        <p class="ld-super-cap">% de los leads de cada fuente que ya compró, según los días desde que entró. Línea punteada vertical: día 90.</p>
+        <div class="ld-super-chart"><canvas id="ldSuperChart" aria-label="Compra acumulada por fuente"></canvas></div>
+      </div>
+      <div data-ld-super-panel="factores">${renderSuperFactores(data.factores, data.destacados)}${avisos}</div>
+    `;
+    root.onclick = (e) => {
+      const b = e.target.closest('[data-ld-super-tab]');
+      if (b) mostrarSuperTab(root, b.getAttribute('data-ld-super-tab'));
+    };
+    mostrarSuperTab(root, tab);
   }
 
   function renderAll() {
@@ -1724,9 +2272,12 @@
     renderKpis();
     renderCampanasCaducar();
     renderAlertasConversion();
+    renderAlertasJuntas();
     renderFuerzaVentas();
+    renderOrigen();
     renderGroups();
     renderOnePagerLeads();
+    renderSupervivencia();
     renderTable();
     if (leadsDrawerUi?.panel?.classList.contains('ops-orders-drawer--open') && state.openKpi) {
       leadsDrawerUi.refresh();
@@ -1836,18 +2387,27 @@
         if (!res.ok) throw new Error(data.error || res.statusText);
         state.data = data;
         state.prospeccion = { loading: true };
+        state.supervivencia = { loading: true };
         state.cacheKey = key;
         renderAll();
-        const proRes = await fetch(`/api/ventas/leads/prospeccion?${qs}`, { credentials: 'same-origin' });
+        const [proRes, supRes] = await Promise.all([
+          fetch(`/api/ventas/leads/prospeccion?${qs}`, { credentials: 'same-origin' }),
+          fetch(`/api/ventas/leads/supervivencia?fechaFin=${encodeURIComponent(fechaFin)}`, { credentials: 'same-origin' }),
+        ]);
         const pro = await proRes.json().catch(() => ({}));
+        const sup = await supRes.json().catch(() => ({}));
         if (state.cacheKey === key) {
           state.prospeccion = proRes.ok ? pro : { error: pro.error || 'No se pudo calcular el proceso de prospección.' };
+          state.supervivencia = supRes.ok ? sup : { error: sup.error || 'No se pudo calcular el tiempo a compra.' };
           renderProspeccion();
+          renderSupervivencia();
+          renderKpis();
         }
       } catch (err) {
         console.warn('[Leads]', err);
         state.cacheKey = null;
         state.prospeccion = { error: err.message };
+        state.supervivencia = { error: err.message };
         state.data = {
           summary: {},
           funnel: [],

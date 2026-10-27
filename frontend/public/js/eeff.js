@@ -563,57 +563,6 @@ function buildEdoFinKpiItems(data) {
   ];
 }
 
-function buildEdoFinPanorama(data) {
-  const s = data.estadoFinanciero?.summary || {};
-  const crecEbit = Number(s.crecimientoEbitPct ?? data.ebitMetrics?.crecimientoEbitPct);
-  const utilidad = Number(s.utilidad);
-  const perdida = Number(s.perdidaFinanciera);
-  const margenBruto = Number(s.margenBrutoPct);
-  const costoPct = pctOfSales(s.costoTotal, s.ventasTotales);
-  const gastosPct = pctOfSales(s.sumaGastos, s.ventasTotales);
-
-  const strengths = [];
-  if (Number(s.ventasTotales) > 0) strengths.push('Ventas');
-  if (Number.isFinite(margenBruto) && margenBruto >= 12) strengths.push('Utilidad bruta');
-  if (Number.isFinite(crecEbit) && crecEbit > 0) strengths.push('crecimiento EBIT');
-
-  const attention = [];
-  if (Number.isFinite(costoPct) && costoPct >= 70) attention.push('Costos');
-  if (Number.isFinite(gastosPct) && gastosPct >= 6) attention.push('gastos');
-
-  const risks = [];
-  if (Number.isFinite(perdida) && perdida < 0) risks.push('Pérdida financiera impacta utilidad neta');
-  else if (Number.isFinite(utilidad) && utilidad < 0) risks.push('Utilidad neta en terreno negativo');
-
-  let summary = 'Sin datos suficientes para interpretar el periodo.';
-  if (Number(s.ventasTotales) > 0) {
-    const parts = [];
-    if (Number.isFinite(margenBruto) && margenBruto >= 12) {
-      parts.push('Las ventas y la utilidad bruta muestran un desempeño sólido');
-    } else {
-      parts.push('Las ventas sostienen la operación, pero el margen bruto es ajustado');
-    }
-    if (Number.isFinite(crecEbit) && crecEbit > 0) {
-      parts.push('con crecimiento de EBIT frente al año anterior');
-    }
-    if (Number.isFinite(perdida) && perdida < 0) {
-      parts.push('sin embargo la pérdida financiera presiona el resultado final');
-      if (utilidad < 0) parts.push('y arrastra la utilidad neta a terreno negativo');
-    } else if (utilidad >= 0) {
-      parts.push('y el resultado neto se mantiene positivo');
-    }
-    summary = `${parts.join(', ')}.`;
-    summary = summary.charAt(0).toUpperCase() + summary.slice(1);
-  }
-
-  return {
-    summary,
-    strengths: strengths.length ? strengths.join(', ') : 'Sin fortalezas destacadas',
-    attention: attention.length ? `${attention.join(' y ')} presionan márgenes` : 'Sin focos de atención relevantes',
-    risk: risks[0] || 'Sin riesgo clave identificado',
-  };
-}
-
 function renderEdoFinStatusBadge(badge) {
   if (!badge) return '';
   return `
@@ -649,100 +598,146 @@ function renderEdoFinKpiCard(k, fmt, gridId, detailPanelId) {
     </${tag}>`;
 }
 
+/** Indicadores de agencia que el estado de resultados no muestra (lo demás ya está en esa pestaña). */
+const EDOFIN_SOLO_AQUI = ['ebitda', 'crecimientoEbit', 'perdidaFinanciera'];
+
 function renderEdoFinOverview(data, fmt) {
-  const items = buildEdoFinKpiItems(data);
-  const primary = items.filter((i) => i.row === 'primary');
-  const secondary = items.filter((i) => i.row === 'secondary');
+  const items = buildEdoFinKpiItems(data).filter((i) => EDOFIN_SOLO_AQUI.includes(i.id));
   const gridId = 'kpiEdoFin';
   const detailId = 'eeffKpiDetailEdoFin';
-
   const primaryEl = document.getElementById('kpiEdoFinPrimary');
-  const secondaryEl = document.getElementById('kpiEdoFinSecondary');
   if (primaryEl) {
-    primaryEl.innerHTML = primary.map((k) => renderEdoFinKpiCard(k, fmt, gridId, detailId)).join('');
+    primaryEl.innerHTML = items.map((k) => renderEdoFinKpiCard(k, fmt, gridId, detailId)).join('');
   }
-  if (secondaryEl) {
-    secondaryEl.innerHTML = secondary.map((k) => renderEdoFinKpiCard(k, fmt, gridId, detailId)).join('');
-  }
-
   renderEeffKpiDetail(detailId, gridId, items, fmt);
+}
 
-  const panorama = buildEdoFinPanorama(data);
-  const panEl = document.getElementById('eeffEdoFinPanorama');
-  if (panEl) {
-    panEl.innerHTML = `
-      <div class="eeff-panorama__main">
-        <div class="eeff-panorama__title-wrap">
-          <span class="material-symbols-outlined eeff-panorama__icon" aria-hidden="true">track_changes</span>
-          <h3 class="eeff-panorama__title">Panorama general</h3>
-        </div>
-        <p class="eeff-panorama__summary">${panorama.summary}</p>
-      </div>
-      <div class="eeff-panorama__insights">
-        <div class="eeff-panorama__insight eeff-panorama__insight--green">
-          <span class="material-symbols-outlined" aria-hidden="true">trending_up</span>
-          <div>
-            <p class="eeff-panorama__insight-label">Fortalezas</p>
-            <p class="eeff-panorama__insight-text">${panorama.strengths}</p>
-          </div>
-        </div>
-        <div class="eeff-panorama__insight eeff-panorama__insight--amber">
-          <span class="material-symbols-outlined" aria-hidden="true">warning</span>
-          <div>
-            <p class="eeff-panorama__insight-label">Atención</p>
-            <p class="eeff-panorama__insight-text">${panorama.attention}</p>
-          </div>
-        </div>
-        <div class="eeff-panorama__insight eeff-panorama__insight--rose">
-          <span class="material-symbols-outlined" aria-hidden="true">bolt</span>
-          <div>
-            <p class="eeff-panorama__insight-label">Riesgo clave</p>
-            <p class="eeff-panorama__insight-text">${panorama.risk}</p>
-          </div>
-        </div>
-      </div>`;
+const num = (v) => Number(v) || 0;
+const pctDe = (a, b) => (num(b) ? Math.round((num(a) / num(b)) * 1000) / 10 : null);
+const pctTexto = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v).toFixed(1)} %`);
+const sumaGastosDe = (r) => (r?.sumaGastos != null ? num(r.sumaGastos) : num(r?.gastos) + num(r?.gastosAdministracion));
+
+/** Departamentos que arman la utilidad de operación de la agencia (mismas cifras del /eeff). */
+function filasDepartamentos(data) {
+  const e = data.estadoFinanciero?.summary || {};
+  const filas = [
+    { id: 'autosNuevos', label: 'Autos nuevos', r: data.ventas?.totalVentasAutos?.summary, vista: 'ventas' },
+    { id: 'seminuevos', label: 'Seminuevos', r: data.seminuevos?.summary, vista: 'seminuevos' },
+    { id: 'postventa', label: 'Postventa', r: data.postventa?.summary, vista: 'postventa' },
+  ].filter((f) => f.r).map((f) => ({
+    ...f,
+    ventas: num(f.r.ventas),
+    utilidadBruta: num(f.r.utilidadBruta),
+    gastos: sumaGastosDe(f.r),
+    utilidadOperacion: num(f.r.utilidadOperacion),
+  }));
+  // Lo que no se prorratea a ningún departamento: así la suma cuadra con la agencia y no se esconde.
+  const sumaUo = filas.reduce((t, f) => t + f.utilidadOperacion, 0);
+  const resto = num(e.utilidadOperacion) - sumaUo;
+  const sumaUb = filas.reduce((t, f) => t + f.utilidadBruta, 0);
+  const restoUb = num(e.utilidadBruta) - sumaUb;
+  if (Math.abs(resto) >= 1 || Math.abs(restoUb) >= 1) {
+    filas.push({
+      id: 'sinProrratear', label: 'Administración sin prorratear', ventas: num(e.ventasTotales) - filas.reduce((t, f) => t + f.ventas, 0),
+      utilidadBruta: restoUb, gastos: restoUb - resto, utilidadOperacion: resto, ajuste: true,
+    });
   }
+  return { filas, total: { ventas: num(e.ventasTotales), utilidadBruta: num(e.utilidadBruta), gastos: num(e.sumaGastos), utilidadOperacion: num(e.utilidadOperacion) } };
+}
+
+function fraseDepartamentos(filas, total) {
+  const deptos = filas.filter((f) => !f.ajuste && f.ventas > 0);
+  if (!deptos.length || !total.ventas) return 'Sin datos de departamentos en el periodo.';
+  const conAporte = deptos.map((f) => ({ ...f, partVentas: pctDe(f.ventas, total.ventas), partUo: pctDe(f.utilidadOperacion, total.utilidadOperacion) }));
+  const masVende = [...conAporte].sort((a, b) => b.ventas - a.ventas)[0];
+  const masGana = [...conAporte].sort((a, b) => b.utilidadOperacion - a.utilidadOperacion)[0];
+  const enPerdida = conAporte.filter((f) => f.utilidadOperacion < 0).map((f) => f.label);
+  const partes = [];
+  if (total.utilidadOperacion > 0 && masGana.id !== masVende.id) {
+    partes.push(`${masVende.label} vende ${pctTexto(masVende.partVentas)} de la agencia, pero ${masGana.label} genera ${pctTexto(masGana.partUo)} de la utilidad de operación con ${pctTexto(masGana.partVentas)} de las ventas.`);
+  } else if (total.utilidadOperacion > 0) {
+    partes.push(`${masGana.label} vende ${pctTexto(masGana.partVentas)} de la agencia y genera ${pctTexto(masGana.partUo)} de la utilidad de operación.`);
+  } else {
+    partes.push('La agencia tiene pérdida de operación en el periodo.');
+  }
+  if (enPerdida.length) partes.push(`Con pérdida de operación: ${enPerdida.join(', ')}.`);
+  return partes.join(' ');
+}
+
+function renderDepartamentos(data, fmt) {
+  const body = document.getElementById('deptosTabla');
+  const foot = document.getElementById('deptosPie');
+  if (!body) return;
+  const { filas, total } = filasDepartamentos(data);
+  const fi = data.filtros?.fechaInicio;
+  const ff = data.filtros?.fechaFin;
+  const periodo = document.getElementById('deptosPeriodo');
+  if (periodo && fi && ff) periodo.textContent = `Del ${fi} al ${ff} · utilidad de operación de cada departamento, con su parte de la administración.`;
+  const frase = document.getElementById('deptosFrase');
+  if (frase) frase.textContent = fraseDepartamentos(filas, total);
+  if (!filas.length) {
+    body.innerHTML = '<tr class="empty-row"><td colspan="8">Sin datos de departamentos en el periodo.</td></tr>';
+    if (foot) foot.innerHTML = '';
+    return;
+  }
+  const maxAbs = Math.max(...filas.map((f) => Math.abs(f.utilidadOperacion)), 1);
+  body.innerHTML = filas.map((f) => {
+    const aporte = pctDe(f.utilidadOperacion, total.utilidadOperacion);
+    const ancho = Math.round((Math.abs(f.utilidadOperacion) / maxAbs) * 100);
+    const nombre = f.vista
+      ? `<button type="button" class="deptos-link" data-eeff-vista="${f.vista}" title="Ver ${escAttr(f.label)}">${f.label}</button>`
+      : `<span class="deptos-ajuste">${f.label}</span>`;
+    return `<tr${f.ajuste ? ' class="deptos-fila--ajuste"' : ''}>
+      <td>${nombre}</td>
+      <td class="cell-money">${f.ajuste ? '—' : fmt.money(f.ventas)}</td>
+      <td class="cell-money">${f.ajuste && !f.utilidadBruta ? '—' : fmt.money(f.utilidadBruta)}</td>
+      <td class="cell-num">${f.ajuste ? '—' : pctTexto(pctDe(f.utilidadBruta, f.ventas))}</td>
+      <td class="cell-money">${fmt.money(f.gastos)}</td>
+      <td class="cell-money ${moneyClass(f.utilidadOperacion)}"><strong>${fmt.money(f.utilidadOperacion)}</strong></td>
+      <td class="cell-num">${f.ajuste ? '—' : pctTexto(pctDe(f.utilidadOperacion, f.ventas))}</td>
+      <td class="deptos-col-aporte"><span class="deptos-barra"><i class="${f.utilidadOperacion < 0 ? 'is-neg' : ''}" style="width:${ancho}%"></i></span><span class="deptos-barra__pct">${pctTexto(aporte)}</span></td>
+    </tr>`;
+  }).join('');
+  if (foot) {
+    foot.innerHTML = `<tr class="row-highlight">
+      <td><strong>Agencia</strong></td>
+      <td class="cell-money"><strong>${fmt.money(total.ventas)}</strong></td>
+      <td class="cell-money"><strong>${fmt.money(total.utilidadBruta)}</strong></td>
+      <td class="cell-num"><strong>${pctTexto(pctDe(total.utilidadBruta, total.ventas))}</strong></td>
+      <td class="cell-money"><strong>${fmt.money(total.gastos)}</strong></td>
+      <td class="cell-money ${moneyClass(total.utilidadOperacion)}"><strong>${fmt.money(total.utilidadOperacion)}</strong></td>
+      <td class="cell-num"><strong>${pctTexto(pctDe(total.utilidadOperacion, total.ventas))}</strong></td>
+      <td class="deptos-col-aporte"><span class="deptos-barra__pct"><strong>100 %</strong></span></td>
+    </tr>`;
+  }
+  const nota = document.getElementById('deptosNota');
+  if (nota) {
+    const ajuste = filas.find((f) => f.ajuste);
+    nota.textContent = ajuste
+      ? `La suma de los departamentos difiere de la agencia en ${fmt.money(ajuste.utilidadOperacion)}: es la parte de administración (u otros renglones) que no se prorratea a ningún departamento. Se muestra para que el total cuadre con el estado de resultados.`
+      : 'La suma de los departamentos es igual a la utilidad de operación del estado de resultados.';
+  }
+}
+
+function escAttr(t) {
+  return String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 function buildVentasKpiItems(data) {
   const v = data.ventas || {};
   const total = v.totalVentasAutos?.summary || {};
-
+  const part = (x) => {
+    const p = pctDe(x?.ventas, total.ventas);
+    return p == null ? '—' : `${pctTexto(p)} de autos nuevos · margen op. ${pctTexto(pctDe(x?.utilidadOperacion, x?.ventas))}`;
+  };
   return [
-    {
-      id: 'menudeo',
-      label: 'Menudeo',
-      value: v.menudeo?.summary?.ventas,
-      icon: 'storefront',
-      color: 'blue',
-      sub: '5 sucursales',
-      drilldown: (v.menudeo?.branches || []).map((b) => drillNode(`menudeo-${b.id}`, b.label, b.ventas, {
-        autoExpand: true,
-        children: branchPnlChildren(b, `menudeo-${b.id}`),
-      })),
-    },
-    {
-      id: 'flotillas',
-      label: 'Flotillas',
-      value: v.flotillas?.summary?.ventas,
-      icon: 'local_shipping',
-      color: 'slate',
-      drilldown: branchPnlChildren(v.flotillas?.summary || v.flotillas?.branch, 'flotillas'),
-    },
-    {
-      id: 'intercambios',
-      label: 'Intercambios',
-      value: v.intercambios?.summary?.ventas,
-      icon: 'swap_horiz',
-      color: 'amber',
-      drilldown: branchPnlChildren(v.intercambios?.summary || v.intercambios?.branch, 'intercambios'),
-    },
     {
       id: 'totalAutos',
       label: 'Total autos nuevos',
       value: total.ventas,
       icon: 'directions_car',
-      color: 'green',
+      color: 'blue',
+      sub: `Utilidad de operación ${pctTexto(pctDe(total.utilidadOperacion, total.ventas))} de las ventas`,
       drilldown: [
         drillNode('menudeo-t', 'Menudeo', v.menudeo?.summary?.ventas, {
           autoExpand: true,
@@ -759,6 +754,62 @@ function buildVentasKpiItems(data) {
         drillRow('Total ventas', total.ventas, { id: 'total-ventas', highlight: true }),
         drillRow('Costo total', total.costo, { id: 'total-costo' }),
         drillRow('Utilidad operación', total.utilidadOperacion, { id: 'total-uo', highlight: true }),
+      ],
+    },
+    {
+      id: 'menudeo',
+      label: 'Menudeo',
+      value: v.menudeo?.summary?.ventas,
+      icon: 'storefront',
+      color: 'green',
+      sub: part(v.menudeo?.summary),
+      drilldown: (v.menudeo?.branches || []).map((b) => drillNode(`menudeo-${b.id}`, b.label, b.ventas, {
+        autoExpand: true,
+        children: branchPnlChildren(b, `menudeo-${b.id}`),
+      })),
+    },
+    {
+      id: 'flotillas',
+      label: 'Flotillas',
+      value: v.flotillas?.summary?.ventas,
+      icon: 'local_shipping',
+      color: 'slate',
+      sub: part(v.flotillas?.summary),
+      drilldown: branchPnlChildren(v.flotillas?.summary || v.flotillas?.branch, 'flotillas'),
+    },
+    {
+      id: 'intercambios',
+      label: 'Intercambios',
+      value: v.intercambios?.summary?.ventas,
+      icon: 'swap_horiz',
+      color: 'amber',
+      sub: part(v.intercambios?.summary),
+      drilldown: branchPnlChildren(v.intercambios?.summary || v.intercambios?.branch, 'intercambios'),
+    },
+  ];
+}
+
+function buildSeminuevosKpiItems(data) {
+  const sm = data.seminuevos || {};
+  const s = sm.summary || {};
+  const ramas = (metric) => (sm.branches || []).map((b) => drillRow(b.label, b[metric], { id: `sm-${b.id}-${metric}` }));
+  return [
+    { id: 'ventas', label: 'Ventas seminuevos', value: s.ventas, icon: 'directions_car', color: 'blue', sub: `${(sm.branches || []).length} líneas`, drilldown: ramas('ventas') },
+    { id: 'utilidadBruta', label: 'Utilidad bruta', value: s.utilidadBruta, icon: 'savings', color: 'green', sub: `${pctTexto(pctDe(s.utilidadBruta, s.ventas))} de las ventas`, drilldown: ramas('utilidadBruta') },
+    {
+      id: 'gastos', label: 'Gastos', value: sumaGastosDe(s), icon: 'payments', color: 'amber', sub: `${pctTexto(pctDe(sumaGastosDe(s), s.utilidadBruta))} de la utilidad bruta`,
+      drilldown: [
+        drillRow('Gastos del departamento', s.gastos, { id: 'sm-g-depto' }),
+        drillRow('Administración (prorrateo)', s.gastosAdministracion, { id: 'sm-g-admin' }),
+        drillRow('Total gastos', sumaGastosDe(s), { id: 'sm-g-total', highlight: true }),
+      ],
+    },
+    {
+      id: 'utilidadOperacion', label: 'Utilidad de operación', value: s.utilidadOperacion, icon: 'query_stats', color: num(s.utilidadOperacion) < 0 ? 'rose' : 'violet', sub: `${pctTexto(pctDe(s.utilidadOperacion, s.ventas))} de las ventas`,
+      drilldown: [
+        drillRow('Utilidad bruta', s.utilidadBruta, { id: 'sm-uo-ub', highlight: true }),
+        drillRow('Gastos', sumaGastosDe(s), { id: 'sm-uo-g' }),
+        drillRow('Utilidad de operación', s.utilidadOperacion, { id: 'sm-uo', highlight: true }),
       ],
     },
   ];
@@ -791,7 +842,7 @@ function buildPostventaKpiItems(data) {
       value: s.utilidadBruta,
       icon: 'savings',
       color: 'green',
-      sub: `${s.margenBrutoPct ?? 0}%`,
+      sub: `${pctTexto(pctDe(s.utilidadBruta, s.ventas))} de las ventas`,
       drilldown: sectionNodes('utilidadBruta'),
     },
     {
@@ -800,20 +851,8 @@ function buildPostventaKpiItems(data) {
       value: s.utilidadOperacion,
       icon: 'query_stats',
       color: 'violet',
+      sub: `${pctTexto(pctDe(s.utilidadOperacion, s.ventas))} de las ventas`,
       drilldown: sectionNodes('utilidadOperacion'),
-    },
-    {
-      id: 'areas',
-      label: 'Servicio + Ref. + HYP',
-      value: sections.length,
-      icon: 'build',
-      color: 'slate',
-      sub: pv.description,
-      displayOverride: `${sections.length} áreas`,
-      drilldown: sections.map((sec) => drillNode(`area-${sec.id}`, sec.label, sec.ventas, {
-        autoExpand: true,
-        children: branchPnlChildren(sec, `area-${sec.id}`),
-      })),
     },
   ];
 }
@@ -847,6 +886,18 @@ function enrichComparativaNode(node, line, cmp) {
   }
 }
 
+/** Renglones donde gastar menos que el presupuesto es lo bueno. */
+const CLAVES_EGRESO = new Set(['costoTotal', 'gastosOperacion', 'gastosAdministracion', 'sumaGastos', 'gastosFinancieros', 'interesesPlanPiso', 'interesesMoratorios']);
+function esEgreso(key, group) {
+  return group === 'costo' || group === 'gasto' || CLAVES_EGRESO.has(key) || /_(costo|gastos|gastosAdmin|sumaGastos)$/.test(String(key || ''));
+}
+/** Verde si la variación favorece a la agencia (más ingreso/utilidad o menos costo/gasto). */
+function favorClass(variacion, egreso) {
+  const n = Number(variacion) || 0;
+  if (!n) return '';
+  return (egreso ? n < 0 : n > 0) ? 'cell-positive' : 'cell-negative';
+}
+
 function buildComparativaKpiItems(cmp) {
   if (!cmp?.available) return [];
   const s = cmp.estadoFinanciero?.summary || {};
@@ -857,10 +908,7 @@ function buildComparativaKpiItems(cmp) {
       .map(([key, label]) => {
         const item = s[key];
         if (!item) return null;
-        return drillNode(key, label, item.real, {
-          presupuesto: item.presupuesto,
-          highlight: true,
-        });
+        return drillNode(key, label, item.real, { presupuesto: item.presupuesto, highlight: true });
       })
       .filter(Boolean);
   }
@@ -870,80 +918,29 @@ function buildComparativaKpiItems(cmp) {
     (node, line) => enrichComparativaNode(node, line, cmp),
   );
 
+  const tarjeta = (id, key, label, icon, drilldown) => {
+    const it = s[key] || {};
+    const egreso = esEgreso(key);
+    const fav = favorClass(it.variacion, egreso);
+    return {
+      id, label, value: it.real, icon, drilldown,
+      // Rojo solo cuando la desviación en contra pasa de 5 %; abajo de eso, ámbar.
+      color: fav === 'cell-positive' ? 'green' : fav === 'cell-negative' ? (Math.abs(Number(it.variacionPct) || 0) > 5 ? 'rose' : 'amber') : 'slate',
+      cmpKey: key,
+    };
+  };
+
   return [
-    {
-      id: 'ventasTotales',
-      label: 'Ventas totales',
-      value: s.ventasTotales?.real,
-      icon: 'receipt_long',
-      color: 'blue',
-      sub: `PPTO · ${s.ventasTotales?.variacionPct ?? 0}%`,
-      drilldown: ventasTree,
-    },
-    {
-      id: 'costosTotales',
-      label: 'Costos totales',
-      value: s.costoTotal?.real,
-      icon: 'shopping_cart',
-      color: 'rose',
-      sub: `PPTO · ${s.costoTotal?.variacionPct ?? 0}%`,
-      drilldown: cmpDrill([
-        ['costoTotal', 'Costo de ventas'],
-      ]),
-    },
-    {
-      id: 'utilidadBruta',
-      label: 'Utilidad bruta',
-      value: s.utilidadBruta?.real,
-      icon: 'savings',
-      color: 'green',
-      sub: `Var. ${s.utilidadBruta?.variacion ?? 0}`,
-      drilldown: cmpDrill([
-        ['ventasTotales', 'Ventas totales'],
-        ['costoTotal', 'Costo de ventas'],
-        ['utilidadBruta', 'Utilidad bruta'],
-      ]),
-    },
-    {
-      id: 'gastosTotales',
-      label: 'Gastos totales',
-      value: s.sumaGastos?.real,
-      icon: 'payments',
-      color: 'amber',
-      sub: `PPTO · ${s.sumaGastos?.variacionPct ?? 0}%`,
-      drilldown: cmpDrill([
-        ['gastosOperacion', 'Gastos de operación'],
-        ['gastosAdministracion', 'Gastos administración'],
-        ['sumaGastos', 'Suma gastos'],
-      ]),
-    },
-    {
-      id: 'utilidadOperacion',
-      label: 'Utilidad operación',
-      value: s.utilidadOperacion?.real,
-      icon: 'query_stats',
-      color: 'violet',
-      sub: `PPTO ${s.utilidadOperacion?.presupuesto ?? 0}`,
-      drilldown: cmpDrill([
-        ['utilidadBruta', 'Utilidad bruta'],
-        ['sumaGastos', 'Suma gastos'],
-        ['utilidadOperacion', 'Utilidad operación'],
-      ]),
-    },
-    {
-      id: 'periodo',
-      label: 'Periodo presupuesto',
-      value: cmp.mesesIncluidos?.length,
-      icon: 'calendar_month',
-      color: 'slate',
-      displayOverride: `${cmp.mesesIncluidos?.length || 0} meses`,
-      sub: `${cmp.template} · ${(cmp.factorPeriodo * 100).toFixed(0)}% anual`,
-      drilldown: [
-        drillHeader(`${cmp.template}`),
-        { type: 'text', label: 'Meses incluidos', value: (cmp.mesesIncluidos || []).join(', ') || '—' },
-        { type: 'text', label: 'Factor del año', value: `${(cmp.factorPeriodo * 100).toFixed(0)}%` },
-      ],
-    },
+    tarjeta('ventasTotales', 'ventasTotales', 'Ventas totales', 'receipt_long', ventasTree),
+    tarjeta('utilidadBruta', 'utilidadBruta', 'Utilidad bruta', 'savings', cmpDrill([
+      ['ventasTotales', 'Ventas totales'], ['costoTotal', 'Costo de ventas'], ['utilidadBruta', 'Utilidad bruta'],
+    ])),
+    tarjeta('gastosTotales', 'sumaGastos', 'Gastos totales', 'payments', cmpDrill([
+      ['gastosOperacion', 'Gastos de operación'], ['gastosAdministracion', 'Gastos administración'], ['sumaGastos', 'Suma gastos'],
+    ])),
+    tarjeta('utilidadOperacion', 'utilidadOperacion', 'Utilidad de operación', 'query_stats', cmpDrill([
+      ['utilidadBruta', 'Utilidad bruta'], ['sumaGastos', 'Suma gastos'], ['utilidadOperacion', 'Utilidad operación'],
+    ])),
   ];
 }
 
@@ -966,13 +963,6 @@ function moneyClass(value) {
   const n = Number(value) || 0;
   if (n < 0) return 'cell-negative';
   if (n > 0) return 'cell-positive';
-  return '';
-}
-
-function variacionClass(value) {
-  const n = Number(value) || 0;
-  if (n > 0) return 'cell-positive';
-  if (n < 0) return 'cell-negative';
   return '';
 }
 
@@ -1073,7 +1063,7 @@ function renderDrillRowHtml(row, fmt, hasCompare) {
         <td>${labelCell}</td>
         <td class="cell-money">${fmt.money(row.value)}</td>
         <td class="cell-money">${fmt.money(row.presupuesto)}</td>
-        <td class="cell-money ${variacionClass(variacion)}">${fmt.money(variacion)}</td>
+        <td class="cell-money ${favorClass(variacion, esEgreso(row.id, row.group))}">${fmt.money(variacion)}</td>
       </tr>`;
   }
 
@@ -1218,6 +1208,7 @@ function renderKpiGrid(containerId, items, fmt) {
     kpiEdoFin: 'eeffKpiDetailEdoFin',
     kpiVentas: 'eeffKpiDetailVentas',
     kpiPostventa: 'eeffKpiDetailPostventa',
+    kpiSeminuevos: 'eeffKpiDetailSeminuevos',
     kpiComparativa: 'eeffKpiDetailComparativa',
   };
   const detailId = detailMap[containerId];
@@ -1237,65 +1228,6 @@ function renderKpiGrid(containerId, items, fmt) {
       <p class="kpi-subtitle">${k.sub || ''}</p>
     </div>
   `).join('');
-}
-
-function renderLinesTable(tbodyId, lines, fmt) {
-  const body = document.getElementById(tbodyId);
-  if (!body) return;
-  if (!lines?.length) {
-    body.innerHTML = '<tr class="empty-row"><td colspan="2">Sin datos en el periodo.</td></tr>';
-    return;
-  }
-  body.innerHTML = lines.map((row) => {
-    const indent = row.level ? ` style="padding-left:${row.level * 16}px"` : '';
-    return `
-    <tr${row.highlight ? ' class="row-highlight"' : ''}>
-      <td${indent}>${row.label}</td>
-      <td class="cell-money ${moneyClass(row.value)}"><strong>${fmt.money(row.value)}</strong></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderBranchTable(tbodyId, footId, rows, fmt, showMargin = true) {
-  const body = document.getElementById(tbodyId);
-  const foot = document.getElementById(footId);
-  if (!body) return;
-  if (!rows?.length) {
-    body.innerHTML = '<tr class="empty-row"><td colspan="7">Sin datos.</td></tr>';
-    if (foot) foot.innerHTML = '';
-    return;
-  }
-  body.innerHTML = rows.map((r) => `
-    <tr>
-      <td><strong>${r.label}</strong></td>
-      <td class="cell-money">${fmt.money(r.ventas)}</td>
-      <td class="cell-money">${fmt.money(r.costo)}</td>
-      <td class="cell-money ${moneyClass(r.utilidadBruta)}"><strong>${fmt.money(r.utilidadBruta)}</strong></td>
-      <td class="cell-money">${fmt.money(r.sumaGastos)}</td>
-      <td class="cell-money ${moneyClass(r.utilidadOperacion)}"><strong>${fmt.money(r.utilidadOperacion)}</strong></td>
-      ${showMargin ? `<td class="cell-num ${moneyClass(r.margenOperacionPct)}">${r.margenOperacionPct}%</td>` : ''}
-    </tr>
-  `).join('');
-
-  if (foot && rows.length > 1) {
-    const t = rows.reduce((acc, r) => ({
-      ventas: acc.ventas + r.ventas,
-      costo: acc.costo + r.costo,
-      utilidadBruta: acc.utilidadBruta + r.utilidadBruta,
-      sumaGastos: acc.sumaGastos + r.sumaGastos,
-      utilidadOperacion: acc.utilidadOperacion + r.utilidadOperacion,
-    }), { ventas: 0, costo: 0, utilidadBruta: 0, sumaGastos: 0, utilidadOperacion: 0 });
-    foot.innerHTML = `
-      <tr class="row-highlight">
-        <td><strong>Total</strong></td>
-        <td class="cell-money"><strong>${fmt.money(t.ventas)}</strong></td>
-        <td class="cell-money"><strong>${fmt.money(t.costo)}</strong></td>
-        <td class="cell-money"><strong>${fmt.money(t.utilidadBruta)}</strong></td>
-        <td class="cell-money"><strong>${fmt.money(t.sumaGastos)}</strong></td>
-        <td class="cell-money"><strong>${fmt.money(t.utilidadOperacion)}</strong></td>
-        ${showMargin ? '<td></td>' : ''}
-      </tr>`;
-  }
 }
 
 function renderPostventaTable(data, fmt) {
@@ -1333,40 +1265,92 @@ function renderPostventaTable(data, fmt) {
 }
 
 function renderEdoFin(data, fmt) {
+  renderDepartamentos(data, fmt);
   renderEdoFinOverview(data, fmt);
-  renderLinesTable('edoFinTable', data.estadoFinanciero?.lines, fmt);
+}
+
+function filaCanal(r, fmt, { label, clase = '', sangria = false } = {}) {
+  if (!r) return '';
+  return `
+    <tr${clase ? ` class="${clase}"` : ''}>
+      <td${sangria ? ' style="padding-left:22px"' : ''}>${clase ? `<strong>${label}</strong>` : label}</td>
+      <td class="cell-money">${fmt.money(r.ventas)}</td>
+      <td class="cell-money">${fmt.money(r.costo)}</td>
+      <td class="cell-money ${moneyClass(r.utilidadBruta)}">${fmt.money(r.utilidadBruta)}</td>
+      <td class="cell-money">${fmt.money(sumaGastosDe(r))}</td>
+      <td class="cell-money ${moneyClass(r.utilidadOperacion)}"><strong>${fmt.money(r.utilidadOperacion)}</strong></td>
+      <td class="cell-num">${pctTexto(pctDe(r.utilidadOperacion, r.ventas))}</td>
+    </tr>`;
 }
 
 function renderVentas(data, fmt) {
   const v = data.ventas || {};
-  const total = v.totalVentasAutos?.summary || {};
-  const items = buildVentasKpiItems(data);
-  const totalItem = items.find((i) => i.id === 'totalAutos');
-  if (totalItem) {
-    totalItem.sub = `Util. op. ${fmt.money(total.utilidadOperacion)}`;
+  renderKpiGrid('kpiVentas', buildVentasKpiItems(data), fmt);
+  const body = document.getElementById('menudeoTable');
+  const foot = document.getElementById('menudeoFoot');
+  if (!body) return;
+  const branches = v.menudeo?.branches || [];
+  if (!branches.length && !v.totalVentasAutos?.summary) {
+    body.innerHTML = '<tr class="empty-row"><td colspan="7">Sin datos de autos nuevos en el periodo.</td></tr>';
+    if (foot) foot.innerHTML = '';
+    return;
   }
-  renderKpiGrid('kpiVentas', items, fmt);
-  renderBranchTable('menudeoTable', 'menudeoFoot', v.menudeo?.branches, fmt);
-  renderBranchTable(
-    'otrasDivisionesTable',
-    'otrasDivisionesFoot',
-    [v.flotillas?.branch, v.intercambios?.branch].filter(Boolean),
-    fmt,
-    false,
-  );
-  renderLinesTable('totalVentasTable', v.totalVentasAutos?.lines, fmt);
+  body.innerHTML = [
+    ...branches.map((b) => filaCanal(b, fmt, { label: b.label, sangria: true })),
+    filaCanal(v.menudeo?.summary, fmt, { label: 'Menudeo', clase: 'row-subtotal' }),
+    filaCanal(v.flotillas?.summary || v.flotillas?.branch, fmt, { label: 'Flotillas' }),
+    filaCanal(v.intercambios?.summary || v.intercambios?.branch, fmt, { label: 'Intercambios' }),
+  ].join('');
+  if (foot) foot.innerHTML = filaCanal(v.totalVentasAutos?.summary, fmt, { label: 'Total autos nuevos', clase: 'row-highlight' });
 }
 
-function renderCompareRow(label, row, fmt, metric = 'ventas') {
+function renderSeminuevos(data, fmt) {
+  const sm = data.seminuevos || {};
+  const s = sm.summary || {};
+  renderKpiGrid('kpiSeminuevos', buildSeminuevosKpiItems(data), fmt);
+  const body = document.getElementById('seminuevosTable');
+  const foot = document.getElementById('seminuevosFoot');
+  if (!body) return;
+  const ramas = sm.branches || [];
+  body.innerHTML = ramas.length
+    ? ramas.map((b) => `
+    <tr>
+      <td>${b.label}</td>
+      <td class="cell-money">${fmt.money(b.ventas)}</td>
+      <td class="cell-money">${fmt.money(b.costo)}</td>
+      <td class="cell-money ${moneyClass(b.utilidadBruta)}"><strong>${fmt.money(b.utilidadBruta)}</strong></td>
+      <td class="cell-num">${pctTexto(pctDe(b.utilidadBruta, b.ventas))}</td>
+    </tr>`).join('')
+    : '<tr class="empty-row"><td colspan="5">Sin ventas de seminuevos en el periodo.</td></tr>';
+  if (foot) {
+    foot.innerHTML = ramas.length ? `
+      <tr class="row-subtotal">
+        <td><strong>Total seminuevos</strong></td>
+        <td class="cell-money"><strong>${fmt.money(s.ventas)}</strong></td>
+        <td class="cell-money"><strong>${fmt.money(s.costo)}</strong></td>
+        <td class="cell-money"><strong>${fmt.money(s.utilidadBruta)}</strong></td>
+        <td class="cell-num"><strong>${pctTexto(pctDe(s.utilidadBruta, s.ventas))}</strong></td>
+      </tr>
+      <tr><td>(−) Gastos del departamento y administración</td><td></td><td></td><td class="cell-money">${fmt.money(-sumaGastosDe(s))}</td><td></td></tr>
+      <tr class="row-highlight">
+        <td><strong>Utilidad de operación</strong></td><td></td><td></td>
+        <td class="cell-money ${moneyClass(s.utilidadOperacion)}"><strong>${fmt.money(s.utilidadOperacion)}</strong></td>
+        <td class="cell-num"><strong>${pctTexto(pctDe(s.utilidadOperacion, s.ventas))}</strong></td>
+      </tr>` : '';
+  }
+}
+
+function renderCompareRow(label, row, fmt, metric = 'ventas', clase = '') {
   const item = row[metric] || row;
   if (!item || item.real == null) return '';
+  const tono = favorClass(item.variacion, false);
   return `
-    <tr>
+    <tr${clase ? ` class="${clase}"` : ''}>
       <td><strong>${label}</strong></td>
       <td class="cell-money">${fmt.money(item.real)}</td>
       <td class="cell-money">${fmt.money(item.presupuesto)}</td>
-      <td class="cell-money ${variacionClass(item.variacion)}"><strong>${fmt.money(item.variacion)}</strong></td>
-      <td class="cell-num ${variacionClass(item.variacion)}">${item.variacionPct > 0 ? '+' : ''}${item.variacionPct}%</td>
+      <td class="cell-money ${tono}"><strong>${fmt.money(item.variacion)}</strong></td>
+      <td class="cell-num ${tono}">${formatPctLabel(item.variacionPct)}</td>
     </tr>`;
 }
 
@@ -1384,8 +1368,8 @@ function renderCompareLinesTable(tbodyId, lines, fmt) {
       <td${indent}>${row.label}</td>
       <td class="cell-money">${fmt.money(row.real)}</td>
       <td class="cell-money">${fmt.money(row.presupuesto)}</td>
-      <td class="cell-money ${variacionClass(row.variacion)}"><strong>${fmt.money(row.variacion)}</strong></td>
-      <td class="cell-num ${variacionClass(row.variacion)}">${row.variacionPct > 0 ? '+' : ''}${row.variacionPct}%</td>
+      <td class="cell-money ${favorClass(row.variacion, esEgreso(row.key, row.group))}"><strong>${fmt.money(row.variacion)}</strong></td>
+      <td class="cell-num ${favorClass(row.variacion, esEgreso(row.key, row.group))}">${formatPctLabel(row.variacionPct)}</td>
     </tr>`;
   }).join('');
 }
@@ -1434,23 +1418,15 @@ function renderComparativa(data, fmt) {
   const cmpItems = buildComparativaKpiItems(cmp);
   const s = cmp.estadoFinanciero?.summary || {};
   cmpItems.forEach((item) => {
-    if (item.id === 'ventasTotales') {
-      item.sub = `PPTO ${fmt.money(s.ventasTotales?.presupuesto)} · var. ${formatPctLabel(s.ventasTotales?.variacionPct)}`;
-    }
-    if (item.id === 'utilidadBruta') {
-      item.sub = `PPTO ${fmt.money(s.utilidadBruta?.presupuesto)} · var. ${fmt.money(s.utilidadBruta?.variacion)}`;
-    }
-    if (item.id === 'utilidadOperacion') {
-      item.sub = `PPTO ${fmt.money(s.utilidadOperacion?.presupuesto)} · var. ${formatPctLabel(s.utilidadOperacion?.variacionPct)}`;
-    }
-    if (item.id === 'periodo') {
-      item.sub = `${(cmp.factorPeriodo * 100).toFixed(0)}% del presupuesto anual`;
-    }
+    const it = s[item.cmpKey] || {};
+    const signo = Number(it.variacion) > 0 ? '+' : '';
+    item.sub = `PPTO ${fmt.money(it.presupuesto)} · var. ${signo}${fmt.money(it.variacion)} (${formatPctLabel(it.variacionPct)})`;
   });
   renderKpiGrid('kpiComparativa', cmpItems, fmt);
 
   if (subtitle) {
-    subtitle.textContent = formatComparativaPeriodLabel(fi, ff, cmp.mesesIncluidos);
+    const factor = Number.isFinite(Number(cmp.factorPeriodo)) ? ` · ${(cmp.factorPeriodo * 100).toFixed(0)} % del presupuesto anual` : '';
+    subtitle.textContent = `${formatComparativaPeriodLabel(fi, ff, cmp.mesesIncluidos)}${factor}`;
   }
 
   const exportBtn = document.getElementById('btnExportComparativa');
@@ -1461,16 +1437,22 @@ function renderComparativa(data, fmt) {
   const menudeoBody = document.getElementById('comparativaMenudeoTable');
   if (menudeoBody) {
     const rows = cmp.ventas?.menudeo || [];
+    const extra = [
+      cmp.ventas?.flotillas && renderCompareRow('Flotillas', cmp.ventas.flotillas, fmt, 'x'),
+      cmp.ventas?.intercambios && renderCompareRow('Intercambios', cmp.ventas.intercambios, fmt, 'x'),
+      cmp.ventas?.totalAutosNuevos && renderCompareRow('Total autos nuevos', cmp.ventas.totalAutosNuevos, fmt, 'x', 'row-highlight'),
+    ].filter(Boolean).join('');
     menudeoBody.innerHTML = rows.length
-      ? rows.map((r) => renderCompareRow(r.label, r, fmt, 'ventas')).join('')
+      ? rows.map((r) => renderCompareRow(r.label, r, fmt, 'ventas')).join('') + extra
       : '<tr class="empty-row"><td colspan="5">Sin menudeo en este periodo. Pruebe otro rango de fechas.</td></tr>';
   }
 
   const pvBody = document.getElementById('comparativaPostventaTable');
   if (pvBody) {
     const rows = cmp.postventa?.sections || [];
+    const totalPv = cmp.postventa?.summary?.ventas ? renderCompareRow('Total postventa', cmp.postventa.summary, fmt, 'ventas', 'row-highlight') : '';
     pvBody.innerHTML = rows.length
-      ? rows.map((r) => renderCompareRow(r.label, r, fmt, 'ventas')).join('')
+      ? rows.map((r) => renderCompareRow(r.label, r, fmt, 'ventas')).join('') + totalPv
       : '<tr class="empty-row"><td colspan="5">Sin postventa en este periodo. Pruebe otro rango de fechas.</td></tr>';
   }
 }
@@ -1493,7 +1475,17 @@ function switchCategoria(categoria) {
     }
   }
 
+  if (!document.querySelector(`.eeff-panel[data-panel="${categoria}"]`)) categoria = 'estadoFinanciero';
   activeCategoria = categoria;
+  // La vista se guarda en la URL (?vista=) para que recargar o compartir abra la misma.
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('tab') === 'eeff') {
+      if (categoria === 'estadoFinanciero') url.searchParams.delete('vista');
+      else url.searchParams.set('vista', categoria);
+      window.history.replaceState(window.history.state, '', url);
+    }
+  } catch { /* sin URL editable */ }
   document.querySelectorAll('.eeff-tab').forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.categoria === categoria);
   });
@@ -1506,6 +1498,7 @@ function renderAll(data) {
   const { fmt } = Dashboard;
   renderEdoFin(data, fmt);
   renderVentas(data, fmt);
+  renderSeminuevos(data, fmt);
   renderPostventa(data, fmt);
   renderComparativa(data, fmt);
   switchCategoria(activeCategoria);
@@ -1519,6 +1512,23 @@ async function loadEeffSummary(fechaInicio, fechaFin) {
   renderAll(data);
   return data;
 }
+
+try {
+  const vistaUrl = new URLSearchParams(window.location.search).get('vista');
+  if (vistaUrl) activeCategoria = vistaUrl;
+} catch { /* sin URL */ }
+
+document.addEventListener('click', (e) => {
+  const aVista = e.target.closest('[data-eeff-vista]');
+  if (aVista) {
+    closeEeffKpiFloat();
+    switchCategoria(aVista.dataset.eeffVista);
+    document.getElementById('eeffTabs')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    return;
+  }
+  const aTab = e.target.closest('[data-ir-tab]');
+  if (aTab) document.querySelector(`#contabilidadMainTabs [data-tab="${aTab.dataset.irTab}"]`)?.click();
+});
 
 document.getElementById('eeffTabs')?.addEventListener('click', (e) => {
   const tab = e.target.closest('.eeff-tab');

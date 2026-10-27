@@ -1,7 +1,7 @@
 window.AssistantChat = (function () {
   const STORAGE_KEY = 'balderrama-ai-chat-v2';
   const DEFAULT_WELCOME =
-    'Soy tu asistente de BALDERRAMA.\n'
+    'Soy Balvo, tu asistente de Balderrama.\n'
     + 'Razonaré con el lente de tu perfil y recordaré tus preferencias para enfocarme en lo que necesitas decidir.';
   let welcomeMessage = DEFAULT_WELCOME;
   let profileLabel = null;
@@ -17,7 +17,7 @@ window.AssistantChat = (function () {
   function buildWelcome(roleLabel) {
     if (!roleLabel) return DEFAULT_WELCOME;
     return (
-      `Soy tu asistente para el perfil **${roleLabel}**.\n`
+      `Soy Balvo, tu asistente para el perfil **${roleLabel}**.\n`
       + 'Uso el conocimiento de tu rol y la memoria de tus preferencias para responder enfocado a lo que necesitas decidir.'
     );
   }
@@ -474,6 +474,11 @@ window.AssistantChat = (function () {
       </div>`;
   }
 
+  function assistantAvatar() {
+    return window.AssistantMascot?.avatarSvg?.()
+      || '<span class="material-symbols-outlined">smart_toy</span>';
+  }
+
   function ensureChartJs() {
     if (typeof Chart !== 'undefined') return Promise.resolve();
     return new Promise((resolve, reject) => {
@@ -502,6 +507,9 @@ window.AssistantChat = (function () {
 
     let messages = [];
     let isLoading = false;
+    // Momento en que cada mensaje apareció, para animar solo los nuevos aunque se repinte.
+    const firstSeen = new WeakMap();
+    let hasRendered = false;
 
     const isExpanded = () => Boolean(options.getExpanded?.());
 
@@ -618,7 +626,7 @@ window.AssistantChat = (function () {
         && (
           messages[0]?.content === welcomeMessage
           || messages[0]?.content === DEFAULT_WELCOME
-          || String(messages[0]?.content || '').startsWith('Soy tu asistente')
+          || /^Soy (tu asistente|Balvo)/.test(String(messages[0]?.content || ''))
         );
     }
 
@@ -768,29 +776,46 @@ window.AssistantChat = (function () {
           ? `<div class="assistant-msg__content assistant-msg__content--plain">${escapeHtml(msg.content).replace(/\n/g, '<br/>')}</div>`
           : `<div class="assistant-msg__content">${formatMarkdown(msg.content)}</div>`;
 
+        const now = performance.now();
+        if (!firstSeen.has(msg)) firstSeen.set(msg, hasRendered ? now : -1e9);
+        const age = now - firstSeen.get(msg);
+        const isNew = age < 500;
+
         return `
-          <article class="assistant-msg ${isUser ? 'assistant-msg--user' : 'assistant-msg--assistant'}">
+          <article class="assistant-msg ${isUser ? 'assistant-msg--user' : 'assistant-msg--assistant'}${isNew ? ' assistant-msg--new' : ''}"${isNew ? ` style="animation-delay:-${Math.round(age)}ms"` : ''}>
             <div class="assistant-msg__avatar">
-              <span class="material-symbols-outlined">${isUser ? 'person' : 'smart_toy'}</span>
+              ${isUser ? '<span class="material-symbols-outlined">person</span>' : assistantAvatar()}
             </div>
             <div class="assistant-msg__body">
               ${blocks}
               ${prose}
+              ${isUser ? '' : `<button type="button" class="assistant-speak" data-ai-speak="${msgIndex}" title="Escuchar" aria-label="Escuchar respuesta"><span class="material-symbols-outlined">volume_up</span></button>`}
               ${exportsHtml}
               ${tools}
             </div>
           </article>`;
       }).join('');
 
+      hasRendered = true;
       renderVizPanel(latestBlocks, latestBlocksIndex);
 
       if (isLoading) {
         chatMessages.insertAdjacentHTML('beforeend', `
-          <article class="assistant-msg assistant-msg--assistant assistant-msg--loading">
-            <div class="assistant-msg__avatar"><span class="material-symbols-outlined">smart_toy</span></div>
+          <article class="assistant-msg assistant-msg--assistant assistant-msg--loading" aria-live="polite">
+            <div class="assistant-msg__avatar">${assistantAvatar()}</div>
             <div class="assistant-msg__body">
-              <div class="assistant-typing"><span></span><span></span><span></span></div>
-              <p class="assistant-msg__meta">Consultando datos y razonando…</p>
+              <div class="assistant-thinking">
+                <div class="assistant-thinking__row">
+                  <div class="assistant-typing" aria-hidden="true"><span></span><span></span><span></span></div>
+                  <span class="assistant-thinking__label">Pensando</span>
+                </div>
+                <div class="assistant-thinking__steps" aria-hidden="true">
+                  <span>Consultando datos…</span>
+                  <span>Cruzando cifras del periodo…</span>
+                  <span>Armando la respuesta…</span>
+                </div>
+                <div class="assistant-thinking__bar" aria-hidden="true"></div>
+              </div>
             </div>
           </article>`);
       }
@@ -850,6 +875,7 @@ window.AssistantChat = (function () {
 
     function setLoading(state) {
       isLoading = state;
+      options.onLoading?.(state);
       if (btnSend) btnSend.disabled = state || !chatInput.value.trim();
       chatInput.disabled = state;
       renderMessages();
@@ -863,20 +889,27 @@ window.AssistantChat = (function () {
         if (!data.configured) {
           aiStatusBadge.textContent = 'Sin API key';
           aiStatusBadge.classList.add('assistant-status--warn');
+          aiStatusBadge.dataset.state = 'warn';
           return false;
         }
-        aiStatusBadge.textContent = data.model;
+        const via = data.source === 'railway' ? 'nube' : null;
+        aiStatusBadge.textContent = data.model
+          ? `En línea${via ? ` · ${via}` : ''} · ${data.model}`
+          : (via ? `En línea · ${via}` : 'En línea');
+        aiStatusBadge.dataset.state = 'ok';
         return true;
       } catch {
         aiStatusBadge.textContent = 'Sin conexión';
         aiStatusBadge.classList.add('assistant-status--warn');
+        aiStatusBadge.dataset.state = 'warn';
         return false;
       }
     }
 
-    async function sendMessage(text) {
+    async function sendMessage(text, { speakReply = false } = {}) {
       const content = String(text || '').trim();
       if (!content || isLoading) return;
+      if (speakReply) setVoiceState('thinking');
 
       await ensureChartJs().catch(() => {});
 
@@ -884,6 +917,7 @@ window.AssistantChat = (function () {
       saveHistory();
       renderMessages();
       setLoading(true);
+      let ok = false;
 
       try {
         const payload = messages
@@ -907,6 +941,8 @@ window.AssistantChat = (function () {
           exports: data.exports || [],
         });
         saveHistory();
+        ok = true;
+        if (voiceOn || speakReply) speak(data.reply || '');
       } catch (err) {
         messages.push({
           role: 'assistant',
@@ -914,17 +950,324 @@ window.AssistantChat = (function () {
           blocks: [],
         });
         saveHistory();
+        if (speakReply) setVoiceState('idle');
       } finally {
         setLoading(false);
-        chatInput.focus();
+        const last = messages[messages.length - 1];
+        options.onReply?.({ ok, reply: last?.content || '', hasBlocks: Boolean(last?.blocks?.length) });
+        if (!speakReply) chatInput.focus();
       }
     }
+
+    function setVoiceState(state) {
+      options.onVoiceState?.(state);
+    }
+
+    const VOICE_KEY = 'balderrama-assistant-voice';
+    const voiceName = 'echo';
+    let voiceOn = localStorage.getItem(VOICE_KEY) === '1';
+    let speechAudio = null;
+    let recognition = null;
+    let listening = false;
+    const btnMic = q('[data-ai="mic"]');
+    const btnVoice = q('[data-ai="voice"]');
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    function plainSpeech(text) {
+      return String(text || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/[#*_`>\[\]()]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 700);
+    }
+
+    function speakWithSystem(phrase) {
+      if (!phrase || !window.speechSynthesis) {
+        setVoiceState('idle');
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(phrase);
+      utter.lang = 'es-MX';
+      const voices = window.speechSynthesis.getVoices() || [];
+      utter.voice = voices.find((item) => /es-MX/i.test(item.lang))
+        || voices.find((item) => /^es/i.test(item.lang))
+        || null;
+      utter.onend = () => setVoiceState('idle');
+      utter.onerror = () => setVoiceState('idle');
+      setVoiceState('speaking');
+      window.speechSynthesis.speak(utter);
+    }
+
+    async function speak(text) {
+      const phrase = plainSpeech(text);
+      if (!phrase) return;
+      stopSpeaking();
+      try {
+        const res = await fetch('/api/ai/speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ text: phrase, voice: voiceName }),
+        });
+        if (!res.ok) throw new Error(`speech ${res.status}`);
+        const url = URL.createObjectURL(await res.blob());
+        const audio = new Audio(url);
+        speechAudio = audio;
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          if (speechAudio === audio) speechAudio = null;
+          setVoiceState('idle');
+        };
+        setVoiceState('speaking');
+        await audio.play();
+      } catch (err) {
+        console.warn('[Balvo voz]', err.message);
+        speakWithSystem(phrase);
+      }
+    }
+
+    function stopSpeaking() {
+      if (speechAudio) {
+        speechAudio.pause();
+        speechAudio = null;
+      }
+      window.speechSynthesis?.cancel();
+    }
+
+    const canRecord = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+    let voiceTurn = null;
+
+    function voiceError(message) {
+      setVoiceState('idle');
+      options.onVoiceError?.(message);
+    }
+
+    function releaseVoiceTurn(turn) {
+      if (!turn) return;
+      clearInterval(turn.timer);
+      turn.stream.getTracks().forEach((t) => t.stop());
+      turn.audioCtx?.close().catch(() => {});
+      if (voiceTurn === turn) voiceTurn = null;
+    }
+
+    async function transcribeAndSend(blob) {
+      setVoiceState('thinking');
+      try {
+        const res = await fetch('/api/ai/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': blob.type || 'audio/webm' },
+          credentials: 'same-origin',
+          body: blob,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `transcribe ${res.status}`);
+        const text = String(data.text || '').trim();
+        if (!text) {
+          voiceError('No alcancé a escucharte. Toca el botón y vuelve a intentarlo.');
+          return;
+        }
+        options.onVoiceTranscript?.(text);
+        sendMessage(text, { speakReply: true });
+      } catch (err) {
+        console.warn('[Balvo voz] transcripción', err.message);
+        voiceError('No pude entender el audio. Intenta de nuevo o usa el modo Chat.');
+      }
+    }
+
+    /** Graba hasta detectar ~1.4 s de silencio tras hablar (máx. 20 s) y transcribe en el backend. */
+    async function startRecordedTurn() {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+      } catch (err) {
+        console.warn('[Balvo voz] micrófono', err.name, err.message);
+        voiceError(err.name === 'NotAllowedError'
+          ? 'Sin permiso de micrófono. Actívalo en la configuración del sistema.'
+          : 'No encontré un micrófono disponible.');
+        return;
+      }
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+        .find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const chunks = [];
+      const turn = { stream, recorder, cancelled: false, timer: null, audioCtx: null };
+      voiceTurn = turn;
+      recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const spoke = turn.spoke;
+        releaseVoiceTurn(turn);
+        listening = false;
+        syncMicButton();
+        if (turn.cancelled) return;
+        if (!spoke || !chunks.length) {
+          voiceError('No te escuché. Toca el botón y habla cerca del micrófono.');
+          return;
+        }
+        transcribeAndSend(new Blob(chunks, { type: recorder.mimeType || mime || 'audio/webm' }));
+      };
+
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      const started = Date.now();
+      let lastVoice = started;
+      if (Ctx) {
+        turn.audioCtx = new Ctx();
+        const analyser = turn.audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        turn.audioCtx.createMediaStreamSource(stream).connect(analyser);
+        const buf = new Uint8Array(analyser.fftSize);
+        turn.timer = setInterval(() => {
+          analyser.getByteTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i += 1) {
+            const v = (buf[i] - 128) / 128;
+            sum += v * v;
+          }
+          const now = Date.now();
+          if (Math.sqrt(sum / buf.length) > 0.035) {
+            turn.spoke = true;
+            lastVoice = now;
+          }
+          const silentFor = now - lastVoice;
+          if ((turn.spoke && silentFor > 1400) || (!turn.spoke && now - started > 8000) || now - started > 20000) {
+            if (recorder.state === 'recording') recorder.stop();
+          }
+        }, 100);
+      } else {
+        turn.spoke = true;
+        turn.timer = setTimeout(() => recorder.state === 'recording' && recorder.stop(), 8000);
+      }
+
+      listening = true;
+      setVoiceState('listening');
+      recorder.start(250);
+    }
+
+    function startVoiceTurn() {
+      if (listening || isLoading || voiceTurn) return;
+      if (canRecord) {
+        stopSpeaking();
+        startRecordedTurn();
+        return;
+      }
+      if (!SpeechRec) {
+        setVoiceState('unsupported');
+        return;
+      }
+      stopSpeaking();
+      recognition = new SpeechRec();
+      recognition.lang = 'es-MX';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      let said = '';
+      recognition.onresult = (event) => {
+        said = '';
+        for (let i = 0; i < event.results.length; i += 1) said += event.results[i][0].transcript;
+        options.onVoiceTranscript?.(said.trim());
+      };
+      recognition.onend = () => {
+        listening = false;
+        syncMicButton();
+        const text = said.trim();
+        if (text) sendMessage(text, { speakReply: true });
+        else setVoiceState('idle');
+      };
+      recognition.onerror = (event) => {
+        listening = false;
+        syncMicButton();
+        voiceError(event?.error === 'not-allowed'
+          ? 'Sin permiso de micrófono.'
+          : 'El dictado no está disponible aquí. Usa el modo Chat.');
+      };
+      listening = true;
+      setVoiceState('listening');
+      recognition.start();
+    }
+
+    function stopVoice() {
+      if (voiceTurn) {
+        voiceTurn.cancelled = true;
+        if (voiceTurn.recorder.state === 'recording') voiceTurn.recorder.stop();
+        else releaseVoiceTurn(voiceTurn);
+      }
+      try { recognition?.stop(); } catch { /* ya detenido */ }
+      listening = false;
+      stopSpeaking();
+      syncMicButton();
+      setVoiceState('idle');
+    }
+
+    function syncVoiceButton() {
+      if (!btnVoice) return;
+      btnVoice.setAttribute('aria-pressed', voiceOn ? 'true' : 'false');
+      btnVoice.title = voiceOn ? 'Voz activada' : 'Leer respuestas en voz';
+      btnVoice.classList.toggle('is-on', voiceOn);
+      const icon = btnVoice.querySelector('.material-symbols-outlined');
+      if (icon) icon.textContent = voiceOn ? 'volume_up' : 'volume_off';
+    }
+
+    function syncMicButton() {
+      if (!btnMic) return;
+      btnMic.hidden = !SpeechRec;
+      btnMic.setAttribute('aria-pressed', listening ? 'true' : 'false');
+      btnMic.classList.toggle('is-on', listening);
+      btnMic.title = listening ? 'Detener dictado' : 'Dictar';
+    }
+
+    function stopDictation() {
+      listening = false;
+      try { recognition?.stop(); } catch { /* ya detenido */ }
+      syncMicButton();
+    }
+
+    function startDictation() {
+      if (!SpeechRec || listening) return;
+      recognition = new SpeechRec();
+      recognition.lang = 'es-MX';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      const base = chatInput.value.trim();
+      recognition.onresult = (event) => {
+        let said = '';
+        for (let i = 0; i < event.results.length; i += 1) said += event.results[i][0].transcript;
+        chatInput.value = `${base}${base ? ' ' : ''}${said.trim()}`;
+        chatInput.dispatchEvent(new Event('input'));
+      };
+      recognition.onend = () => { listening = false; syncMicButton(); };
+      recognition.onerror = () => { listening = false; syncMicButton(); };
+      listening = true;
+      syncMicButton();
+      stopSpeaking();
+      recognition.start();
+    }
+
+    btnMic?.addEventListener('click', () => (listening ? stopDictation() : startDictation()));
+    btnVoice?.addEventListener('click', () => {
+      voiceOn = !voiceOn;
+      localStorage.setItem(VOICE_KEY, voiceOn ? '1' : '0');
+      syncVoiceButton();
+      if (!voiceOn) stopSpeaking();
+      else speak('Hola, soy Balvo.');
+    });
+    chatMessages.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-ai-speak]');
+      if (!btn) return;
+      const msg = messages[Number(btn.dataset.aiSpeak)];
+      if (msg?.content) speak(msg.content);
+    });
+    syncVoiceButton();
+    syncMicButton();
 
     renderSuggestedPrompts({ reshuffle: true });
 
     chatForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const text = chatInput.value;
+      stopDictation();
+      stopSpeaking();
       chatInput.value = '';
       chatInput.style.height = 'auto';
       if (btnSend) btnSend.disabled = true;
@@ -1021,6 +1364,9 @@ window.AssistantChat = (function () {
 
     return {
       sendMessage,
+      startVoiceTurn,
+      stopVoice,
+      isListening: () => listening,
       focus: () => chatInput.focus(),
       refresh: renderMessages,
       refreshSuggestions: () => renderSuggestedPrompts({ reshuffle: true }),

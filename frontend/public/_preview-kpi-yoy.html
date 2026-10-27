@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Vista previa KPI YoY · Ventas</title>
+  <link href="/css/dashboard.css?v=172" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <style>
+    body { margin: 0; background: #eef2f7; font-family: Inter, system-ui, sans-serif; }
+    .preview-wrap { max-width: 980px; margin: 32px auto; padding: 0 20px 40px; }
+    .preview-note {
+      margin-bottom: 16px; padding: 12px 14px; border-radius: 10px;
+      background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; font-size: 13px; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-wrap">
+    <p class="preview-note">
+      Vista previa del formato (datos de ejemplo). La consulta real a SQL está caída en este momento:
+      no se pudo conectar a la BD, por eso Ventas muestra 0.
+    </p>
+    <section class="kpi-grid kpi-grid--yoy" id="panelVentasUnidades">
+      <div class="kpi-card kpi-card--blue kpi-card--yoy">
+        <div class="kpi-card-head">
+          <span class="kpi-title">Total ventas</span>
+          <span class="material-symbols-outlined kpi-icon">shopping_cart</span>
+        </div>
+        <div class="kpi-value">116</div>
+        <div class="kpi-yoy" data-kpi-yoy="totalVentas">
+          <span class="kpi-yoy-badge is-down" data-yoy-badge>-18.5%</span>
+          <span class="kpi-yoy-prior" data-yoy-prior>2025: 142</span>
+        </div>
+      </div>
+      <div class="kpi-card kpi-card--green kpi-card--yoy">
+        <div class="kpi-card-head">
+          <span class="kpi-title">Ventas retail</span>
+          <span class="material-symbols-outlined kpi-icon">storefront</span>
+        </div>
+        <div class="kpi-value">103</div>
+        <div class="kpi-yoy">
+          <span class="kpi-yoy-badge is-down">-12.7%</span>
+          <span class="kpi-yoy-prior">2025: 118</span>
+        </div>
+      </div>
+      <div class="kpi-card kpi-card--slate kpi-card--yoy">
+        <div class="kpi-card-head">
+          <span class="kpi-title">Flotillas</span>
+          <span class="material-symbols-outlined kpi-icon">local_shipping</span>
+        </div>
+        <div class="kpi-value">13</div>
+        <div class="kpi-yoy">
+          <span class="kpi-yoy-badge is-down">-31.2%</span>
+          <span class="kpi-yoy-prior">2025: 24</span>
+        </div>
+      </div>
+      <div class="kpi-card kpi-card--magenta kpi-card--yoy">
+        <div class="kpi-card-head">
+          <span class="kpi-title">Notif. entrega SOFIA</span>
+        </div>
+        <div class="kpi-value">110</div>
+        <div class="kpi-yoy">
+          <span class="kpi-yoy-badge is-down">-15.4%</span>
+          <span class="kpi-yoy-prior">2025: 130</span>
+        </div>
+      </div>
+      <div class="kpi-card kpi-card--violet kpi-card--yoy">
+        <div class="kpi-card-head">
+          <span class="kpi-title">Cobertura</span>
+          <span class="material-symbols-outlined kpi-icon">donut_large</span>
+        </div>
+        <div class="kpi-value">91.67%</div>
+        <div class="kpi-yoy">
+          <span class="kpi-yoy-badge is-up">+4.2%</span>
+          <span class="kpi-yoy-prior">2025: 135 u</span>
+        </div>
+      </div>
+      <div class="kpi-card kpi-card--green kpi-card--yoy">
+        <div class="kpi-card-head">
+          <span class="kpi-title">Ejemplo al alza</span>
+          <span class="material-symbols-outlined kpi-icon">payments</span>
+        </div>
+        <div class="kpi-value">5,737,330</div>
+        <div class="kpi-yoy">
+          <span class="kpi-yoy-badge is-up">+8.3%</span>
+          <span class="kpi-yoy-prior">2025: 5,297,000</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

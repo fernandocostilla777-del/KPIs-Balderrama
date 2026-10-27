@@ -22,6 +22,7 @@ const SERVICE = path.join(ROOT, 'backend', 'src', 'services', 'intelligentInsigh
 const PANTALLAS = {
   buildVentasInsights: ['sales', 'sales', 'comisiones', 'analisisComercial', 'financiamiento', 'leads', 'afluencia'],
   buildContabilidadInsights: ['contabilidad', 'eeff'],
+  buildEstadoResultadosInsights: ['contabilidad', 'contabilidad-formato'],
   buildAnalisisFinancieroInsights: ['contabilidad', 'analisisFinanciero', 'eeff'],
   buildLiquidezInsights: ['contabilidad', 'analisisFinanciero', 'eeff'],
   buildOverviewInsights: ['index', 'overview'],

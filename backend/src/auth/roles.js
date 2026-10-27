@@ -3,6 +3,7 @@ const {
   resolveHomePath,
   resolveApiPrefixes,
   listPageCatalog,
+  listActionCatalog,
   getOverrides,
   updateRolePermissions,
   resetRolePermissions,
@@ -100,6 +101,7 @@ const ALWAYS_API_PREFIXES = [
   '/auth/summary-kpi-prefs',
   '/auth/password-reset',
   '/health',
+  '/data-source',
   '/ai',
 ];
 
@@ -107,14 +109,29 @@ function getDefaultRole(roleId) {
   return ROLE_DEFAULTS[roleId] || null;
 }
 
+function defaultActionsForRole(roleId) {
+  const role = getDefaultRole(roleId);
+  if (!role) return {};
+  const allActions = listActionCatalog().map((action) => action.id);
+  return Object.fromEntries(
+    role.pages.map((pageId) => [
+      pageId,
+      roleId === 'administracion' ? allActions : ['leer'],
+    ]),
+  );
+}
+
 function getRole(roleId) {
   const base = getDefaultRole(roleId);
   if (!base) return null;
 
   const override = getRoleOverride(roleId);
+  const actions = override?.actions && typeof override.actions === 'object'
+    ? override.actions
+    : defaultActionsForRole(roleId);
   const pages = Array.isArray(override?.pages) && override.pages.length
     ? [...override.pages]
-    : [...base.pages];
+    : Object.keys(actions).filter((pageId) => actions[pageId]?.includes('leer'));
 
   // Administración siempre gestiona usuarios y conserva página admin
   if (base.canManageUsers && !pages.includes('admin')) {
@@ -140,6 +157,7 @@ function getRole(roleId) {
     canManageUsers: !!base.canManageUsers,
     apiPrefixes,
     isCustomized: Boolean(override?.pages),
+    actions,
   };
 }
 
@@ -150,6 +168,7 @@ function listRoles() {
       id: role.id,
       label: role.label,
       pages: role.pages,
+      actions: role.actions,
       homePath: role.homePath,
       canManageUsers: role.canManageUsers,
       isCustomized: role.isCustomized,
@@ -192,15 +211,22 @@ function canManageUsers(roleId) {
 function getRolePermissionsPayload() {
   const store = readStore();
   const defaults = {};
+  const defaultActions = {};
   for (const id of Object.keys(ROLE_DEFAULTS)) {
     defaults[id] = [...ROLE_DEFAULTS[id].pages];
+    defaultActions[id] = defaultActionsForRole(id);
   }
   return {
     pages: listPageCatalog(),
+    actionCatalog: listActionCatalog(),
     roles: listRoles(),
     defaults,
+    defaultActions,
     byRole: Object.fromEntries(
-      Object.keys(ROLE_DEFAULTS).map((id) => [id, { pages: getRole(id).pages }]),
+      Object.keys(ROLE_DEFAULTS).map((id) => {
+        const role = getRole(id);
+        return [id, { pages: role.pages, actions: role.actions }];
+      }),
     ),
     updatedAt: store.updatedAt,
   };

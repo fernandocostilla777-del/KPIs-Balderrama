@@ -30,8 +30,11 @@
     alertPrefsGrid: document.getElementById('alertPrefsGrid'),
     btnSaveAlertPrefs: document.getElementById('btnSaveAlertPrefs'),
     rolePermissionsGrid: document.getElementById('rolePermissionsGrid'),
+    rolePermissionsSelect: document.getElementById('rolePermissionsSelect'),
     rolePermissionsMeta: document.getElementById('rolePermissionsMeta'),
     rolePermissionsDirty: document.getElementById('rolePermissionsDirty'),
+    rolePermissionsSummaryMeta: document.getElementById('rolePermissionsSummaryMeta'),
+    rolePermissionsSummaryGrid: document.getElementById('rolePermissionsSummaryGrid'),
     btnSaveRolePermissions: document.getElementById('btnSaveRolePermissions'),
     btnResetRolePermissions: document.getElementById('btnResetRolePermissions'),
     prorationMeta: document.getElementById('prorationMeta'),
@@ -63,8 +66,11 @@
   let alertTypes = [];
   let alertPrefs = {};
   let pageCatalog = [];
+  let actionCatalog = [];
   let rolePageDefaults = {};
   let rolePagesByRole = {};
+  let roleActionsByRole = {};
+  let selectedPermissionRole = '';
   let rolePermDirty = false;
   let prorationCatalog = { ventas: [], postventa: [] };
   let prorationConfig = null;
@@ -210,39 +216,26 @@
       els.rolePermissionsGrid.innerHTML = '<p class="admin-hint">No hay roles o páginas configuradas.</p>';
       return;
     }
-
-    const roleCols = roles.map((role) => {
-      const pages = pagesForRole(role.id);
-      const nUsers = usersCountByRole(role.id);
-      const nPages = pages.length;
-      return `
-        <th scope="col" class="admin-perm-role-col" data-role-col="${esc(role.id)}">
-          <div class="admin-perm-role-head">
-            <strong>${esc(role.label)}</strong>
-            <span class="admin-perm-role-meta">${nUsers} usuario${nUsers === 1 ? '' : 's'} · ${nPages} módulo${nPages === 1 ? '' : 's'}</span>
-            <div class="admin-role-perm-actions">
-              <button type="button" class="btn-glass btn-secondary btn-xs" data-role-select-all="${esc(role.id)}" title="Marcar todos">Todos</button>
-              <button type="button" class="btn-glass btn-secondary btn-xs" data-role-select-none="${esc(role.id)}" title="Quitar todos">Ninguno</button>
-            </div>
-          </div>
-        </th>`;
-    }).join('');
-
+    if (!selectedPermissionRole || !roles.some((role) => role.id === selectedPermissionRole)) {
+      selectedPermissionRole = roles[0].id;
+    }
+    const role = roles.find((item) => item.id === selectedPermissionRole);
+    const actions = roleActionsByRole[role.id] || {};
     const bodyRows = pageCatalog.map((page) => {
-      const cells = roles.map((role) => {
-        const enabled = new Set(pagesForRole(role.id));
-        const lockAdmin = role.id === 'administracion' && page.id === 'admin';
-        const checked = enabled.has(page.id) || lockAdmin;
+      const cells = actionCatalog.map((action) => {
+        const lockAdmin = role.id === 'administracion' && page.id === 'admin' && action.id === 'leer';
+        const checked = actions[page.id]?.includes(action.id) || lockAdmin;
         return `
           <td class="admin-perm-cell${checked ? ' is-on' : ''}${lockAdmin ? ' is-locked' : ''}">
-            <label class="admin-perm-toggle" title="${esc(role.label)} → ${esc(page.label)}${lockAdmin ? ' (obligatorio)' : ''}">
+            <label class="admin-perm-toggle" title="${esc(role.label)} → ${esc(page.label)}: ${esc(action.label)}${lockAdmin ? ' (obligatorio)' : ''}">
               <input type="checkbox"
                 data-role-perm="${esc(role.id)}"
                 data-page="${esc(page.id)}"
+                data-action="${esc(action.id)}"
                 ${checked ? 'checked' : ''}
                 ${lockAdmin ? 'disabled' : ''}
-                aria-label="${esc(role.label)}: ${esc(page.label)}"/>
-              <span class="admin-perm-toggle-ui" aria-hidden="true"></span>
+                aria-label="${esc(role.label)}: ${esc(page.label)}, ${esc(action.label)}"/>
+              <span class="admin-perm-toggle-ui" aria-hidden="true">${checked ? '✓' : '×'}</span>
             </label>
           </td>`;
       }).join('');
@@ -261,27 +254,36 @@
         <table class="admin-perm-matrix" role="grid" aria-label="Matriz de permisos por rol">
           <thead>
             <tr>
-              <th scope="col" class="admin-perm-corner">Módulo</th>
-              ${roleCols}
+              <th scope="col" class="admin-perm-corner">Recurso</th>
+              ${actionCatalog.map((action) => `<th scope="col">${esc(action.label)}</th>`).join('')}
             </tr>
           </thead>
           <tbody>${bodyRows}</tbody>
         </table>
       </div>`;
-    setRolePermDirty(false);
+    renderRolePermissionSummary();
   }
 
-  function refreshRoleMetaCounts() {
-    if (!els.rolePermissionsGrid) return;
-    roles.forEach((role) => {
-      const head = els.rolePermissionsGrid.querySelector(`[data-role-col="${role.id}"] .admin-perm-role-meta`);
-      if (!head) return;
-      const nUsers = usersCountByRole(role.id);
-      const nPages = els.rolePermissionsGrid.querySelectorAll(
-        `input[type="checkbox"][data-role-perm="${role.id}"]:checked, input[type="checkbox"][data-role-perm="${role.id}"]:disabled`,
-      ).length;
-      head.textContent = `${nUsers} usuario${nUsers === 1 ? '' : 's'} · ${nPages} módulo${nPages === 1 ? '' : 's'}`;
-    });
+  function renderRolePermissionSummary() {
+    if (!els.rolePermissionsSummaryGrid) return;
+    const role = roles.find((item) => item.id === selectedPermissionRole);
+    const actions = roleActionsByRole[selectedPermissionRole] || {};
+    if (els.rolePermissionsSummaryMeta) {
+      const usersForRole = usersCountByRole(selectedPermissionRole);
+      els.rolePermissionsSummaryMeta.textContent = `${role?.label || 'Rol'} · ${usersForRole} usuario${usersForRole === 1 ? '' : 's'} hereda${usersForRole === 1 ? '' : 'n'} esta configuración.`;
+    }
+    els.rolePermissionsSummaryGrid.innerHTML = pageCatalog.map((page) => {
+      const active = actions[page.id] || [];
+      return `
+        <article class="admin-perm-summary-card${active.length ? '' : ' is-empty'}">
+          <strong>${esc(page.label)}</strong>
+          <div class="admin-perm-summary-pills">${
+            active.length
+              ? active.map((id) => `<span>${esc(actionCatalog.find((action) => action.id === id)?.label || id)}</span>`).join('')
+              : '<small>Sin acceso</small>'
+          }</div>
+        </article>`;
+    }).join('');
   }
 
   function syncPermCellState(input) {
@@ -291,19 +293,23 @@
   }
 
   function collectRolePermissionsFromDom() {
-    const next = {};
-    roles.forEach((r) => { next[r.id] = { pages: [] }; });
-    els.rolePermissionsGrid?.querySelectorAll('input[type="checkbox"][data-role-perm][data-page]').forEach((input) => {
+    const next = Object.fromEntries(roles.map((role) => [
+      role.id,
+      { actions: JSON.parse(JSON.stringify(roleActionsByRole[role.id] || {})) },
+    ]));
+    const selected = next[selectedPermissionRole] || { actions: {} };
+    selected.actions = {};
+    els.rolePermissionsGrid?.querySelectorAll('input[type="checkbox"][data-role-perm][data-page][data-action]').forEach((input) => {
       if (!input.checked && !input.disabled) return;
-      const role = input.dataset.rolePerm;
       const page = input.dataset.page;
-      if (!next[role]) next[role] = { pages: [] };
-      if (input.checked || input.disabled) next[role].pages.push(page);
+      const action = input.dataset.action;
+      if (!selected.actions[page]) selected.actions[page] = [];
+      selected.actions[page].push(action);
     });
-    // Administración siempre incluye admin aunque el checkbox esté disabled
-    if (next.administracion && !next.administracion.pages.includes('admin')) {
-      next.administracion.pages.unshift('admin');
+    if (selectedPermissionRole === 'administracion' && !selected.actions.admin?.includes('leer')) {
+      selected.actions.admin = ['leer', ...(selected.actions.admin || [])];
     }
+    next[selectedPermissionRole] = selected;
     return next;
   }
 
@@ -312,13 +318,23 @@
     try {
       const data = await api('/auth/role-permissions');
       pageCatalog = data.pages || [];
+      actionCatalog = data.actionCatalog || [];
       rolePageDefaults = data.defaults || {};
       rolePagesByRole = {};
+      roleActionsByRole = {};
       Object.entries(data.byRole || {}).forEach(([id, cfg]) => {
         rolePagesByRole[id] = cfg?.pages || [];
+        roleActionsByRole[id] = cfg?.actions || Object.fromEntries((cfg?.pages || []).map((page) => [page, ['leer']]));
       });
       if (data.roles?.length) {
         roles = data.roles.map((r) => ({ id: r.id, label: r.label, pages: r.pages }));
+      }
+      if (els.rolePermissionsSelect) {
+        els.rolePermissionsSelect.innerHTML = roles.map((role) => `<option value="${esc(role.id)}">${esc(role.label)}</option>`).join('');
+        if (!selectedPermissionRole || !roles.some((role) => role.id === selectedPermissionRole)) {
+          selectedPermissionRole = roles[0]?.id || '';
+        }
+        els.rolePermissionsSelect.value = selectedPermissionRole;
       }
       if (els.rolePermissionsMeta) {
         els.rolePermissionsMeta.textContent = data.updatedAt
@@ -327,6 +343,7 @@
       }
       renderRolePermissions();
       renderUsers();
+      setRolePermDirty(false);
     } catch (err) {
       els.rolePermissionsGrid.innerHTML = `<p class="admin-hint">${esc(err.message || 'No se pudieron cargar los permisos.')}</p>`;
     }
@@ -347,14 +364,22 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || res.statusText);
       pageCatalog = data.pages || pageCatalog;
+      actionCatalog = data.actionCatalog || actionCatalog;
       rolePageDefaults = data.defaults || rolePageDefaults;
       rolePagesByRole = {};
+      roleActionsByRole = {};
       Object.entries(data.byRole || {}).forEach(([id, cfg]) => {
         rolePagesByRole[id] = cfg?.pages || [];
+        roleActionsByRole[id] = cfg?.actions || Object.fromEntries((cfg?.pages || []).map((page) => [page, ['leer']]));
       });
       if (data.roles?.length) {
         roles = data.roles.map((r) => ({ id: r.id, label: r.label, pages: r.pages }));
         fillRoleOptions(els.formRole?.value || roles[0]?.id);
+      }
+      if (els.rolePermissionsSelect) {
+        els.rolePermissionsSelect.innerHTML = roles.map((role) => `<option value="${esc(role.id)}">${esc(role.label)}</option>`).join('');
+        if (!roles.some((role) => role.id === selectedPermissionRole)) selectedPermissionRole = roles[0]?.id || '';
+        els.rolePermissionsSelect.value = selectedPermissionRole;
       }
       if (els.rolePermissionsMeta) {
         els.rolePermissionsMeta.textContent = data.updatedAt
@@ -928,26 +953,22 @@
     if (!window.confirm('¿Restablecer los permisos de todos los roles a los valores precargados?')) return;
     saveRolePermissions({ reset: true });
   });
+  els.rolePermissionsSelect?.addEventListener('change', () => {
+    selectedPermissionRole = els.rolePermissionsSelect.value;
+    renderRolePermissions();
+  });
   els.rolePermissionsGrid?.addEventListener('change', (e) => {
-    const input = e.target.closest('input[type="checkbox"][data-role-perm][data-page]');
+    const input = e.target.closest('input[type="checkbox"][data-role-perm][data-page][data-action]');
     if (!input) return;
     syncPermCellState(input);
-    refreshRoleMetaCounts();
     setRolePermDirty(true);
-  });
-  els.rolePermissionsGrid?.addEventListener('click', (e) => {
-    const allBtn = e.target.closest('[data-role-select-all]');
-    const noneBtn = e.target.closest('[data-role-select-none]');
-    const roleId = allBtn?.dataset.roleSelectAll || noneBtn?.dataset.roleSelectNone;
-    if (!roleId) return;
-    const selectAll = Boolean(allBtn);
-    els.rolePermissionsGrid.querySelectorAll(`input[type="checkbox"][data-role-perm="${roleId}"]`).forEach((input) => {
-      if (input.disabled) return;
-      input.checked = selectAll;
-      syncPermCellState(input);
-    });
-    refreshRoleMetaCounts();
-    setRolePermDirty(true);
+    const draft = collectRolePermissionsFromDom();
+    roleActionsByRole[selectedPermissionRole] = draft[selectedPermissionRole].actions;
+    rolePagesByRole[selectedPermissionRole] = Object.entries(draft[selectedPermissionRole].actions)
+      .filter(([, actions]) => actions.includes('leer'))
+      .map(([page]) => page);
+    renderRolePermissionSummary();
+    renderUsers();
   });
   els.btnSaveProration?.addEventListener('click', () => saveProration());
   els.btnResetProration?.addEventListener('click', () => {

@@ -6,7 +6,7 @@
 <title>Administración | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=166" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=172" rel="stylesheet"/>
 <script src="/js/theme.js?v=1"></script>
 </head>
 <body class="dashboard-body" data-page="admin">
@@ -55,7 +55,7 @@
 <div class="admin-header">
 <div>
 <h2 class="section-title">Permisos por rol</h2>
-<p class="admin-subtitle">Marque qué módulos ve cada rol. Los usuarios heredan el acceso de su rol (no se configuran uno a uno).</p>
+<p class="admin-subtitle">Defina qué puede hacer cada perfil. El acceso al menú sigue dependiendo de la acción Leer.</p>
 </div>
 <div class="admin-header-actions">
 <button type="button" class="btn-glass btn-secondary" id="btnResetRolePermissions">
@@ -68,25 +68,22 @@
 </button>
 </div>
 </div>
-<div class="admin-perm-legend" aria-hidden="false">
-<div class="admin-perm-legend-item">
-<span class="material-symbols-outlined">group</span>
-<span>1. Asigne un <strong>rol</strong> al usuario arriba.</span>
-</div>
-<div class="admin-perm-legend-item">
-<span class="material-symbols-outlined">tune</span>
-<span>2. Aquí active o quite <strong>módulos</strong> de ese rol.</span>
-</div>
-<div class="admin-perm-legend-item">
-<span class="material-symbols-outlined">sync_alt</span>
-<span>3. Todos los usuarios con ese rol cambian al guardar.</span>
-</div>
-</div>
 <div class="admin-perm-toolbar">
+<label class="admin-role-picker" for="rolePermissionsSelect">
+<span>Seleccionar rol</span>
+<select id="rolePermissionsSelect" class="filter-input"></select>
+</label>
 <p id="rolePermissionsMeta" class="admin-hint"></p>
 <p id="rolePermissionsDirty" class="admin-perm-dirty hidden" role="status">Hay cambios sin guardar</p>
 </div>
 <div id="rolePermissionsGrid" class="admin-perm-matrix-wrap"></div>
+<section class="admin-perm-summary" aria-labelledby="rolePermissionsSummaryTitle">
+<div>
+<h3 class="section-title" id="rolePermissionsSummaryTitle">Resumen de permisos</h3>
+<p class="admin-subtitle" id="rolePermissionsSummaryMeta">Acciones activas por módulo.</p>
+</div>
+<div id="rolePermissionsSummaryGrid" class="admin-perm-summary-grid"></div>
+</section>
 </section>
 
 <section class="section-panel dashboard-section" id="alertPrefsSection">
@@ -288,6 +285,6 @@ Usuario activo
 <script src="/js/sidebar.js?v=11"></script>
 <script src="/js/topbar.js?v=23"></script>
 <script src="/js/mobile-nav.js"></script>
-<script src="/js/admin.js?v=8"></script>
+<script src="/js/admin.js?v=9"></script>
 </body>
 </html>

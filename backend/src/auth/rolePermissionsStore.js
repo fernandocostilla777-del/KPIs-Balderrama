@@ -73,6 +73,16 @@ const PAGE_CATALOG = [
 const PAGE_BY_ID = Object.fromEntries(PAGE_CATALOG.map((p) => [p.id, p]));
 const VALID_PAGE_IDS = new Set(PAGE_CATALOG.map((p) => p.id));
 
+const ACTION_CATALOG = [
+  { id: 'crear', label: 'Crear' },
+  { id: 'leer', label: 'Leer' },
+  { id: 'actualizar', label: 'Actualizar' },
+  { id: 'eliminar', label: 'Eliminar' },
+  { id: 'asignar', label: 'Asignar' },
+  { id: 'exportar', label: 'Exportar' },
+];
+const VALID_ACTION_IDS = new Set(ACTION_CATALOG.map((action) => action.id));
+
 const HOME_PRIORITY = [
   'overview', 'sales', 'post-sales', 'inventory', 'lista-precios', 'contabilidad', 'forecast', 'seguimiento', 'admin',
 ];
@@ -87,7 +97,7 @@ function readStore() {
     if (!fs.existsSync(STORE_FILE)) return { byRole: {}, updatedAt: null };
     const raw = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
     return {
-      byRole: raw?.byRole && typeof raw.byRole === 'object' ? raw.byRole : {},
+      byRole: normalizeByRole(raw?.byRole),
       updatedAt: raw?.updatedAt || null,
     };
   } catch {
@@ -115,6 +125,57 @@ function sanitizePages(pages, { forceAdmin = false } = {}) {
     throw Object.assign(new Error('Cada rol debe tener al menos una página seleccionada.'), { status: 400 });
   }
   return next;
+}
+
+function sanitizeActions(actions, { pages = [], forceAdmin = false } = {}) {
+  const raw = actions && typeof actions === 'object' ? actions : {};
+  const legacyPagesOnly = Object.keys(raw).length === 0;
+  const next = {};
+  for (const page of PAGE_CATALOG) {
+    const source = Array.isArray(raw[page.id])
+      ? raw[page.id]
+      : (pages.includes(page.id)
+        ? (forceAdmin && legacyPagesOnly ? ACTION_CATALOG.map((action) => action.id) : ['leer'])
+        : []);
+    const seen = new Set();
+    const allowed = [];
+    for (const action of source) {
+      const id = String(action || '').trim();
+      if (!VALID_ACTION_IDS.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      allowed.push(id);
+    }
+    if (forceAdmin && page.id === 'admin' && !seen.has('leer')) allowed.unshift('leer');
+    if (allowed.length) next[page.id] = allowed;
+  }
+  return next;
+}
+
+function pagesFromActions(actions) {
+  return PAGE_CATALOG
+    .filter((page) => Array.isArray(actions?.[page.id]) && actions[page.id].includes('leer'))
+    .map((page) => page.id);
+}
+
+function normalizeRoleEntry(entry, { forceAdmin = false } = {}) {
+  if (!entry || typeof entry !== 'object') return null;
+  const pages = sanitizePages(entry.pages || [], { forceAdmin });
+  const actions = sanitizeActions(entry.actions, { pages, forceAdmin });
+  const derivedPages = pagesFromActions(actions);
+  return {
+    pages: derivedPages.length ? derivedPages : pages,
+    actions: Object.keys(actions).length ? actions : sanitizeActions(null, { pages }),
+    updatedAt: entry.updatedAt || null,
+  };
+}
+
+function normalizeByRole(byRole) {
+  if (!byRole || typeof byRole !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(byRole)
+      .map(([roleId, entry]) => [roleId, normalizeRoleEntry(entry, { forceAdmin: roleId === 'administracion' })])
+      .filter(([, entry]) => entry),
+  );
 }
 
 function resolveHomePath(pages) {
@@ -149,8 +210,13 @@ function listPageCatalog() {
   }));
 }
 
+function listActionCatalog() {
+  return ACTION_CATALOG.map((action) => ({ ...action }));
+}
+
 /**
- * Guarda permisos por rol: { byRole: { roleId: { pages: string[] } } }
+ * Guarda permisos por rol: { byRole: { roleId: { actions: { pageId: string[] } } } }.
+ * `pages` se conserva como compatibilidad y siempre se deriva de la acción `leer`.
  * roleDefaults: mapa id -> páginas por defecto (para validar roles conocidos).
  */
 function updateRolePermissions(byRoleInput, roleDefaults = {}) {
@@ -166,9 +232,12 @@ function updateRolePermissions(byRoleInput, roleDefaults = {}) {
     const incoming = byRoleInput?.[roleId];
     if (!incoming) continue;
     const forceAdmin = roleId === 'administracion';
-    const pages = sanitizePages(incoming.pages, { forceAdmin });
+    const fallbackPages = sanitizePages(incoming.pages || roleDefaults[roleId], { forceAdmin });
+    const actions = sanitizeActions(incoming.actions, { pages: fallbackPages, forceAdmin });
+    const pages = sanitizePages(pagesFromActions(actions), { forceAdmin });
     nextByRole[roleId] = {
       pages,
+      actions,
       updatedAt: new Date().toISOString(),
     };
   }
@@ -191,7 +260,9 @@ module.exports = {
   PAGE_CATALOG,
   PAGE_BY_ID,
   VALID_PAGE_IDS,
+  ACTION_CATALOG,
   listPageCatalog,
+  listActionCatalog,
   getOverrides,
   getRoleOverride,
   resolveHomePath,

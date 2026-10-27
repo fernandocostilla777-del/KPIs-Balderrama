@@ -384,9 +384,39 @@ function classifyCampanaConversion(campanaName) {
   };
 }
 
+/**
+ * Año del One Pager de la planta: octubre a septiembre.
+ * Un lead de septiembre todavía puede comprar en los 90 días siguientes, así que
+ * el cierre que publica Chevrolet no es el año calendario.
+ * octubre–diciembre abre el año que termina en septiembre siguiente;
+ * enero–septiembre pertenece al año que empezó el octubre anterior.
+ */
+function ventanaAnioPlanta(iso) {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(iso || '').slice(0, 10));
+  const ahora = new Date();
+  const y = m ? Number(m[1]) : ahora.getFullYear();
+  const mo = m ? Number(m[2]) : ahora.getMonth() + 1;
+  const anioInicio = mo >= 10 ? y : y - 1;
+  const anioFin = anioInicio + 1;
+  const meses = [];
+  for (let i = 0; i < 12; i += 1) {
+    const d = new Date(Date.UTC(anioInicio, 9 + i, 1));
+    meses.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
+  }
+  return {
+    desde: `${anioInicio}-10-01`,
+    hasta: `${anioFin}-09-30`,
+    anioInicio,
+    anioFin,
+    meses,
+    etiqueta: `oct ${anioInicio} – sep ${anioFin}`,
+  };
+}
+
 module.exports = {
   LEAD_VIDA_DIAS,
   CAMPANAS_CONVERSION,
+  ventanaAnioPlanta,
   normCampana,
   normalizeVehiculoLead,
   resolveCampanaConversionKey,

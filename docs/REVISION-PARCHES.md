@@ -46,7 +46,7 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 |---|---|---|
 | Resumen (`index.html`) | — | `initDateFilter` |
 | Ventas (`sales.html`) | `#financiamiento`, `#leads`, `#afluencia`, `#comisiones` o `?tab=` | propio de `sales.js` |
-| Contabilidad | `?tab=eeff` / `?tab=balance` | `initDateFilter` |
+| Contabilidad | `?tab=analisis` / `?tab=balance` / `?tab=eeff&vista=` (seminuevos, ventas, postventa, comparativa) | `initDateFilter` |
 | Postventa | `#hyp`, `#refacciones`, `#servicio` | `initDateFilter` |
 | Inventario | `?tab=postventa`, `seminuevos`, `cierre` | propio |
 | Pronóstico | `?tab=` | propio |
@@ -66,7 +66,10 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 - Arriba, los KPIs que el perfil necesita para decidir; abajo, el detalle.
 - En tablas por mes, **el acumulado y la variación van junto al concepto**,
   antes de los meses, para que se vean sin desplazar.
-- Sin cifras repetidas entre el titular y las tarjetas.
+- Sin cifras repetidas entre el titular y las tarjetas, ni entre pestañas: lo que ya
+  está en Estado de resultados o Análisis no se vuelve a pintar en Departamentos.
+- En real contra presupuesto, el color dice si la variación **favorece**: en costos
+  y gastos, quedar abajo del presupuesto es verde.
 - Cada KPI con su unidad y su comparativo (`$X · var. ±Y%`), con
   `fmt.money` y el signo explícito.
 - Textos de negocio, no nombres de hojas de Excel ni de tablas SQL.
@@ -96,8 +99,20 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
 ## 4. Cifras, permisos y alertas
 
 ### Cifras (Contabilidad / EEFF)
+- **Formato VECSA, cálculo Balderrama.** Estado de resultados, Análisis y Balance
+  salen de `contabilidadFormatoService.js`, que solo ordena lo que ya calculan
+  `eeffSummaryService`, `balanceGeneralService` y `breakEvenService`. Una regla
+  contable nueva va en esos servicios o en `eeffSummaryConfig.js`, no en el formato.
+- **Signo de presentación:** ingresos en positivo; costo y gastos en negativo.
 - Totales que deben cuadrar: líneas de negocio = utilidad bruta; rubros =
-  total de gastos; activo = pasivo + capital + resultado.
+  total de gastos; activo = pasivo + capital + resultado. Lo vigila
+  `contabilidad-formato.test.js`.
+- **No esconder lo que no cuadra:** cuentas con saldo sin renglón, cuentas en dos
+  renglones y departamentos (GPO) con gasto fuera del estado se señalan en
+  «Revisión de la balanza» y en su alerta.
+- **Cuadre contra el libro (oficina):**
+  `node backend/scripts/cuadra-estado-resultados.js --libro "<EEFF.xlsx>" --desde AAAA-MM-DD --hasta AAAA-MM-DD`.
+  La primera vez, confirmar qué renglón tomó para cada concepto.
 - Real contra presupuesto: el periodo debe ser 2026 (`presupuesto-2026.xlsx`);
   si no, alerta clara y botón «Usar acumulado 2026».
 - El mes en curso está abierto: decirlo en pantalla.
@@ -125,8 +140,22 @@ Contraloría o Gerencia General. Esta es la lista para **entregar un parche**.
   (`julianday`, `instr`, `printf`, `GLOB`…), y con prueba que compare el resultado
   de SQLite contra el de PostgreSQL.
 - Sin base cargada, el servicio responde «sin datos», no un error.
+- **Pendiente etapa 2:** `crmCiclosService.js` y `leadsSupervivenciaService.js` (Leads y
+  tiempo a compra) todavía abren `crm-ciclos.db` directo y usan `julianday`.
 - Correr las pruebas también con PostgreSQL:
   `CRM_PG_URL_TEST=postgresql://… npm test` (sin la variable, esas pruebas se omiten).
+
+### Modo nube (réplica)
+- **Ruta nueva con fechas** que se use al abrir una pantalla: agregarla a
+  `RUTAS_CON_FECHAS` (o `RUTAS_FIJAS` con sus parámetros exactos) en
+  `cloudReplica/replicaPublisher.js`. La consulta publicada debe ser igual a la
+  que manda el frontend; si no, se publica algo que nadie lee.
+- **Vista de un cliente individual** (nombre, teléfono, historial): agregarla a
+  `PREFIJOS_EXCLUIDOS` en `replicaKey.js` **y** en `cloud-api/.../desktopCacheStore.js`.
+  Una prueba vigila que coincidan.
+- **Ruta que no depende de SQL Server:** agregarla a `LOCAL_PREFIXES` en
+  `replicaMiddleware.js` para no ir a la nube sin necesidad.
+- Ver `docs/REPLICA-NUBE.md`.
 
 ### Datos personales
 - Nada con nombre, teléfono, correo, RFC o VIN de clientes en el repositorio.
@@ -158,9 +187,12 @@ for f in ../frontend/public/js/*.js; do node --check "$f"; done
 ## 7. Lo que solo se valida en la oficina
 
 - Cifras contra SQL Server real y el libro de Excel de Contraloría.
-- Sincronización a la nube (`cloudSync/` → `cloud-api`) con datos reales.
+- Sincronización a la nube (`cloudSync/` → `cloud-api`) y réplica (`desktop-cache`) con datos reales.
 - Tiempos de respuesta con datos completos.
 - Íconos y textos encimados con las fuentes cargadas.
+- Tiempo a compra de Leads: antes de leer sus cifras, correr
+  `node backend/scripts/diagnostico-maduracion-leads.js` y revisar el veredicto
+  (Kaplan–Meier, Cox, curación, riesgos competitivos, hitos). Solo imprime conteos.
 
 ## 8. Empaquetar y entregar
 

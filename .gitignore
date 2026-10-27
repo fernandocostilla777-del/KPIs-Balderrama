@@ -43,3 +43,6 @@ stitch_liquid_glass_analytics/
 *.db-shm
 *.db-wal
 
+
+# Diagnósticos con conteos de la base real
+backend/data/private/

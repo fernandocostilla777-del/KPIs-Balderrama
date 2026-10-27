@@ -62,3 +62,14 @@ test('consultar Cholula no recorta la consulta siguiente de toda la agencia', as
   assert.ok(cholula > 0 && cholula < antes, `Cholula es una parte: ${cholula} de ${antes}`);
   assert.equal(despues, antes);
 });
+
+test('Cholula no recibe las entregas SOFIA de toda la agencia (ni del periodo anterior)', async () => {
+  const periodo = { fechaInicio: '2026-09-01', fechaFin: '2026-09-30' };
+  const agencia = await getVentas(periodo);
+  const cholula = await getVentas({ ...periodo, canal: 'CHOLULA' });
+  const entregas = (r) => Number(r.totalEntregasSinPrevias || 0) + Number(r.totalEntregasConPrevias || 0);
+  assert.ok(entregas(agencia.resumen) > 0, 'la agencia trae entregas');
+  assert.equal(entregas(cholula.resumen), 0);
+  assert.equal(Number(cholula.comparativoPeriodo?.anterior?.totalNotificacionesEntrega || 0), 0);
+  assert.ok((cholula.registros || []).every((r) => r.CANAL_VENTA === 'CHOLULA'));
+});

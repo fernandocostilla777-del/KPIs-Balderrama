@@ -158,6 +158,14 @@ router.post('/ventas/sofia-live-sync', async (_req, res, next) => {
   }
 });
 
+// Financiamiento (contratos del CRM y SOFIA) no trae sucursal: un perfil de sucursal no lo consulta.
+router.use('/ventas/financiamiento', (req, res, next) => {
+  if (alcanceDe(req)) {
+    return res.status(403).json({ error: 'Financiamiento no está disponible para este perfil.' });
+  }
+  return next();
+});
+
 router.get('/ventas/financiamiento', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin, pvaAnio, pvaTrimestre } = req.query;

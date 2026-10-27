@@ -1163,9 +1163,9 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
     }
   }
   const rows = core.registros;
-  const sofiaEntregas = canal
-    ? { ...core.sofiaEntregas, registrosEntrega: [] }
-    : core.sofiaEntregas;
+  // SOFIA no trae sucursal: un perfil de sucursal no recibe sus totales (entregas con y sin
+  // previas, notificaciones por mes), que son de toda la agencia.
+  const sofiaEntregas = canal ? { registrosEntrega: [] } : core.sofiaEntregas;
   const tomasFuente = canal
     ? { total: 0, montoTotal: 0, registros: [], porMes: null }
     : tomasACuenta;
@@ -1204,7 +1204,7 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
       coreAnterior.registros,
       inicioAnterior,
       finAnterior,
-      coreAnterior.sofiaEntregas || {},
+      canal ? { registrosEntrega: [] } : (coreAnterior.sofiaEntregas || {}),
     );
     // Tomas del mismo periodo del año previo (consulta ligera ya hecha no; opcional omitir).
     resumenAnterior.totalTomasACuenta = 0;

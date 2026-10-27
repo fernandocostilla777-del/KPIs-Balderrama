@@ -212,7 +212,7 @@ function buildTrimestresYtd(actualMonths, anteriorMonths, maxQ, maxMonth) {
     });
 }
 
-function buildComparativoYtd(d, fechaFin) {
+function buildComparativoYtd(d, fechaFin, sucursalKey = null) {
   const end = String(fechaFin || '').slice(0, 10);
   const year = Number(end.slice(0, 4));
   if (!Number.isFinite(year) || year < 2000) return null;
@@ -220,7 +220,9 @@ function buildComparativoYtd(d, fechaFin) {
   const maxMonth = Number(end.slice(5, 7)) || 12;
 
   const porCentro = {};
-  for (const centro of YTD_CENTROS) {
+  // Perfil de sucursal: solo su centro (y «trimestres» es el de ese centro).
+  const centros = sucursalKey ? YTD_CENTROS.filter((c) => c.key === sucursalKey) : YTD_CENTROS;
+  for (const centro of centros) {
     const key = centro.key === 'todos' ? null : centro.key;
     const actualMonths = buildYearMonthSeries(d, year, end, key);
     const anteriorMonths = buildYearMonthSeries(d, year - 1, end, key);
@@ -236,7 +238,7 @@ function buildComparativoYtd(d, fechaFin) {
     anioAnterior: year - 1,
     hasta: end.slice(5, 10),
     maxMonth,
-    centros: YTD_CENTROS,
+    centros,
     metricas: [
       { key: 'afluenciaTotal', label: 'Afluencia' },
       { key: 'freshUp', label: 'Fresh up' },
@@ -245,7 +247,7 @@ function buildComparativoYtd(d, fechaFin) {
       { key: 'pruebasManejo', label: 'Pruebas de manejo' },
     ],
     // Compat: trimestres = Todos los centros
-    trimestres: porCentro.todos.trimestres,
+    trimestres: (sucursalKey ? porCentro[sucursalKey] : porCentro.todos)?.trimestres || [],
     porCentro,
   };
 }
@@ -361,19 +363,34 @@ function sortAgg(map, limit = 20) {
 /**
  * Compras CRM (VIN) del periodo, atribuidas por medio / submedio / forma de contacto.
  */
-function loadComprasPorCanal(d, fechaInicio, fechaFin) {
+function loadComprasPorCanal(d, fechaInicio, fechaFin, alcance = null) {
   if (!hasTable(d, 'crm_actividades')) {
     return { porMedio: [], porSubmedio: [], porFormaContacto: [], porMedioSubmedio: [], total: 0 };
   }
 
   const fechaExpr = 'COALESCE(fecha_factura, fecha_entrega, fecha_estatus, fecha_inicio_ciclo)';
+  // Las actividades del CRM no traen sucursal. Para un perfil de sucursal, la compra cuenta si el
+  // contacto es un lead de esa sucursal o una visita de piso de ese centro.
+  let ySucursal = '';
+  let pSucursal = [];
+  if (alcance?.crm && alcance.texto) {
+    const traficoSql = hasTable(d, 'crm_trafico_piso')
+      ? ` UNION SELECT upper(trim(id_crm)) FROM crm_trafico_piso
+           WHERE id_crm IS NOT NULL AND (instr(upper(COALESCE(centro_trabajo, '')), ?) > 0 OR instr(upper(COALESCE(fuerza, '')), ?) > 0)`
+      : '';
+    ySucursal = `AND upper(trim(id_contacto)) IN (
+      SELECT upper(trim(id_crm)) FROM crm_leads WHERE id_crm IS NOT NULL AND ${alcance.crm.sql}${traficoSql}
+    )`;
+    pSucursal = [...alcance.crm.params, ...(traficoSql ? [alcance.texto, alcance.texto] : [])];
+  }
   const total = Number(d.prepare(`
     SELECT COUNT(DISTINCT upper(trim(vin))) AS n
     FROM crm_actividades
     WHERE vin IS NOT NULL AND trim(vin) <> ''
       AND ${fechaExpr} >= ?
       AND ${fechaExpr} <= ?
-  `).get(String(fechaInicio), String(fechaFin))?.n || 0);
+      ${ySucursal}
+  `).get(String(fechaInicio), String(fechaFin), ...pSucursal)?.n || 0);
 
   const rows = d.prepare(`
     SELECT
@@ -385,8 +402,9 @@ function loadComprasPorCanal(d, fechaInicio, fechaFin) {
     WHERE vin IS NOT NULL AND trim(vin) <> ''
       AND ${fechaExpr} >= ?
       AND ${fechaExpr} <= ?
+      ${ySucursal}
     GROUP BY 1, 2, 3
-  `).all(String(fechaInicio), String(fechaFin));
+  `).all(String(fechaInicio), String(fechaFin), ...pSucursal);
 
   const porMedio = {};
   const porSubmedio = {};
@@ -429,7 +447,10 @@ const COMPRA_LEAD_SQL_AF = `
 /**
  * Marketing: origen del tráfico piso (medio/submedio) + campañas de leads activas.
  */
-function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
+function buildMarketing(d, fechaInicio, fechaFin, traficoRows, alcanceCrm = null) {
+  // Perfil de sucursal: los leads de campañas también se limitan a su sucursal.
+  const yAlcance = alcanceCrm ? `AND ${alcanceCrm.sql}` : '';
+  const pAlcance = alcanceCrm ? alcanceCrm.params : [];
   const porMedio = {};
   const porSubmedio = {};
   const porFormaContacto = {};
@@ -468,7 +489,7 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
     bumpAgg(porMedioSubmedio, pair, patch);
   }
 
-  const comprasCanal = loadComprasPorCanal(d, fechaInicio, fechaFin);
+  const comprasCanal = loadComprasPorCanal(d, fechaInicio, fechaFin, alcanceCrm);
   for (const r of comprasCanal.porMedio) addComprasToMap(porMedio, r.grupo, r.compras);
   for (const r of comprasCanal.porSubmedio) addComprasToMap(porSubmedio, r.grupo, r.compras);
   for (const r of comprasCanal.porFormaContacto) addComprasToMap(porFormaContacto, r.grupo, r.compras);
@@ -503,7 +524,8 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
         AND fecha_entrada >= ?
         AND fecha_entrada <= ?
         AND (${noDup})
-    `).get(String(fechaInicio), String(fechaFin));
+        ${yAlcance}
+    `).get(String(fechaInicio), String(fechaFin), ...pAlcance);
 
     const rows = d.prepare(`
       SELECT
@@ -520,10 +542,11 @@ function buildMarketing(d, fechaInicio, fechaFin, traficoRows) {
         AND fecha_entrada >= ?
         AND fecha_entrada <= ?
         AND (${noDup})
+        ${yAlcance}
       GROUP BY campana, canal
       ORDER BY compras DESC, citas DESC, leads DESC
       LIMIT 40
-    `).all(String(fechaInicio), String(fechaFin));
+    `).all(String(fechaInicio), String(fechaFin), ...pAlcance);
 
     campañasLeads = rows.map((r) => {
       const leads = Number(r.leads || 0);
@@ -738,6 +761,15 @@ function pctConv(num, den) {
   return Math.round((n / d) * 1000) / 10;
 }
 
+/** Filtro de leads (crm_leads) del perfil cuya clave de afluencia es sucursalKey. */
+function crmAlcanceDeSucursal(sucursalKey) {
+  const { PERFILES, sqlCrmSucursal } = require('../auth/alcanceSucursal');
+  const perfil = Object.values(PERFILES).find((p) => p.afluenciaKey === sucursalKey);
+  const crm = perfil ? sqlCrmSucursal(perfil.crmTexto) : null;
+  // sql/params para crm_leads; crm/texto para cruzar las compras del ciclo con el tráfico.
+  return crm ? { ...crm, crm, texto: crm.params[0] } : null;
+}
+
 function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300, sucursalKey = null } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
@@ -945,8 +977,14 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300, sucursalKey
       detalle,
       detallePorKpi,
       pruebasDetalle,
-      comparativoYtd: buildComparativoYtd(d, fechaFin),
-      marketing: buildMarketing(d, fechaInicio, fechaFin, rows),
+      comparativoYtd: buildComparativoYtd(d, fechaFin, sucursalKey),
+      marketing: buildMarketing(
+        d,
+        fechaInicio,
+        fechaFin,
+        sucursalKey ? rows.filter((r) => mapSucursalKey(r.centro_trabajo, r.fuerza) === sucursalKey) : rows,
+        sucursalKey ? crmAlcanceDeSucursal(sucursalKey) : null,
+      ),
       semantica: {
         alcance: 'Solo registros NUEVOS (columna R / COMENTARIOS)',
         afluenciaTotal: 'Fresh up + Citas (columna T), solo nuevos',
@@ -970,6 +1008,8 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300, sucursalKey
 
 module.exports = {
   getAfluenciaDashboard,
+  buildComparativoYtd,
+  buildMarketing,
   mapSucursalKey,
   classifyReconciliacion,
   isNuevos,

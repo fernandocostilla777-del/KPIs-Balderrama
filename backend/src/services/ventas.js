@@ -1155,9 +1155,11 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
 
   const { filtrarFilasCanal } = require('../auth/alcanceSucursal');
   if (canal) {
-    core.registros = filtrarFilasCanal(core.registros, canal);
+    // core y coreAnterior vienen del caché que comparten todos los perfiles: se filtran en una
+    // copia. Filtrarlos en su lugar dejaba a toda la agencia viendo solo esta sucursal (5 min).
+    core = { ...core, registros: filtrarFilasCanal(core.registros, canal) };
     if (coreAnterior?.registros) {
-      coreAnterior.registros = filtrarFilasCanal(coreAnterior.registros, canal);
+      coreAnterior = { ...coreAnterior, registros: filtrarFilasCanal(coreAnterior.registros, canal) };
     }
   }
   const rows = core.registros;

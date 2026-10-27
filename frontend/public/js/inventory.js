@@ -4321,7 +4321,37 @@ document.getElementById('planPisoPeriod')?.addEventListener('change', (e) => {
   loadInventory({ onlyPlanPiso: true });
 });
 
+function esInventarioCholula() {
+  return document.documentElement.dataset.alcanceSucursal === 'cholula';
+}
+
+function aplicarInventarioCholula() {
+  if (!esInventarioCholula()) return;
+  document.querySelectorAll('[data-inventory-scope="cierre"], [data-inventory-scope="postventa"]').forEach((el) => {
+    el.hidden = true;
+    el.classList.add('hidden');
+  });
+  [
+    'kpiPlanPisoWrap',
+    'kCostoInventario',
+    'secAnalisisInventario',
+    'secPlanPisoAnalisis',
+    'secIntercambiosHistorico',
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.hidden = true;
+    el.classList.add('hidden');
+  });
+  document.getElementById('chartInvCosto')?.closest('figure')?.classList.add('hidden');
+  const etiqueta = document.querySelector('#secInvCostoTiempo .inv-kpi-label');
+  if (etiqueta) etiqueta.textContent = 'Tiempo';
+  const title = document.querySelector('.top-bar-title');
+  if (title && inventoryScope !== 'seminuevos') title.textContent = 'Disponibilidad de inventario';
+}
+
 function setInventoryScope(scope) {
+  if (esInventarioCholula() && (scope === 'cierre' || scope === 'postventa')) scope = 'autos';
   const next = ['autos', 'cierre', 'seminuevos', 'postventa'].includes(scope) ? scope : 'autos';
   inventoryScope = next;
   if (inventoryScope !== 'autos' && autosDrawerUi?.panel?.classList.contains('ops-orders-drawer--open')) {
@@ -4347,7 +4377,7 @@ function setInventoryScope(scope) {
         ? 'Inventario · Autos seminuevos'
         : inventoryScope === 'cierre'
           ? 'Inventario · Cierre de unidades vendidas'
-          : 'Gestión de Inventario';
+          : (esInventarioCholula() ? 'Disponibilidad de inventario' : 'Gestión de Inventario');
   }
 
   if (inventoryScope === 'postventa') {
@@ -6267,10 +6297,11 @@ async function refreshInventoryPageQuiet() {
   if (inventoryQuietRefreshing) return;
   inventoryQuietRefreshing = true;
   try {
+    const cholula = esInventarioCholula();
     const jobs = [
       loadInventory({ quiet: true }),
-      loadIntercambiosHistorico({ quiet: true }),
-      loadVendidosAnalisis({ quiet: true }),
+      cholula ? Promise.resolve() : loadIntercambiosHistorico({ quiet: true }),
+      cholula ? Promise.resolve() : loadVendidosAnalisis({ quiet: true }),
       loadEntregasSinPreviasMes({ quiet: true }),
     ];
     const range = currentVendidosRange();
@@ -6408,11 +6439,15 @@ document.getElementById('intHistFilterTabs')?.addEventListener('click', (e) => {
   renderIntercambiosHistoricoTable();
 });
 
-const params = new URLSearchParams(window.location.search);
-if (params.get('tab') === 'postventa') setInventoryScope('postventa');
-else if (params.get('tab') === 'seminuevos') setInventoryScope('seminuevos');
-else if (params.get('tab') === 'cierre') setInventoryScope('cierre');
-else setInventoryScope('autos');
+(async function bootInventoryPage() {
+  await window.DashboardAuth?.getSession?.().catch(() => null);
+  aplicarInventarioCholula();
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab');
+  if (tab === 'seminuevos') setInventoryScope('seminuevos');
+  else if (!esInventarioCholula() && tab === 'postventa') setInventoryScope('postventa');
+  else if (!esInventarioCholula() && tab === 'cierre') setInventoryScope('cierre');
+  else setInventoryScope('autos');
 
 initPlanPisoKpiCard();
 initIntercambiosHistoricoDates({ force: true });
@@ -6423,14 +6458,15 @@ Dashboard.initDateFilter?.({
     if (vendidosInput && fi.slice(0, 7) === ff.slice(0, 7)) vendidosInput.value = fi.slice(0, 7);
 
     // Intercambios usa su propio rango (año anterior → hoy). No lo pisa el filtro global.
-    initIntercambiosHistoricoDates();
+    if (!esInventarioCholula()) initIntercambiosHistoricoDates();
 
+    const cholula = esInventarioCholula();
     await Promise.all([
       loadInventory({ quiet: false }),
-      loadIntercambiosHistorico({ quiet: false }),
-      loadVendidosAnalisis({ quiet: false }),
+      cholula ? Promise.resolve() : loadIntercambiosHistorico({ quiet: false }),
+      cholula ? Promise.resolve() : loadVendidosAnalisis({ quiet: false }),
       loadEntregasSinPreviasMes({ quiet: false }),
-      inventoryScope === 'postventa' ? loadInventoryPostventa({ force: true }) : Promise.resolve(),
+      !cholula && inventoryScope === 'postventa' ? loadInventoryPostventa({ force: true }) : Promise.resolve(),
       (window.AnalisisComercial?.load && fi && ff)
         ? window.AnalisisComercial.load(fi, ff)
         : Promise.resolve(),
@@ -6446,3 +6482,4 @@ if (!params.get('fechaInicio') && !params.get('fechaFin')) {
   Dashboard.setActivePresetChip?.(defaultPreset);
 }
 startInventoryAutoRefresh();
+})();

@@ -22,7 +22,7 @@
     kpiExpandido: true,
     kpiFiltro: null,
     kpiBusqueda: '',
-    sucursal: 'todas',
+    sucursal: document.documentElement.dataset.alcanceSucursal || 'todas',
   };
 
   function focoAnalisis() {
@@ -40,9 +40,18 @@
   }
 
   function marcarSucursal() {
+    const alcance = document.documentElement.dataset.alcanceSucursal;
+    if (alcance) state.sucursal = alcance;
     document.querySelectorAll('#anSucursalChips [data-sucursal]').forEach((b) => {
+      const propia = !alcance || b.dataset.sucursal === alcance;
+      b.hidden = !propia;
       b.classList.toggle('active', b.dataset.sucursal === state.sucursal);
     });
+    const sel = document.getElementById('filtroSucursal');
+    if (alcance && sel) {
+      sel.value = alcance;
+      sel.disabled = true;
+    }
   }
 
   function pintarAnalisis() {

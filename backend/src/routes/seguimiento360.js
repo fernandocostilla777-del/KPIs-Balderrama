@@ -84,7 +84,12 @@ router.get('/buscar', (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'Parámetro requerido: q (ID CRM, nombre o VIN).' });
     }
     const limit = req.query.limit;
-    const resultados = crm().searchContacts({ q, limit });
+    const { alcanceDeRol } = require('../auth/alcanceSucursal');
+    const resultados = crm().searchContacts({
+      q,
+      limit,
+      crmTexto: alcanceDeRol(req.session?.role)?.crmTexto || null,
+    });
     res.json({
       ok: true,
       formato: 'seguimiento-360-v1',

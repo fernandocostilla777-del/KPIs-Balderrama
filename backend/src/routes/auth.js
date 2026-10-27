@@ -54,6 +54,7 @@ router.get('/me', requireSession, (req, res) => {
     pages: role?.pages || [],
     homePath: role?.homePath || '/',
     canManageUsers: canManageUsers(session.role),
+    alcanceSucursal: role?.alcanceSucursal || null,
     devBypass: !!session.devBypass,
   });
 });
@@ -77,6 +78,7 @@ router.post('/login', (req, res) => {
     roleLabel: role?.label || user.role,
     homePath: role?.homePath || '/',
     canManageUsers: canManageUsers(user.role),
+    alcanceSucursal: role?.alcanceSucursal || null,
   });
 });
 

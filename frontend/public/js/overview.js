@@ -2174,10 +2174,8 @@ function renderPeAgencyInsightHtml(insight) {
 }
 
 async function renderOverview(fechaInicio, fechaFin) {
-  const { api, setText, showLoading } = Dashboard;
-  showLoading(true);
-  try {
-    const [data] = await Promise.all([
+  const { api, setText } = Dashboard;
+  const [data] = await Promise.all([
       api(`/overview?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
       summaryState.prefs ? Promise.resolve() : loadSummaryPrefs(),
     ]);
@@ -2206,9 +2204,6 @@ async function renderOverview(fechaInicio, fechaFin) {
         puntoEquilibrio: data.puntoEquilibrio || null,
       });
     }
-  } finally {
-    showLoading(false);
-  }
 }
 
 wireSummaryPrefsUi();

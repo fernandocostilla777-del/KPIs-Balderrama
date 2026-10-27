@@ -1044,7 +1044,10 @@
     const periodLeads = Number(summary().leads || 0);
     const rows = periodLeads === 0 ? [] : groupRows();
     const meta = document.getElementById('ldGroupMeta');
-    if (meta) meta.textContent = `${GROUP_META[state.groupView] || ''} Suman los ${num(periodLeads)} leads del periodo.`;
+    const groupMeta = state.groupView === 'fuerza' && document.documentElement.dataset.alcanceSucursal === 'cholula'
+      ? 'Solo los leads de la fuerza de ventas de Cholula.'
+      : (GROUP_META[state.groupView] || '');
+    if (meta) meta.textContent = `${groupMeta} Suman los ${num(periodLeads)} leads del periodo.`;
     const foot = document.getElementById('ldGroupsFoot');
     const total = rows.reduce((acc, r) => acc + Number(r.leads || 0), 0);
     const cell = (v) => (v == null ? '<span class="cell-muted">—</span>' : num(v));

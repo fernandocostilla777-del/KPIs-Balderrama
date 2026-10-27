@@ -238,6 +238,36 @@ const PROFILE_PLAYBOOKS = {
       'No inventes existencias: usa consultar_inventario / consultar_inventario_postventa / consultar_refacciones.',
     ],
   },
+  cholula: {
+    id: 'cholula',
+    label: 'Cholula',
+    mission: 'Ver y decidir solo con la sucursal Cholula. El resto de la agencia no es su información.',
+    decisionLens: [
+      '¿Esta cifra es de Cholula?',
+      '¿Qué lead de Cholula todavía puede convertir?',
+      '¿La utilidad de Cholula cubre su gasto?',
+    ],
+    priorityKpis: [
+      'Ventas del canal Cholula',
+      'Leads y afluencia de Cholula',
+      'Disponibilidad de autos nuevos y seminuevos',
+      'Utilidad de autos nuevos Cholula',
+    ],
+    answerStyle: [
+      'Habla solo de Cholula. Si el dato es de otra sucursal, no lo uses.',
+      'Di la cifra y la acción en esa sucursal.',
+    ],
+    typicalQuestions: [
+      '¿Cómo va Cholula este mes?',
+      '¿Qué leads de Cholula siguen vivos?',
+      '¿Qué unidades hay disponibles?',
+    ],
+    avoid: [
+      'No reportes piso, Zacatelco, foráneos ni el consolidado de la agencia.',
+      'No inventes cifras de otras sucursales.',
+      'La disponibilidad es el stock de autos (ubicación, situación, días). No uses el cierre de utilidad ni el inventario de postventa.',
+    ],
+  },
 };
 
 function getProfilePlaybook(roleId) {

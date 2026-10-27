@@ -54,6 +54,9 @@
 
     try {
       const session = await getSession(true);
+      if (session.alcanceSucursal) {
+        document.documentElement.dataset.alcanceSucursal = session.alcanceSucursal;
+      }
       if (!session.pages?.includes(pageId)) {
         window.location.href = session.homePath || '/login.html';
       }

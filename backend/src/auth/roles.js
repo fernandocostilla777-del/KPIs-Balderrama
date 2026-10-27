@@ -68,6 +68,25 @@ const ROLE_DEFAULTS = {
       '/health',
     ],
   },
+  cholula: {
+    id: 'cholula',
+    label: 'Cholula',
+    pages: ['sales', 'inventory', 'contabilidad', 'lista-precios', 'seguimiento'],
+    homePath: '/sales.html',
+    alcanceSucursal: 'cholula',
+    apiPrefixes: [
+      '/ventas',
+      '/inventory',
+      '/contabilidad',
+      '/eeff',
+      '/lista-precios',
+      '/crm',
+      '/seguimiento-360',
+      '/objetivos-resultados',
+      '/ai',
+      '/health',
+    ],
+  },
 };
 
 /** @deprecated use ROLE_DEFAULTS — kept for compatibility with require('./roles').ROLES */
@@ -91,6 +110,7 @@ const USERNAME_TO_ROLE = {
   'gestion.inventario': 'gestion_inventario',
   gestion_inventario: 'gestion_inventario',
   'gestor.inventario': 'gestion_inventario',
+  cholula: 'cholula',
 };
 
 const ALWAYS_API_PREFIXES = [
@@ -158,6 +178,7 @@ function getRole(roleId) {
     apiPrefixes,
     isCustomized: Boolean(override?.pages),
     actions,
+    alcanceSucursal: base.alcanceSucursal || null,
   };
 }
 
@@ -172,6 +193,7 @@ function listRoles() {
       homePath: role.homePath,
       canManageUsers: role.canManageUsers,
       isCustomized: role.isCustomized,
+      alcanceSucursal: role.alcanceSucursal,
     };
   });
 }

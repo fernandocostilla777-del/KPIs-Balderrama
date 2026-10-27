@@ -1334,6 +1334,15 @@ async function executeTool(name, args = {}, context = {}) {
   let result;
   const username = context.username || null;
   const roleId = context.roleId || null;
+  const alcance = require('../auth/alcanceSucursal').alcanceDeRol(roleId);
+  if (alcance) {
+    args = {
+      ...args,
+      canal: alcance.canalVenta,
+      sucursal: alcance.contabilidadId,
+      crmTexto: alcance.crmTexto,
+    };
+  }
 
   switch (name) {
     case 'consultar_ventas_modelo':
@@ -1494,6 +1503,7 @@ async function executeTool(name, args = {}, context = {}) {
           const ventas = await getVentas({
             fechaInicio: args.fechaInicio,
             fechaFin: args.fechaFin,
+            canal: args.canal || null,
           });
           const r = ventas?.resumen || {};
           avance = {

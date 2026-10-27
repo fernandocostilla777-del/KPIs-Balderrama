@@ -291,6 +291,9 @@ function initDateFilter({ onConsult, statusId = 'statusBadge', getInitialRange }
   }
 
   const compact = initCompactFilters();
+  // La primera consulta (la de después del login) no tapa la pantalla.
+  // El usuario ve el tablero y el estado «Consultando…» mientras llegan los datos.
+  let cortina = false;
 
   async function consultar() {
     const fi = fechaInicio.value;
@@ -299,9 +302,11 @@ function initDateFilter({ onConsult, statusId = 'statusBadge', getInitialRange }
       setStatus('Seleccione ambas fechas', 'error');
       return;
     }
+    const usarCortina = cortina;
+    cortina = true;
     setStatus('Consultando...', 'loading');
     if (btnConsultar) btnConsultar.disabled = true;
-    showLoading(true);
+    if (usarCortina) showLoading(true);
     try {
       syncDateParamsToUrl(fi, ff);
       await onConsult(fi, ff);
@@ -312,7 +317,7 @@ function initDateFilter({ onConsult, statusId = 'statusBadge', getInitialRange }
       setStatus(err.message, 'error');
     } finally {
       if (btnConsultar) btnConsultar.disabled = false;
-      showLoading(false);
+      if (usarCortina) showLoading(false);
     }
   }
 

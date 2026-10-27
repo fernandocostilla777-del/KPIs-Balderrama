@@ -3362,7 +3362,55 @@
     URL.revokeObjectURL(link.href);
   }
 
-  async function consultar({ quiet = false, fresh = false } = {}) {
+  function esPerfilCholula() {
+    return document.documentElement.dataset.alcanceSucursal === 'cholula';
+  }
+
+  function ocultarComisionesCholula() {
+    if (!esPerfilCholula()) return;
+    document.querySelectorAll('[data-sales-tab="comisiones"], #panelVentasComisiones').forEach((el) => {
+      el.hidden = true;
+      el.classList.add('hidden');
+    });
+  }
+
+  const TAB_SRC = {
+    financiamiento: '/js/financiamiento.js?v=64',
+    leads: '/js/leads.js?v=37',
+    afluencia: '/js/afluencia.js?v=18',
+    comisiones: '/js/comisiones.js?v=2',
+    vendedores: '/js/monitoreo-cholula.js?v=1',
+  };
+  const scriptListo = {};
+  const tabListo = {};
+
+  function loadScriptOnce(src) {
+    if (scriptListo[src]) return scriptListo[src];
+    scriptListo[src] = new Promise((resolve, reject) => {
+      const tag = document.createElement('script');
+      tag.src = src;
+      tag.onload = () => resolve();
+      tag.onerror = () => reject(new Error('No se pudo abrir la sección'));
+      document.body.appendChild(tag);
+    });
+    return scriptListo[src];
+  }
+
+  function ensureTabModule(tab) {
+    const src = TAB_SRC[tab];
+    if (!src) return Promise.resolve();
+    if (!tabListo[tab]) {
+      tabListo[tab] = loadScriptOnce(src).then(() => {
+        if (tab === 'financiamiento') window.FinanciamientoVentas?.init?.();
+        if (tab === 'leads') window.LeadsVentas?.init?.();
+        if (tab === 'afluencia') window.AfluenciaVentas?.init?.();
+        if (tab === 'comisiones') window.ComisionesVentas?.init?.();
+      });
+    }
+    return tabListo[tab];
+  }
+
+  async function consultar({ quiet = false, fresh = false, sinCortina = false } = {}) {
     const fechaInicio = els.fechaInicio.value;
     const fechaFin = els.fechaFin.value;
     if (!fechaInicio || !fechaFin) { setStatus('Seleccione ambas fechas', 'error'); return; }
@@ -3383,9 +3431,8 @@
     if (activeSalesTab === 'comisiones' && window.ComisionesVentas?.load) {
       sideLoads.push(window.ComisionesVentas.load(fechaInicio, fechaFin, { force: true }));
     }
-    // CMI comercial vive repartido en Ventas / Financiamiento (no en un tab único).
-    if (window.AnalisisComercial?.load) {
-      sideLoads.push(window.AnalisisComercial.load(fechaInicio, fechaFin, { force: fresh }));
+    if (activeSalesTab === 'vendedores' && window.MonitoreoCholula?.load) {
+      sideLoads.push(window.MonitoreoCholula.load(fechaInicio, fechaFin, { force: true }));
     }
     // Financiamiento: arrancar de inmediato con el periodo del filtro (no esperar /api/ventas).
     // Así no se queda pintado el mes anterior mientras carga ventas/SOFIA.
@@ -3405,7 +3452,7 @@
     if (!quiet) {
       setStatus('Consultando...', 'loading');
       els.btnConsultar.disabled = true;
-      Dashboard.showLoading(true);
+      if (!sinCortina) Dashboard.showLoading(true);
     } else if (refreshBtn) {
       refreshBtn.disabled = true;
       refreshBtn.classList.add('is-refreshing');
@@ -3622,12 +3669,19 @@
         }
       }
 
-      // Precarga en segundo plano las otras secciones del mismo periodo.
-      prefetchSalesTabs(fechaInicio, fechaFin, {
-        porTipoVentaRetail: resumen.porTipoVentaRetail,
-        registrosVentas: registrosActuales,
-        entregasSofia: entregasActuales,
-      });
+      // Las otras secciones esperan a que Ventas ya se vea, para no competir con la primera consulta.
+      const lanzarResto = () => {
+        loadScriptOnce('/js/analisisComercial.js?v=20')
+          .then(() => window.AnalisisComercial?.load?.(fechaInicio, fechaFin, { force: fresh }))
+          .catch(() => {});
+        prefetchSalesTabs(fechaInicio, fechaFin, {
+          porTipoVentaRetail: resumen.porTipoVentaRetail,
+          registrosVentas: registrosActuales,
+          entregasSofia: entregasActuales,
+        });
+      };
+      if (sinCortina) setTimeout(lanzarResto, 2500);
+      else lanzarResto();
 
       // Leads/Afluencia/Comisiones ya se dispararon al inicio con el periodo seleccionado.
       syncSofiaLiveMode(data.sofiaLiveUpdate);
@@ -3642,7 +3696,7 @@
       await sideLoadPromise;
       if (!quiet) {
         els.btnConsultar.disabled = false;
-        Dashboard.showLoading(false);
+        if (!sinCortina) Dashboard.showLoading(false);
       }
       if (refreshBtn) {
         refreshBtn.disabled = false;
@@ -3693,6 +3747,7 @@
       && activeSalesTab !== 'leads'
       && activeSalesTab !== 'afluencia'
       && activeSalesTab !== 'financiamiento'
+      && activeSalesTab !== 'vendedores'
     ) {
       applySofiaLivePeriod(ctx, { force: true });
     }
@@ -3724,7 +3779,7 @@
       if (typeof data.intervalMinutes === 'number') ctx.intervalMinutes = data.intervalMinutes;
       // No forzar periodo SOFIA si la URL abre directo en CRM/histórico.
       const bootTab = getSalesTabFromUrl();
-      if (bootTab !== 'leads' && bootTab !== 'afluencia' && bootTab !== 'financiamiento') {
+      if (bootTab !== 'leads' && bootTab !== 'afluencia' && bootTab !== 'financiamiento' && bootTab !== 'vendedores') {
         applySofiaLivePeriod(ctx, { force: true });
       }
       syncSofiaLiveMode(ctx);
@@ -3839,19 +3894,27 @@
       || hash === 'trafico'
       || hash === 'tráfico'
     ) return 'afluencia';
-    if (hash === 'comisiones' || hash === 'comision' || hash === 'comisiones-fi') return 'comisiones';
+    if (!esPerfilCholula() && (hash === 'comisiones' || hash === 'comision' || hash === 'comisiones-fi')) return 'comisiones';
+    if (hash === 'vendedores' || hash === 'vendedor' || hash === 'monitoreo' || hash === 'cholula') return 'vendedores';
     const params = new URLSearchParams(location.search);
     const tab = String(params.get('tab') || '').toLowerCase();
     if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
     if (tab === 'leads' || tab === 'lead' || tab === 'oportunidades') return 'leads';
     if (tab === 'afluencia' || tab === 'trafico' || tab === 'tráfico' || tab === 'mtk' || tab === 'marketing') return 'afluencia';
-    if (tab === 'comisiones' || tab === 'comision') return 'comisiones';
+    if (!esPerfilCholula() && (tab === 'comisiones' || tab === 'comision')) return 'comisiones';
+    if (tab === 'vendedores' || tab === 'vendedor' || tab === 'monitoreo' || tab === 'cholula') return 'vendedores';
     return 'ventas';
   }
 
   function prefetchSalesTabs(fechaInicio, fechaFin, fiCtx = null) {
     if (!fechaInicio || !fechaFin) return;
     const run = () => {
+      Promise.all([
+        ensureTabModule('leads'),
+        ensureTabModule('afluencia'),
+        ensureTabModule('financiamiento'),
+        ...(esPerfilCholula() ? [] : [ensureTabModule('comisiones')]),
+      ]).then(() => {
       const tasks = [];
       if (activeSalesTab !== 'leads' && window.LeadsVentas?.load && !window.LeadsVentas.hasCache?.(fechaInicio, fechaFin)) {
         tasks.push(window.LeadsVentas.load(fechaInicio, fechaFin));
@@ -3878,6 +3941,7 @@
         tasks.push(window.ComisionesVentas.load(fechaInicio, fechaFin));
       }
       Promise.allSettled(tasks).catch(() => {});
+      }).catch(() => {});
     };
     if (typeof requestIdleCallback === 'function') {
       requestIdleCallback(run, { timeout: 2500 });
@@ -3939,10 +4003,19 @@
       void window.ComisionesVentas.load(fi, ff);
       return;
     }
+
+    if (tab === 'vendedores' && window.MonitoreoCholula?.load) {
+      if (window.MonitoreoCholula.hasCache?.(fi, ff)) {
+        await window.MonitoreoCholula.load(fi, ff);
+        return;
+      }
+      void window.MonitoreoCholula.load(fi, ff);
+    }
   }
 
   async function switchSalesTab(tab) {
-    const next = ['financiamiento', 'leads', 'afluencia', 'comisiones'].includes(tab) ? tab : 'ventas';
+    if (esPerfilCholula() && tab === 'comisiones') tab = 'ventas';
+    const next = ['financiamiento', 'leads', 'afluencia', 'comisiones', 'vendedores'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
     if (next !== 'ventas') {
       ventasDrawerUi?.close?.();
@@ -3959,6 +4032,7 @@
     const panelLd = document.getElementById('panelVentasLeads');
     const panelAf = document.getElementById('panelVentasAfluencia');
     const panelCom = document.getElementById('panelVentasComisiones');
+    const panelVend = document.getElementById('panelVentasVendedores');
     if (panelVentas) {
       panelVentas.classList.toggle('hidden', next !== 'ventas');
       panelVentas.hidden = next !== 'ventas';
@@ -3979,6 +4053,10 @@
       panelCom.classList.toggle('hidden', next !== 'comisiones');
       panelCom.hidden = next !== 'comisiones';
     }
+    if (panelVend) {
+      panelVend.classList.toggle('hidden', next !== 'vendedores');
+      panelVend.hidden = next !== 'vendedores';
+    }
 
     const title = document.querySelector('.top-bar-title');
     if (title) {
@@ -3988,7 +4066,9 @@
           ? 'Leads'
           : (next === 'afluencia'
             ? 'Afluencia'
-            : (next === 'comisiones' ? 'Comisiones' : 'Ventas de Unidades')));
+            : (next === 'comisiones'
+              ? 'Comisiones'
+              : (next === 'vendedores' ? 'Vendedores Cholula' : 'Ventas de Unidades'))));
     }
 
     if (next === 'financiamiento') {
@@ -4010,12 +4090,18 @@
       if (location.hash !== '#comisiones') {
         history.replaceState(null, '', `${location.pathname}${location.search}#comisiones`);
       }
+    } else if (next === 'vendedores') {
+      if (location.hash !== '#vendedores') {
+        history.replaceState(null, '', `${location.pathname}${location.search}#vendedores`);
+      }
     } else if (
       location.hash === '#financiamiento' || location.hash === '#financiera' || location.hash === '#fi'
       || location.hash === '#leads' || location.hash === '#lead' || location.hash === '#oportunidades'
       || location.hash === '#afluencia' || location.hash === '#afluencia-mtk' || location.hash === '#mtk'
       || location.hash === '#marketing' || location.hash === '#trafico' || location.hash === '#tráfico'
       || location.hash === '#comisiones' || location.hash === '#comision'
+      || location.hash === '#vendedores' || location.hash === '#vendedor'
+      || location.hash === '#monitoreo' || location.hash === '#cholula'
       || location.hash === '#analisis-comercial' || location.hash === '#analisis' || location.hash === '#cmi'
     ) {
       history.replaceState(null, '', `${location.pathname}${location.search}`);
@@ -4036,6 +4122,7 @@
       block: 'nearest',
     });
 
+    await ensureTabModule(next);
     if (next === 'financiamiento') {
       requestAnimationFrame(() => {
         window.FinanciamientoVentas?.onVisible?.();
@@ -4147,10 +4234,8 @@
       bindElements();
       bindEvents();
       await resolveGoalEditPermission();
-      window.FinanciamientoVentas?.init?.();
-      window.LeadsVentas?.init?.();
-      window.AfluenciaVentas?.init?.();
-      window.ComisionesVentas?.init?.();
+      await window.DashboardAuth?.getSession?.().catch(() => null);
+      ocultarComisionesCholula();
       compactFilters = Dashboard.initCompactFilters();
       // El periodo viene de la URL si existe (enlace compartido, recarga, «ir a» desde otra pantalla).
       const desdeUrl = Dashboard.getDateParamsFromUrl();
@@ -4163,9 +4248,10 @@
         setDefaultDates();
         Dashboard.setActivePresetChip('mes-actual');
       }
-      await ensureSofiaLiveOnBoot();
+      const sofiaBoot = ensureSofiaLiveOnBoot();
       await switchSalesTab(getSalesTabFromUrl());
-      await consultar();
+      await consultar({ sinCortina: true });
+      void sofiaBoot;
       window.__salesPageInit = true;
       window.__salesPageInitBuild = SALES_JS_BUILD;
     } catch (err) {

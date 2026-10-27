@@ -657,7 +657,85 @@ function filtroSucursalesDe(payload, segmentos, fechaInicio, fechaFin) {
   }).filter(Boolean);
 }
 
-async function getEstadoResultadosFormato({ fechaInicio, fechaFin }) {
+function estadoSoloSucursal(estado, sucursalId) {
+  const foco = (estado.filtroSucursales || []).find((s) => s.id === sucursalId);
+  const linea = foco?.linea;
+  if (!linea) {
+    return {
+      ...estado,
+      alcanceSucursal: sucursalId,
+      nota: 'No hay movimiento de esta sucursal en el periodo.',
+      totales: totalesDe({}),
+      lineas: [],
+      filtroSucursales: [],
+      filas: [],
+      gastos: [],
+      gastosFueraDelEstado: [],
+      equilibrio: null,
+      serie: [],
+      comparativo: null,
+      revisionDisponible: false,
+      cuentasSinRenglon: [],
+      cuentasDuplicadas: [],
+    };
+  }
+  const gastosOp = num(linea.gastos);
+  const admin = num(linea.gastosAdministracion);
+  const operacion = num(linea.utilidad) - gastosOp - admin;
+  const fila = (n, seccion, nivel, concepto, importe, extra = {}) => ({
+    fila: n, seccion, nivel, concepto, importe: redondear(importe), cuentas: [], ...extra,
+  });
+  const filas = [
+    fila(10, 'Ingresos', 'total', `VENTAS ${String(linea.label || sucursalId).toUpperCase()}`, linea.ventas),
+    fila(20, 'Costo de ventas', 'total', 'COSTO', linea.costo),
+    fila(30, 'Utilidad bruta', 'total', 'UTILIDAD BRUTA', linea.utilidad),
+    fila(40, 'Gastos', 'cuenta', 'Gasto de operación', gastosOp),
+    fila(50, 'Gastos', 'cuenta', 'Administración prorrateada', admin),
+    fila(60, 'Gastos', 'total', 'TOTAL DE GASTOS', gastosOp + admin),
+    fila(70, 'Resultado', 'total', 'UTILIDAD DE OPERACIÓN', operacion, { final: true }),
+  ];
+  const totales = {
+    ventas: redondear(linea.ventas),
+    costo: redondear(linea.costo),
+    utilidadBruta: redondear(linea.utilidad),
+    gastosOperacion: redondear(gastosOp),
+    gastosAdministracion: redondear(admin),
+    gastos: redondear(gastosOp + admin),
+    utilidadOperacion: redondear(operacion),
+    resultadoFinanciero: 0,
+    utilidadNeta: redondear(operacion),
+  };
+  return {
+    ...estado,
+    alcanceSucursal: sucursalId,
+    nota: `Estado de ${linea.label}. Autos nuevos de esa sucursal, con su gasto de operación y la administración que le toca. El resto de la agencia no entra.`,
+    totales,
+    margenes: {
+      brutoPct: pct(totales.utilidadBruta, totales.ventas),
+      operacionPct: pct(totales.utilidadOperacion, totales.ventas),
+      netoPct: pct(totales.utilidadNeta, totales.ventas),
+    },
+    filas: filas.map((f) => ({ ...f, pctVentas: pct(f.importe, totales.ventas) })),
+    bloques: {
+      ventas: { raices: [10], total: 10 },
+      costo: { raices: [20], total: 20 },
+      utilidadBruta: { raices: [30], total: 30 },
+      gastos: { raices: [40], total: 60 },
+    },
+    lineas: [{ ...linea, grupo: 'nuevos' }],
+    filtroSucursales: [foco],
+    gastos: [],
+    gastosFueraDelEstado: [],
+    equilibrio: null,
+    serie: foco.serie || [],
+    comparativo: foco.comparativo || null,
+    revisionDisponible: false,
+    cuentasSinRenglon: [],
+    cuentasDuplicadas: [],
+  };
+}
+
+async function getEstadoResultadosFormato({ fechaInicio, fechaFin, alcanceSucursal = null }) {
   if (!fechaInicio || !fechaFin) throw new Error('fechaInicio y fechaFin son obligatorios');
   const { getEeffSummary } = require('./eeffSummaryService');
   const { getPuntoEquilibrio } = require('./breakEvenService');
@@ -667,7 +745,7 @@ async function getEstadoResultadosFormato({ fechaInicio, fechaFin }) {
     getPuntoEquilibrio({ fechaInicio, fechaFin }).catch(() => null),
     cuentasDeResultados(fechaInicio, fechaFin).catch((err) => { console.error('[contabilidad-formato] revisión:', err.message); return null; }),
   ]);
-  return armarEstado({
+  const estado = armarEstado({
     payload,
     porMes: meses.porMes,
     segmentos: meses.segmentos,
@@ -676,6 +754,7 @@ async function getEstadoResultadosFormato({ fechaInicio, fechaFin }) {
     fechaInicio,
     fechaFin,
   });
+  return alcanceSucursal ? estadoSoloSucursal(estado, alcanceSucursal) : estado;
 }
 
 /** Parte pura: recibe lo ya calculado y arma la respuesta (la usan las pruebas). */

@@ -1112,7 +1112,7 @@ function computeCrmStats() {
  * Buscar contactos por ID CRM exacto, nombre parcial, VIN, teléfono o correo.
  * Busca tanto en actividades (ciclos) como en leads y consolida por ID CRM.
  */
-function searchContacts({ q = '', limit = 25 } = {}) {
+function searchContacts({ q = '', limit = 25, crmTexto = null } = {}) {
   const d = getDb();
   const term = String(q || '').trim();
   if (!term) return [];
@@ -1337,7 +1337,20 @@ function searchContacts({ q = '', limit = 25 } = {}) {
     }
   }
 
-  return [...byId.values()].slice(0, max);
+  let salida = [...byId.values()];
+  const alcanceBusqueda = require('../auth/alcanceSucursal').sqlCrmSucursal(crmTexto);
+  if (alcanceBusqueda && hasLeadsTable(d)) {
+    const permitidos = new Set(
+      d.prepare(`
+        SELECT DISTINCT id_crm AS id
+        FROM crm_leads
+        WHERE id_crm IS NOT NULL AND trim(id_crm) <> ''
+          AND ${alcanceBusqueda.sql}
+      `).all(...alcanceBusqueda.params).map((r) => String(r.id)),
+    );
+    salida = salida.filter((r) => permitidos.has(String(r.id_contacto || '')));
+  }
+  return salida.slice(0, max);
 }
 
 function matchCrmVinToSerie(crmVin, serieSql) {
@@ -3741,7 +3754,7 @@ function ordenarDetalleVida(rows, kpiKey) {
 /**
  * Detalle completo de un KPI del embudo (sin depender del preview truncado del dashboard).
  */
-function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads', limit = 5000 } = {}) {
+function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads', limit = 5000, crmTexto = null } = {}) {
   const d = getDb();
   if (!hasLeadsTable(d)) {
     throw Object.assign(
@@ -3761,6 +3774,11 @@ function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads'
       notDupSql,
       hasta: rango.hasta,
     });
+    const alcanceVida = require('../auth/alcanceSucursal').sqlCrmSucursal(crmTexto);
+    if (alcanceVida) {
+      vidaQ.whereSql += ` AND ${alcanceVida.sql}`;
+      vidaQ.params.push(...alcanceVida.params);
+    }
     const total = Number(
       d.prepare(`SELECT COUNT(*) AS n FROM crm_leads ${vidaQ.whereSql}`).get(...vidaQ.params)?.n || 0,
     );
@@ -3803,6 +3821,11 @@ function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads'
     where.push('substr(fecha_entrada, 1, 10) <= ?');
     params.push(String(rango.hasta).slice(0, 10));
   }
+  const alcanceCrm = require('../auth/alcanceSucursal').sqlCrmSucursal(crmTexto);
+  if (alcanceCrm) {
+    where.push(alcanceCrm.sql);
+    params.push(...alcanceCrm.params);
+  }
   const extra = leadKpiExtraWhere(kpiKey, {
     compraSql: getCompraLeadAtribuibleSql(require('../config/campanasConversion').LEAD_VIDA_DIAS),
   });
@@ -3836,7 +3859,7 @@ function getLeadsKpiDetalle({ fechaInicio = null, fechaFin = null, kpi = 'leads'
   };
 }
 
-function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } = {}) {
+function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400, crmTexto = null } = {}) {
   const d = getDb();
   if (!hasLeadsTable(d)) {
     throw Object.assign(
@@ -3853,15 +3876,24 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
 
   const notDupSql = getLeadNotDuplicateSql();
   const dupSql = getLeadIsDuplicateSql();
+  const alcanceCrm = require('../auth/alcanceSucursal').sqlCrmSucursal(crmTexto);
+  const coberturaWhere = [
+    `fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''`,
+    `(${notDupSql})`,
+  ];
+  const coberturaParams = [];
+  if (alcanceCrm) {
+    coberturaWhere.push(alcanceCrm.sql);
+    coberturaParams.push(...alcanceCrm.params);
+  }
   const coberturaRow = d.prepare(`
     SELECT
       MIN(substr(fecha_entrada, 1, 10)) AS minFechaEntrada,
       MAX(substr(fecha_entrada, 1, 10)) AS maxFechaEntrada,
       COUNT(*) AS totalLeads
     FROM crm_leads
-    WHERE fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''
-      AND (${notDupSql})
-  `).get();
+    WHERE ${coberturaWhere.join(' AND ')}
+  `).get(...coberturaParams);
   const cobertura = {
     minFechaEntrada: coberturaRow?.minFechaEntrada || null,
     maxFechaEntrada: coberturaRow?.maxFechaEntrada || null,
@@ -3879,6 +3911,10 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     where.push('substr(fecha_entrada, 1, 10) <= ?');
     params.push(String(rango.hasta).slice(0, 10));
   }
+  if (alcanceCrm) {
+    where.push(alcanceCrm.sql);
+    params.push(...alcanceCrm.params);
+  }
   const whereSql = `WHERE ${where.join(' AND ')}`;
 
   const periodDateWhere = [];
@@ -3890,6 +3926,10 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
   if (rango.hasta) {
     periodDateWhere.push('substr(fecha_entrada, 1, 10) <= ?');
     periodDateParams.push(String(rango.hasta).slice(0, 10));
+  }
+  if (alcanceCrm) {
+    periodDateWhere.push(alcanceCrm.sql);
+    periodDateParams.push(...alcanceCrm.params);
   }
   const periodDateSql = periodDateWhere.length
     ? `WHERE ${periodDateWhere.join(' AND ')}`
@@ -3925,6 +3965,10 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     notDupSql,
     hasta: rango.hasta,
   });
+  if (alcanceCrm) {
+    seguimientoVidaQ.whereSql += ` AND ${alcanceCrm.sql}`;
+    seguimientoVidaQ.params.push(...alcanceCrm.params);
+  }
   const seguimientoSinCompra = Number(
     d.prepare(`SELECT COUNT(*) AS n FROM crm_leads ${seguimientoVidaQ.whereSql}`)
       .get(...seguimientoVidaQ.params)?.n || 0,
@@ -3936,6 +3980,10 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     'substr(fecha_entrada, 1, 10) <= ?',
   ];
   const pipelineParams = [seguimientoVidaQ.desdeVida, seguimientoVidaQ.refHasta];
+  if (alcanceCrm) {
+    pipelineWhere.push(alcanceCrm.sql);
+    pipelineParams.push(...alcanceCrm.params);
+  }
   const pipelineVivo = Number(
     d.prepare(`SELECT COUNT(*) AS n FROM crm_leads WHERE ${pipelineWhere.join(' AND ')}`)
       .get(...pipelineParams)?.n || 0,
@@ -4061,7 +4109,9 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     AND fecha_entrada IS NOT NULL AND trim(fecha_entrada) <> ''
     AND substr(fecha_entrada, 1, 10) >= ?
     AND substr(fecha_entrada, 1, 10) <= ?
+    ${alcanceCrm ? `AND ${alcanceCrm.sql}` : ''}
   `;
+  const plantaParams = [planta.desde, planta.hasta, ...(alcanceCrm ? alcanceCrm.params : [])];
 
   // Regla de la campaña: compra ≤ LEAD_VIDA_DIAS (90). La de 180 días es referencia para ver
   // cuánto convierte el lead después de su vida útil; no cambia la regla.
@@ -4081,7 +4131,7 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     FROM crm_leads
     WHERE ${plantaSql}
     GROUP BY campana
-  `).all(hoyCampanas, planta.desde, planta.hasta);
+  `).all(hoyCampanas, ...plantaParams);
 
   const campanasMap = Object.fromEntries(
     CAMPANAS_CONVERSION.map((c) => [c.key, {
@@ -4209,7 +4259,7 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
     FROM crm_leads
     WHERE ${plantaSql}
     GROUP BY substr(fecha_entrada, 1, 7), campana
-  `).all(planta.desde, planta.hasta);
+  `).all(...plantaParams);
 
   const mesBuckets = new Map(planta.meses.map((mes) => [mes, {
     mes,
@@ -4275,12 +4325,14 @@ function getLeadsDashboard({ fechaInicio = null, fechaFin = null, limit = 400 } 
       AND substr(fecha_entrada, 1, 10) >= ?
       AND substr(fecha_entrada, 1, 10) <= ?
       AND (${compraLeadSql()}) = 0
+      ${alcanceCrm ? `AND ${alcanceCrm.sql}` : ''}
     ORDER BY fecha_entrada ASC
     LIMIT 3000
   `).all(
     hoyIso,
     String(caducarDesde).slice(0, 10),
     String(caducarHasta).slice(0, 10),
+    ...(alcanceCrm ? alcanceCrm.params : []),
   );
 
   const campanasCaducarAll = candidatosCaducar
@@ -6649,7 +6701,7 @@ function citaConResultadoSql(alias = '') {
  * P-PRO-1 a P-PRO-6 para la pestaña Leads.
  * P-PRO-6 sale del corte de cartera (HT-PRO-2). Los SLA que piden hora se dejan sin valor.
  */
-function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {}) {
+function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null, crmTexto = null } = {}) {
   const d = getDb();
   if (!hasLeadsTable(d)) {
     throw Object.assign(new Error('Tabla de leads no cargada.'), { status: 503 });
@@ -6666,6 +6718,11 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
   if (hasta) {
     where.push('substr(fecha_entrada, 1, 10) <= ?');
     params.push(hasta);
+  }
+  const alcanceCrm = require('../auth/alcanceSucursal').sqlCrmSucursal(crmTexto);
+  if (alcanceCrm) {
+    where.push(alcanceCrm.sql);
+    params.push(...alcanceCrm.params);
   }
   const hoja = d.prepare(`
     SELECT
@@ -6712,6 +6769,14 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
       citaWhere.push('substr(fecha_prog_actividad, 1, 10) <= ?');
       citaParams.push(hasta);
     }
+    if (alcanceCrm) {
+      citaWhere.push(`trim(id_contacto) IN (
+        SELECT trim(id_crm) FROM crm_leads
+        WHERE id_crm IS NOT NULL AND trim(id_crm) <> ''
+          AND ${alcanceCrm.sql}
+      )`);
+      citaParams.push(...alcanceCrm.params);
+    }
     const citaRow = d.prepare(`
       SELECT
         COUNT(DISTINCT id_ciclo) AS programadas,
@@ -6730,6 +6795,14 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
     const corte = hasta || new Date().toISOString().slice(0, 10);
     const activosSql = ESTATUS_CARTERA_ACTIVA.map(() => '?').join(',');
     const cicloSql = sqlCicloVigente();
+    const alcanceCicloSql = alcanceCrm
+      ? `WHERE substr(contacto_key, instr(contacto_key, '|') + 1) IN (
+          SELECT trim(id_crm) FROM crm_leads
+          WHERE id_crm IS NOT NULL AND trim(id_crm) <> ''
+            AND ${alcanceCrm.sql}
+        )`
+      : '';
+    const alcanceCicloParams = alcanceCrm ? alcanceCrm.params : [];
     const carteraRow = d.prepare(`
       WITH ciclo AS (${cicloSql})
       SELECT
@@ -6741,7 +6814,15 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
           AND substr(COALESCE(fecha_prog_actividad, ''), 1, 10) >= ? THEN 1 ELSE 0 END) AS diferidaConEspera,
         MAX(CASE WHEN substr(estatus_key, instr(estatus_key, '|') + 1) IN (${activosSql}) THEN fecha_estatus END) AS ultimoEstatus
       FROM ciclo
-    `).get(...ESTATUS_CARTERA_ACTIVA, ...ESTATUS_CARTERA_ACTIVA, corte, corte, ...ESTATUS_CARTERA_ACTIVA);
+      ${alcanceCicloSql}
+    `).get(
+      ...ESTATUS_CARTERA_ACTIVA,
+      ...ESTATUS_CARTERA_ACTIVA,
+      corte,
+      corte,
+      ...ESTATUS_CARTERA_ACTIVA,
+      ...alcanceCicloParams,
+    );
 
     const porEjecutivo = d.prepare(`
       WITH ciclo AS (${cicloSql}),
@@ -6750,6 +6831,7 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
           MAX(CASE WHEN ejecutivo_asignado IS NOT NULL AND trim(ejecutivo_asignado) <> '' THEN ejecutivo_asignado END) AS ejecutivo
         FROM crm_leads
         WHERE es_duplicado = 0 AND id_crm IS NOT NULL AND trim(id_crm) <> ''
+          ${alcanceCrm ? `AND ${alcanceCrm.sql}` : ''}
         GROUP BY trim(id_crm)
       )
       SELECT
@@ -6764,11 +6846,12 @@ function getProspeccionIndicadores({ fechaInicio = null, fechaFin = null } = {})
       FROM ciclo
       LEFT JOIN lead_ej
         ON lead_ej.id_crm = substr(ciclo.contacto_key, instr(ciclo.contacto_key, '|') + 1)
+      ${alcanceCicloSql}
       GROUP BY ejecutivo
       HAVING cartera > 0
       ORDER BY (cartera - vigentes) DESC, cartera DESC
       LIMIT 15
-    `).all(...ESTATUS_CARTERA_ACTIVA, ...ESTATUS_CARTERA_ACTIVA, corte);
+    `).all(...alcanceCicloParams, ...ESTATUS_CARTERA_ACTIVA, ...ESTATUS_CARTERA_ACTIVA, corte, ...alcanceCicloParams);
 
     cartera = {
       activa: Number(carteraRow?.activa || 0),

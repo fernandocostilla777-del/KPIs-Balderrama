@@ -1076,7 +1076,7 @@ async function getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes = false
   }
 }
 
-async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
+async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } = {}) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
 
@@ -1099,66 +1099,97 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
   const inicioAnterior = parseDateInput(fechaInicioAnterior);
   const finAnterior = parseDateInput(fechaFinAnterior);
 
-  const [core, coreAnterior, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
-    getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes, fresh }),
-    getVentasSofiaCore({
-      fechaInicio: fechaInicioAnterior,
-      fechaFin: fechaFinAnterior,
-      incluirPorMes: false,
-      fresh: false,
-    }).catch((err) => {
-      console.warn('[ventas] periodo año anterior:', err.message);
-      return null;
-    }),
-    getComparativoYtd(fechaFin),
-    getInventory({ planPisoPeriod: 'all' }).catch(() => null),
-    getMejorUtilidadPorCarline({
-      fechaInicio: ytdRanges.inicioActual,
-      fechaFin: ytdRanges.finActual,
-      metric: 'utilidad_neta',
-      minUnidades: 1,
-    }).catch((err) => {
-      console.warn('[ventas] utilidad carline:', err.message);
-      return { available: false, reason: err.message, porCarline: [] };
-    }),
-    getTomasACuenta({ fechaInicio, fechaFin }).catch((err) => {
-      console.warn('[ventas] tomas a cuenta:', err.message);
-      return { total: 0, montoTotal: 0, registros: [], porMes: null, error: err.message };
-    }),
-    sameAsTomasChart
-      ? Promise.resolve(null)
-      : getTomasACuenta({
-        fechaInicio: tomasChartInicio,
-        fechaFin: tomasChartFin,
+  const corePromise = getVentasSofiaCore({ fechaInicio, fechaFin, incluirPorMes, fresh });
+  const anteriorPromise = getVentasSofiaCore({
+    fechaInicio: fechaInicioAnterior,
+    fechaFin: fechaFinAnterior,
+    incluirPorMes: false,
+    fresh: false,
+  }).catch((err) => {
+    console.warn('[ventas] periodo año anterior:', err.message);
+    return null;
+  });
+  // Un perfil de sucursal solo pinta sus facturas. Inventario, utilidad de agencia
+  // y tomas no se usan y retrasaban la respuesta más de medio minuto.
+  let core;
+  let coreAnterior;
+  let comparativoYtd = null;
+  let inventorySnap = null;
+  let utilidadCarline = canal
+    ? { available: false, porCarline: [], reason: 'Perfil de sucursal' }
+    : null;
+  let tomasACuenta = { total: 0, montoTotal: 0, registros: [], porMes: null };
+  let tomasYtdRaw = null;
+  if (canal) {
+    [core, coreAnterior] = await Promise.all([corePromise, anteriorPromise]);
+  } else {
+    [core, coreAnterior, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
+      corePromise,
+      anteriorPromise,
+      getComparativoYtd(fechaFin),
+      getInventory({ planPisoPeriod: 'all' }).catch(() => null),
+      getMejorUtilidadPorCarline({
+        fechaInicio: ytdRanges.inicioActual,
+        fechaFin: ytdRanges.finActual,
+        metric: 'utilidad_neta',
+        minUnidades: 1,
       }).catch((err) => {
-        console.warn('[ventas] tomas mensual YTD:', err.message);
-        return { total: 0, registros: [], porMes: null, error: err.message };
+        console.warn('[ventas] utilidad carline:', err.message);
+        return { available: false, reason: err.message, porCarline: [] };
       }),
-  ]);
+      getTomasACuenta({ fechaInicio, fechaFin }).catch((err) => {
+        console.warn('[ventas] tomas a cuenta:', err.message);
+        return { total: 0, montoTotal: 0, registros: [], porMes: null, error: err.message };
+      }),
+      sameAsTomasChart
+        ? Promise.resolve(null)
+        : getTomasACuenta({
+          fechaInicio: tomasChartInicio,
+          fechaFin: tomasChartFin,
+        }).catch((err) => {
+          console.warn('[ventas] tomas mensual YTD:', err.message);
+          return { total: 0, registros: [], porMes: null, error: err.message };
+        }),
+    ]);
+  }
 
+  const { filtrarFilasCanal } = require('../auth/alcanceSucursal');
+  if (canal) {
+    core.registros = filtrarFilasCanal(core.registros, canal);
+    if (coreAnterior?.registros) {
+      coreAnterior.registros = filtrarFilasCanal(coreAnterior.registros, canal);
+    }
+  }
   const rows = core.registros;
-  const sofiaEntregas = core.sofiaEntregas;
+  const sofiaEntregas = canal
+    ? { ...core.sofiaEntregas, registrosEntrega: [] }
+    : core.sofiaEntregas;
+  const tomasFuente = canal
+    ? { total: 0, montoTotal: 0, registros: [], porMes: null }
+    : tomasACuenta;
+  const tomasYtdFuente = canal ? tomasFuente : tomasYtdRaw;
+  const invFuente = canal ? null : inventorySnap;
   const resumen = summarizeVentas(rows, inicio, fin, sofiaEntregas);
-  resumen.unidadesApartadas = Number(inventorySnap?.summary?.availableApartadas ?? 0);
-  const apartadasInventario = Array.isArray(inventorySnap?.inventoryTable)
-    ? inventorySnap.inventoryTable.filter((u) => u.isApartada || u.situacion === 'SEP')
+  resumen.unidadesApartadas = Number(invFuente?.summary?.availableApartadas ?? 0);
+  const apartadasInventario = Array.isArray(invFuente?.inventoryTable)
+    ? invFuente.inventoryTable.filter((u) => u.isApartada || u.situacion === 'SEP')
     : [];
-  resumen.totalTomasACuenta = Number(tomasACuenta.total || 0);
-  resumen.montoTomasACuenta = Number(tomasACuenta.montoTotal || 0);
-  resumen.montoAdquisicionTomas = Number(tomasACuenta.montoAdquisicion || 0);
-  resumen.totalTomasVendidas = Number(tomasACuenta.totalVendidos || tomasACuenta.totalVendidosMismoMes || 0);
+  resumen.totalTomasACuenta = Number(tomasFuente.total || 0);
+  resumen.montoTomasACuenta = Number(tomasFuente.montoTotal || 0);
+  resumen.montoAdquisicionTomas = Number(tomasFuente.montoAdquisicion || 0);
+  resumen.totalTomasVendidas = Number(tomasFuente.totalVendidos || tomasFuente.totalVendidosMismoMes || 0);
   resumen.totalTomasEnInventario = Number(
-    tomasACuenta.totalEnInventario
+    tomasFuente.totalEnInventario
     ?? Math.max(0, resumen.totalTomasACuenta - resumen.totalTomasVendidas)
   );
-  resumen.pctTomasVendidas = Number(tomasACuenta.pctVendidos || tomasACuenta.pctVendidosMismoMes || 0);
-  resumen.totalTomasVendidasMismoMes = Number(tomasACuenta.totalVendidosMismoMes || 0);
-  resumen.montoTomasVendidasMismoMes = Number(tomasACuenta.montoVentasUsado || 0);
+  resumen.pctTomasVendidas = Number(tomasFuente.pctVendidos || tomasFuente.pctVendidosMismoMes || 0);
+  resumen.totalTomasVendidasMismoMes = Number(tomasFuente.totalVendidosMismoMes || 0);
+  resumen.montoTomasVendidasMismoMes = Number(tomasFuente.montoVentasUsado || 0);
   // Compat: el KPI/UI de tomas ahora mide reventa total (cualquier fecha), no solo mismo mes.
   resumen.pctTomasVendidasMismoMes = resumen.pctTomasVendidas;
   resumen.pctVentasConToma = resumen.pctTomasVendidas;
 
-  const tomasChartSource = sameAsTomasChart ? tomasACuenta : (tomasYtdRaw || tomasACuenta);
+  const tomasChartSource = sameAsTomasChart ? tomasFuente : (tomasYtdFuente || tomasFuente);
   const tomasMensual = tomasChartSource.porMes || buildTomasPorMes(
     tomasChartSource.registros || [],
     parseDateInput(tomasChartInicio),
@@ -1185,15 +1216,15 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
   });
 
   return {
-    filtros: { fechaInicio, fechaFin },
+    filtros: { fechaInicio, fechaFin, canal: canal || null },
     resumen,
     comparativoPeriodo,
-    comparativoYtd,
-    utilidadCarline,
+    comparativoYtd: canal ? null : comparativoYtd,
+    utilidadCarline: canal ? { available: false, porCarline: [], reason: 'Perfil de sucursal' } : utilidadCarline,
     registros: rows,
-    entregasSofia: resumen.entregasSofiaEfectivas || sofiaEntregas.registrosEntrega || [],
+    entregasSofia: resumen.entregasSofiaEfectivas || (canal ? [] : (sofiaEntregas.registrosEntrega || [])),
     apartadasInventario,
-    tomasACuenta: tomasACuenta.registros || [],
+    tomasACuenta: tomasFuente.registros || [],
     tomasMensual: {
       ...tomasMensual,
       anio: tomasChartAnio,
@@ -1202,14 +1233,14 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false } = {}) {
       registros: tomasChartSource.registros || [],
     },
     tomasACuentaMeta: {
-      porModeloToma: tomasACuenta.porModeloToma || [],
-      montoAdquisicion: tomasACuenta.montoAdquisicion || 0,
-      totalVendidos: tomasACuenta.totalVendidos || 0,
-      totalEnInventario: tomasACuenta.totalEnInventario || 0,
-      pctVendidos: tomasACuenta.pctVendidos || 0,
-      totalVendidosMismoMes: tomasACuenta.totalVendidosMismoMes || 0,
-      pctVendidosMismoMes: tomasACuenta.pctVendidosMismoMes || 0,
-      montoVentasUsado: tomasACuenta.montoVentasUsado || 0,
+      porModeloToma: tomasFuente.porModeloToma || [],
+      montoAdquisicion: tomasFuente.montoAdquisicion || 0,
+      totalVendidos: tomasFuente.totalVendidos || 0,
+      totalEnInventario: tomasFuente.totalEnInventario || 0,
+      pctVendidos: tomasFuente.pctVendidos || 0,
+      totalVendidosMismoMes: tomasFuente.totalVendidosMismoMes || 0,
+      pctVendidosMismoMes: tomasFuente.pctVendidosMismoMes || 0,
+      montoVentasUsado: tomasFuente.montoVentasUsado || 0,
     },
   };
 }

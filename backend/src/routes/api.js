@@ -23,6 +23,11 @@ const { getFacturaMovimientos } = require('../services/facturaMovimientosService
 const { getAnalisisFinanciero } = require('../services/analisisFinancieroService');
 const { getAnalisisComercial } = require('../services/analisisComercialService');
 const { getContabilidad } = require('../services/contabilidadService');
+const { alcanceDeRol } = require('../auth/alcanceSucursal');
+
+function alcanceDe(req) {
+  return alcanceDeRol(req.session?.role);
+}
 const { getEeffSummary } = require('../services/eeffSummaryService');
 const { loadDailySalesUnits } = require('../services/ventasNuevosFinanciero');
 const { isConfigured, runChat, synthesizeSpeech, transcribeAudio, DEFAULT_MODEL } = require('../services/aiAgent');
@@ -101,7 +106,13 @@ router.get('/ventas', async (req, res, next) => {
         /* ignore */
       }
     }
-    const data = await getVentas({ fechaInicio, fechaFin, fresh: forceFresh });
+    const alcance = alcanceDe(req);
+    const data = await getVentas({
+      fechaInicio,
+      fechaFin,
+      fresh: forceFresh,
+      canal: alcance?.canalVenta || null,
+    });
     let sofiaLiveUpdate = { active: false };
     try {
       const status = require('../services/sofiaMonthEndLive').getStatus();
@@ -160,12 +171,18 @@ router.get('/ventas/financiamiento', async (req, res, next) => {
   }
 });
 
-router.get('/ventas/comisiones/tipos', (_req, res) => {
+router.get('/ventas/comisiones/tipos', (req, res) => {
+  if (alcanceDe(req)) {
+    return res.status(403).json({ error: 'Las comisiones no están disponibles para este perfil.' });
+  }
   res.json({ tipos: listComisionTypes() });
 });
 
 router.get('/ventas/comisiones', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'Las comisiones no están disponibles para este perfil.' });
+    }
     const { fechaInicio, fechaFin, tipo } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
@@ -216,7 +233,12 @@ router.get('/ventas/leads/supervivencia', (req, res, next) => {
     if (!fechaFin) {
       return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
     }
-    res.json(getSupervivencia({ fechaFin, horizonte }));
+    const alcance = alcanceDe(req);
+    res.json(getSupervivencia({
+      fechaFin,
+      horizonte,
+      crmTexto: alcance?.crmTexto || null,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -230,7 +252,12 @@ router.get('/ventas/leads/prospeccion', (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(crm.getProspeccionIndicadores({ fechaInicio, fechaFin }));
+    const alcance = alcanceDe(req);
+    res.json(crm.getProspeccionIndicadores({
+      fechaInicio,
+      fechaFin,
+      crmTexto: alcance?.crmTexto || null,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -245,15 +272,22 @@ router.get('/ventas/leads', (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     // ?kpi=compras → detalle completo del indicador (misma ruta, sin depender de /detalle)
+    const alcance = alcanceDe(req);
     if (kpi) {
       return res.json(crm.getLeadsKpiDetalle({
         fechaInicio,
         fechaFin,
         kpi,
         limit: limit || 5000,
+        crmTexto: alcance?.crmTexto || null,
       }));
     }
-    res.json(crm.getLeadsDashboard({ fechaInicio, fechaFin, limit }));
+    res.json(crm.getLeadsDashboard({
+      fechaInicio,
+      fechaFin,
+      limit,
+      crmTexto: alcance?.crmTexto || null,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -267,12 +301,31 @@ router.get('/ventas/leads/detalle', (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
+    const alcance = alcanceDe(req);
     res.json(crm.getLeadsKpiDetalle({
       fechaInicio,
       fechaFin,
       kpi: kpi || 'leads',
       limit: limit || 5000,
+      crmTexto: alcance?.crmTexto || null,
     }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/monitoreo-cholula', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, vendedor } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    const monitoreo = require('../services/monitoreoCholulaService');
+    if (vendedor) {
+      return res.json(await monitoreo.getMonitoreoCholulaDetalle({ fechaInicio, fechaFin, vendedor }));
+    }
+    res.json(await monitoreo.getMonitoreoCholula({ fechaInicio, fechaFin }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -285,7 +338,13 @@ router.get('/ventas/afluencia', (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(getAfluenciaDashboard({ fechaInicio, fechaFin, limit }));
+    const alcance = alcanceDe(req);
+    res.json(getAfluenciaDashboard({
+      fechaInicio,
+      fechaFin,
+      limit,
+      sucursalKey: alcance?.afluenciaKey || null,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -436,6 +495,9 @@ router.get('/inventory', async (req, res, next) => {
 
 router.get('/inventory/vendidos', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'Este perfil consulta la disponibilidad de autos, no el cierre de utilidad.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     const vendidos = await getVendidosAnalisis({ fechaInicio, fechaFin });
     const iemc = await computeIemcF2({
@@ -455,6 +517,9 @@ router.get('/inventory/vendidos', async (req, res, next) => {
 
 router.get('/inventory/intercambios', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'Los intercambios de planta no están disponibles para este perfil.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
@@ -468,6 +533,9 @@ router.get('/inventory/intercambios', async (req, res, next) => {
 
 router.get('/inventory/postventa', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'El inventario de postventa no está disponible para este perfil.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     res.json(await getInventoryPostventa({ fechaInicio, fechaFin }));
   } catch (err) {
@@ -479,6 +547,9 @@ router.get('/inventory/postventa', async (req, res, next) => {
 /** Traspasos de refacciones entre almacenes (DE…A…) */
 router.get('/inventory/postventa/traspasos', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'El inventario de postventa no está disponible para este perfil.' });
+    }
     const { getTraspasosEntreAlmacenes } = require('../services/inventoryPostventaService');
     const { fechaInicio, fechaFin } = req.query;
     res.json(await getTraspasosEntreAlmacenes({ fechaInicio, fechaFin }));
@@ -650,7 +721,15 @@ router.get('/contabilidad', async (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(await getContabilidad({ fechaInicio, fechaFin, planPisoPeriod, sucursal, area, includeFi }));
+    const alcance = alcanceDe(req);
+    res.json(await getContabilidad({
+      fechaInicio,
+      fechaFin,
+      planPisoPeriod,
+      sucursal: alcance?.contabilidadId || sucursal,
+      area,
+      includeFi,
+    }));
   } catch (err) {
     next(err);
   }
@@ -666,7 +745,7 @@ router.get('/contabilidad/punto-equilibrio', async (req, res, next) => {
     res.json(await getPuntoEquilibrio({
       fechaInicio,
       fechaFin,
-      sucursal: sucursal || 'todos',
+      sucursal: alcanceDe(req)?.contabilidadId || sucursal || 'todos',
       refined: refined === 'true' || refined === '1',
     }));
   } catch (err) {
@@ -682,7 +761,11 @@ router.get('/contabilidad/estado-resultados', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     const { getEstadoResultadosFormato } = require('../services/contabilidadFormatoService');
-    res.json(await getEstadoResultadosFormato({ fechaInicio, fechaFin }));
+    res.json(await getEstadoResultadosFormato({
+      fechaInicio,
+      fechaFin,
+      alcanceSucursal: alcanceDe(req)?.contabilidadId || null,
+    }));
   } catch (err) {
     next(err);
   }
@@ -693,6 +776,13 @@ router.get('/contabilidad/balance', async (req, res, next) => {
     const { fechaFin } = req.query;
     if (!fechaFin) return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
     const { getBalanceFormato } = require('../services/contabilidadFormatoService');
+    if (alcanceDe(req)?.contabilidadId) {
+      return res.json({
+        disponible: false,
+        alcanceSucursal: alcanceDe(req).contabilidadId,
+        nota: 'El balance es de toda la agencia. Este perfil solo consulta el estado de resultados de su sucursal.',
+      });
+    }
     res.json(await getBalanceFormato({ fechaFin }));
   } catch (err) {
     next(err);
@@ -704,6 +794,12 @@ router.get('/contabilidad/analisis-financiero', async (req, res, next) => {
     const { fechaInicio, fechaFin } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
+    }
+    if (alcanceDe(req)?.contabilidadId) {
+      return res.json({
+        disponible: false,
+        nota: 'El análisis financiero de agencia no aplica a un perfil de sucursal.',
+      });
     }
     res.json(await getAnalisisFinanciero({ fechaInicio, fechaFin }));
   } catch (err) {
@@ -921,7 +1017,13 @@ router.get('/crm/contactos', (req, res, next) => {
     const crm = require('../services/crmCiclosService');
     const { q, limit } = req.query;
     if (!q) return res.status(400).json({ error: 'Parametro requerido: q (ID CRM, nombre o VIN).' });
-    res.json({ resultados: crm.searchContacts({ q, limit }) });
+    res.json({
+      resultados: crm.searchContacts({
+        q,
+        limit,
+        crmTexto: alcanceDe(req)?.crmTexto || null,
+      }),
+    });
   } catch (err) {
     next(err);
   }

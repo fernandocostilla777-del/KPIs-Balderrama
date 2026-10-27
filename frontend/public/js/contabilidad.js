@@ -1961,7 +1961,9 @@ function renderDailySalesTable(rows, fmt) {
 
 function getFiltrosContabilidad() {
   return {
-    sucursal: document.getElementById('filtroSucursal')?.value || 'todos',
+    sucursal: document.documentElement.dataset.alcanceSucursal
+      || document.getElementById('filtroSucursal')?.value
+      || 'todos',
     area: document.getElementById('filtroArea')?.value || 'todos',
     includeFi: document.getElementById('filtroIncludeFi')?.checked !== false,
   };

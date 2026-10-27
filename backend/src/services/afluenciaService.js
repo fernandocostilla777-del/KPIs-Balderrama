@@ -738,7 +738,7 @@ function pctConv(num, den) {
   return Math.round((n / d) * 1000) / 10;
 }
 
-function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
+function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300, sucursalKey = null } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
@@ -804,6 +804,7 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
 
       const flags = classifyReconciliacion(row.reconciliacion);
       const key = mapSucursalKey(row.centro_trabajo, row.fuerza);
+      if (sucursalKey && key !== sucursalKey) continue;
       const buckets = [summary, byKey[key] || byKey.otras];
 
       for (const b of buckets) {
@@ -871,19 +872,24 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
       `).all(String(fechaInicio), String(fechaFin));
     }
 
-    summary.pruebasManejo = pruebas.length;
-    for (const p of pruebas) {
+    const pruebasAlcance = sucursalKey
+      ? pruebas.filter((p) => mapSucursalKey(p.centro_trabajo, p.fuerza_venta) === sucursalKey)
+      : pruebas;
+    summary.pruebasManejo = pruebasAlcance.length;
+    for (const p of pruebasAlcance) {
       const key = mapSucursalKey(p.centro_trabajo, p.fuerza_venta);
       const b = byKey[key] || byKey.otras;
       b.pruebasManejo += 1;
     }
 
-    const porSucursal = SUCURSALES.map((s) => byKey[s.key]);
-    if (byKey.otras.registros > 0 || byKey.otras.pruebasManejo > 0) {
+    const porSucursal = sucursalKey
+      ? [byKey[sucursalKey]].filter(Boolean)
+      : SUCURSALES.map((s) => byKey[s.key]);
+    if (!sucursalKey && (byKey.otras.registros > 0 || byKey.otras.pruebasManejo > 0)) {
       porSucursal.push(byKey.otras);
     }
 
-    const pruebasDetalle = pruebas.slice(0, maxDetalle).map((p) => {
+    const pruebasDetalle = pruebasAlcance.slice(0, maxDetalle).map((p) => {
       const key = mapSucursalKey(p.centro_trabajo, p.fuerza_venta);
       const item = {
         fecha: p.fecha,
@@ -906,8 +912,8 @@ function getAfluenciaDashboard({ fechaInicio, fechaFin, limit = 300 } = {}) {
       return item;
     });
     // Si el slice omite filas, recalcular compras sobre el total de pruebas
-    if (pruebas.length > pruebasDetalle.length) {
-      summary.pruebasCompras = pruebas.reduce((acc, p) => {
+    if (pruebasAlcance.length > pruebasDetalle.length) {
+      summary.pruebasCompras = pruebasAlcance.reduce((acc, p) => {
         const hit = rowLooksLikeBuyer({
           idCrm: p.id_crm,
           cliente: p.nombre_cliente,

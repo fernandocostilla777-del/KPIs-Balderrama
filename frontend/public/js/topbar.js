@@ -1196,13 +1196,17 @@
 
   function filterKpiIndex(query, index) {
     const q = normalizeSearch(query);
+    const visibles = index.filter((item) => !(
+      document.documentElement.dataset.alcanceSucursal === 'cholula'
+      && (item.tab === 'comisiones' || String(item.href || '').includes('tab=cierre'))
+    ));
     if (!q) {
-      return index
+      return visibles
         .slice()
         .sort((a, b) => Number(b.local) - Number(a.local) || a.label.localeCompare(b.label, 'es'))
         .slice(0, 12);
     }
-    return index
+    return visibles
       .map((item) => {
         const hay = normalizeSearch(`${item.label} ${item.keys || ''} ${item.module || ''}`);
         let score = 0;
@@ -1477,49 +1481,6 @@
     goto: gotoKpiEntry,
   };
 
-  function themeToggleHtml() {
-    const Theme = window.BalderramaTheme;
-    const pref = Theme?.getPreference?.() || 'system';
-    const prefs = Theme?.PREFS || ['system', 'light', 'dark'];
-    const labels = Theme?.LABELS || { system: 'Sistema', light: 'Claro', dark: 'Oscuro' };
-    const icons = Theme?.ICONS || { system: 'brightness_auto', light: 'light_mode', dark: 'dark_mode' };
-    const buttons = prefs.map((id) => `
-      <button type="button"
-        class="top-bar-theme-btn${pref === id ? ' is-active' : ''}"
-        data-theme-pref="${id}"
-        aria-pressed="${pref === id ? 'true' : 'false'}"
-        title="${esc(labels[id] || id)}">
-        <span class="material-symbols-outlined" aria-hidden="true">${icons[id] || 'contrast'}</span>
-        <span>${esc(labels[id] || id)}</span>
-      </button>
-    `).join('');
-    return `
-      <div class="top-bar-user-row top-bar-user-row--stack top-bar-theme-block">
-        <span class="top-bar-user-label">Apariencia</span>
-        <div class="top-bar-theme-toggle" role="group" aria-label="Tema de apariencia">
-          ${buttons}
-        </div>
-      </div>
-    `;
-  }
-
-  function bindThemeToggle(panel) {
-    const Theme = window.BalderramaTheme;
-    if (!Theme || !panel) return;
-    panel.querySelectorAll('[data-theme-pref]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const next = btn.getAttribute('data-theme-pref');
-        Theme.setPreference(next);
-        panel.querySelectorAll('[data-theme-pref]').forEach((el) => {
-          const on = el.getAttribute('data-theme-pref') === next;
-          el.classList.toggle('is-active', on);
-          el.setAttribute('aria-pressed', on ? 'true' : 'false');
-        });
-      });
-    });
-  }
-
   function renderUserPanel(panel, session) {
     const pages = (session?.pages || [])
       .map((id) => PAGE_LABELS[id] || id)
@@ -1548,7 +1509,6 @@
           <span class="top-bar-user-label">Perfil</span>
           <span class="top-bar-user-value">${esc(session?.roleLabel || '—')}</span>
         </div>
-        ${themeToggleHtml()}
         <div class="top-bar-user-row top-bar-user-row--stack">
           <span class="top-bar-user-label">Módulos con acceso</span>
           <div class="top-bar-user-modules">
@@ -1564,8 +1524,6 @@
         Cerrar sesión
       </button>
     `;
-
-    bindThemeToggle(panel);
 
     panel.querySelector('[data-user-logout]')?.addEventListener('click', async () => {
       try {

@@ -630,7 +630,7 @@ function primeraDesde(fechas, entrada) {
   return null;
 }
 
-function leerFilas({ desde, hasta }) {
+function leerFilas({ desde, hasta, crmTexto = null }) {
   if (!fs.existsSync(DB_PATH)) {
     throw Object.assign(new Error('Tabla de leads no cargada.'), { status: 503 });
   }
@@ -643,6 +643,11 @@ function leerFilas({ desde, hasta }) {
       'substr(fecha_entrada, 1, 10) <= ?',
     ];
     const params = [desde, hasta];
+    const alcance = require('../auth/alcanceSucursal').sqlCrmSucursal(crmTexto);
+    if (alcance) {
+      where.push(alcance.sql);
+      params.push(...alcance.params);
+    }
     const rows = db.prepare(`
       SELECT
         id_crm AS idCrm,
@@ -689,15 +694,25 @@ function leerFilas({ desde, hasta }) {
     // Cobertura: cuántos registros del hito en la ventana cruzan con un lead por ID CRM.
     const idsLeads = new Set(rows.map((r) => String(r.idCrm || '').trim()).filter(Boolean));
     const contar = (tabla, campoFecha) => {
+      const extra = alcance
+        ? ` AND trim(id_crm) IN (
+            SELECT trim(id_crm) FROM crm_leads
+            WHERE id_crm IS NOT NULL AND trim(id_crm) <> ''
+              AND ${alcance.sql}
+          )`
+        : '';
+      const extraParams = alcance ? alcance.params : [];
       const tot = db.prepare(`
         SELECT COUNT(*) AS n FROM ${tabla}
         WHERE substr(${campoFecha}, 1, 10) >= ? AND substr(${campoFecha}, 1, 10) <= ?
-      `).get(desde, hasta).n;
+        ${extra}
+      `).get(desde, hasta, ...extraParams).n;
       const ids = db.prepare(`
         SELECT trim(id_crm) AS id FROM ${tabla}
         WHERE substr(${campoFecha}, 1, 10) >= ? AND substr(${campoFecha}, 1, 10) <= ?
           AND id_crm IS NOT NULL AND trim(id_crm) <> ''
-      `).all(desde, hasta);
+          ${extra}
+      `).all(desde, hasta, ...extraParams);
       return { disponible: true, registros: tot, conLead: ids.filter((r) => idsLeads.has(r.id)).length };
     };
     const citasSinFecha = rows.filter((r) => r.cita === 'SI' && !r.fechaCita).length;
@@ -742,14 +757,14 @@ function corteEfectivo(fechaFin, hoy = new Date().toISOString().slice(0, 10)) {
   return ff > hoy ? hoy : ff;
 }
 
-function getSupervivencia({ fechaFin, horizonte = HORIZONTE } = {}) {
+function getSupervivencia({ fechaFin, horizonte = HORIZONTE, crmTexto = null } = {}) {
   const hasta = corteEfectivo(fechaFin);
   const desde = sumarMeses(hasta, -12);
   const h = Math.max(30, Math.min(365, Number(horizonte) || HORIZONTE));
-  const clave = `${desde}|${hasta}|${h}`;
+  const clave = `${desde}|${hasta}|${h}|${crmTexto || ''}`;
   const hit = cache.get(clave);
   if (hit && Date.now() - hit.at < 6 * 60 * 60 * 1000) return hit.payload;
-  const { filas, cobertura } = leerFilas({ desde, hasta });
+  const { filas, cobertura } = leerFilas({ desde, hasta, crmTexto });
   const payload = construirRespuesta(filas, {
     corte: hasta, horizonte: h, desde, hasta, cobertura,
   });

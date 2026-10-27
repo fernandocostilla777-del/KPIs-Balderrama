@@ -6,9 +6,9 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=172" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=174" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
-<script src="/js/theme.js?v=1"></script>
+<script src="/js/theme.js?v=2"></script>
 </head>
 <body class="dashboard-body" data-page="sales">
 <div id="loading" class="loading-overlay hidden"><div class="spinner"></div></div>
@@ -88,6 +88,10 @@ Afluencia
 <button type="button" class="contabilidad-tab" data-sales-tab="comisiones" aria-controls="panelVentasComisiones" aria-selected="false">
 <span class="material-symbols-outlined" aria-hidden="true">payments</span>
 Comisiones
+</button>
+<button type="button" class="contabilidad-tab" data-sales-tab="vendedores" aria-controls="panelVentasVendedores" aria-selected="false">
+<span class="material-symbols-outlined" aria-hidden="true">badge</span>
+Vendedores Cholula
 </button>
 </nav>
 
@@ -1102,6 +1106,59 @@ Ver unidades
 
 </div>
 
+<div id="panelVentasVendedores" class="sales-main-panel hidden" data-sales-panel="vendedores" hidden>
+<style>
+#cholVendTable tbody tr.chol-vend-row { cursor: pointer; }
+#cholVendTable tbody tr.is-open { background: color-mix(in srgb, var(--accent, #1d4ed8) 12%, transparent); }
+.chol-vend-sub { display: block; font-size: 11px; opacity: .75; font-weight: 500; }
+#cholVendTable td.num, #cholVendTable th:not(:first-child) { text-align: right; }
+.chol-vend-detalle { margin-top: 18px; }
+.chol-vend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.chol-vend-bloque h3 { margin: 0 0 8px; font-size: 14px; }
+.chol-vend-bloque h3 span { font-weight: 600; opacity: .7; }
+</style>
+<section id="secVendedoresCholula" class="section-panel dashboard-section fi-section" aria-label="Monitoreo de vendedores Cholula">
+<div class="fi-section-header">
+<div>
+<h2 class="section-title" style="margin-bottom:6px">Monitoreo de vendedores · Cholula</h2>
+<p id="cholVendSubtitle" class="section-subtitle" style="margin:0">Ventas, solicitudes, pruebas de manejo y el resto de la actividad comercial de la sucursal.</p>
+</div>
+</div>
+<div id="cholVendKpis" class="kpi-grid" style="margin:16px 0">
+<div class="kpi-card kpi-card--blue"><div class="kpi-card-head"><span class="kpi-title">Ventas</span></div><div id="cholKpiVentas" class="kpi-value">—</div></div>
+<div class="kpi-card kpi-card--green"><div class="kpi-card-head"><span class="kpi-title">Leads</span></div><div id="cholKpiLeads" class="kpi-value">—</div></div>
+<div class="kpi-card kpi-card--violet"><div class="kpi-card-head"><span class="kpi-title">Pruebas</span></div><div id="cholKpiPruebas" class="kpi-value">—</div></div>
+<div class="kpi-card kpi-card--slate"><div class="kpi-card-head"><span class="kpi-title">Solicitudes</span></div><div id="cholKpiSolicitudes" class="kpi-value">—</div></div>
+<div class="kpi-card kpi-card--blue"><div class="kpi-card-head"><span class="kpi-title">Visitas</span></div><div id="cholKpiVisitas" class="kpi-value">—</div></div>
+<div class="kpi-card kpi-card--green"><div class="kpi-card-head"><span class="kpi-title">Compras de lead</span></div><div id="cholKpiCompras" class="kpi-value">—</div></div>
+</div>
+<div class="table-scroll">
+<table class="data-table" id="cholVendTable">
+<thead>
+<tr>
+<th>Vendedor</th>
+<th>Ventas</th>
+<th>Leads</th>
+<th>Contactados</th>
+<th>Citas</th>
+<th>Cotizaciones</th>
+<th>Pruebas</th>
+<th>Solicitudes</th>
+<th>Aprobadas</th>
+<th>Visitas</th>
+<th>Seguimientos</th>
+<th>Compras</th>
+</tr>
+</thead>
+<tbody id="cholVendBody">
+<tr><td colspan="12" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
+</tbody>
+</table>
+</div>
+<div id="cholVendDetalle" class="chol-vend-detalle" hidden></div>
+</section>
+</div>
+
 <div id="panelVentasComisiones" class="sales-main-panel hidden" data-sales-panel="comisiones" hidden>
 
 <section id="secComisiones" class="section-panel dashboard-section fi-section" aria-label="Comisiones">
@@ -1230,19 +1287,14 @@ Exportar CSV
 </main>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
-<script src="/js/auth-client.js"></script>
-<script src="/js/shared.js?v=9"></script>
+<script src="/js/auth-client.js?v=2"></script>
+<script src="/js/shared.js?v=10"></script>
 <script src="/js/canales.js?v=3"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=23"></script>
+<script src="/js/topbar.js?v=26"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/financiamiento.js?v=64"></script>
-<script src="/js/leads.js?v=36"></script>
-<script src="/js/afluencia.js?v=18"></script>
-<script src="/js/comisiones.js?v=2"></script>
-<script src="/js/analisisComercial.js?v=20"></script>
-<script src="/js/sales.js?v=126"></script>
+<script src="/js/sales.js?v=130"></script>
 </body>
 </html>

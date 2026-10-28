@@ -38,7 +38,8 @@ function printStartupUrls() {
   console.log(`  → API local:  http://localhost:${PORT}/api`);
   console.log(`  → API LAN:    http://${preferred}:${PORT}/api`);
   console.log(`  → Frontend:   ${FRONTEND_URL}`);
-  console.log(`  BD: ${process.env.DB_NAME} @ ${process.env.DB_HOST}`);
+  const conexion = require('./src/services/conexionOrigen').estado();
+  console.log(`  BD: ${process.env.DB_NAME} @ ${conexion.host} (${conexion.label})`);
   console.log(`  Auth: ${isAuthEnabled() ? 'activado' : 'desactivado (AUTH_ENABLED=false)'}`);
   console.log('');
 }
@@ -130,6 +131,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Error al consultar la base de datos', detail: err.message });
 });
 
+const conexionOrigen = require('./src/services/conexionOrigen');
+conexionOrigen.aplicarGuardado();
 dataSource.start().catch((err) => console.error('[data-source]', err.message));
 
 const server = app.listen(PORT, HOST, () => {

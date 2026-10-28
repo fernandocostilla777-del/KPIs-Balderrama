@@ -20,6 +20,7 @@ backend/data/passwordResets.json
 backend/data/sales-goals.json
 backend/data/financiamiento-notes.json
 backend/data/seguimiento-clientes.json
+backend/data/conexion-origen.json
 backend/data/rolePermissions.json
 backend/data/messages.json
 backend/data/crm-ciclos.db

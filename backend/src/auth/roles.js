@@ -120,6 +120,7 @@ const ALWAYS_API_PREFIXES = [
   '/auth/password-reset',
   '/health',
   '/data-source',
+  '/conexion',
   '/ai',
 ];
 

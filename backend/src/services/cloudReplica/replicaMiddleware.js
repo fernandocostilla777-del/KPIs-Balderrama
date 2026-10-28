@@ -18,6 +18,7 @@ const READ_TIMEOUT_MS = 60 * 1000;
 const LOCAL_PREFIXES = [
   '/health',
   '/data-source',
+  '/conexion',
   '/ai/',
   '/crm/sheets-sync/',
   '/cloud-sync/',

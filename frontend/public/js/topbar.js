@@ -1519,6 +1519,11 @@
         </div>
       </div>
       ${adminLink}
+      <div class="top-bar-conexion" data-conexion hidden>
+        <span class="top-bar-user-label">Conexión</span>
+        <div class="top-bar-conexion-ops" role="group" aria-label="Tipo de conexión"></div>
+        <p class="top-bar-conexion-nota" data-conexion-nota></p>
+      </div>
       <button type="button" class="top-bar-user-logout" data-user-logout>
         <span class="material-symbols-outlined">logout</span>
         Cerrar sesión
@@ -1533,7 +1538,63 @@
       }
     });
 
+    if (session?.canManageUsers) cargarConexion(panel);
+
     pollNotifications();
+  }
+
+  function pintarConexion(panel, data) {
+    const caja = panel.querySelector('[data-conexion]');
+    const ops = panel.querySelector('.top-bar-conexion-ops');
+    const nota = panel.querySelector('[data-conexion-nota]');
+    if (!caja || !ops) return;
+    caja.hidden = false;
+    ops.innerHTML = (data.opciones || []).map((op) => {
+      const on = op.activo ? ' is-on' : '';
+      const off = op.disponible ? '' : ' is-soon';
+      const titulo = op.disponible
+        ? (op.host || op.label)
+        : (op.nota || 'Próximamente');
+      return `<button type="button" class="top-bar-conexion-btn${on}${off}" data-conexion-modo="${esc(op.id)}"${op.disponible ? '' : ' disabled'} title="${esc(titulo)}">${esc(op.label)}</button>`;
+    }).join('');
+    const activa = (data.opciones || []).find((op) => op.activo);
+    if (nota) {
+      nota.textContent = activa?.host
+        ? activa.host
+        : (activa?.nota || '');
+    }
+  }
+
+  async function cargarConexion(panel) {
+    try {
+      const res = await fetch('/api/conexion', { credentials: 'same-origin' });
+      const data = await res.json();
+      if (!res.ok) return;
+      pintarConexion(panel, data);
+      panel.querySelector('.top-bar-conexion-ops')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-conexion-modo]');
+        if (!btn || btn.disabled || btn.classList.contains('is-on')) return;
+        const nota = panel.querySelector('[data-conexion-nota]');
+        if (nota) nota.textContent = 'Conectando…';
+        btn.disabled = true;
+        try {
+          const resp = await fetch('/api/conexion', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modo: btn.dataset.conexionModo }),
+          });
+          const body = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(body.error || 'No se pudo cambiar la conexión.');
+          window.location.reload();
+        } catch (err) {
+          if (nota) nota.textContent = err.message || 'No se pudo cambiar la conexión.';
+          btn.disabled = false;
+        }
+      });
+    } catch {
+      /* el menú de usuario sigue usable */
+    }
   }
 
   async function loadUserSession(wrap) {

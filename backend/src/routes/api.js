@@ -39,6 +39,23 @@ const seguimiento360Routes = require('./seguimiento360');
 
 const router = express.Router();
 
+router.get('/conexion', (_req, res) => {
+  res.json(require('../services/conexionOrigen').estado());
+});
+
+router.put('/conexion', async (req, res) => {
+  try {
+    const { canManageUsers } = require('../auth/roles');
+    if (!canManageUsers(req.session?.role)) {
+      return res.status(403).json({ error: 'Solo administración puede cambiar la conexión.' });
+    }
+    const data = await require('../services/conexionOrigen').seleccionar(req.body?.modo);
+    res.json(data);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 router.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'dashboard-ventas-abp', database: process.env.DB_NAME, timestamp: new Date().toISOString() });
 });

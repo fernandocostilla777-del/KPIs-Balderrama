@@ -78,5 +78,15 @@ async function query(text, params = {}) {
   throw lastErr;
 }
 
-module.exports = { getPool, query, sql, resetPool };
+function getServer() {
+  return config.server;
+}
+
+async function setServer(host) {
+  config.server = String(host || '').trim();
+  await resetPool();
+  try { await sql.close(); } catch { /* el pool global ya estaba cerrado */ }
+}
+
+module.exports = { getPool, query, sql, resetPool, getServer, setServer };
 

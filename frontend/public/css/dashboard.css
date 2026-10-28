@@ -652,6 +652,21 @@ body.dashboard-body {
   background: #b91c1c;
 }
 
+.top-bar-conexion {
+  margin: 4px 0 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider, #e7edf5);
+}
+.top-bar-conexion-ops { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.top-bar-conexion-btn {
+  height: 34px; border-radius: 10px; border: 1px solid #dfe5ee; background: #fff;
+  font: inherit; font-size: 12px; font-weight: 700; color: #334155; cursor: pointer;
+}
+.top-bar-conexion-btn.is-on { background: #2d5bff; border-color: #2d5bff; color: #fff; }
+.top-bar-conexion-btn.is-soon,
+.top-bar-conexion-btn:disabled { opacity: 0.55; cursor: default; }
+.top-bar-conexion-nota { margin: 6px 0 0; font-size: 11px; color: #64748b; word-break: break-all; }
+
 .top-bar-user-empty {
   margin: 0;
   font-size: 12px;

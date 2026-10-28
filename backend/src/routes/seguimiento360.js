@@ -191,9 +191,13 @@ router.get('/expediente/:idContacto', (req, res, next) => {
 /** P-VTA-4 — Tiempo de Maduración Comercial y cobertura del objetivo. */
 router.get('/maduracion', (req, res, next) => {
   try {
+    const { alcanceDeRol } = require('../auth/alcanceSucursal');
+    const alcance = alcanceDeRol(req.session?.role);
     const data = crm().getTiempoMaduracion({
       fechaInicio: req.query.fechaInicio || null,
       fechaFin: req.query.fechaFin || null,
+      crmTexto: alcance?.crmTexto || null,
+      sucursal: alcance?.label || null,
     });
     res.json({ ok: true, formato: 'seguimiento-360-v1', seccion: 'p-vta-4', ...data });
   } catch (err) {
@@ -224,7 +228,15 @@ router.get('/cierres-taller', async (req, res, next) => {
         error: 'Parámetros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).',
       });
     }
-    const data = await crm().getCierresTallerPeriodo({ fechaInicio, fechaFin, limit });
+    const { alcanceDeRol } = require('../auth/alcanceSucursal');
+    const alcance = alcanceDeRol(req.session?.role);
+    const data = await crm().getCierresTallerPeriodo({
+      fechaInicio,
+      fechaFin,
+      limit,
+      letrasOrden: alcance?.tallerLetras || null,
+      sucursal: alcance?.label || null,
+    });
     res.json({
       ok: true,
       formato: 'seguimiento-360-v1',

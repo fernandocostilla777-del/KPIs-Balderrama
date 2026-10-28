@@ -3366,9 +3366,15 @@
     return document.documentElement.dataset.alcanceSucursal === 'cholula';
   }
 
+  /** Pestañas sin datos por sucursal: Comisiones y Financiamiento (el servidor también las bloquea). */
+  const TABS_SIN_SUCURSAL = ['comisiones', 'financiamiento'];
+  function tabPermitidaCholula(tab) {
+    return !(esPerfilCholula() && TABS_SIN_SUCURSAL.includes(tab));
+  }
+
   function ocultarComisionesCholula() {
     if (!esPerfilCholula()) return;
-    document.querySelectorAll('[data-sales-tab="comisiones"], #panelVentasComisiones').forEach((el) => {
+    document.querySelectorAll('[data-sales-tab="comisiones"], #panelVentasComisiones, [data-sales-tab="financiamiento"], #panelVentasFinanciamiento').forEach((el) => {
       el.hidden = true;
       el.classList.add('hidden');
     });
@@ -3379,7 +3385,7 @@
     leads: '/js/leads.js?v=37',
     afluencia: '/js/afluencia.js?v=18',
     comisiones: '/js/comisiones.js?v=2',
-    vendedores: '/js/monitoreo-cholula.js?v=1',
+    vendedores: '/js/monitoreo-cholula.js?v=10',
   };
   const scriptListo = {};
   const tabListo = {};
@@ -3884,7 +3890,7 @@
 
   function getSalesTabFromUrl() {
     const hash = String(location.hash || '').replace(/^#/, '').toLowerCase();
-    if (hash === 'financiamiento' || hash === 'financiera' || hash === 'fi') return 'financiamiento';
+    if (tabPermitidaCholula('financiamiento') && (hash === 'financiamiento' || hash === 'financiera' || hash === 'fi')) return 'financiamiento';
     if (hash === 'leads' || hash === 'lead' || hash === 'oportunidades') return 'leads';
     if (
       hash === 'afluencia'
@@ -3898,7 +3904,7 @@
     if (hash === 'vendedores' || hash === 'vendedor' || hash === 'monitoreo' || hash === 'cholula') return 'vendedores';
     const params = new URLSearchParams(location.search);
     const tab = String(params.get('tab') || '').toLowerCase();
-    if (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi') return 'financiamiento';
+    if (tabPermitidaCholula('financiamiento') && (tab === 'financiamiento' || tab === 'financiera' || tab === 'fi')) return 'financiamiento';
     if (tab === 'leads' || tab === 'lead' || tab === 'oportunidades') return 'leads';
     if (tab === 'afluencia' || tab === 'trafico' || tab === 'tráfico' || tab === 'mtk' || tab === 'marketing') return 'afluencia';
     if (!esPerfilCholula() && (tab === 'comisiones' || tab === 'comision')) return 'comisiones';
@@ -3912,8 +3918,7 @@
       Promise.all([
         ensureTabModule('leads'),
         ensureTabModule('afluencia'),
-        ensureTabModule('financiamiento'),
-        ...(esPerfilCholula() ? [] : [ensureTabModule('comisiones')]),
+        ...(esPerfilCholula() ? [] : [ensureTabModule('financiamiento'), ensureTabModule('comisiones')]),
       ]).then(() => {
       const tasks = [];
       if (activeSalesTab !== 'leads' && window.LeadsVentas?.load && !window.LeadsVentas.hasCache?.(fechaInicio, fechaFin)) {
@@ -4014,7 +4019,7 @@
   }
 
   async function switchSalesTab(tab) {
-    if (esPerfilCholula() && tab === 'comisiones') tab = 'ventas';
+    if (!tabPermitidaCholula(tab)) tab = 'ventas';
     const next = ['financiamiento', 'leads', 'afluencia', 'comisiones', 'vendedores'].includes(tab) ? tab : 'ventas';
     activeSalesTab = next;
     if (next !== 'ventas') {

@@ -78,3 +78,41 @@ test('el perfil Cholula queda acotado a su sucursal y a Ventas', () => {
   assert.equal(sql.params[0].includes("'"), false);
   assert.match(sql.params[0], /^[A-Z0-9 ]+$/);
 });
+
+const { periodoAnterior, nombreVisible, conTasas } = require('../src/services/monitoreoCholulaService');
+
+test('el periodo anterior es el mes previo o los mismos días justo antes', () => {
+  assert.deepEqual(periodoAnterior('2026-09-01', '2026-09-30'), { fechaInicio: '2026-08-01', fechaFin: '2026-08-31' });
+  assert.deepEqual(periodoAnterior('2026-03-01', '2026-03-31'), { fechaInicio: '2026-02-01', fechaFin: '2026-02-28' });
+  assert.deepEqual(periodoAnterior('2026-01-01', '2026-03-31'), { fechaInicio: '2025-10-01', fechaFin: '2025-12-31' });
+  assert.deepEqual(periodoAnterior('2026-03-10', '2026-03-19'), { fechaInicio: '2026-02-28', fechaFin: '2026-03-09' });
+});
+
+test('los nombres en mayúsculas del DMS se muestran legibles', () => {
+  assert.equal(nombreVisible('ORTEGA SALAS LUIS'), 'Ortega Salas Luis');
+  assert.equal(nombreVisible('MARIA DE LA CRUZ'), 'Maria de la Cruz');
+  assert.equal(nombreVisible('Ana López'), 'Ana López');
+});
+
+test('las tasas no se inventan cuando no hay base', () => {
+  const sinBase = conTasas({ leads: 0, contactados: 0, citas: 0, comprasLead: 0, solicitudes: 3, solicitudesAprobadas: 1, ventas: 4, ventasAnterior: 0 });
+  assert.equal(sinBase.pctContacto, null);
+  assert.equal(sinBase.pctCierreLead, null);
+  assert.equal(sinBase.variacionVentasPct, null);
+  assert.equal(sinBase.pctAprobacion, 33.3);
+  const conBase = conTasas({ leads: 8, contactados: 6, citas: 3, comprasLead: 1, solicitudes: 0, solicitudesAprobadas: 0, ventas: 3, ventasAnterior: 4 });
+  assert.equal(conBase.pctContacto, 75);
+  assert.equal(conBase.pctCita, 50);
+  assert.equal(conBase.pctCierreLead, 12.5);
+  assert.equal(conBase.variacionVentasPct, -25);
+});
+
+
+test('el equipo de Cholula reconoce el nombre aunque cambie el orden', () => {
+  const { esVendedorEquipo } = require('../src/services/monitoreoCholulaService');
+  assert.equal(esVendedorEquipo('Arenas Garzón Fredy'), true);
+  assert.equal(esVendedorEquipo('ADRIANA TELLEZ FLORES'), true);
+  assert.equal(esVendedorEquipo('Laura Viviana Reyes Aguilar'), true);
+  assert.equal(esVendedorEquipo('ROJAS ROBLES CINTHIA'), false);
+  assert.equal(esVendedorEquipo('Sin asignar'), false);
+});

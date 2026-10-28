@@ -245,13 +245,12 @@ const PROFILE_PLAYBOOKS = {
     decisionLens: [
       '¿Esta cifra es de Cholula?',
       '¿Qué lead de Cholula todavía puede convertir?',
-      '¿La utilidad de Cholula cubre su gasto?',
+      '¿Qué unidades hay disponibles en Cholula?',
     ],
     priorityKpis: [
       'Ventas del canal Cholula',
       'Leads y afluencia de Cholula',
-      'Disponibilidad de autos nuevos y seminuevos',
-      'Utilidad de autos nuevos Cholula',
+      'Disponibilidad de autos nuevos y seminuevos de Cholula',
     ],
     answerStyle: [
       'Habla solo de Cholula. Si el dato es de otra sucursal, no lo uses.',
@@ -264,8 +263,9 @@ const PROFILE_PLAYBOOKS = {
     ],
     avoid: [
       'No reportes piso, Zacatelco, foráneos ni el consolidado de la agencia.',
+      'No entres a contabilidad ni a estados financieros.',
       'No inventes cifras de otras sucursales.',
-      'La disponibilidad es el stock de autos (ubicación, situación, días). No uses el cierre de utilidad ni el inventario de postventa.',
+      'La disponibilidad de seminuevos es el stock físico del DMS con ubicación Cholula (O4). No uses el lote de seminuevos de otras sucursales, ni el cierre de utilidad, ni el inventario de postventa.',
     ],
   },
 };

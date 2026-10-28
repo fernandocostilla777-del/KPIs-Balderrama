@@ -238,3 +238,25 @@ test('parámetros por confirmar quedan expuestos', () => {
   assert.equal(PVTA4.perdidoDias, 180);
   assert.equal(PVTA4.maxMaduracionDias, 730);
 });
+
+test('una venta es de Cholula si el lead o el vendedor del equipo lo son', () => {
+  const porLead = clasificarContactoMaduracion(contacto({
+    ciclos: [ciclo({ fic: '2026-08-01', ff: '2026-08-21', vendedor: 'OTRA PERSONA' })],
+    leads: [{ fecha: '2026-08-01', cholula: true }],
+    huellas: [{ fecha: '2026-08-01', fuente: 'lead' }],
+  }), HOY);
+  assert.equal(porLead.ventas[0].cholula, true);
+
+  const porVendedor = clasificarContactoMaduracion(contacto({
+    ciclos: [ciclo({ fic: '2026-08-01', ff: '2026-08-21', vendedor: 'JUNCO CASTAÑEDA MAX JALIL' })],
+    huellas: [{ fecha: '2026-08-01', fuente: 'ciclo' }],
+  }), HOY);
+  assert.equal(porVendedor.ventas[0].cholula, true);
+
+  const ajena = clasificarContactoMaduracion(contacto({
+    ciclos: [ciclo({ fic: '2026-08-01', ff: '2026-08-21', vendedor: 'ROJAS ROBLES CINTHIA' })],
+    leads: [{ fecha: '2026-08-01', cholula: false }],
+    huellas: [{ fecha: '2026-08-01', fuente: 'lead' }],
+  }), HOY);
+  assert.equal(ajena.ventas[0].cholula, false);
+});

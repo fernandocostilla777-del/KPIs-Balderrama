@@ -1155,15 +1155,17 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
 
   const { filtrarFilasCanal } = require('../auth/alcanceSucursal');
   if (canal) {
-    core.registros = filtrarFilasCanal(core.registros, canal);
+    // core y coreAnterior vienen del caché que comparten todos los perfiles: se filtran en una
+    // copia. Filtrarlos en su lugar dejaba a toda la agencia viendo solo esta sucursal (5 min).
+    core = { ...core, registros: filtrarFilasCanal(core.registros, canal) };
     if (coreAnterior?.registros) {
-      coreAnterior.registros = filtrarFilasCanal(coreAnterior.registros, canal);
+      coreAnterior = { ...coreAnterior, registros: filtrarFilasCanal(coreAnterior.registros, canal) };
     }
   }
   const rows = core.registros;
-  const sofiaEntregas = canal
-    ? { ...core.sofiaEntregas, registrosEntrega: [] }
-    : core.sofiaEntregas;
+  // SOFIA no trae sucursal: un perfil de sucursal no recibe sus totales (entregas con y sin
+  // previas, notificaciones por mes), que son de toda la agencia.
+  const sofiaEntregas = canal ? { registrosEntrega: [] } : core.sofiaEntregas;
   const tomasFuente = canal
     ? { total: 0, montoTotal: 0, registros: [], porMes: null }
     : tomasACuenta;
@@ -1202,7 +1204,7 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
       coreAnterior.registros,
       inicioAnterior,
       finAnterior,
-      coreAnterior.sofiaEntregas || {},
+      canal ? { registrosEntrega: [] } : (coreAnterior.sofiaEntregas || {}),
     );
     // Tomas del mismo periodo del año previo (consulta ligera ya hecha no; opcional omitir).
     resumenAnterior.totalTomasACuenta = 0;

@@ -221,7 +221,9 @@
     const periodo = data?.periodo || {};
     const fi = periodo.fechaInicio || '';
     const ff = periodo.fechaFin || '';
-    setText('emptySummaryPeriod', fi && ff ? `Periodo ${fi} — ${ff}` : 'Periodo seleccionado');
+    setText('emptySummaryPeriod', fi && ff
+      ? `${data.sucursal ? `${data.sucursal} · ` : ''}Periodo ${fi} — ${ff}`
+      : 'Periodo seleccionado');
     setText('emptyKpiOrdenes', tot.ordenesCerradas ?? 0);
     setText('emptyKpiClientes', tot.clientes ?? 0);
     setText('emptyKpiCrm', tot.clientesConIdCrm ?? 0);
@@ -229,9 +231,10 @@
     const conCrm = Number(tot.clientesConIdCrm || 0);
     const clientes = Number(tot.clientes || 0);
     const completos = Number(tot.clientesCompletos || 0);
+    const donde = data.sucursal ? ` de ${data.sucursal}` : '';
     const note = clientes
-      ? `${clientes} cliente(s) con cierre de taller · ${conCrm} con ID CRM listos para abrir 360${completos ? ` · ${completos} con unidad comprada y datos completos` : ''}.`
-      : 'Sin cierres de taller en este periodo. Ajusta las fechas o busca un cliente.';
+      ? `${clientes} cliente(s) con cierre de taller${donde} · ${conCrm} con ID CRM listos para abrir 360${completos ? ` · ${completos} con unidad comprada y datos completos` : ''}.`
+      : `Sin cierres de taller${donde} en este periodo. Ajusta las fechas o busca un cliente.`;
     setText('emptySummaryNote', note);
     setText('emptyKpiCrmPct', clientes ? `${Math.round((conCrm / clientes) * 100)}% del total` : '');
     el('emptySummary')?.setAttribute('aria-busy', 'false');
@@ -365,7 +368,9 @@
     const cob = data.cobertura || {};
     const per = data.periodo || {};
     const zona = data.zonaMaduracion || {};
-    setText('emptyMadPeriodo', per.fechaInicio && per.fechaFin ? `Ventas facturadas ${per.fechaInicio} — ${per.fechaFin}` : '');
+    setText('emptyMadPeriodo', per.fechaInicio && per.fechaFin
+      ? `${data.sucursal ? `${data.sucursal} · ` : ''}Ventas facturadas ${per.fechaInicio} — ${per.fechaFin}`
+      : '');
 
     // Tarjeta 1: días de maduración = promedio de los últimos 12 meses.
     const cardMad = el('kMaduracion');
@@ -398,7 +403,9 @@
         : 'periodo cerrado · sin objetivo retail capturado en Ventas';
     } else if (cob.objetivo == null) {
       cobValor = `≈${cob.esperadas ?? 0}`;
-      cobSub = `ventas esperadas en ${cob.horizonteDias} días · captura el objetivo retail en Ventas para medir cobertura`;
+      cobSub = data.sucursal
+        ? `ventas esperadas de ${data.sucursal} en ${cob.horizonteDias} días`
+        : `ventas esperadas en ${cob.horizonteDias} días · captura el objetivo retail en Ventas para medir cobertura`;
     } else if (Number(cob.faltante) === 0) {
       cobValor = '100%';
       cobSub = `objetivo ${cob.objetivo} ya cubierto con ${cob.facturadas} facturadas`;
@@ -700,7 +707,7 @@
         renderEmptySummary(data);
         setText('periodLabel', `${fechaInicio} — ${fechaFin}`);
         setStatus(
-          `Resumen · ${data.totales?.clientes || 0} cliente(s) · ${data.totales?.ordenesCerradas || 0} órdenes`
+          `Resumen${data.sucursal ? ` ${data.sucursal}` : ''} · ${data.totales?.clientes || 0} cliente(s) · ${data.totales?.ordenesCerradas || 0} órdenes`
         );
       }
     } catch (err) {

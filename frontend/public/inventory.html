@@ -6,7 +6,7 @@
 <title>Inventario | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=174" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=178" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -678,7 +678,7 @@ Unidad
 <button type="button" class="kpi-card kpi-card--blue kpi-card--interactive" data-semi-kpi="total" aria-expanded="false" title="Clic para ver unidades">
 <div class="kpi-card-head"><span class="kpi-title">Unidades en stock</span><span class="material-symbols-outlined kpi-icon">directions_car</span></div>
 <div id="semiTotal" class="kpi-value">—</div>
-<p class="kpi-subtitle">Situación SFIS · físico seminuevo</p>
+<p class="kpi-subtitle" id="semiStockSub">Situación SFIS · físico seminuevo</p>
 <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
 <div class="kpi-accent"></div>
 </button>
@@ -745,7 +745,7 @@ Unidad
 <div class="table-header-row">
 <div>
 <h3 class="section-title" style="margin-bottom:4px">Análisis de rotación</h3>
-<p class="section-subtitle" style="margin:0">Facturas históricas seminuevos (ADE_VTAFI tipo U) · últimos 12 meses · días de adquisición a factura</p>
+<p class="section-subtitle" id="semiRotacionSub" style="margin:0">Facturas históricas seminuevos (ADE_VTAFI tipo U) · últimos 12 meses · días de adquisición a factura</p>
 </div>
 <span id="semiTableCount" class="top-bar-meta">—</span>
 </div>
@@ -1104,11 +1104,11 @@ Unidad
 <script src="/js/auth-client.js?v=2"></script>
 <script src="/js/shared.js?v=10"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=26"></script>
+<script src="/js/topbar.js?v=28"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
 <script src="/js/analisisComercial.js?v=20"></script>
-<script src="/js/inventory.js?v=101"></script>
+<script src="/js/inventory.js?v=102"></script>
 </body>
 </html>

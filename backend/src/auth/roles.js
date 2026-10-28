@@ -71,14 +71,12 @@ const ROLE_DEFAULTS = {
   cholula: {
     id: 'cholula',
     label: 'Cholula',
-    pages: ['sales', 'inventory', 'contabilidad', 'lista-precios', 'seguimiento'],
+    pages: ['sales', 'inventory', 'lista-precios', 'seguimiento'],
     homePath: '/sales.html',
     alcanceSucursal: 'cholula',
     apiPrefixes: [
       '/ventas',
       '/inventory',
-      '/contabilidad',
-      '/eeff',
       '/lista-precios',
       '/crm',
       '/seguimiento-360',

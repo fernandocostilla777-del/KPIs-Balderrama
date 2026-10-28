@@ -4374,7 +4374,7 @@ function setInventoryScope(scope) {
     title.textContent = inventoryScope === 'postventa'
       ? 'Inventario · Postventa'
       : inventoryScope === 'seminuevos'
-        ? 'Inventario · Autos seminuevos'
+        ? (esInventarioCholula() ? 'Seminuevos · Cholula' : 'Inventario · Autos seminuevos')
         : inventoryScope === 'cierre'
           ? 'Inventario · Cierre de unidades vendidas'
           : (esInventarioCholula() ? 'Disponibilidad de inventario' : 'Gestión de Inventario');
@@ -4843,6 +4843,19 @@ function escSemiHtml(value) {
 function renderSeminuevosOverview(data) {
   const { fmt, setText } = Dashboard;
   const s = data?.summary || {};
+  const sucursal = data?.criterio?.sucursal || '';
+  const stockSub = document.getElementById('semiStockSub');
+  if (stockSub) {
+    stockSub.textContent = sucursal
+      ? `Físico seminuevo en ${sucursal} · ubicación ${data.criterio.ubicacion || ''} del DMS`
+      : 'Situación SFIS · físico seminuevo';
+  }
+  const rotSub = document.getElementById('semiRotacionSub');
+  if (rotSub) {
+    rotSub.textContent = sucursal
+      ? `Facturas de seminuevos con ubicación ${sucursal} · últimos 12 meses · días de adquisición a factura`
+      : 'Facturas históricas seminuevos (ADE_VTAFI tipo U) · últimos 12 meses · días de adquisición a factura';
+  }
   setText('semiTotal', fmt.number(s.totalUnits || 0));
   setText('semiValorAdq', moneyInt(s.valorAdquisicion || 0));
   setText('semiValorAdqSub', `Ticket prom. ${moneyInt(s.ticketPromAdq || 0)}`);
@@ -4862,7 +4875,7 @@ function renderSeminuevosOverview(data) {
           <td class="cell-money">${moneyInt(r.valorAdquisicion || 0)}</td>
           <td class="cell-money">${moneyInt(r.valorVenta || 0)}</td>
         </tr>`).join('')
-      : '<tr class="empty-row"><td colspan="5">Sin unidades en stock.</td></tr>';
+      : `<tr class="empty-row"><td colspan="5">${sucursal ? `No hay seminuevos físicos en ${escSemiHtml(sucursal)}.` : 'Sin unidades en stock.'}</td></tr>`;
   }
 
   const ageingBody = document.getElementById('tblSemiAgeing');
@@ -5945,7 +5958,8 @@ async function loadInventorySeminuevos({ force = false } = {}) {
     seminuevosLoaded = true;
     renderSeminuevosOverview(seminuevosData);
     const facturas = seminuevosData.rotacionHistorica?.totalFacturas || 0;
-    status.textContent = `${(seminuevosData.summary?.totalUnits || 0).toLocaleString('es-MX')} en stock · ${facturas.toLocaleString('es-MX')} facturas históricas`;
+    const donde = seminuevosData.criterio?.sucursal ? ` en ${seminuevosData.criterio.sucursal}` : '';
+    status.textContent = `${(seminuevosData.summary?.totalUnits || 0).toLocaleString('es-MX')} en stock${donde} · ${facturas.toLocaleString('es-MX')} facturas históricas`;
     status.className = 'sidebar-status-line';
   } catch (err) {
     status.textContent = err.message;

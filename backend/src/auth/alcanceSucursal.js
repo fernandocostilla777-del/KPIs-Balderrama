@@ -11,6 +11,10 @@ const PERFILES = {
     contabilidadId: 'cholula',
     crmTexto: 'CHOLULA',
     afluenciaKey: 'cholula',
+    /** PAR_TIPOPARA UBI · O4 = CHOLULA. El lote de seminuevos de la agencia es otra ubicación. */
+    inventarioUbicacion: 'O4',
+    /** Primera letra del folio de orden: Y normal Cholula, X reparación Cholula. */
+    tallerLetras: ['Y', 'X'],
   },
 };
 

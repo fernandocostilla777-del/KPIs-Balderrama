@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=174" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=178" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=2"></script>
 </head>
@@ -1107,55 +1107,89 @@ Ver unidades
 </div>
 
 <div id="panelVentasVendedores" class="sales-main-panel hidden" data-sales-panel="vendedores" hidden>
-<style>
-#cholVendTable tbody tr.chol-vend-row { cursor: pointer; }
-#cholVendTable tbody tr.is-open { background: color-mix(in srgb, var(--accent, #1d4ed8) 12%, transparent); }
-.chol-vend-sub { display: block; font-size: 11px; opacity: .75; font-weight: 500; }
-#cholVendTable td.num, #cholVendTable th:not(:first-child) { text-align: right; }
-.chol-vend-detalle { margin-top: 18px; }
-.chol-vend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
-.chol-vend-bloque h3 { margin: 0 0 8px; font-size: 14px; }
-.chol-vend-bloque h3 span { font-weight: 600; opacity: .7; }
-</style>
-<section id="secVendedoresCholula" class="section-panel dashboard-section fi-section" aria-label="Monitoreo de vendedores Cholula">
-<div class="fi-section-header">
+<section id="secVendedoresCholula" class="section-panel dashboard-section cv" aria-labelledby="cholVendTitulo">
+<header class="cv-head">
 <div>
-<h2 class="section-title" style="margin-bottom:6px">Monitoreo de vendedores · Cholula</h2>
-<p id="cholVendSubtitle" class="section-subtitle" style="margin:0">Ventas, solicitudes, pruebas de manejo y el resto de la actividad comercial de la sucursal.</p>
+<h2 class="section-title" id="cholVendTitulo">Vendedores · Cholula</h2>
+<p id="cholVendSubtitle" class="section-subtitle">Elija el periodo y abra esta pestaña.</p>
 </div>
+<details class="cv-como">
+<summary>¿Cómo se calcula?</summary>
+<p id="cholVendNota"></p>
+</details>
+</header>
+<p id="cholVendAviso" class="cv-aviso" hidden></p>
+
+<div id="cholVendKpis" class="cv-kpis" aria-label="Resultado del equipo"></div>
+
+<nav class="eeff-tabs cv-pestanas" id="cholVendModos" aria-label="Vista de vendedores">
+<button type="button" class="eeff-tab active" data-cv-modo="ranking" aria-selected="true">Ranking</button>
+<button type="button" class="eeff-tab" data-cv-modo="clientes" aria-selected="false">Seguimiento de clientes</button>
+<button type="button" class="eeff-tab" data-cv-modo="calendario" aria-selected="false">Calendario</button>
+</nav>
+<div id="cholVendRanking">
+<div class="cv-tabla-head">
+<h3 class="cv-subtitulo">Ranking del periodo</h3>
+<p class="cv-leyenda"><span class="cv-punto cv-punto--arriba"></span>arriba del promedio del equipo <span class="cv-punto cv-punto--abajo"></span>abajo · diferencia de 5 puntos o más · clic en un vendedor para ver su información</p>
 </div>
-<div id="cholVendKpis" class="kpi-grid" style="margin:16px 0">
-<div class="kpi-card kpi-card--blue"><div class="kpi-card-head"><span class="kpi-title">Ventas</span></div><div id="cholKpiVentas" class="kpi-value">—</div></div>
-<div class="kpi-card kpi-card--green"><div class="kpi-card-head"><span class="kpi-title">Leads</span></div><div id="cholKpiLeads" class="kpi-value">—</div></div>
-<div class="kpi-card kpi-card--violet"><div class="kpi-card-head"><span class="kpi-title">Pruebas</span></div><div id="cholKpiPruebas" class="kpi-value">—</div></div>
-<div class="kpi-card kpi-card--slate"><div class="kpi-card-head"><span class="kpi-title">Solicitudes</span></div><div id="cholKpiSolicitudes" class="kpi-value">—</div></div>
-<div class="kpi-card kpi-card--blue"><div class="kpi-card-head"><span class="kpi-title">Visitas</span></div><div id="cholKpiVisitas" class="kpi-value">—</div></div>
-<div class="kpi-card kpi-card--green"><div class="kpi-card-head"><span class="kpi-title">Compras de lead</span></div><div id="cholKpiCompras" class="kpi-value">—</div></div>
-</div>
-<div class="table-scroll">
-<table class="data-table" id="cholVendTable">
+<div class="table-scroll table-scroll--auto">
+<table class="data-table cv-tabla" id="cholVendTable">
 <thead>
 <tr>
 <th>Vendedor</th>
-<th>Ventas</th>
-<th>Leads</th>
-<th>Contactados</th>
-<th>Citas</th>
-<th>Cotizaciones</th>
-<th>Pruebas</th>
-<th>Solicitudes</th>
-<th>Aprobadas</th>
-<th>Visitas</th>
-<th>Seguimientos</th>
-<th>Compras</th>
+<th class="cv-col-ventas">Ventas</th>
+<th class="num">Leads</th>
+<th class="num cv-col-op">Contacto</th>
+<th class="num cv-col-op">Cita</th>
+<th class="num">Lead → compra</th>
+<th class="num cv-col-op">Solicitudes aprobadas</th>
+<th class="num cv-col-op">Pruebas</th>
+<th class="num cv-col-op">Fresh up</th>
+<th class="num cv-col-op">Seguimientos</th>
 </tr>
 </thead>
 <tbody id="cholVendBody">
-<tr><td colspan="12" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
+<tr><td colspan="10" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
+</tbody>
+<tfoot id="cholVendFoot"></tfoot>
+</table>
+</div>
+</div>
+<div id="cholVendDetalle" class="cv-detalle" hidden></div>
+<div id="cholVendCalendario" class="cv-cal" hidden></div>
+<div id="cholCarteraSlot">
+<section id="cholCartera" class="cc" aria-labelledby="cholCarteraTitulo" hidden>
+<header class="cv-tabla-head cc-head">
+<div>
+<h3 class="cv-subtitulo" id="cholCarteraTitulo">Seguimiento de clientes</h3>
+<p class="cv-leyenda" id="cholCarteraSub">Cargando clientes…</p>
+</div>
+<details class="cv-como">
+<summary>¿Cómo se etiqueta?</summary>
+<p id="cholCarteraNota"></p>
+</details>
+</header>
+<div id="cholCarteraFiltros" class="cc-filtros"></div>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table cc-tabla" id="cholCarteraTable">
+<thead>
+<tr>
+<th>Cliente</th>
+<th class="cc-col-vend">Vendedor</th>
+<th class="cc-col-op">Entró</th>
+<th>Último seguimiento</th>
+<th class="cc-col-op">Avance</th>
+<th class="cc-col-etiqueta">Etiqueta</th>
+</tr>
+</thead>
+<tbody id="cholCarteraBody">
+<tr><td colspan="6" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
 </tbody>
 </table>
 </div>
-<div id="cholVendDetalle" class="chol-vend-detalle" hidden></div>
+<button type="button" id="cholCarteraMas" class="cc-mas" hidden></button>
+</section>
+</div>
 </section>
 </div>
 
@@ -1291,10 +1325,10 @@ Exportar CSV
 <script src="/js/shared.js?v=10"></script>
 <script src="/js/canales.js?v=3"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=26"></script>
+<script src="/js/topbar.js?v=28"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/sales.js?v=130"></script>
+<script src="/js/sales.js?v=140"></script>
 </body>
 </html>

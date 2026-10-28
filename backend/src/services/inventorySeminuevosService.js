@@ -30,6 +30,18 @@ function clean(v) {
   return s || null;
 }
 
+/** Código de VEH_UBICACION del catálogo UBI. Vacío si no hay sucursal. */
+function clausulaUbicacion(alias, ubicacion) {
+  const code = String(ubicacion || '').trim().toUpperCase();
+  if (!code) return '';
+  if (!/^[A-Z0-9]{1,8}$/.test(code)) {
+    const err = new Error('Ubicación de inventario no válida.');
+    err.status = 400;
+    throw err;
+  }
+  return ` AND LTRIM(RTRIM(ISNULL(${alias}.VEH_UBICACION, ''))) = '${code}'`;
+}
+
 function round2(n) {
   return Math.round(Number(n || 0) * 100) / 100;
 }
@@ -109,7 +121,8 @@ function mapUnit(row, today) {
   };
 }
 
-async function loadSeminuevosUnits() {
+async function loadSeminuevosUnits({ ubicacion = null, sucursal = null } = {}) {
+  const filtro = clausulaUbicacion('v', ubicacion);
   const rows = await query(`
     SELECT
       LTRIM(RTRIM(v.VEH_NUMSERIE)) AS vin,
@@ -134,7 +147,7 @@ async function loadSeminuevosUnits() {
     FROM SER_VEHICULO v
     LEFT JOIN ControlVehiculoSeminuevos ctrl
       ON RTRIM(ctrl.VIN) = RTRIM(v.VEH_NUMSERIE)
-    WHERE LTRIM(RTRIM(v.VEH_SITUACION)) = 'SFIS'
+    WHERE LTRIM(RTRIM(v.VEH_SITUACION)) = 'SFIS'${filtro}
     ORDER BY
       CASE
         WHEN v.VEH_SFECADQUI IS NOT NULL AND LTRIM(RTRIM(v.VEH_SFECADQUI)) <> ''
@@ -146,7 +159,12 @@ async function loadSeminuevosUnits() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return (rows || []).map((row) => mapUnit(row, today));
+  const etiqueta = sucursal ? String(sucursal) : null;
+  return (rows || []).map((row) => {
+    const unit = mapUnit(row, today);
+    if (!etiqueta) return unit;
+    return { ...unit, ubicacionCodigo: unit.ubicacion, ubicacion: etiqueta };
+  });
 }
 
 function summarize(units) {
@@ -241,8 +259,9 @@ function summarize(units) {
  * Rotación histórica: facturas ADE_VTAFI tipo U (seminuevos)
  * días = factura − fecha adquisición (VEH_SFECADQUI).
  */
-async function loadRotacionHistorica({ meses = 12 } = {}) {
+async function loadRotacionHistorica({ meses = 12, ubicacion = null, sucursal = null } = {}) {
   const months = Math.max(1, Math.min(36, Number(meses) || 12));
+  const filtro = clausulaUbicacion('v', ubicacion);
   const rows = await query(`
     SELECT
       LTRIM(RTRIM(fv.VTE_DOCTO)) AS factura,
@@ -271,7 +290,7 @@ async function loadRotacionHistorica({ meses = 12 } = {}) {
       AND fv.VTE_TIPODOCTO = 'U'
       AND CONVERT(DATE, fv.VTE_FECHDOCTO, 103) >= DATEADD(month, -${months}, GETDATE())
       AND v.VEH_SFECADQUI IS NOT NULL
-      AND LTRIM(RTRIM(v.VEH_SFECADQUI)) <> ''
+      AND LTRIM(RTRIM(v.VEH_SFECADQUI)) <> ''${filtro}
     ORDER BY CONVERT(DATE, fv.VTE_FECHDOCTO, 103) DESC
   `);
 
@@ -295,7 +314,8 @@ async function loadRotacionHistorica({ meses = 12 } = {}) {
         marcaCode,
         marca: marcaLabel(marcaCode),
         color: clean(row.colorExterior) || 'Sin color',
-        ubicacion: clean(row.ubicacion),
+        ubicacion: sucursal ? String(sucursal) : clean(row.ubicacion),
+        ubicacionCodigo: clean(row.ubicacion),
         fechaAdquisicion: clean(row.fechaAdquisicion),
         diasRotacion: dias,
         /** Alias para reutilizar UI de rotación */
@@ -350,11 +370,13 @@ function emptyRotacion(meses = 12, error = null) {
   };
 }
 
-async function getInventorySeminuevos({ mesesRotacion = 12 } = {}) {
+async function getInventorySeminuevos({ mesesRotacion = 12, ubicacion = null, sucursal = null } = {}) {
   const months = Math.max(1, Math.min(36, Number(mesesRotacion) || 12));
+  const code = String(ubicacion || '').trim().toUpperCase() || null;
+  const nombre = sucursal ? String(sucursal) : null;
   const [unitsResult, rotResult] = await Promise.allSettled([
-    loadSeminuevosUnits(),
-    loadRotacionHistorica({ meses: months }),
+    loadSeminuevosUnits({ ubicacion: code, sucursal: nombre }),
+    loadRotacionHistorica({ meses: months, ubicacion: code, sucursal: nombre }),
   ]);
 
   if (unitsResult.status === 'rejected') {
@@ -372,8 +394,10 @@ async function getInventorySeminuevos({ mesesRotacion = 12 } = {}) {
 
   return {
     criterio: {
-      situacion: 'SFIS · Físico seminuevo',
+      situacion: nombre ? `SFIS en ${nombre}` : 'SFIS · Físico seminuevo',
       fuente: 'SER_VEHICULO',
+      sucursal: nombre,
+      ubicacion: code,
       diasDesde: 'VEH_SFECADQUI (adquisición)',
       valorAdq: 'VEH_TOMAIMPADQUI (precio de toma)',
       valorVenta: 'VEH_SIMPPVTA (precio venta IVA incluido)',
@@ -394,4 +418,5 @@ module.exports = {
   loadRotacionHistorica,
   AGEING_DAYS,
   AGEING_CRITICAL_DAYS,
+  clausulaUbicacion,
 };

@@ -38,6 +38,17 @@ function createReplicaMiddleware({ fetchImpl = (...a) => fetch(...a) } = {}) {
     const ruta = normalizeRoute(req.path);
     if (esLocal(ruta) || esRutaExcluida(ruta)) return next();
 
+    // La réplica se publica con la vista de toda la agencia. Un perfil de sucursal (Cholula)
+    // no puede leerla: vería cifras de toda la agencia.
+    const { alcanceDeRol } = require('../../auth/alcanceSucursal');
+    if (alcanceDeRol(req.session?.role)) {
+      res.setHeader('X-Data-Source', 'sin-replica-sucursal');
+      return res.status(503).json({
+        error: 'Este perfil solo consulta datos conectado a la red de la oficina.',
+        motivo: 'perfil_sucursal_sin_replica',
+      });
+    }
+
     const qsIndex = req.originalUrl.indexOf('?');
     const consulta = normalizeQuery(qsIndex >= 0 ? req.originalUrl.slice(qsIndex + 1) : '');
     const url = `${dataSource.cloudReadUrl()}/api/desktop-cache?${new URLSearchParams({ ruta, consulta })}`;

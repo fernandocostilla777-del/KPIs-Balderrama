@@ -2885,15 +2885,21 @@ function resolveIdCrmByTelefono(telefono) {
  * con importe generado en taller y cruce a ID CRM vía VIN/serie;
  * si la serie no está en el CRM, respaldo por nombre y teléfono.
  */
-async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = {}) {
+async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200, letrasOrden = null, sucursal = null } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw new Error('fechaInicio y fechaFin son requeridos (YYYY-MM-DD)');
   }
   const max = Math.min(500, Math.max(1, Number(limit) || 200));
+  const letras = [...new Set((letrasOrden || [])
+    .map((l) => String(l || '').trim().toUpperCase())
+    .filter((l) => /^[A-Z]$/.test(l)))];
+  const letraSql = letras.length
+    ? ` AND LEFT(LTRIM(RTRIM(o.ORE_IDORDEN)), 1) IN (${letras.map((l) => `'${l}'`).join(',')})`
+    : '';
 
   // Las órdenes cerradas del periodo se piden en cada carga de la pantalla;
   // compartir el resultado unos minutos evita repetir la consulta pesada.
-  const rows = await ttlCache('cierresTaller', `${fechaInicio}|${fechaFin}`, CIERRES_TTL_MS, () => query(`
+  const rows = await ttlCache('cierresTaller', `${fechaInicio}|${fechaFin}|${letras.join('')}`, CIERRES_TTL_MS, () => query(`
     SELECT TOP 5000
       o.ORE_IDCLIENTE AS idClienteDms,
       LTRIM(RTRIM(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))) AS cliente,
@@ -2937,7 +2943,7 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
       AND CONVERT(DATE, o.ORE_FECHACIE, 103) <= @fechaFin
       AND o.ORE_STATUS <> 'C'
       AND UPPER(ISNULL(c.PER_NOMRAZON, '') + ' ' + ISNULL(c.PER_PATERNO, '') + ' ' + ISNULL(c.PER_MATERNO, ''))
-        NOT LIKE '%AUTOMOTRIZ%BALDERRAMA%PUEBLA%'
+        NOT LIKE '%AUTOMOTRIZ%BALDERRAMA%PUEBLA%'${letraSql}
     ORDER BY CONVERT(DATE, o.ORE_FECHACIE, 103) DESC
   `, { fechaInicio, fechaFin }));
 
@@ -3027,6 +3033,8 @@ async function getCierresTallerPeriodo({ fechaInicio, fechaFin, limit = 200 } = 
 
   return {
     periodo: { fechaInicio, fechaFin },
+    sucursal: sucursal || null,
+    letrasOrden: letras,
     totales: {
       ordenesCerradas: rows.length,
       clientes: clientes.size,
@@ -7327,14 +7335,15 @@ function computeMaduracionBase(hoyIso) {
   // 2) Huellas fuera de los ciclos: leads, pruebas de manejo y solicitudes.
   if (hasLeadsTable(d)) {
     for (const r of d.prepare(`
-      SELECT trim(id_crm) AS id, substr(fecha_entrada, 1, 10) AS fecha, canal, campana
+      SELECT trim(id_crm) AS id, substr(fecha_entrada, 1, 10) AS fecha, canal, campana, sucursal, fuerza_ventas
       FROM crm_leads
       WHERE id_crm IS NOT NULL AND trim(id_crm) <> '' AND ${fechaValida('fecha_entrada')}
     `).all()) {
       const fecha = isoDay(r.fecha);
       if (!fecha) continue;
       const c = getC(r.id);
-      c.leads.push({ fecha, canal: r.canal || null, campana: r.campana || null });
+      const cholula = `${r.sucursal || ''} ${r.fuerza_ventas || ''}`.toUpperCase().includes('CHOLULA');
+      c.leads.push({ fecha, canal: r.canal || null, campana: r.campana || null, cholula });
       c.huellas.push({ fecha, fuente: 'lead' });
     }
   }
@@ -7391,6 +7400,12 @@ function computeMaduracionBase(hoyIso) {
  *
  * @param {{id, nombre, ciclos:[{idCiclo,fic,crea,ult,estatus,vendedor,ff,producto,unidades}], leads:[{fecha,canal,campana}], huellas:[{fecha,fuente}]}} c
  */
+function contactoEsCholula(vendedor, leads) {
+  if ((leads || []).some((l) => l.cholula)) return true;
+  const { esVendedorEquipo } = require('./monitoreoCholulaService');
+  return esVendedorEquipo(vendedor);
+}
+
 function clasificarContactoMaduracion(c, hoyIso) {
   const limiteCartera = PVTA4.carteraMeses * 30.44;
   const limiteFuturo = sumarDiasIso(hoyIso, 1);
@@ -7462,6 +7477,7 @@ function clasificarContactoMaduracion(c, hoyIso) {
       unidades: g.unidades,
       ciclosHastaCerrar,
       compraPrevia: prevFf,
+      cholula: contactoEsCholula(ganador.vendedor, leadsVentana),
     });
     prevFf = g.ff;
   }
@@ -7498,6 +7514,7 @@ function clasificarContactoMaduracion(c, hoyIso) {
         ultimaActividad: ultimaAct,
         origen,
         canal: leadPost?.canal || null,
+        cholula: contactoEsCholula(cicloVigente.vendedor, leadPost ? [leadPost] : []),
       },
     };
   }
@@ -7508,6 +7525,7 @@ function clasificarContactoMaduracion(c, hoyIso) {
       llegada,
       edadAlPerder: Math.max(0, diasEntre(llegada, ultimaAct)),
       origen,
+      cholula: contactoEsCholula(cicloVigente.vendedor, leadPost ? [leadPost] : []),
     },
   };
 }
@@ -7561,7 +7579,7 @@ function construirCurva(ventas, perdidos, { desde, hasta }) {
  * P-VTA-4 para un periodo: días de maduración (promedio, mediana, P75) por origen,
  * serie mensual, prospectos activos por edad y cobertura del objetivo.
  */
-function getTiempoMaduracion({ fechaInicio = null, fechaFin = null } = {}) {
+function getTiempoMaduracion({ fechaInicio = null, fechaFin = null, crmTexto = null, sucursal = null } = {}) {
   const hoy = new Date().toISOString().slice(0, 10);
   let fi = isoDay(fechaInicio);
   let ff = isoDay(fechaFin);
@@ -7570,8 +7588,21 @@ function getTiempoMaduracion({ fechaInicio = null, fechaFin = null } = {}) {
     ff = sumarDiasIso(sumarMesesIso(fi, 1), -1);
   }
   if (fi > ff) [fi, ff] = [ff, fi];
-  return ttlCache('pvta4', `${fi}|${ff}|${hoy}`, PVTA4_TTL_MS, () => {
-    const base = getMaduracionBase(hoy);
+  const alcance = String(crmTexto || '').trim().toUpperCase();
+  return ttlCache('pvta4', `${fi}|${ff}|${hoy}|${alcance}`, PVTA4_TTL_MS, () => {
+    const base0 = getMaduracionBase(hoy);
+    const base = alcance
+      ? {
+        ...base0,
+        ventas: base0.ventas.filter((v) => v.cholula),
+        activos: base0.activos.filter((a) => a.cholula),
+        perdidos: base0.perdidos.filter((p) => p.cholula),
+        contactos: new Set([
+          ...base0.ventas.filter((v) => v.cholula).map((v) => v.idContacto),
+          ...base0.activos.filter((a) => a.cholula).map((a) => a.idContacto),
+        ].filter(Boolean)).size,
+      }
+      : base0;
     const ventasPeriodo = base.ventas.filter((v) => v.fechaFactura >= fi && v.fechaFactura <= ff);
     const validas = ventasPeriodo.filter((v) => v.dias != null);
     const excluidas = ventasPeriodo.filter((v) => v.excluida);
@@ -7651,11 +7682,13 @@ function getTiempoMaduracion({ fechaInicio = null, fechaFin = null } = {}) {
     });
     let objetivo = null;
     let objetivoFuente = null;
-    try {
-      const goals = require('./salesGoals').getGoals({ fechaInicio: fi, fechaFin: ff });
-      objetivo = Number(goals?.retail) > 0 ? Number(goals.retail) : null;
-      objetivoFuente = objetivo != null ? (goals?.retailSource || null) : null;
-    } catch { /* sin objetivo configurado */ }
+    if (!alcance) {
+      try {
+        const goals = require('./salesGoals').getGoals({ fechaInicio: fi, fechaFin: ff });
+        objetivo = Number(goals?.retail) > 0 ? Number(goals.retail) : null;
+        objetivoFuente = objetivo != null ? (goals?.retailSource || null) : null;
+      } catch { /* sin objetivo configurado */ }
+    }
     const facturadas = ventasPeriodo.reduce((s, v) => s + Math.max(1, v.unidades), 0);
     const faltante = objetivo != null ? Math.max(0, objetivo - facturadas) : null;
     const prospectos = base.activos
@@ -7704,6 +7737,7 @@ function getTiempoMaduracion({ fechaInicio = null, fechaFin = null } = {}) {
     return {
       clave: 'P-VTA-4',
       indicador: 'Tiempo de Maduración Comercial',
+      sucursal: sucursal || null,
       periodo: { fechaInicio: fi, fechaFin: ff, hoy },
       parametros: { ...PVTA4 },
       general,

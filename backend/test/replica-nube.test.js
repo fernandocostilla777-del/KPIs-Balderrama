@@ -232,3 +232,17 @@ test('publicar → pedir lo faltante → leer desde un backend sin SQL Server', 
     assert.deepEqual(await sub.json(), { ok: true, guardadas: 0, rechazadas: 1 });
   });
 });
+
+test('modo nube: un perfil de sucursal no lee la réplica (está publicada con toda la agencia)', () => enModoNube(async () => {
+  let llamadas = 0;
+  const mw = createReplicaMiddleware({ fetchImpl: async () => { llamadas += 1; return new Response('{"agencia":1}'); } });
+  const res = fakeRes();
+  res.json = (b) => { res.body = b; return res; };
+  let siguio = false;
+  const req = { ...fakeReq('/ventas?fechaInicio=2026-10-01&fechaFin=2026-10-31'), session: { username: 'cholula', role: 'cholula' } };
+  await mw(req, res, () => { siguio = true; });
+  assert.equal(llamadas, 0);
+  assert.equal(siguio, false);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.motivo, 'perfil_sucursal_sin_replica');
+}));

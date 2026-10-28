@@ -1198,7 +1198,7 @@
     const q = normalizeSearch(query);
     const visibles = index.filter((item) => !(
       document.documentElement.dataset.alcanceSucursal === 'cholula'
-      && (item.tab === 'comisiones' || String(item.href || '').includes('tab=cierre'))
+      && (item.tab === 'comisiones' || item.tab === 'financiamiento' || item.page === 'contabilidad' || String(item.href || '').includes('tab=cierre'))
     ));
     if (!q) {
       return visibles

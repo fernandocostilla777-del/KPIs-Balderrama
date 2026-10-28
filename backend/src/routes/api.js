@@ -158,6 +158,14 @@ router.post('/ventas/sofia-live-sync', async (_req, res, next) => {
   }
 });
 
+// Financiamiento (contratos del CRM y SOFIA) no trae sucursal: un perfil de sucursal no lo consulta.
+router.use('/ventas/financiamiento', (req, res, next) => {
+  if (alcanceDe(req)) {
+    return res.status(403).json({ error: 'Financiamiento no está disponible para este perfil.' });
+  }
+  return next();
+});
+
 router.get('/ventas/financiamiento', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin, pvaAnio, pvaTrimestre } = req.query;
@@ -326,6 +334,47 @@ router.get('/ventas/monitoreo-cholula', async (req, res, next) => {
       return res.json(await monitoreo.getMonitoreoCholulaDetalle({ fechaInicio, fechaFin, vendedor }));
     }
     res.json(await monitoreo.getMonitoreoCholula({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/monitoreo-cholula/calendario', (req, res, next) => {
+  try {
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(monitoreo.getCalendarioCholula({ mes: req.query.mes }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.get('/ventas/monitoreo-cholula/clientes', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+    if (!fechaFin) {
+      return res.status(400).json({ error: 'Parametro requerido: fechaFin (YYYY-MM-DD).' });
+    }
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(await monitoreo.getCarteraCholula({ fechaInicio, fechaFin }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.put('/ventas/monitoreo-cholula/clientes/:idCrm', (req, res, next) => {
+  try {
+    // Las etiquetas viven en el servidor de la oficina; fuera de la red no se guardan
+    // para no tener dos copias distintas.
+    if (require('../services/dataSource').isCloud()) {
+      return res.status(503).json({ error: 'Las etiquetas de clientes solo se guardan conectado a la red de la oficina.' });
+    }
+    const { etiqueta, motivo, nota } = req.body || {};
+    const autor = req.session?.username || 'usuario';
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(monitoreo.etiquetarClienteCholula(req.params.idCrm, { etiqueta, motivo, nota, autor }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -562,7 +611,12 @@ router.get('/inventory/postventa/traspasos', async (req, res, next) => {
 router.get('/inventory/seminuevos', async (req, res, next) => {
   try {
     const mesesRotacion = Number(req.query.mesesRotacion || 12);
-    res.json(await getInventorySeminuevos({ mesesRotacion }));
+    const alcance = alcanceDe(req);
+    res.json(await getInventorySeminuevos({
+      mesesRotacion,
+      ubicacion: alcance?.inventarioUbicacion || null,
+      sucursal: alcance?.label || null,
+    }));
   } catch (err) {
     next(err);
   }
@@ -1092,7 +1146,14 @@ router.get('/crm/cierres-taller', async (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(await crm.getCierresTallerPeriodo({ fechaInicio, fechaFin, limit }));
+    const alcance = alcanceDe(req);
+    res.json(await crm.getCierresTallerPeriodo({
+      fechaInicio,
+      fechaFin,
+      limit,
+      letrasOrden: alcance?.tallerLetras || null,
+      sucursal: alcance?.label || null,
+    }));
   } catch (err) {
     next(err);
   }

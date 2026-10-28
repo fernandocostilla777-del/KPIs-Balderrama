@@ -1,12 +1,12 @@
 const express = require('express');
 const {
-  authenticate,
   listUsers,
   createUser,
   updateUser,
   deleteUser,
   getAssignableRoles,
   revealPassword,
+  authenticateHybrid,
 } = require('../auth/users');
 const {
   getRole,
@@ -59,12 +59,12 @@ router.get('/me', requireSession, (req, res) => {
   });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   if (!isAuthEnabled()) {
     return res.json({ ok: true, role: 'direccion', roleLabel: 'Dirección (modo desarrollo)' });
   }
   const { username, password } = req.body || {};
-  const user = authenticate(username, password);
+  const user = await authenticateHybrid(username, password);
   if (!user) {
     return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
   }
@@ -79,6 +79,7 @@ router.post('/login', (req, res) => {
     homePath: role?.homePath || '/',
     canManageUsers: canManageUsers(user.role),
     alcanceSucursal: role?.alcanceSucursal || null,
+    authSource: user.source || 'local',
   });
 });
 

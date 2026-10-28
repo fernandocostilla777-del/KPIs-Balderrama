@@ -47,12 +47,29 @@ CLOUD_READ_API_KEY=<llave lectura réplica desktop-cache>
 CRM_CLOUD_PULL_ON_START=true
 ```
 
+## Usuarios (login en la nube)
+
+Los usuarios de `backend/data/users.json` se publican a Railway:
+
+```bash
+node backend/scripts/push-auth-users-cloud.js --replace
+```
+
+| Destino | Uso |
+|---------|-----|
+| Tabla `auth_users` | Login preferido `POST /api/auth/login` |
+| `sync_entities` (domain=auth) | Respaldo / sync oficina |
+
+El escritorio intenta login local y, si falla, Railway (`AUTH_CLOUD_FALLBACK=true`).
+
 ## APIs útiles
 
 - `GET /api/data-source` — modo sql/cloud + estado híbrido CRM
 - `GET /api/conexion` — Local / Remota / Nube
 - `GET /api/crm/status` — disponibilidad SQLite + hybrid
 - `POST /api/crm/pull-cloud` — (admin) baja ciclos desde Railway ya
+- `GET /api/auth/users/summary` — (cloud) conteo `auth_users`
+- `POST /api/auth/users/ingest` — (cloud) carga hashes de usuarios
 
 ## Tablas Sheets en la nube
 

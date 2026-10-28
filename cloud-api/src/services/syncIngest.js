@@ -3,6 +3,7 @@ const { withTransaction } = require('../db');
 const { upsertPersonalBatch } = require('./dmsPersonalService');
 const { upsertCrmBatch, normalizeRow } = require('./crmCiclosCloudService');
 const { upsertSheetBatch } = require('./crmSheetsCloudService');
+const { upsertAuthUsersBatch } = require('./authUsersStore');
 
 const CRM_ENTITY_TABLE = {
   lead: 'crm_leads',
@@ -189,6 +190,19 @@ async function ingestSyncPayload(body) {
       );
     }
 
+    let authUsersMirror = null;
+    if (domain === 'auth') {
+      authUsersMirror = await upsertAuthUsersBatch(
+        normalized.map((r) => r.payload),
+        {
+          replaceAll: syncType === 'monthly',
+          source: 'sync',
+          batchId,
+          client,
+        },
+      );
+    }
+
     let crmMirror = null;
     let crmSheetsMirror = null;
     if (domain === 'crm') {
@@ -250,6 +264,7 @@ async function ingestSyncPayload(body) {
       history,
       archived,
       personalMirror,
+      authUsersMirror,
       crmMirror,
       crmSheetsMirror,
     };

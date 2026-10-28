@@ -18,6 +18,10 @@ const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
 const { ensureCrmCiclosTable } = require('./src/services/crmCiclosCloudService');
 const { ensureCrmTables } = require('./src/services/crmCiclosCloud');
 const { ensureCrmSheetsTables } = require('./src/services/crmSheetsCloudService');
+const {
+  ensureAuthUsersTable,
+  backfillAuthUsersFromSync,
+} = require('./src/services/authUsersStore');
 const { ensureIemcFinancieroTables } = require('./src/services/iemcFinancieroStore');
 
 const app = express();
@@ -107,6 +111,14 @@ async function ensureSchema() {
   await ensureCrmCiclosTable();
   await ensureCrmTables();
   await ensureCrmSheetsTables();
+  await ensureAuthUsersTable();
+  const authBackfill = await backfillAuthUsersFromSync().catch((err) => {
+    console.warn('[cloud-api] backfill auth_users:', err.message);
+    return null;
+  });
+  if (authBackfill && !authBackfill.skipped) {
+    console.log(`[cloud-api] auth_users backfill: ${authBackfill.total} usuarios`);
+  }
   await ensureIemcFinancieroTables();
   const { ensureTable: ensureOfficeCommands } = require('./src/services/officeCommandsStore');
   await ensureOfficeCommands();

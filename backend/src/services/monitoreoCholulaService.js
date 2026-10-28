@@ -469,11 +469,20 @@ async function getMonitoreoCholula({ fechaInicio, fechaFin } = {}) {
     leerVentas(anterior.fechaInicio, anterior.fechaFin),
   ]);
   aplicarVentas(mapa, ventas.filas);
-  const grupos = fusionar([...mapa.values()]).filter((g) => esVendedorEquipo(g.vendedor));
+  const todos = fusionar([...mapa.values()]);
+  const grupos = todos.filter((g) => esVendedorEquipo(g.vendedor));
   aplicarVentasAnteriores(grupos, ventasPrevias.filas);
   const vendedores = grupos.map(conTasas);
-  const conNombre = vendedores.filter((f) => f.vendedor !== 'Sin asignar');
-  const sinAsignar = vendedores.find((f) => f.vendedor === 'Sin asignar') || null;
+  const conNombre = vendedores;
+  // Lo que no es del equipo (sin ejecutivo, gerentes, ex vendedores) no entra en los totales,
+  // pero se informa para que las cifras cuadren con la pestaña Ventas.
+  const sinAsignar = todos.find((f) => f.vendedor === 'Sin asignar') || null;
+  const otros = todos.filter((g) => g.vendedor !== 'Sin asignar' && !esVendedorEquipo(g.vendedor));
+  const fueraEquipo = {
+    personas: otros.length,
+    ventas: otros.reduce((n, g) => n + Number(g.ventas || 0), 0),
+    leads: otros.reduce((n, g) => n + Number(g.leads || 0), 0),
+  };
   const totales = conTasas(sumarTotales(vendedores));
   // Promedio por vendedor (sin «Sin asignar»): referencia para leer cada fila.
   totales.promedioVentas = conNombre.length ? Math.round((totales.ventas / conNombre.length) * 10) / 10 : null;
@@ -493,6 +502,7 @@ async function getMonitoreoCholula({ fechaInicio, fechaFin } = {}) {
       ventas: sinAsignar.ventas,
       key: sinAsignar.key,
     } : null,
+    fueraEquipo,
     ventasError: ventas.error,
     nota: notaPeriodo(),
   };
@@ -697,13 +707,30 @@ async function getMonitoreoCholulaDetalle({ fechaInicio, fechaFin, vendedor } = 
 const DIAS_SIN_SEGUIMIENTO = 7;
 /** Actividad reciente que cuenta para sugerir «En seguimiento». */
 const DIAS_ACTIVIDAD_RECIENTE = 15;
+/** Ventana para medir el cumplimiento de compromisos y contar los vencidos. */
+const DIAS_VENTANA_COMPROMISOS = 30;
 const ORDEN_ETIQUETA = { caliente: 0, seguimiento: 1, frio: 2, no_compra: 3, compro: 4 };
+const TTL_BASE_MS = 60 * 1000;
+const cacheBase = new Map();
 
 function diasEntre(desdeIso, hastaIso) {
   if (!desdeIso || !hastaIso) return null;
   const [y1, m1, d1] = desdeIso.split('-').map(Number);
   const [y2, m2, d2] = hastaIso.split('-').map(Number);
   return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+}
+
+/** Fecha de hoy (hora local del servidor de la oficina). */
+function hoyIso(ahora = new Date()) {
+  const mm = String(ahora.getMonth() + 1).padStart(2, '0');
+  const dd = String(ahora.getDate()).padStart(2, '0');
+  return `${ahora.getFullYear()}-${mm}-${dd}`;
+}
+
+/** Corte de la cartera: el fin del periodo, pero nunca después de hoy. */
+function corteCartera(fechaFin, hoy = hoyIso()) {
+  const fin = fechaIso(fechaFin);
+  return fin > hoy ? hoy : fin;
 }
 
 function esSi(v) {
@@ -714,6 +741,8 @@ function tieneCotizacion(v) {
   const s = String(v || '').trim().toUpperCase();
   return !!s && !['NO', 'N', '0'].includes(s);
 }
+
+const esFecha = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
 
 /**
  * Etiqueta que se propone cuando nadie la ha puesto. Solo orienta: no se guarda.
@@ -733,6 +762,24 @@ function grupoDeEjecutivo(grupos, nombre) {
   return grupos.find((g) => g.aliases.includes(plano) || mismoNombre(g.vendedor, nombre)) || null;
 }
 
+/** Nombre oficial (del equipo) de un vendedor del CRM, o null si no es del equipo. */
+function oficialDe(nombre) {
+  const oficial = EQUIPO_CHOLULA.find((o) => mismoNombre(o, nombre));
+  return oficial ? nombreMostrado(oficial, nombre) : null;
+}
+
+/**
+ * El mismo nombre que usa el ranking (orden del CRM), para que todas las vistas coincidan.
+ * Sin ranking a la mano, el nombre como viene del CRM.
+ */
+function nombreMostrado(oficial, comoViene) {
+  for (const { data } of cache.values()) {
+    const g = (data?.vendedores || []).find((v) => mismoNombre(oficial, v.vendedor));
+    if (g) return g.vendedor;
+  }
+  return nombreVisible(comoViene || oficial);
+}
+
 const ESTATUS_CARTERA = ['Prospección', 'Ofrecimiento', 'Neg. Caliente', 'Pre-pedido', 'Cartera'];
 
 function columnaExiste(d, tabla, columna) {
@@ -740,8 +787,9 @@ function columnaExiste(d, tabla, columna) {
 }
 
 /**
- * Ciclos cuyo último estatus sigue en la cartera del ejecutivo.
+ * Ciclos cuyo último estatus al corte sigue en la cartera del ejecutivo.
  * El dueño es el vendedor de la última actividad; si no hay, el ejecutivo del lead.
+ * Solo cuentan actividades con estatus hasta el corte: un periodo pasado no ve el estatus de hoy.
  */
 function leerCiclosCartera(d, hasta) {
   if (!hayTabla(d, 'crm_actividades') || !hayTabla(d, 'crm_leads')) return [];
@@ -761,6 +809,7 @@ function leerCiclosCartera(d, hasta) {
         MAX(fecha_prog_actividad) AS fecha_prog_actividad
       FROM crm_actividades
       WHERE id_ciclo IS NOT NULL AND trim(id_ciclo) <> ''
+        AND substr(COALESCE(fecha_estatus, ''), 1, 10) <= ?
       GROUP BY id_ciclo
     )
     SELECT
@@ -772,7 +821,7 @@ function leerCiclosCartera(d, hasta) {
     FROM ciclo
     WHERE trim(substr(estatus_key, instr(estatus_key, '|') + 1)) IN (${marcas})
       AND trim(substr(contacto_key, instr(contacto_key, '|') + 1)) <> ''
-  `).all(...ESTATUS_CARTERA);
+  `).all(hasta, ...ESTATUS_CARTERA);
   const porContacto = new Map();
   for (const ciclo of ciclos) {
     const previo = porContacto.get(ciclo.idCrm);
@@ -785,48 +834,201 @@ function leerCiclosCartera(d, hasta) {
     gestionVigente: !!(ciclo.accionSiguiente && ciclo.accionSiguiente >= hasta),
   }));
 }
-function solicitudesPorIdCrm(d, ids) {
-  const map = new Map();
+
+function porLotes(ids, fn, tam = 400) {
   const unicos = [...new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean))];
-  if (!unicos.length || !hayTabla(d, 'crm_solicitudes')) return map;
-  const TAM = 400;
-  for (let i = 0; i < unicos.length; i += TAM) {
-    const lote = unicos.slice(i, i + TAM);
-    const rows = d.prepare(`
-      SELECT
-        trim(CAST(id_crm AS TEXT)) AS idCrm,
-        COALESCE(no_solicitud, '') AS folio,
-        substr(COALESCE(fecha_solicitud, ''), 1, 10) AS fecha,
-        COALESCE(estatus, '') AS estatus,
-        COALESCE(financiera, '') AS financiera,
-        COALESCE(respuesta_financiera, '') AS respuesta,
-        COALESCE(unidad_paquete, '') AS unidad,
-        substr(COALESCE(fecha_aprobacion, ''), 1, 10) AS fechaAprobacion,
-        COALESCE(num_contrato, '') AS contrato,
-        enganche
-      FROM crm_solicitudes
-      WHERE trim(CAST(id_crm AS TEXT)) IN (${lote.map(() => '?').join(',')})
-      ORDER BY fecha_solicitud DESC
-    `).all(...lote);
-    for (const r of rows) {
-      const lista = map.get(r.idCrm) || [];
-      if (lista.length >= 8) continue;
-      lista.push({
-        folio: r.folio,
-        fecha: r.fecha,
-        estatus: r.estatus,
-        financiera: r.financiera,
-        respuesta: r.respuesta,
-        unidad: r.unidad,
-        fechaAprobacion: r.fechaAprobacion,
-        contrato: r.contrato,
-        enganche: r.enganche == null || r.enganche === '' ? null : Number(r.enganche),
-        aprobada: String(r.estatus).toUpperCase().includes('APROBADA'),
-      });
-      map.set(r.idCrm, lista);
-    }
+  const out = [];
+  for (let i = 0; i < unicos.length; i += tam) out.push(...fn(unicos.slice(i, i + tam)));
+  return out;
+}
+
+/** Solicitudes de crédito por id del CRM, hasta el corte. */
+function solicitudesPorIdCrm(d, ids, hasta) {
+  const map = new Map();
+  if (!hayTabla(d, 'crm_solicitudes')) return map;
+  const cols = new Set(d.prepare('PRAGMA table_info(crm_solicitudes)').all().map((c) => c.name));
+  const col = (nombre, alias, defecto = "''") => (cols.has(nombre) ? `COALESCE(${nombre}, ${defecto}) AS ${alias}` : `${defecto} AS ${alias}`);
+  const rows = porLotes(ids, (lote) => d.prepare(`
+    SELECT
+      trim(CAST(id_crm AS TEXT)) AS idCrm,
+      ${col('no_solicitud', 'folio')},
+      substr(COALESCE(fecha_solicitud, ''), 1, 10) AS fecha,
+      ${col('estatus', 'estatus')},
+      ${col('financiera', 'financiera')},
+      ${col('respuesta_financiera', 'respuesta')},
+      ${col('unidad_paquete', 'unidad')},
+      ${cols.has('fecha_aprobacion') ? "substr(COALESCE(fecha_aprobacion, ''), 1, 10)" : "''"} AS fechaAprobacion,
+      ${col('num_contrato', 'contrato')},
+      ${cols.has('enganche') ? 'enganche' : 'NULL'} AS enganche
+    FROM crm_solicitudes
+    WHERE trim(CAST(id_crm AS TEXT)) IN (${lote.map(() => '?').join(',')})
+      AND substr(COALESCE(fecha_solicitud, ''), 1, 10) <= ?
+    ORDER BY fecha_solicitud DESC
+  `).all(...lote, hasta));
+  for (const r of rows) {
+    const lista = map.get(r.idCrm) || [];
+    if (lista.length >= 8) continue;
+    lista.push({
+      folio: r.folio,
+      fecha: r.fecha,
+      estatus: r.estatus,
+      financiera: r.financiera,
+      respuesta: r.respuesta,
+      unidad: r.unidad,
+      fechaAprobacion: r.fechaAprobacion,
+      contrato: r.contrato,
+      enganche: r.enganche == null || r.enganche === '' ? null : Number(r.enganche),
+      aprobada: String(r.estatus).toUpperCase().includes('APROBADA'),
+    });
+    map.set(r.idCrm, lista);
   }
   return map;
+}
+
+/**
+ * Actividad cumplida: tiene fecha de respuesta y esa respuesta es de este compromiso
+ * (posterior a cuando se creó; si no hay fecha de creación, en o después de la fecha programada).
+ * Una respuesta anterior suele ser de otro ciclo y no cuenta.
+ */
+function sqlFechaCrea(d) {
+  return columnaExiste(d, 'crm_actividades', 'fecha_crea_actividad')
+    ? "substr(COALESCE(fecha_crea_actividad, ''), 1, 10)"
+    : "''";
+}
+
+function estadoCompromiso({ fecha, respuesta, creada }, hoy) {
+  const base = esFecha(creada) ? creada : fecha;
+  const cumplida = esFecha(respuesta) && respuesta >= base;
+  return {
+    cumplida,
+    aTiempo: cumplida && respuesta <= fecha,
+    vencida: !cumplida && fecha < hoy,
+  };
+}
+
+/**
+ * Compromiso del asesor por cliente al corte: el pendiente más antiguo que ya venció
+ * (dentro de la ventana) o, si no hay, el próximo por hacer.
+ */
+function compromisosPorIdCrm(d, ids, hoy) {
+  const map = new Map();
+  if (!hayTabla(d, 'crm_actividades')) return map;
+  const crea = sqlFechaCrea(d);
+  const desde = restarDias(hoy, DIAS_VENTANA_COMPROMISOS);
+  const rows = porLotes(ids, (lote) => d.prepare(`
+    SELECT
+      trim(CAST(id_contacto AS TEXT)) AS idCrm,
+      substr(fecha_prog_actividad, 1, 10) AS fecha,
+      substr(COALESCE(fecha_resp_actividad, ''), 1, 10) AS respuesta,
+      ${crea} AS creada,
+      trim(COALESCE(tipo_actividad, '')) AS tipo,
+      trim(COALESCE(resultado_actividad, '')) AS comentario,
+      trim(COALESCE(vendedor, '')) AS vendedor
+    FROM crm_actividades
+    WHERE trim(CAST(id_contacto AS TEXT)) IN (${lote.map(() => '?').join(',')})
+      AND substr(COALESCE(fecha_prog_actividad, ''), 1, 10) >= ?
+  `).all(...lote, desde));
+  for (const r of rows) {
+    if (!esFecha(r.fecha)) continue;
+    const e = estadoCompromiso(r, hoy);
+    if (e.cumplida) continue;
+    const previo = map.get(r.idCrm);
+    const candidato = {
+      fecha: r.fecha,
+      vencido: e.vencida,
+      dias: diasEntre(r.fecha, hoy),
+      tipo: r.tipo || null,
+      comentario: r.comentario || r.tipo || null,
+    };
+    // Vencido más antiguo primero; si no hay vencidos, el próximo.
+    const mejor = !previo
+      || (candidato.vencido && !previo.vencido)
+      || (candidato.vencido === previo.vencido && (candidato.vencido ? candidato.fecha < previo.fecha : candidato.fecha < previo.fecha));
+    if (mejor) map.set(r.idCrm, candidato);
+  }
+  return map;
+}
+
+const COLUMNAS_LEAD = (compra) => `
+  trim(CAST(id_crm AS TEXT)) AS idCrm,
+  nombre AS cliente,
+  telefono,
+  campana,
+  auto_interes AS auto,
+  substr(fecha_entrada, 1, 10) AS fecha,
+  TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo,
+  contacto,
+  cita_programada AS cita,
+  cita_asistida AS asistio,
+  cotizacion,
+  ${compra} AS compra`;
+
+/** Lectura pesada del CRM para la cartera al corte (se guarda un minuto). */
+function leerBaseCartera(hasta) {
+  const guardado = cacheBase.get(hasta);
+  if (guardado && Date.now() - guardado.at < TTL_BASE_MS) return guardado.base;
+  const desdeVida = restarDias(hasta, LEAD_VIDA_DIAS - 1);
+  const d = abrirCrm();
+  const base = { filas: [], ultimos: new Map(), solicitudes: new Map(), ciclos: new Map(), compromisos: new Map() };
+  try {
+    if (hayTabla(d, 'crm_leads')) {
+      const compra = getCompraLeadAtribuibleSql(LEAD_VIDA_DIAS);
+      const noDup = getLeadNotDuplicateSql();
+      const filtro = `
+        (${noDup})
+        AND id_crm IS NOT NULL AND trim(CAST(id_crm AS TEXT)) <> ''
+        AND substr(fecha_entrada, 1, 10) >= ?
+        AND substr(fecha_entrada, 1, 10) <= ?
+        AND ${predCholula(['sucursal', 'fuerza_ventas'])}`;
+      base.filas = d.prepare(`
+        SELECT ${COLUMNAS_LEAD(compra)}
+        FROM crm_leads
+        WHERE ${filtro}
+        ORDER BY fecha_entrada DESC
+      `).all(desdeVida, hasta);
+
+      for (const ciclo of leerCiclosCartera(d, hasta)) base.ciclos.set(ciclo.idCrm, ciclo);
+      const yaEnVentana = new Set(base.filas.map((f) => f.idCrm));
+      const faltan = [...base.ciclos.keys()].filter((id) => !yaEnVentana.has(id));
+      // Clientes en cartera del ejecutivo cuyo lead es anterior a la ventana (nunca posterior al corte).
+      const extra = porLotes(faltan, (lote) => d.prepare(`
+        SELECT ${COLUMNAS_LEAD(compra)}
+        FROM crm_leads
+        WHERE (${noDup})
+          AND trim(CAST(id_crm AS TEXT)) IN (${lote.map(() => '?').join(',')})
+          AND substr(fecha_entrada, 1, 10) <= ?
+          AND ${predCholula(['sucursal', 'fuerza_ventas'])}
+        ORDER BY fecha_entrada DESC
+      `).all(...lote, hasta));
+      for (const fila of extra) {
+        fila.fueraDeVida = true;
+        base.filas.push(fila);
+      }
+
+      // Un cliente por id_crm (el registro más reciente).
+      const vistos = new Set();
+      base.filas = base.filas.filter((f) => (vistos.has(f.idCrm) ? false : vistos.add(f.idCrm)));
+      const ids = base.filas.map((f) => f.idCrm);
+
+      if (hayTabla(d, 'crm_actividades')) {
+        const fechaAct = `substr(COALESCE(fecha_resp_actividad, fecha_crea_actividad, fecha_prog_actividad, fecha_estatus), 1, 10)`;
+        const acts = porLotes(ids, (lote) => d.prepare(`
+          SELECT trim(CAST(id_contacto AS TEXT)) AS idCrm, MAX(${fechaAct}) AS ultima, COUNT(*) AS n
+          FROM crm_actividades
+          WHERE ${fechaAct} <= ?
+            AND trim(CAST(id_contacto AS TEXT)) IN (${lote.map(() => '?').join(',')})
+          GROUP BY trim(CAST(id_contacto AS TEXT))
+        `).all(hasta, ...lote));
+        for (const a of acts) base.ultimos.set(a.idCrm, { ultima: a.ultima || null, n: Number(a.n || 0) });
+        base.compromisos = compromisosPorIdCrm(d, ids, hasta);
+      }
+      base.solicitudes = solicitudesPorIdCrm(d, ids, hasta);
+    }
+  } finally {
+    d.close();
+  }
+  cacheBase.set(hasta, { at: Date.now(), base });
+  return base;
 }
 
 async function gruposDelPeriodo(fechaInicio, fechaFin) {
@@ -839,111 +1041,46 @@ async function gruposDelPeriodo(fechaInicio, fechaFin) {
   }
 }
 
+function revisionVista(r, ultimoSeguimiento) {
+  // Si el asesor registró actividad después de programarse la revisión, ya hay algo que revisar.
+  const creadaDia = String(r.creada || '').slice(0, 10);
+  return {
+    id: r.id,
+    fecha: r.fecha,
+    que: r.que,
+    queLabel: seguimientoStore.etiquetaQue(r.que),
+    nota: r.nota,
+    autor: r.autor,
+    creada: r.creada,
+    estado: r.estado,
+    cerrada: r.cerrada,
+    asesorRegistro: !!(ultimoSeguimiento && creadaDia && ultimoSeguimiento >= creadaDia),
+  };
+}
+
 /**
- * Leads de Cholula que siguen dentro de su vida (LEAD_VIDA_DIAS) al cierre del periodo,
- * con sus pasos en el CRM, el último seguimiento y la etiqueta del equipo.
+ * Leads de Cholula que siguen dentro de su vida (LEAD_VIDA_DIAS) al corte, más la cartera activa
+ * del ejecutivo; con su avance, el compromiso del asesor, la revisión del gerente y la etiqueta.
+ * El corte es el fin del periodo, sin pasar de hoy.
  */
-async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
-  const hasta = fechaIso(fechaFin);
+async function getCarteraCholula({ fechaInicio, fechaFin, hoy } = {}) {
+  const hoyDia = hoy || hoyIso();
+  const hasta = corteCartera(fechaFin, hoyDia);
   const desdeVida = restarDias(hasta, LEAD_VIDA_DIAS - 1);
-  const grupos = await gruposDelPeriodo(fechaInicio ? fechaIso(fechaInicio) : null, hasta);
+  const grupos = await gruposDelPeriodo(fechaInicio ? fechaIso(fechaInicio) : null, fechaIso(fechaFin));
+  const base = leerBaseCartera(hasta);
 
-  const d = abrirCrm();
-  let filas = [];
-  const ultimos = new Map();
-  let solicitudesPorCrm = new Map();
-  let carteraPorCrm = new Map();
-  try {
-    if (hayTabla(d, 'crm_leads')) {
-      const compra = getCompraLeadAtribuibleSql(LEAD_VIDA_DIAS);
-      const noDup = getLeadNotDuplicateSql();
-      const filtro = `
-        (${noDup})
-        AND id_crm IS NOT NULL AND trim(CAST(id_crm AS TEXT)) <> ''
-        AND substr(fecha_entrada, 1, 10) >= ?
-        AND substr(fecha_entrada, 1, 10) <= ?
-        AND ${predCholula(['sucursal', 'fuerza_ventas'])}`;
-      filas = d.prepare(`
-        SELECT
-          trim(CAST(id_crm AS TEXT)) AS idCrm,
-          nombre AS cliente,
-          telefono,
-          campana,
-          auto_interes AS auto,
-          substr(fecha_entrada, 1, 10) AS fecha,
-          TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo,
-          contacto,
-          cita_programada AS cita,
-          cita_asistida AS asistio,
-          cotizacion,
-          ${compra} AS compra
-        FROM crm_leads
-        WHERE ${filtro}
-        ORDER BY fecha_entrada DESC
-      `).all(desdeVida, hasta);
-
-      for (const ciclo of leerCiclosCartera(d, hasta)) carteraPorCrm.set(ciclo.idCrm, ciclo);
-      const yaEnVentana = new Set(filas.map((f) => f.idCrm));
-      const faltan = [...carteraPorCrm.keys()].filter((id) => !yaEnVentana.has(id));
-      for (let i = 0; i < faltan.length; i += 400) {
-        const lote = faltan.slice(i, i + 400);
-        const extra = d.prepare(`
-          SELECT
-            trim(CAST(id_crm AS TEXT)) AS idCrm,
-            nombre AS cliente,
-            telefono,
-            campana,
-            auto_interes AS auto,
-            substr(fecha_entrada, 1, 10) AS fecha,
-            TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo,
-            contacto,
-            cita_programada AS cita,
-            cita_asistida AS asistio,
-            cotizacion,
-            ${compra} AS compra
-          FROM crm_leads
-          WHERE (${noDup})
-            AND trim(CAST(id_crm AS TEXT)) IN (${lote.map(() => '?').join(',')})
-            AND ${predCholula(['sucursal', 'fuerza_ventas'])}
-        `).all(...lote);
-        for (const fila of extra) {
-          fila.fueraDeVida = true;
-          filas.push(fila);
-        }
-      }
-
-      if (hayTabla(d, 'crm_actividades')) {
-        const fechaAct = `substr(COALESCE(fecha_resp_actividad, fecha_crea_actividad, fecha_prog_actividad, fecha_estatus), 1, 10)`;
-        const idsExtra = filas.filter((f) => f.fueraDeVida).map((f) => f.idCrm);
-        const extraIn = idsExtra.length
-          ? ` OR trim(CAST(id_contacto AS TEXT)) IN (${idsExtra.map(() => '?').join(',')})`
-          : '';
-        const acts = d.prepare(`
-          SELECT trim(CAST(id_contacto AS TEXT)) AS idCrm, MAX(${fechaAct}) AS ultima, COUNT(*) AS n
-          FROM crm_actividades
-          WHERE ${fechaAct} <= ?
-            AND (
-              trim(CAST(id_contacto AS TEXT)) IN (
-                SELECT trim(CAST(id_crm AS TEXT)) FROM crm_leads WHERE ${filtro}
-              )${extraIn}
-            )
-          GROUP BY trim(CAST(id_contacto AS TEXT))
-        `).all(hasta, desdeVida, hasta, ...idsExtra);
-        for (const a of acts) ultimos.set(a.idCrm, { ultima: a.ultima || null, n: Number(a.n || 0) });
-      }
-      solicitudesPorCrm = solicitudesPorIdCrm(d, filas.map((f) => f.idCrm));
-    }
-  } finally {
-    d.close();
+  const guardadas = seguimientoStore.leerEtiquetas(base.filas.map((f) => f.idCrm));
+  const revisionesPorCrm = new Map();
+  for (const r of seguimientoStore.listarRevisiones({ ids: base.filas.map((f) => f.idCrm) })) {
+    if (r.estado !== 'pendiente') continue;
+    const lista = revisionesPorCrm.get(r.idCrm) || [];
+    lista.push(r);
+    revisionesPorCrm.set(r.idCrm, lista);
   }
 
-  // Un cliente por id_crm (el registro más reciente).
-  const vistos = new Set();
-  filas = filas.filter((f) => (vistos.has(f.idCrm) ? false : vistos.add(f.idCrm)));
-
-  const guardadas = seguimientoStore.leerEtiquetas(filas.map((f) => f.idCrm));
-  const clientes = filas.map((f) => {
-    const act = ultimos.get(f.idCrm) || null;
+  const clientes = base.filas.map((f) => {
+    const act = base.ultimos.get(f.idCrm) || null;
     const ultimoSeguimiento = act?.ultima || null;
     const diasSinSeguimiento = ultimoSeguimiento ? Math.max(0, diasEntre(ultimoSeguimiento, hasta)) : null;
     const pasos = {
@@ -954,7 +1091,7 @@ async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
       compra: Number(f.compra) > 0,
     };
     const guardada = guardadas[f.idCrm] || null;
-    const solicitudes = solicitudesPorCrm.get(f.idCrm) || [];
+    const solicitudes = base.solicitudes.get(f.idCrm) || [];
     pasos.credito = solicitudes.length > 0;
     let etiqueta;
     if (pasos.compra) {
@@ -983,25 +1120,29 @@ async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
     }
     const activo = etiqueta.clave === 'caliente' || etiqueta.clave === 'seguimiento';
     const diasVida = diasEntre(f.fecha, hasta);
-    const ciclo = carteraPorCrm.get(f.idCrm) || null;
+    const ciclo = base.ciclos.get(f.idCrm) || null;
     const ejecutivoNombre = ciclo?.vendedor || f.ejecutivo;
     const grupo = grupoDeEjecutivo(grupos, ejecutivoNombre);
+    const vendedor = grupo ? grupo.vendedor : (oficialDe(ejecutivoNombre) || (ejecutivoNombre ? nombreVisible(ejecutivoNombre) : 'Sin asignar'));
+    const revisiones = (revisionesPorCrm.get(f.idCrm) || []).map((r) => revisionVista(r, ultimoSeguimiento));
     return {
       idCrm: f.idCrm,
       cliente: nombreVisible(f.cliente) || 'Sin nombre',
       telefono: f.telefono || '',
-      vendedor: grupo ? grupo.vendedor : (ejecutivoNombre ? nombreVisible(ejecutivoNombre) : 'Sin asignar'),
-      vendedorKey: grupo ? grupo.key : personTokenKey(ejecutivoNombre || 'Sin asignar'),
+      vendedor,
+      vendedorKey: grupo ? grupo.key : personTokenKey(vendedor),
       campana: f.campana || '',
       auto: f.auto || '',
       fechaEntrada: f.fecha,
       diasVida,
-      diasRestantes: Math.max(0, LEAD_VIDA_DIAS - 1 - diasVida),
+      diasRestantes: f.fueraDeVida ? null : Math.max(0, LEAD_VIDA_DIAS - 1 - diasVida),
       ultimoSeguimiento,
       diasSinSeguimiento,
       seguimientos: act?.n || 0,
       pasos,
       solicitudes,
+      compromiso: pasos.compra ? null : (base.compromisos.get(f.idCrm) || null),
+      revision: revisiones[0] || null,
       origen: ciclo ? (f.fueraDeVida ? 'cartera' : 'ambos') : 'lead',
       cartera: ciclo ? {
         estatus: ciclo.estatus,
@@ -1018,19 +1159,23 @@ async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
     };
   }).filter((c) => esVendedorEquipo(c.vendedor));
 
+  const peso = (c) => (c.compromiso?.vencido ? 0 : c.revision ? 1 : c.alertaSeguimiento ? 2 : 3);
   clientes.sort((a, b) => (
-    (ORDEN_ETIQUETA[a.etiqueta.clave] - ORDEN_ETIQUETA[b.etiqueta.clave])
-    || (Number(b.alertaSeguimiento) - Number(a.alertaSeguimiento))
-    || (Number(!!b.cartera) - Number(!!a.cartera))
+    (ORDEN_ETIQUETA[a.etiqueta.clave] >= 3) - (ORDEN_ETIQUETA[b.etiqueta.clave] >= 3)
+    || peso(a) - peso(b)
+    || (a.compromiso?.vencido && b.compromiso?.vencido ? a.compromiso.fecha.localeCompare(b.compromiso.fecha) : 0)
+    || (ORDEN_ETIQUETA[a.etiqueta.clave] - ORDEN_ETIQUETA[b.etiqueta.clave])
     || String(b.fechaEntrada).localeCompare(String(a.fechaEntrada))
   ));
 
-  const resumen = { total: clientes.length, sinEtiqueta: 0, alertas: 0 };
+  const resumen = { total: clientes.length, sinEtiqueta: 0, alertas: 0, vencidos: 0, conRevision: 0 };
   for (const clave of Object.keys(seguimientoStore.ETIQUETAS)) resumen[clave] = 0;
   for (const c of clientes) {
     resumen[c.etiqueta.clave] += 1;
     if (c.etiqueta.origen === 'sugerida') resumen.sinEtiqueta += 1;
     if (c.alertaSeguimiento) resumen.alertas += 1;
+    if (c.compromiso?.vencido) resumen.vencidos += 1;
+    if (c.revision) resumen.conRevision += 1;
   }
   resumen.leads90 = clientes.filter((c) => c.origen !== 'cartera').length;
   resumen.enCartera = clientes.filter((c) => c.cartera).length;
@@ -1038,6 +1183,7 @@ async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
   return {
     sucursal: SUCURSAL.label,
     fechaCorte: hasta,
+    hoy: hoyDia,
     desdeVida,
     vidaDias: LEAD_VIDA_DIAS,
     diasSinSeguimiento: DIAS_SIN_SEGUIMIENTO,
@@ -1047,56 +1193,141 @@ async function getCarteraCholula({ fechaInicio, fechaFin } = {}) {
       manual: seguimientoStore.ETIQUETAS_MANUALES.includes(clave),
     })),
     motivos: Object.entries(seguimientoStore.MOTIVOS_NO_COMPRA).map(([clave, label]) => ({ clave, label })),
+    queRevisar: Object.entries(seguimientoStore.QUE_REVISAR).map(([clave, label]) => ({ clave, label })),
     resumen,
     clientes,
     nota: `Leads de Cholula de los últimos ${LEAD_VIDA_DIAS} días al ${hasta}, más la cartera activa del ejecutivo `
-      + '(prospección, ofrecimiento, negociación caliente, pre-pedido o cartera), aunque el lead sea anterior. '
-      + 'La solicitud de crédito se enlaza por el id del CRM del lead. '
+      + '(prospección, ofrecimiento, negociación caliente, pre-pedido o cartera) con su estatus a esa fecha, aunque el lead sea anterior. '
+      + 'El corte es el fin del periodo, sin pasar de hoy. '
+      + 'El compromiso del asesor es la actividad con fecha que dejó en el CRM: primero la vencida más antigua '
+      + `(últimos ${DIAS_VENTANA_COMPROMISOS} días) y, si no hay, la próxima. `
+      + 'La revisión es la fecha que el gerente programa para confirmar el estatus con el asesor. '
       + '«Compró» se pone solo cuando el CRM registra la compra. Sin etiqueta del equipo se muestra una sugerida: '
       + 'caliente si asistió a cita o cotizó; en seguimiento si tuvo actividad en los últimos '
-      + `${DIAS_ACTIVIDAD_RECIENTE} días; frío en otro caso. Se marca a los clientes calientes o en seguimiento `
-      + `con más de ${DIAS_SIN_SEGUIMIENTO} días sin seguimiento registrado.`,
+      + `${DIAS_ACTIVIDAD_RECIENTE} días; frío en otro caso.`,
   };
 }
 
-/** Guarda la etiqueta de un cliente, solo si es un lead de Cholula. */
-function etiquetarClienteCholula(idCrm, { etiqueta, motivo, nota, autor } = {}) {
+/**
+ * Lead de Cholula del equipo: su ejecutivo es del equipo, o el dueño de su último ciclo lo es
+ * (la cartera asigna así al cliente). Regresa nombre del cliente y vendedor oficial.
+ */
+function validarClienteCholula(idCrm) {
   const key = String(idCrm || '').trim();
   const d = abrirCrm();
-  let existe = null;
   try {
-    existe = hayTabla(d, 'crm_leads')
+    const leads = hayTabla(d, 'crm_leads')
       ? d.prepare(`
-          SELECT TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo
+          SELECT nombre AS cliente, TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo
           FROM crm_leads
           WHERE trim(CAST(id_crm AS TEXT)) = ?
             AND ${predCholula(['sucursal', 'fuerza_ventas'])}
-          LIMIT 1
-        `).get(key)
-      : null;
+          ORDER BY fecha_entrada DESC
+        `).all(key)
+      : [];
+    if (!leads.length) {
+      const err = new Error('Ese cliente no es un lead de Cholula.');
+      err.status = 404;
+      throw err;
+    }
+    let dueno = null;
+    if (hayTabla(d, 'crm_actividades')) {
+      const orden = columnaExiste(d, 'crm_actividades', 'fecha_estatus') ? 'fecha_estatus' : 'fecha_prog_actividad';
+      dueno = d.prepare(`
+        SELECT trim(vendedor) AS vendedor FROM crm_actividades
+        WHERE trim(CAST(id_contacto AS TEXT)) = ? AND trim(COALESCE(vendedor, '')) <> ''
+        ORDER BY ${orden} DESC LIMIT 1
+      `).get(key)?.vendedor || null;
+    }
+    const candidatos = [dueno, ...leads.map((l) => l.ejecutivo)].filter(Boolean);
+    const delEquipo = candidatos.find((n) => esVendedorEquipo(n));
+    if (!delEquipo) {
+      const err = new Error('Ese cliente no está asignado al equipo de vendedores de Cholula.');
+      err.status = 404;
+      throw err;
+    }
+    return { idCrm: key, cliente: nombreVisible(leads[0].cliente) || 'Sin nombre', vendedor: oficialDe(delEquipo) };
   } finally {
     d.close();
   }
-  if (!existe) {
-    const err = new Error('Ese cliente no es un lead de Cholula.');
-    err.status = 404;
-    throw err;
-  }
-  if (!esVendedorEquipo(existe.ejecutivo)) {
-    const err = new Error('Ese cliente no está asignado al equipo de vendedores de Cholula.');
-    err.status = 404;
-    throw err;
-  }
+}
+
+/** Guarda la etiqueta de un cliente, solo si es un lead de Cholula del equipo. */
+function etiquetarClienteCholula(idCrm, { etiqueta, motivo, nota, autor } = {}) {
+  const { idCrm: key } = validarClienteCholula(idCrm);
   const guardado = seguimientoStore.etiquetar(key, { etiqueta, motivo, nota, autor });
   return { idCrm: key, etiqueta: guardado };
 }
 
+/** Programa la revisión del gerente para un cliente de Cholula del equipo. */
+function programarRevisionCholula(idCrm, { fecha, que, nota, autor, hoy } = {}) {
+  const cliente = validarClienteCholula(idCrm);
+  const revision = seguimientoStore.programarRevision(cliente.idCrm, {
+    fecha,
+    que,
+    nota,
+    autor,
+    cliente: cliente.cliente,
+    vendedor: cliente.vendedor,
+    hoy: hoy || hoyIso(),
+  });
+  return { idCrm: cliente.idCrm, revision: revisionVista(revision, null) };
+}
+
+function cerrarRevisionCholula(id, { estado, autor } = {}) {
+  return { revision: revisionVista(seguimientoStore.cerrarRevision(id, { estado, autor }), null) };
+}
+
+/** Actividades con fecha programada del equipo en un rango, sin duplicados. */
+function leerCompromisosEquipo(d, desde, hasta, hoy) {
+  if (!hayTabla(d, 'crm_actividades')) return [];
+  const crea = sqlFechaCrea(d);
+  const filas = d.prepare(`
+    SELECT
+      substr(fecha_prog_actividad, 1, 10) AS fecha,
+      substr(COALESCE(fecha_resp_actividad, ''), 1, 10) AS respuesta,
+      ${crea} AS creada,
+      trim(COALESCE(id_contacto, '')) AS idCrm,
+      trim(COALESCE(nombre_contacto, '')) AS cliente,
+      trim(COALESCE(vendedor, '')) AS vendedor,
+      trim(COALESCE(tipo_actividad, '')) AS tipo,
+      trim(COALESCE(resultado_actividad, '')) AS comentario
+    FROM crm_actividades
+    WHERE substr(COALESCE(fecha_prog_actividad, ''), 1, 10) >= ?
+      AND substr(COALESCE(fecha_prog_actividad, ''), 1, 10) <= ?
+      AND trim(COALESCE(vendedor, '')) <> ''
+  `).all(desde, hasta);
+  const vistos = new Set();
+  const out = [];
+  for (const fila of filas) {
+    const oficial = oficialDe(fila.vendedor);
+    if (!oficial) continue;
+    const comentario = fila.comentario || fila.tipo;
+    if (!comentario || !esFecha(fila.fecha)) continue;
+    const clave = [fila.idCrm, fila.fecha, comentario, oficial].join('|');
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    const e = estadoCompromiso(fila, hoy);
+    out.push({
+      fecha: fila.fecha,
+      idCrm: fila.idCrm || null,
+      cliente: nombreVisible(fila.cliente) || 'Sin nombre',
+      vendedor: oficial,
+      tipo: fila.tipo || null,
+      comentario,
+      respuesta: e.cumplida ? fila.respuesta : null,
+      ...e,
+    });
+  }
+  return out;
+}
+
 /**
- * Actividades del equipo con fecha programada: es la fecha de cumplimiento
- * que se le deja al cliente. El comentario es el resultado de la actividad.
- * @param {{ mes?: string, dbPath?: string }} opts mes en YYYY-MM
+ * Agenda del mes: compromisos que el equipo dejó en el CRM (fecha programada y comentario)
+ * y las revisiones que programó el gerente.
+ * @param {{ mes?: string, dbPath?: string, hoy?: string }} opts mes en YYYY-MM
  */
-function getCalendarioCholula({ mes, dbPath } = {}) {
+function getCalendarioCholula({ mes, dbPath, hoy } = {}) {
   const m = String(mes || '').trim();
   if (!/^\d{4}-\d{2}$/.test(m)) {
     const err = new Error('Indica el mes como YYYY-MM.');
@@ -1109,61 +1340,97 @@ function getCalendarioCholula({ mes, dbPath } = {}) {
     err.status = 400;
     throw err;
   }
+  const hoyDia = hoy || hoyIso();
   const desde = `${m}-01`;
   const ultimo = new Date(anio, mesNum, 0).getDate();
   const hasta = `${m}-${String(ultimo).padStart(2, '0')}`;
   const d = abrirCrm(dbPath);
+  let eventos = [];
   try {
-    if (!hayTabla(d, 'crm_actividades')) {
-      return { mes: m, sucursal: SUCURSAL.label, total: 0, pendientes: 0, eventos: [] };
-    }
-    const filas = d.prepare(`
-      SELECT
-        substr(fecha_prog_actividad, 1, 10) AS fecha,
-        substr(COALESCE(fecha_resp_actividad, ''), 1, 10) AS respuesta,
-        trim(COALESCE(id_contacto, '')) AS idCrm,
-        trim(COALESCE(nombre_contacto, '')) AS cliente,
-        trim(COALESCE(vendedor, '')) AS vendedor,
-        trim(COALESCE(tipo_actividad, '')) AS tipo,
-        trim(COALESCE(resultado_actividad, '')) AS comentario
-      FROM crm_actividades
-      WHERE substr(COALESCE(fecha_prog_actividad, ''), 1, 10) >= ?
-        AND substr(COALESCE(fecha_prog_actividad, ''), 1, 10) <= ?
-        AND trim(COALESCE(vendedor, '')) <> ''
-    `).all(desde, hasta);
-    const vistos = new Set();
-    const eventos = [];
-    for (const fila of filas) {
-      if (!esVendedorEquipo(fila.vendedor)) continue;
-      const comentario = fila.comentario || fila.tipo;
-      if (!comentario || !/^\d{4}-\d{2}-\d{2}$/.test(fila.fecha)) continue;
-      const clave = [fila.idCrm, fila.fecha, comentario, String(fila.vendedor).toUpperCase()].join('|');
-      if (vistos.has(clave)) continue;
-      vistos.add(clave);
-      const cumplida = /^\d{4}-\d{2}-\d{2}$/.test(fila.respuesta) && fila.respuesta >= fila.fecha;
-      eventos.push({
-        fecha: fila.fecha,
-        idCrm: fila.idCrm || null,
-        cliente: fila.cliente || 'Sin nombre',
-        vendedor: nombreVisible(fila.vendedor),
-        tipo: fila.tipo || null,
-        comentario,
-        cumplida,
-      });
-    }
-    eventos.sort((a, b) => a.fecha.localeCompare(b.fecha)
-      || a.vendedor.localeCompare(b.vendedor, 'es')
-      || a.cliente.localeCompare(b.cliente, 'es'));
-    return {
-      mes: m,
-      sucursal: SUCURSAL.label,
-      total: eventos.length,
-      pendientes: eventos.filter((e) => !e.cumplida).length,
-      eventos,
-    };
+    eventos = leerCompromisosEquipo(d, desde, hasta, hoyDia);
   } finally {
     d.close();
   }
+  eventos.sort((a, b) => a.fecha.localeCompare(b.fecha)
+    || a.vendedor.localeCompare(b.vendedor, 'es')
+    || a.cliente.localeCompare(b.cliente, 'es'));
+  const revisiones = dbPath ? [] : seguimientoStore.listarRevisiones({ desde, hasta })
+    .filter((r) => r.estado !== 'cancelada')
+    .map((r) => ({ ...revisionVista(r, null), idCrm: r.idCrm, cliente: r.cliente || 'Sin nombre', vendedor: r.vendedor || '' }));
+  return {
+    mes: m,
+    hoy: hoyDia,
+    sucursal: SUCURSAL.label,
+    total: eventos.length,
+    pendientes: eventos.filter((e) => !e.cumplida).length,
+    vencidas: eventos.filter((e) => e.vencida).length,
+    porHacer: eventos.filter((e) => !e.cumplida && !e.vencida).length,
+    eventos,
+    revisiones,
+  };
+}
+
+/**
+ * Equipo hoy: por asesor, cumplimiento de compromisos (últimos 30 días), vencidos, para hoy,
+ * clientes activos sin seguimiento y revisiones pendientes del gerente.
+ */
+async function getEquipoCholula({ hoy, fechaInicio } = {}) {
+  const hoyDia = hoy || hoyIso();
+  const desde = restarDias(hoyDia, DIAS_VENTANA_COMPROMISOS);
+  const d = abrirCrm();
+  let compromisos = [];
+  try {
+    compromisos = leerCompromisosEquipo(d, desde, hoyDia, hoyDia);
+  } finally {
+    d.close();
+  }
+  const cartera = await getCarteraCholula({
+    fechaInicio: fechaInicio || `${hoyDia.slice(0, 7)}-01`,
+    fechaFin: hoyDia,
+    hoy: hoyDia,
+  });
+  const pendientesRev = seguimientoStore.listarRevisiones().filter((r) => r.estado === 'pendiente');
+  const filas = EQUIPO_CHOLULA.map((oficial) => {
+    const nombre = nombreMostrado(oficial);
+    const suyos = compromisos.filter((c) => c.vendedor === nombre);
+    const pasados = suyos.filter((c) => c.fecha < hoyDia);
+    const deHoy = suyos.filter((c) => c.fecha === hoyDia);
+    const clientes = cartera.clientes.filter((c) => mismoNombre(oficial, c.vendedor));
+    const revs = pendientesRev.filter((r) => r.vendedor && mismoNombre(oficial, r.vendedor));
+    return {
+      vendedor: nombre,
+      key: clientes[0]?.vendedorKey || personTokenKey(nombre),
+      compromisos: pasados.length,
+      aTiempo: pasados.filter((c) => c.aTiempo).length,
+      tarde: pasados.filter((c) => c.cumplida && !c.aTiempo).length,
+      vencidas: pasados.filter((c) => c.vencida).length,
+      paraHoy: deHoy.length,
+      paraHoyCumplidas: deHoy.filter((c) => c.cumplida).length,
+      pctATiempo: pasados.length ? Math.round((pasados.filter((c) => c.aTiempo).length / pasados.length) * 1000) / 10 : null,
+      activos: clientes.filter((c) => ['caliente', 'seguimiento'].includes(c.etiqueta.clave)).length,
+      sinSeguimiento: clientes.filter((c) => c.alertaSeguimiento).length,
+      revisiones: revs.length,
+      revisionesHoy: revs.filter((r) => r.fecha <= hoyDia).length,
+    };
+  });
+  filas.sort((a, b) => b.vencidas - a.vencidas || (a.pctATiempo ?? 101) - (b.pctATiempo ?? 101) || a.vendedor.localeCompare(b.vendedor, 'es'));
+  return {
+    hoy: hoyDia,
+    desde,
+    ventanaDias: DIAS_VENTANA_COMPROMISOS,
+    vendedores: filas,
+    totales: {
+      compromisos: filas.reduce((n, f) => n + f.compromisos, 0),
+      aTiempo: filas.reduce((n, f) => n + f.aTiempo, 0),
+      vencidas: filas.reduce((n, f) => n + f.vencidas, 0),
+      paraHoy: filas.reduce((n, f) => n + f.paraHoy, 0),
+      sinSeguimiento: filas.reduce((n, f) => n + f.sinSeguimiento, 0),
+      revisiones: filas.reduce((n, f) => n + f.revisiones, 0),
+    },
+    nota: `Compromisos = actividades con fecha programada que el asesor dejó en el CRM. A tiempo = registró la respuesta en su fecha o antes. `
+      + `Vencida = sin respuesta y su fecha ya pasó (últimos ${DIAS_VENTANA_COMPROMISOS} días). `
+      + `Sin seguimiento = clientes calientes o en seguimiento con más de ${DIAS_SIN_SEGUIMIENTO} días sin actividad.`,
+  };
 }
 
 module.exports = {
@@ -1171,7 +1438,12 @@ module.exports = {
   getMonitoreoCholulaDetalle,
   getCalendarioCholula,
   getCarteraCholula,
+  getEquipoCholula,
   etiquetarClienteCholula,
+  programarRevisionCholula,
+  cerrarRevisionCholula,
+  estadoCompromiso,
+  corteCartera,
   etiquetaSugerida,
   esVendedorEquipo,
   fusionar,

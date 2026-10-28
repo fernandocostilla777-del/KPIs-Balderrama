@@ -9,6 +9,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const ARCHIVO = () => process.env.SEGUIMIENTO_CLIENTES_PATH
   || path.join(__dirname, '../../data/seguimiento-clientes.json');
@@ -45,12 +46,15 @@ function cargar() {
     const archivo = ARCHIVO();
     if (fs.existsSync(archivo)) {
       const data = JSON.parse(fs.readFileSync(archivo, 'utf8'));
-      if (data && typeof data.clientes === 'object' && data.clientes) return data;
+      if (data && typeof data.clientes === 'object' && data.clientes) {
+        if (!data.revisiones || typeof data.revisiones !== 'object') data.revisiones = {};
+        return data;
+      }
     }
   } catch {
     /* archivo ausente o dañado: se empieza vacío */
   }
-  return { clientes: {} };
+  return { clientes: {}, revisiones: {} };
 }
 
 function guardar(data) {
@@ -120,10 +124,97 @@ function etiquetar(idCrm, { etiqueta, motivo, nota, autor } = {}) {
   return data.clientes[key].etiqueta ? data.clientes[key] : null;
 }
 
+// ── Revisiones del gerente ────────────────────────────────────────────────
+// Fecha en la que el gerente vuelve a confirmar con el asesor el estatus de un cliente.
+
+const QUE_REVISAR = {
+  estatus: 'Estatus del cliente',
+  firma: 'Fecha de firma',
+  cotizacion: 'Que envió la cotización',
+  credito: 'Crédito o solicitud',
+  prueba: 'Prueba de manejo',
+  otro: 'Otro',
+};
+
+const ESTADOS_REVISION = ['pendiente', 'lista', 'cancelada'];
+
+function fechaValida(v) {
+  const s = String(v || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? s : null;
+}
+
+/** Programa una revisión. `cliente` y `vendedor` se guardan como referencia para la agenda. */
+function programarRevision(idCrm, { fecha, que, nota, autor, cliente, vendedor, hoy } = {}) {
+  const key = String(idCrm || '').trim();
+  if (!key) throw error(400, 'Falta el cliente.');
+  const dia = fechaValida(fecha);
+  if (!dia) throw error(400, 'Indica la fecha de la revisión.');
+  if (hoy && dia < hoy) throw error(400, 'La revisión no puede quedar en una fecha pasada.');
+  const clave = String(que || '').trim();
+  if (!QUE_REVISAR[clave]) throw error(400, 'Indica qué se va a confirmar.');
+  const notaLimpia = String(nota || '').replace(/\s+/g, ' ').trim();
+  if (notaLimpia.length > MAX_NOTA) throw error(400, `La nota supera ${MAX_NOTA} caracteres.`);
+  if (clave === 'otro' && !notaLimpia) throw error(400, 'Con «Otro» escribe qué se va a confirmar.');
+  const data = cargar();
+  const ahora = new Date().toISOString();
+  const revision = {
+    id: crypto.randomUUID(),
+    idCrm: key,
+    fecha: dia,
+    que: clave,
+    nota: notaLimpia || null,
+    cliente: String(cliente || '').trim() || null,
+    vendedor: String(vendedor || '').trim() || null,
+    autor: String(autor || 'usuario').trim() || 'usuario',
+    creada: ahora,
+    estado: 'pendiente',
+    cerrada: null,
+    cerradaPor: null,
+  };
+  data.revisiones[revision.id] = revision;
+  guardar(data);
+  return revision;
+}
+
+/** Marca una revisión como lista o cancelada (o la regresa a pendiente). */
+function cerrarRevision(id, { estado, autor } = {}) {
+  const data = cargar();
+  const revision = data.revisiones[String(id || '')];
+  if (!revision) throw error(404, 'Revisión no encontrada.');
+  if (!ESTADOS_REVISION.includes(estado)) throw error(400, 'Estado no válido.');
+  revision.estado = estado;
+  revision.cerrada = estado === 'pendiente' ? null : new Date().toISOString();
+  revision.cerradaPor = estado === 'pendiente' ? null : (String(autor || 'usuario').trim() || 'usuario');
+  guardar(data);
+  return revision;
+}
+
+/** Revisiones, opcionalmente de un rango de fechas o de ciertos clientes. */
+function listarRevisiones({ desde, hasta, ids } = {}) {
+  const { revisiones } = cargar();
+  const filtroIds = ids ? new Set([...ids].map(String)) : null;
+  return Object.values(revisiones)
+    .filter((r) => (!desde || r.fecha >= desde) && (!hasta || r.fecha <= hasta))
+    .filter((r) => !filtroIds || filtroIds.has(r.idCrm))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha) || String(a.creada).localeCompare(String(b.creada)));
+}
+
+function etiquetaQue(clave) {
+  return QUE_REVISAR[clave] || clave;
+}
+
 module.exports = {
   ETIQUETAS,
   ETIQUETAS_MANUALES,
   MOTIVOS_NO_COMPRA,
   leerEtiquetas,
   etiquetar,
+  QUE_REVISAR,
+  programarRevision,
+  cerrarRevision,
+  listarRevisiones,
+  etiquetaQue,
 };

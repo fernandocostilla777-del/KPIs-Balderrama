@@ -369,6 +369,51 @@ router.get('/ventas/monitoreo-cholula', async (req, res, next) => {
   }
 });
 
+router.get('/ventas/monitoreo-cholula/equipo', async (req, res, next) => {
+  try {
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(await monitoreo.getEquipoCholula({ fechaInicio: req.query.fechaInicio }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+function bloquearEscrituraNube(res) {
+  // Etiquetas y revisiones viven en el servidor de la oficina; fuera de la red no se guardan
+  // para no tener dos copias distintas.
+  if (!require('../services/dataSource').isCloud()) return false;
+  res.status(503).json({ error: 'El seguimiento de clientes solo se guarda conectado a la red de la oficina.' });
+  return true;
+}
+
+router.post('/ventas/monitoreo-cholula/clientes/:idCrm/revisiones', (req, res, next) => {
+  try {
+    if (bloquearEscrituraNube(res)) return;
+    const { fecha, que, nota } = req.body || {};
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.status(201).json(monitoreo.programarRevisionCholula(req.params.idCrm, {
+      fecha, que, nota, autor: req.session?.username || 'usuario',
+    }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+router.put('/ventas/monitoreo-cholula/revisiones/:id', (req, res, next) => {
+  try {
+    if (bloquearEscrituraNube(res)) return;
+    const monitoreo = require('../services/monitoreoCholulaService');
+    res.json(monitoreo.cerrarRevisionCholula(req.params.id, {
+      estado: req.body?.estado, autor: req.session?.username || 'usuario',
+    }));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.get('/ventas/monitoreo-cholula/calendario', (req, res, next) => {
   try {
     const monitoreo = require('../services/monitoreoCholulaService');
@@ -397,9 +442,7 @@ router.put('/ventas/monitoreo-cholula/clientes/:idCrm', (req, res, next) => {
   try {
     // Las etiquetas viven en el servidor de la oficina; fuera de la red no se guardan
     // para no tener dos copias distintas.
-    if (require('../services/dataSource').isCloud()) {
-      return res.status(503).json({ error: 'Las etiquetas de clientes solo se guardan conectado a la red de la oficina.' });
-    }
+    if (bloquearEscrituraNube(res)) return;
     const { etiqueta, motivo, nota } = req.body || {};
     const autor = req.session?.username || 'usuario';
     const monitoreo = require('../services/monitoreoCholulaService');

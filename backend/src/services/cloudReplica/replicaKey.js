@@ -20,6 +20,7 @@ const PREFIJOS_EXCLUIDOS = [
   '/post-sales/orden/',
   '/ventas/financiamiento/factura/',
   '/ventas/monitoreo-cholula/clientes',
+  '/ventas/monitoreo-cholula/calendario',
   '/ai/',
   '/auth/',
 ];

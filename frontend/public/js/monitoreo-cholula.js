@@ -1,8 +1,8 @@
 /**
  * Ventas › Vendedores Cholula.
- * Arriba, el resultado de la sucursal (ventas contra el periodo anterior y tasas del embudo);
- * después, el ranking de vendedores con cada tasa marcada contra el promedio de Cholula;
- * al abrir un vendedor, su resumen contra la sucursal y sus registros por pestaña.
+ * Arriba, el resultado del equipo (ventas contra el periodo anterior y tasas del embudo).
+ * Dos vistas: Ranking (cada tasa contra el promedio del equipo; al abrir un vendedor, su resumen
+ * y sus registros) y Seguimiento del equipo (cartera-cholula.js: trabajo de cada asesor y agenda).
  */
 (() => {
   const esc = (s) => String(s ?? '')
@@ -13,7 +13,6 @@
   const num = (n) => Number(n || 0).toLocaleString('es-MX');
   const pct = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v).toFixed(1)} %`);
   const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  const MESES_LARGOS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   /** Diferencia (en puntos) contra la sucursal a partir de la cual se marca una tasa. */
   const UMBRAL_PUNTOS = 5;
   /** Con menos leads que esto la tasa de un vendedor se muestra, pero no se marca. */
@@ -23,7 +22,7 @@
   let cacheKey = null;
   let lastPayload = null;
   let abierto = null;
-  let pestanaDetalle = 'clientes';
+  let pestanaDetalle = 'ventas';
   let detalleActual = null;
   let inflight = null;
 
@@ -81,6 +80,13 @@
     if (data.sinAsignar?.leads) {
       avisos.push(`${num(data.sinAsignar.leads)} ${Number(data.sinAsignar.leads) === 1 ? 'lead' : 'leads'} de Cholula sin ejecutivo asignado en el periodo.`);
     }
+    const fuera = data.fueraEquipo;
+    if (fuera && (fuera.ventas || fuera.leads)) {
+      const partes = [];
+      if (fuera.ventas) partes.push(`${num(fuera.ventas)} ${Number(fuera.ventas) === 1 ? 'venta' : 'ventas'}`);
+      if (fuera.leads) partes.push(`${num(fuera.leads)} leads`);
+      avisos.push(`${partes.join(' y ')} de Cholula son de personas fuera del equipo y no cuentan aquí (sí en la pestaña Ventas).`);
+    }
     if (data.ventasError) avisos.push(`Las facturas no se pudieron leer: ${data.ventasError}`);
     const aviso = document.getElementById('cholVendAviso');
     if (aviso) {
@@ -111,7 +117,7 @@
       tarjeta({ titulo: 'Lead → compra', valor: pct(t.pctCierreLead), sub: `${num(t.comprasLead)} compras de ${num(t.leads)} leads`, tono: 'green' }),
       tarjeta({ titulo: 'Contacto', valor: pct(t.pctContacto), sub: `${num(t.contactados)} de ${num(t.leads)} leads · cita ${pct(t.pctCita)}`, tono: 'violet' }),
       tarjeta({ titulo: 'Solicitudes aprobadas', valor: pct(t.pctAprobacion), sub: `${num(t.solicitudesAprobadas)} de ${num(t.solicitudes)} solicitudes`, tono: 'slate' }),
-      tarjeta({ titulo: 'Fresh up', valor: num(t.visitas), sub: `${num(t.pruebas)} pruebas · ${num(t.seguimientos)} seguimientos`, tono: 'blue' }),
+      tarjeta({ titulo: 'Fresh up', valor: num(t.visitas), sub: 'Visitas de piso de autos nuevos', tono: 'blue' }),
     ].join('');
   }
 
@@ -195,7 +201,6 @@
     { id: 'seguimientos', titulo: 'Seguimientos', columnas: [
       ['Fecha', (r) => r.fecha], ['Cliente', (r) => r.cliente], ['Actividad', (r) => r.tipo], ['Resultado', (r) => r.resultado],
     ] },
-    { id: 'clientes', titulo: 'Clientes', cartera: true },
   ];
 
   function tablaDetalle(def, filas) {
@@ -228,173 +233,37 @@
   }
 
   let modo = 'ranking';
-  let calMes = null;
-  let calManual = false;
-  let calDia = null;
-  let calVendedor = '';
-  let calPayload = null;
-  let calInflight = null;
-
-  function soltarCartera() {
-    const slot = document.getElementById('cholCarteraSlot');
-    const sec = document.getElementById('cholCartera');
-    if (slot && sec && sec.parentElement !== slot) slot.appendChild(sec);
-    sec?.classList.remove('cc--embebida');
-  }
 
   function pintarModo() {
     const ranking = document.getElementById('cholVendRanking');
+    const seg = document.getElementById('cholSeguimiento');
+    const detalle = document.getElementById('cholVendDetalle');
     const nav = document.getElementById('cholVendModos');
-    const sec = document.getElementById('cholCartera');
-    const cal = document.getElementById('cholVendCalendario');
-    const viendoVendedor = !!abierto;
+    const viendoVendedor = !!abierto && modo === 'ranking';
     if (ranking) ranking.hidden = viendoVendedor || modo !== 'ranking';
-    if (nav) nav.hidden = viendoVendedor;
-    if (sec && !sec.classList.contains('cc--embebida')) sec.hidden = viendoVendedor || modo !== 'clientes';
-    if (cal) cal.hidden = viendoVendedor || modo !== 'calendario';
+    if (seg) seg.hidden = modo !== 'seguimiento';
+    if (detalle && modo !== 'ranking') detalle.hidden = true;
     nav?.querySelectorAll('[data-cv-modo]').forEach((btn) => {
-      const on = !viendoVendedor && btn.dataset.cvModo === modo;
+      const on = btn.dataset.cvModo === modo;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    if (!viendoVendedor && modo === 'calendario') asegurarCalendario();
   }
 
-  function mesDelPeriodo() {
-    const ff = dates().fechaFin || '';
-    if (/^\d{4}-\d{2}/.test(ff)) return ff.slice(0, 7);
-    const h = new Date();
-    return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  function hoyIso() {
-    const h = new Date();
-    return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, '0')}-${String(h.getDate()).padStart(2, '0')}`;
-  }
-
-  function etiquetaDia(iso) {
-    const [, m, d] = String(iso || '').split('-').map(Number);
-    if (!m || !d) return iso || '';
-    return `${d} ${MESES[m - 1]}`;
-  }
-
-  function asegurarCalendario() {
-    if (!calManual) calMes = mesDelPeriodo();
-    if (calPayload?.mes === calMes) {
-      pintarCalendario(calPayload, false);
-      return;
-    }
-    cargarCalendario();
-  }
-
-  function cargarCalendario() {
-    const mes = calMes || mesDelPeriodo();
-    calMes = mes;
-    pintarCalendario(calPayload?.mes === mes ? calPayload : null, true);
-    if (calInflight?.key === mes) return calInflight.promise;
-    const promise = api(`/ventas/monitoreo-cholula/calendario?mes=${mes}`).then((data) => {
-      if (calMes !== mes) return data;
-      calPayload = data;
-      pintarCalendario(data, false);
-      return data;
-    }).catch((err) => {
-      const host = document.getElementById('cholVendCalendario');
-      if (host && calMes === mes) {
-        host.innerHTML = `<p class="cv-leyenda">${esc(err.message || 'No se pudo cargar el calendario.')}</p>`;
-      }
-    }).finally(() => {
-      if (calInflight?.key === mes) calInflight = null;
+  function irASeguimiento(key, nombre) {
+    modo = 'seguimiento';
+    abierto = null;
+    pintarTabla(lastPayload);
+    pintarDetalle(null);
+    const { fechaInicio, fechaFin } = dates();
+    cartera().then((c) => {
+      c?.verVendedor(key || null, nombre || '');
+      return c?.load(fechaInicio, fechaFin);
     });
-    calInflight = { key: mes, promise };
-    return promise;
+    document.getElementById('cholVendModos')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  function pintarCalendario(data, cargando) {
-    const host = document.getElementById('cholVendCalendario');
-    if (!host) return;
-    const mes = calMes || mesDelPeriodo();
-    const [anio, mesNum] = mes.split('-').map(Number);
-    const eventos = data?.mes === mes ? (data.eventos || []) : [];
-    const vendedores = [...new Set(eventos.map((e) => e.vendedor))].sort((a, b) => a.localeCompare(b, 'es'));
-    if (calVendedor && !vendedores.includes(calVendedor)) calVendedor = '';
-    const visibles = eventos.filter((e) => !calVendedor || e.vendedor === calVendedor);
-    const delDia = calDia ? visibles.filter((e) => e.fecha === calDia) : visibles;
-    const pendientes = visibles.filter((e) => !e.cumplida).length;
-    const porDia = new Map();
-    visibles.forEach((ev) => porDia.set(ev.fecha, (porDia.get(ev.fecha) || 0) + 1));
-    const hoy = hoyIso();
-    const primero = new Date(anio, mesNum - 1, 1);
-    const huecos = (primero.getDay() + 6) % 7;
-    const ultimo = new Date(anio, mesNum, 0).getDate();
-    const celdas = [];
-    for (let i = 0; i < huecos; i += 1) celdas.push('<span class="cv-cal-vacio"></span>');
-    for (let dia = 1; dia <= ultimo; dia += 1) {
-      const iso = `${mes}-${String(dia).padStart(2, '0')}`;
-      const n = porDia.get(iso) || 0;
-      const clases = ['cv-cal-dia'];
-      if (n) clases.push('cv-cal-dia--con');
-      if (iso === calDia) clases.push('cv-cal-dia--on');
-      if (iso === hoy) clases.push('cv-cal-dia--hoy');
-      celdas.push(
-        `<button type="button" class="${clases.join(' ')}" data-cv-dia="${iso}" aria-pressed="${iso === calDia ? 'true' : 'false'}">`
-        + `<span>${dia}</span>${n ? `<em>${n}</em>` : ''}</button>`,
-      );
-    }
-    let sub = 'Cargando comentarios…';
-    if (!cargando) {
-      sub = visibles.length
-        ? `${num(visibles.length)} comentarios · ${num(pendientes)} pendientes`
-        : 'En este mes el equipo no tiene comentarios con fecha de cumplimiento.';
-    }
-    const opciones = ['<option value="">Todo el equipo</option>']
-      .concat(vendedores.map((v) => `<option value="${esc(v)}"${v === calVendedor ? ' selected' : ''}>${esc(v)}</option>`))
-      .join('');
-    const lista = !delDia.length
-      ? `<p class="cv-leyenda">${calDia ? 'Ese día no tiene comentarios.' : (cargando ? 'Cargando comentarios…' : 'Nada que mostrar en este mes.')}</p>`
-      : `<ul class="cv-cal-lista">${delDia.map((ev) => {
-        const tipo = ev.tipo && ev.tipo !== ev.comentario ? esc(ev.tipo) : '';
-        return `<li class="cv-cal-item">
-          <div class="cv-cal-item-top">
-            <strong>${esc(ev.cliente)}</strong>
-            <span class="cv-cal-estado${ev.cumplida ? ' cv-cal-estado--ok' : ''}">${ev.cumplida ? 'Cumplida' : 'Pendiente'}</span>
-          </div>
-          <p>${esc(ev.comentario)}</p>
-          <p class="cv-cal-meta">${esc(ev.vendedor)}${tipo ? ` · ${tipo}` : ''}${calDia ? '' : ` · ${esc(etiquetaDia(ev.fecha))}`}</p>
-        </li>`;
-      }).join('')}</ul>`;
-    host.innerHTML = `
-      <div class="cv-cal-head">
-        <div>
-          <h3 class="cv-subtitulo">${esc(MESES_LARGOS[mesNum - 1] || '')} ${anio}</h3>
-          <p class="cv-leyenda">${esc(sub)}</p>
-        </div>
-        <div class="cv-cal-nav">
-          <button type="button" class="cc-btn" data-cv-cal="prev" aria-label="Mes anterior">Anterior</button>
-          <button type="button" class="cc-btn" data-cv-cal="next" aria-label="Mes siguiente">Siguiente</button>
-        </div>
-      </div>
-      <p class="cv-leyenda">Fecha de cumplimiento de la actividad y el comentario que se le dejó al cliente.</p>
-      <label class="cv-cal-filtro">Vendedor
-        <select data-cv-cal="vendedor">${opciones}</select>
-      </label>
-      <div class="cv-cal-semana" aria-hidden="true"><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span></div>
-      <div class="cv-cal-grid">${celdas.join('')}</div>
-      <h4 class="cv-cal-lista-titulo">${calDia ? esc(etiquetaDia(calDia)) : 'Todo el mes'}</h4>
-      ${lista}`;
-  }
-
-  function embeberCartera() {
-    const host = document.getElementById('cholVendCarteraHost');
-    const sec = document.getElementById('cholCartera');
-    if (!host || !sec) return;
-    host.appendChild(sec);
-    sec.hidden = false;
-    sec.classList.add('cc--embebida');
-    const fila = (lastPayload?.vendedores || []).find((v) => v.key === abierto);
-    cartera().then((c) => c?.verVendedor(abierto, fila?.vendedor || ''));
-  }
   function pintarDetalle(data) {
-    soltarCartera();
     const caja = document.getElementById('cholVendDetalle');
     if (!caja) return;
     detalleActual = data;
@@ -406,17 +275,11 @@
     }
     const r = data.resumen || {};
     const t = lastPayload?.totales || {};
-    const nClientes = window.CarteraCholula?.contar?.(abierto);
-    const conteos = Object.fromEntries(PESTANAS.map((p) => (
-      p.cartera ? [p.id, nClientes] : [p.id, (data[p.id] || []).length]
-    )));
-    const actual = PESTANAS.find((p) => p.id === pestanaDetalle);
-    if (!actual || (!actual.cartera && !conteos[pestanaDetalle])) {
-      pestanaDetalle = PESTANAS.find((p) => p.cartera || conteos[p.id])?.id || 'ventas';
-    }
+    const conteos = Object.fromEntries(PESTANAS.map((p) => [p.id, (data[p.id] || []).length]));
+    if (!conteos[pestanaDetalle]) pestanaDetalle = PESTANAS.find((p) => conteos[p.id])?.id || 'ventas';
     const def = PESTANAS.find((p) => p.id === pestanaDetalle);
-    const cuenta = (p) => (p.cartera && conteos[p.id] == null ? '' : ` <span class="cv-cuenta">${num(conteos[p.id] || 0)}</span>`);
-    const cuerpo = def.cartera ? '<div id="cholVendCarteraHost"></div>' : tablaDetalle(def, data[def.id] || []);
+    const cuenta = (p) => ` <span class="cv-cuenta">${num(conteos[p.id] || 0)}</span>`;
+    const cuerpo = tablaDetalle(def, data[def.id] || []);
     caja.hidden = false;
     caja.innerHTML = `
       <div class="cv-detalle__head">
@@ -424,7 +287,10 @@
           <span class="cv-detalle__kicker">Detalle del vendedor</span>
           <h3 class="cv-detalle__nombre">${esc(data.vendedor)}</h3>
         </div>
-        <button type="button" class="cc-btn" data-cv-cerrar>Volver al ranking</button>
+        <div class="cv-detalle__acciones">
+          <button type="button" class="cc-btn cc-btn--primario" data-cv-seguimiento="${esc(abierto || '')}" data-cv-nombre="${esc(data.vendedor)}">Ver su seguimiento</button>
+          <button type="button" class="cc-btn" data-cv-cerrar>Volver al ranking</button>
+        </div>
       </div>
       <div class="cv-minis">
         <div class="cv-mini">
@@ -437,11 +303,10 @@
         ${comparativo('Solicitudes aprobadas', r.pctAprobacion, t.pctAprobacion, `${num(r.solicitudesAprobadas)} de ${num(r.solicitudes)}`)}
       </div>
       <nav class="eeff-tabs cv-pestanas" aria-label="Registros del vendedor">
-        ${PESTANAS.map((p) => `<button type="button" class="eeff-tab${p.id === pestanaDetalle ? ' active' : ''}" data-cv-pestana="${p.id}"${!p.cartera && !conteos[p.id] ? ' disabled' : ''}>${esc(p.titulo)}${cuenta(p)}</button>`).join('')}
+        ${PESTANAS.map((p) => `<button type="button" class="eeff-tab${p.id === pestanaDetalle ? ' active' : ''}" data-cv-pestana="${p.id}"${!conteos[p.id] ? ' disabled' : ''}>${esc(p.titulo)}${cuenta(p)}</button>`).join('')}
       </nav>
       ${cuerpo}`;
     pintarModo();
-    if (def.cartera) embeberCartera();
   }
 
   async function abrirDetalle(key) {
@@ -451,11 +316,10 @@
       abierto = null;
       pintarTabla(lastPayload);
       pintarDetalle(null);
-      verCarteraDe(null);
       return;
     }
     abierto = key;
-    pestanaDetalle = 'clientes';
+    pestanaDetalle = 'ventas';
     pintarTabla(lastPayload);
     pintarModo();
     const caja = document.getElementById('cholVendDetalle');
@@ -475,18 +339,13 @@
       carteraLista = new Promise((resolve) => {
         if (window.CarteraCholula) return resolve(window.CarteraCholula);
         const tag = document.createElement('script');
-        tag.src = '/js/cartera-cholula.js?v=4';
+        tag.src = '/js/cartera-cholula.js?v=5';
         tag.onload = () => resolve(window.CarteraCholula || null);
         tag.onerror = () => resolve(null);
         document.body.appendChild(tag);
       });
     }
     return carteraLista;
-  }
-
-  function verCarteraDe(key) {
-    const fila = (lastPayload?.vendedores || []).find((v) => v.key === key);
-    cartera().then((c) => c?.verVendedor(key, fila?.vendedor || ''));
   }
 
   function pintarTodo(data) {
@@ -503,7 +362,7 @@
     if (!opts.force && cacheKey === key && lastPayload) {
       pintarTodo(lastPayload);
       pintarModo();
-      cartera().then((c) => c?.load(fi, ff));
+      if (modo === 'seguimiento') cartera().then((c) => c?.load(fi, ff));
       return lastPayload;
     }
     if (inflight && inflight.key === key) return inflight.promise;
@@ -516,10 +375,7 @@
       lastPayload = data;
       pintarTodo(data);
       pintarModo();
-      cartera().then((c) => {
-        c?.verVendedor(null);
-        return c?.load(fi, ff, { force: !!opts.force });
-      });
+      if (modo === 'seguimiento') cartera().then((c) => c?.load(fi, ff, { force: !!opts.force }));
       return data;
     }).catch((err) => {
       setTexto('cholVendSubtitle', err.message || 'No se pudo cargar el monitoreo.');
@@ -533,38 +389,28 @@
 
   const panel = document.getElementById('secVendedoresCholula');
   panel?.addEventListener('click', (e) => {
+    if (e.target.closest('#cholSeguimiento')) return;
     if (e.target.closest('[data-cv-cerrar]')) {
       abierto = null;
       pintarTabla(lastPayload);
       pintarDetalle(null);
-      verCarteraDe(null);
       return;
     }
-    const calBtn = e.target.closest('[data-cv-cal]');
-    if (calBtn && calBtn.dataset.cvCal !== 'vendedor') {
-      const accion = calBtn.dataset.cvCal;
-      calManual = true;
-      const [y, m] = (calMes || mesDelPeriodo()).split('-').map(Number);
-      const d = new Date(y, m - 1 + (accion === 'next' ? 1 : -1), 1);
-      calMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      calDia = null;
-      cargarCalendario();
-      return;
-    }
-    const diaBtn = e.target.closest('[data-cv-dia]');
-    if (diaBtn) {
-      const dia = diaBtn.dataset.cvDia;
-      calDia = calDia === dia ? null : dia;
-      if (calPayload) pintarCalendario(calPayload, false);
+    const seg = e.target.closest('[data-cv-seguimiento]');
+    if (seg) {
+      irASeguimiento(seg.dataset.cvSeguimiento, seg.dataset.cvNombre);
       return;
     }
     const modoBtn = e.target.closest('[data-cv-modo]');
     if (modoBtn) {
+      if (modoBtn.dataset.cvModo === 'seguimiento') {
+        irASeguimiento(null);
+        return;
+      }
+      modo = 'ranking';
       abierto = null;
-      modo = modoBtn.dataset.cvModo;
       pintarTabla(lastPayload);
       pintarDetalle(null);
-      verCarteraDe(null);
       return;
     }
     const pestana = e.target.closest('[data-cv-pestana]');
@@ -576,12 +422,6 @@
     const fila = e.target.closest('#cholVendBody [data-vendedor]');
     if (!fila) return;
     abrirDetalle(fila.dataset.vendedor).catch((err) => setTexto('cholVendSubtitle', err.message || 'No se pudo abrir el detalle.'));
-  });
-  panel?.addEventListener('change', (e) => {
-    const sel = e.target.closest('[data-cv-cal="vendedor"]');
-    if (!sel) return;
-    calVendedor = sel.value;
-    if (calPayload) pintarCalendario(calPayload, false);
   });
   document.getElementById('cholVendBody')?.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;

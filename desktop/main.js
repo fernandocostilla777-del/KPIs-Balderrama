@@ -22,6 +22,25 @@ let mainWindow = null;
 let backendProc = null;
 let frontendProc = null;
 let shuttingDown = false;
+/** Últimas líneas stdout/stderr del backend (para diagnóstico en el diálogo de error). */
+const backendLogLines = [];
+const BACKEND_LOG_MAX = 40;
+
+function pushBackendLog(chunk) {
+  String(chunk)
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      backendLogLines.push(line);
+      while (backendLogLines.length > BACKEND_LOG_MAX) backendLogLines.shift();
+    });
+}
+
+function backendLogTail(maxLines = 12) {
+  if (!backendLogLines.length) return '';
+  return `\n\nDetalle del backend:\n${backendLogLines.slice(-maxLines).join('\n')}`;
+}
 
 function repoRoot() {
   // desktop/ is one level under monorepo root in development
@@ -204,6 +223,7 @@ function spawnServer(label, cwd, scriptRel, envExtra = {}) {
     env.ELECTRON_RUN_AS_NODE = '1';
   }
 
+  console.log(`[desktop] Arrancando ${label} con ${cmd}${electronAsNode ? ' (ELECTRON_RUN_AS_NODE)' : ''}`);
   const child = spawn(cmd, [script], {
     cwd,
     env,
@@ -215,17 +235,19 @@ function spawnServer(label, cwd, scriptRel, envExtra = {}) {
   child.stdout.on('data', (buf) => {
     const text = String(buf).trim();
     if (text) console.log(prefix, text);
+    if (label === 'backend') pushBackendLog(buf);
   });
   child.stderr.on('data', (buf) => {
     const text = String(buf).trim();
     if (text) console.error(prefix, text);
+    if (label === 'backend') pushBackendLog(buf);
   });
   child.on('exit', (code, signal) => {
     console.log(prefix, `exit code=${code} signal=${signal}`);
     if (!shuttingDown && mainWindow && !mainWindow.isDestroyed()) {
       dialog.showErrorBox(
         'Servicio detenido',
-        `El proceso ${label} se detuvo inesperadamente (código ${code}).\nRevise la configuración SQL en:\n${userDataEnvPath()}`
+        `El proceso ${label} se detuvo inesperadamente (código ${code}).\nRevise la configuración SQL en:\n${userDataEnvPath()}${label === 'backend' ? backendLogTail() : ''}`
       );
     }
   });
@@ -333,7 +355,7 @@ async function startServers() {
       ? ` (proceso salió con código ${backendProc.exitCode})`
       : '';
     throw new Error(
-      `El backend no respondió en ${healthUrl}${exited}.\nVerifique SQL Server y el archivo .env:\n${configEnvPath()}`
+      `El backend no respondió en ${healthUrl}${exited}.\nVerifique SQL Server, que Node.js esté instalado y el archivo .env:\n${configEnvPath()}${backendLogTail()}`
     );
   }
 
@@ -479,19 +501,38 @@ async function createWindow() {
   try {
     const uiUrl = await startServers();
     setLoadingStatus('Cargando dashboard…');
-    await mainWindow.loadURL(uiUrl);
+    try {
+      await mainWindow.loadURL(uiUrl);
+    } catch (navErr) {
+      // Redirects de sesión (login → sales) a veces abortan loadURL en Electron.
+      const msg = String(navErr && navErr.message ? navErr.message : navErr);
+      if (/ERR_ABORTED|ERR_FAILED/i.test(msg) && !mainWindow.isDestroyed()) {
+        const uiOk = await httpOk(uiUrl, 2500)
+          || await httpOk(`http://127.0.0.1:${FRONTEND_PORT}/login.html`, 2500);
+        if (uiOk) {
+          console.warn('[desktop] loadURL abortado pero la UI responde; se continúa.');
+          try { await mainWindow.loadURL(uiUrl); } catch (_) { /* ya hay contenido o redirect */ }
+        } else {
+          throw navErr;
+        }
+      } else {
+        throw navErr;
+      }
+    }
   } catch (err) {
     console.error(err);
     const message = err && err.message ? err.message : String(err);
-    await mainWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(
-        `<!doctype html><html><body style="font-family:Segoe UI,sans-serif;background:#0f172a;color:#f8fafc;padding:40px">
-        <h1>No se pudo iniciar</h1>
-        <p style="white-space:pre-wrap;color:#cbd5e1">${message.replace(/</g, '&lt;')}</p>
-        <p style="color:#94a3b8">Edite la configuración SQL y reinicie la aplicación.</p>
-        </body></html>`
-      )}`
-    );
+    if (!mainWindow.isDestroyed()) {
+      await mainWindow.loadURL(
+        `data:text/html;charset=utf-8,${encodeURIComponent(
+          `<!doctype html><html><body style="font-family:Segoe UI,sans-serif;background:#0f172a;color:#f8fafc;padding:40px">
+          <h1>No se pudo iniciar</h1>
+          <p style="white-space:pre-wrap;color:#cbd5e1">${message.replace(/</g, '&lt;')}</p>
+          <p style="color:#94a3b8">Edite la configuración SQL y reinicie la aplicación.</p>
+          </body></html>`
+        )}`
+      ).catch(() => {});
+    }
     dialog.showErrorBox('Error al iniciar', message);
   }
 

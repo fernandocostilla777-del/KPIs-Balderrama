@@ -44,13 +44,18 @@ npm run dist:mac:x64      # Intel (opcional)
 npm run dist:mac:universal # arm64+x64 (más lento)
 ```
 
-**Windows** (desde Windows):
+**Windows** (se puede generar desde macOS):
 
 ```bash
+# Desde la raíz o desktop/ — prepara better-sqlite3 win32 y luego empaqueta
 npm run dist:win
 ```
 
 Salida en `desktop/dist/`.
+
+> En la PC Windows debe haber **Node.js 18+** (idealmente la misma major que usaste al empaquetar).
+> El instalador empaqueta `backend/node_modules` con binarios nativos de Windows; sin Node del sistema
+> Electron intenta `ELECTRON_RUN_AS_NODE` y los nativos de Node fallan.
 
 ## Actualizaciones remotas (Windows)
 

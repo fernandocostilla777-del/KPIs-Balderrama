@@ -132,8 +132,18 @@ app.use((err, _req, res, _next) => {
 });
 
 const conexionOrigen = require('./src/services/conexionOrigen');
-conexionOrigen.aplicarGuardado();
-dataSource.start().catch((err) => console.error('[data-source]', err.message));
+conexionOrigen.aplicarAlArranque()
+  .then((st) => {
+    if (st?.aviso) console.warn('[conexion]', st.aviso);
+  })
+  .catch((err) => {
+    console.error('[conexion] Falló la detección al arrancar:', err.message);
+    try { conexionOrigen.aplicarGuardado(); } catch { /* ignore */ }
+  })
+  .finally(() => {
+    // Después de fijar local/remota, para no sondear el DB_HOST viejo del .env.
+    dataSource.start().catch((e) => console.error('[data-source]', e.message));
+  });
 
 const server = app.listen(PORT, HOST, () => {
   printStartupUrls();

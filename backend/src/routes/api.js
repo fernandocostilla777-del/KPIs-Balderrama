@@ -39,8 +39,20 @@ const seguimiento360Routes = require('./seguimiento360');
 
 const router = express.Router();
 
-router.get('/conexion', (_req, res) => {
-  res.json(require('../services/conexionOrigen').estado());
+router.get('/conexion', async (req, res) => {
+  try {
+    const svc = require('../services/conexionOrigen');
+    const probe = String(req.query.probe || '1') !== '0';
+    const data = probe ? await svc.estadoConPrueba() : svc.estado();
+    res.json(data);
+  } catch (err) {
+    res.status(err.status || 500).json({
+      error: err.message,
+      aviso: 'No se pudo verificar la conexión a la base de datos.',
+      conectado: false,
+      opciones: [],
+    });
+  }
 });
 
 router.put('/conexion', async (req, res) => {
@@ -1005,15 +1017,45 @@ router.get('/crm/status', (_req, res, next) => {
   try {
     const crm = require('../services/crmCiclosService');
     const sheetsSync = require('../services/crmSheetsSync');
+    const { localCrmStatus, canPullViaApi } = require('../services/crmCloudPull');
+    const hybrid = {
+      local: localCrmStatus(),
+      cloudPullConfigured: canPullViaApi(),
+      pgReadonly: Boolean(process.env.PG_READONLY_URL),
+    };
     if (!crm.isAvailable()) {
       return res.json({
         ok: false,
         disponible: false,
-        detalle: 'Base CRM no cargada. Ejecute etl-crm-ciclos.js',
+        detalle: 'Base CRM no cargada. Ejecute etl-crm-ciclos.js o POST /api/crm/pull-cloud',
         sheetsSync: sheetsSync.getStatus(),
+        hybrid,
       });
     }
-    res.json({ ok: true, disponible: true, ...crm.getCrmStats(), sheetsSync: sheetsSync.getStatus() });
+    res.json({
+      ok: true,
+      disponible: true,
+      ...crm.getCrmStats(),
+      sheetsSync: sheetsSync.getStatus(),
+      hybrid,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Baja ciclos CRM desde Railway a SQLite local (modo híbrido). */
+router.post('/crm/pull-cloud', requireSession, async (req, res, next) => {
+  try {
+    if (isAuthEnabled() && !canManageUsers(req.session?.role)) {
+      return res.status(403).json({ error: 'Solo Administración puede bajar el CRM desde la nube.' });
+    }
+    const { sincronizarCiclosEnVivo } = require('../services/crmCiclosLiveSync');
+    const result = await sincronizarCiclosEnVivo({
+      full: req.body?.full !== false,
+      forceApi: req.body?.forceApi === true,
+    });
+    res.status(result.ok ? 200 : (result.skipped ? 409 : 500)).json(result);
   } catch (err) {
     next(err);
   }

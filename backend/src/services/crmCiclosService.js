@@ -4656,7 +4656,9 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
 
   const d = getDb();
   const records = [];
-  const counts = { leads: 0, solicitudes: 0, pruebas: 0, financiamiento: 0, actividades: 0 };
+  const counts = {
+    leads: 0, solicitudes: 0, pruebas: 0, financiamiento: 0, actividades: 0, trafico: 0,
+  };
 
   function mapSqliteRows(entity, rows) {
     for (const row of rows) {
@@ -4672,6 +4674,7 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
     else if (entity === 'prueba') counts.pruebas += rows.length;
     else if (entity === 'financiamiento') counts.financiamiento += rows.length;
     else if (entity === 'actividad') counts.actividades += rows.length;
+    else if (entity === 'trafico') counts.trafico += rows.length;
   }
 
   if (hasLeadsTable(d)) {
@@ -4710,6 +4713,15 @@ function exportCloudSyncRecords({ fechaInicio, fechaFin } = {}) {
         AND COALESCE(fecha_compra, fecha_timbrado) <= ?
     `).all(fechaInicio, fechaFin);
     mapSqliteRows('financiamiento', financiamiento);
+  }
+
+  if (d.prepare(`SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = 'crm_trafico_piso'`).get()) {
+    const trafico = d.prepare(`
+      SELECT * FROM crm_trafico_piso
+      WHERE fecha IS NOT NULL
+        AND fecha >= ? AND fecha <= ?
+    `).all(fechaInicio, fechaFin);
+    mapSqliteRows('trafico', trafico);
   }
 
   const actividades = d.prepare(`

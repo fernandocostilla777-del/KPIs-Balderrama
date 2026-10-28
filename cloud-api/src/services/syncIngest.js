@@ -2,6 +2,19 @@ const crypto = require('crypto');
 const { withTransaction } = require('../db');
 const { upsertPersonalBatch } = require('./dmsPersonalService');
 const { upsertCrmBatch, normalizeRow } = require('./crmCiclosCloudService');
+const { upsertSheetBatch } = require('./crmSheetsCloudService');
+
+const CRM_ENTITY_TABLE = {
+  lead: 'crm_leads',
+  trafico: 'crm_trafico_piso',
+  trafico_piso: 'crm_trafico_piso',
+  solicitud: 'crm_solicitudes',
+  prueba: 'crm_pruebas_manejo',
+  financiamiento: 'crm_financiamiento',
+  pago_gmf: 'crm_pagos_gmf',
+  csi_ventas: 'crm_csi_ventas',
+  csi_posventa: 'crm_csi_posventa',
+};
 
 const VALID_DOMAINS = new Set([
   'overview',
@@ -177,6 +190,7 @@ async function ingestSyncPayload(body) {
     }
 
     let crmMirror = null;
+    let crmSheetsMirror = null;
     if (domain === 'crm') {
       const actividades = normalized
         .map((r) => r.payload)
@@ -196,6 +210,25 @@ async function ingestSyncPayload(body) {
           batchId,
           client,
         });
+      }
+
+      const byTable = new Map();
+      for (const r of normalized) {
+        const entity = String(r.payload?.entity || '').toLowerCase();
+        const table = CRM_ENTITY_TABLE[entity];
+        if (!table) continue;
+        if (!byTable.has(table)) byTable.set(table, []);
+        byTable.get(table).push(r.payload);
+      }
+      if (byTable.size) {
+        crmSheetsMirror = {};
+        for (const [table, rows] of byTable.entries()) {
+          crmSheetsMirror[table] = await upsertSheetBatch(table, rows, {
+            source: 'sync',
+            batchId,
+            client,
+          });
+        }
       }
     }
 
@@ -218,6 +251,7 @@ async function ingestSyncPayload(body) {
       archived,
       personalMirror,
       crmMirror,
+      crmSheetsMirror,
     };
   });
 }

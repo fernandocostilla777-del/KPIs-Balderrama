@@ -49,8 +49,9 @@ function setMode(mode, reason) {
 }
 
 async function probeSql() {
-  if (!String(process.env.DB_HOST || '').trim()) return { ok: false, reason: 'DB_HOST vacío' };
-  const { query } = require('../db');
+  const { query, getServer } = require('../db');
+  const host = String(getServer?.() || process.env.DB_HOST || '').trim();
+  if (!host) return { ok: false, reason: 'DB_HOST vacío' };
   let timer;
   try {
     await Promise.race([
@@ -59,9 +60,9 @@ async function probeSql() {
         timer = setTimeout(() => reject(new Error(`sin respuesta en ${PROBE_TIMEOUT_MS / 1000} s`)), PROBE_TIMEOUT_MS);
       }),
     ]);
-    return { ok: true, reason: `${process.env.DB_HOST} responde` };
+    return { ok: true, reason: `${host} responde` };
   } catch (err) {
-    return { ok: false, reason: `${process.env.DB_HOST}: ${err.message}` };
+    return { ok: false, reason: `${host}: ${err.message}` };
   } finally {
     clearTimeout(timer);
   }
@@ -107,6 +108,23 @@ function isCloud() {
 }
 
 function getStatus() {
+  let crmHybrid = null;
+  try {
+    const { localCrmStatus, canPullViaApi } = require('./crmCloudPull');
+    crmHybrid = {
+      local: localCrmStatus(),
+      cloudPullConfigured: canPullViaApi(),
+      pgReadonly: Boolean(process.env.PG_READONLY_URL),
+    };
+  } catch {
+    crmHybrid = null;
+  }
+  let sqlHost = null;
+  try {
+    sqlHost = require('../db').getServer?.() || process.env.DB_HOST || null;
+  } catch {
+    sqlHost = process.env.DB_HOST || null;
+  }
   return {
     mode: getMode(),
     configured: configuredMode(),
@@ -114,6 +132,12 @@ function getStatus() {
     checkedAt: state.checkedAt,
     cloudReadConfigured: cloudReadConfigured(),
     cloudUrl: cloudReadUrl() || null,
+    sqlHost,
+    hybrid: {
+      sqlOrder: ['local (192.168.0.2)', 'remota (189.197.60.78)', 'réplica nube'],
+      crmOrder: ['sqlite local', 'pull cloud /api/crm', 'PG_READONLY'],
+      crm: crmHybrid,
+    },
   };
 }
 

@@ -33,20 +33,22 @@ db.close();
 const { getCalendarioCholula } = require('../src/services/monitoreoCholulaService');
 
 test('el calendario de Cholula toma el comentario y la fecha de cumplimiento del equipo', () => {
-  const r = getCalendarioCholula({ mes: '2026-10', dbPath });
+  const r = getCalendarioCholula({ mes: '2026-10', dbPath, hoy: '2026-10-28' });
   assert.equal(r.mes, '2026-10');
   assert.equal(r.sucursal, 'Cholula');
   assert.equal(r.total, 2);
   assert.equal(r.pendientes, 1);
-  const maria = r.eventos.find((e) => e.cliente === 'MARIA');
+  const maria = r.eventos.find((e) => e.cliente === 'Maria');
   assert.equal(maria.fecha, '2026-10-15');
   assert.equal(maria.comentario, 'Viene el sabado');
   assert.equal(maria.cumplida, true);
   assert.equal(maria.vendedor, 'Simon Bolivar Olaiz');
-  const pedro = r.eventos.find((e) => e.cliente === 'PEDRO');
+  const pedro = r.eventos.find((e) => e.cliente === 'Pedro');
   assert.equal(pedro.comentario, 'Cita');
   assert.equal(pedro.cumplida, false);
-  assert.equal(r.eventos.some((e) => e.cliente === 'LUIS'), false);
+  // Respuesta anterior a la fecha programada (de otro ciclo): no cuenta; ya pasó la fecha, queda vencida.
+  assert.equal(pedro.vencida, true);
+  assert.equal(r.eventos.some((e) => e.cliente === 'Luis'), false);
   const nov = getCalendarioCholula({ mes: '2026-11', dbPath });
   assert.equal(nov.total, 1);
   assert.equal(nov.eventos[0].comentario, 'Noviembre');

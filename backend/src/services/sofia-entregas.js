@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { getPool, sql } = require('../db');
+const { getCanalVenta } = require('./canales-venta');
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const CRM_DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
@@ -282,6 +283,33 @@ function buildEntregasPorMes(registros, inicio, fin) {
   }));
 }
 
+/** Notificaciones cuya factura reportada pertenece al canal (Cholula = forma de pago CH). */
+function filtrarSofiaPorCanal(sofia, canal) {
+  if (!canal) return sofia || { registrosEntrega: [] };
+  const registros = (sofia?.registrosEntrega || []).filter(
+    (row) => getCanalVenta(row.FORMAPAGO_ORIGINAL, row.VENDEDOR) === canal,
+  );
+  const sinPrevias = registros.filter((r) => Number(r.PREVIAS || 0) === 0).length;
+  const out = {
+    ...(sofia || {}),
+    registrosEntrega: registros,
+    totalNotificacionesEntrega: registros.length,
+    totalEntregasSinPrevias: sinPrevias,
+    totalEntregasConPrevias: registros.length - sinPrevias,
+  };
+  if (Array.isArray(sofia?.entregasPorMes)) {
+    const counts = Object.fromEntries(sofia.entregasPorMes.map((m) => [m.key, 0]));
+    for (const row of registros) {
+      const fecha = parseFechaDoc(row.SOF_FechAct || row.FECHA_PERIODO || row.SOF_FechFact);
+      if (fecha && Object.prototype.hasOwnProperty.call(counts, fecha.monthKey)) {
+        counts[fecha.monthKey] += 1;
+      }
+    }
+    out.entregasPorMes = sofia.entregasPorMes.map((m) => ({ ...m, count: counts[m.key] || 0 }));
+  }
+  return out;
+}
+
 async function getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes = false, fresh = false } = {}) {
   const cacheKey = `${fechaInicio}|${fechaFin}|${incluirPorMes ? 1 : 0}`;
   if (fresh) {
@@ -351,6 +379,7 @@ async function getNotificacionesEntrega({ fechaInicio, fechaFin, incluirPorMes =
 
 module.exports = {
   getNotificacionesEntrega,
+  filtrarSofiaPorCanal,
   computeCoberturaSofia,
   isFlotillaExcluidaSofia,
   excludeFlotillaContadoSofia,

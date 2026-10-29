@@ -6,7 +6,7 @@
 <title>Rendimiento de Ventas | BALDERRAMA</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=179" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=182" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=2"></script>
 </head>
@@ -91,7 +91,7 @@ Comisiones
 </button>
 <button type="button" class="contabilidad-tab" data-sales-tab="vendedores" aria-controls="panelVentasVendedores" aria-selected="false">
 <span class="material-symbols-outlined" aria-hidden="true">badge</span>
-Vendedores Cholula
+Seguimiento 1 a 1
 </button>
 </nav>
 
@@ -1110,7 +1110,7 @@ Ver unidades
 <section id="secVendedoresCholula" class="section-panel dashboard-section cv" aria-labelledby="cholVendTitulo">
 <header class="cv-head">
 <div>
-<h2 class="section-title" id="cholVendTitulo">Vendedores · Cholula</h2>
+<h2 class="section-title" id="cholVendTitulo">Seguimiento 1 a 1</h2>
 <p id="cholVendSubtitle" class="section-subtitle">Elija el periodo y abra esta pestaña.</p>
 </div>
 <details class="cv-como">
@@ -1124,8 +1124,7 @@ Ver unidades
 
 <nav class="eeff-tabs cv-pestanas" id="cholVendModos" aria-label="Vista de vendedores">
 <button type="button" class="eeff-tab active" data-cv-modo="ranking" aria-selected="true">Ranking</button>
-<button type="button" class="eeff-tab" data-cv-modo="clientes" aria-selected="false">Seguimiento de clientes</button>
-<button type="button" class="eeff-tab" data-cv-modo="calendario" aria-selected="false">Calendario</button>
+<button type="button" class="eeff-tab" data-cv-modo="seguimiento" aria-selected="false">Seguimiento del equipo</button>
 </nav>
 <div id="cholVendRanking">
 <div class="cv-tabla-head">
@@ -1156,12 +1155,44 @@ Ver unidades
 </div>
 </div>
 <div id="cholVendDetalle" class="cv-detalle" hidden></div>
-<div id="cholVendCalendario" class="cv-cal" hidden></div>
-<div id="cholCarteraSlot">
-<section id="cholCartera" class="cc" aria-labelledby="cholCarteraTitulo" hidden>
+<div id="cholSeguimiento" class="cs" hidden>
+<div class="cs-division">
+<div class="cs-trabajo">
+<section class="cs-bloque" id="cholEquipoHoy" aria-labelledby="cholEquipoTitulo">
 <header class="cv-tabla-head cc-head">
 <div>
-<h3 class="cv-subtitulo" id="cholCarteraTitulo">Seguimiento de clientes</h3>
+<h3 class="cv-subtitulo" id="cholEquipoTitulo">Equipo hoy</h3>
+<p class="cv-leyenda" id="cholEquipoSub">Cargando al equipo…</p>
+</div>
+<details class="cv-como">
+<summary>¿Cómo se mide?</summary>
+<p id="cholEquipoNota"></p>
+</details>
+</header>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table cv-tabla cs-equipo">
+<thead>
+<tr>
+<th>Asesor</th>
+<th class="cc-col-op">Cumplimiento · 30 días</th>
+<th class="num">Vencidos</th>
+<th class="num">Para hoy</th>
+<th class="num cc-col-op">Sin seguimiento</th>
+<th class="num">Revisiones</th>
+</tr>
+</thead>
+<tbody id="cholEquipoBody">
+<tr><td colspan="6" class="empty-row">Cargando al equipo…</td></tr>
+</tbody>
+<tfoot id="cholEquipoFoot"></tfoot>
+</table>
+</div>
+</section>
+
+<section id="cholCartera" class="cc" aria-labelledby="cholCarteraTitulo">
+<header class="cv-tabla-head cc-head">
+<div>
+<h3 class="cv-subtitulo" id="cholCarteraTitulo">Clientes del equipo</h3>
 <p class="cv-leyenda" id="cholCarteraSub">Cargando clientes…</p>
 </div>
 <details class="cv-como">
@@ -1175,20 +1206,21 @@ Ver unidades
 <thead>
 <tr>
 <th>Cliente</th>
-<th class="cc-col-vend">Vendedor</th>
-<th class="cc-col-op">Entró</th>
-<th>Último seguimiento</th>
-<th class="cc-col-op">Avance</th>
 <th class="cc-col-etiqueta">Etiqueta</th>
+<th>Compromiso del asesor</th>
+<th>Revisión del gerente</th>
 </tr>
 </thead>
 <tbody id="cholCarteraBody">
-<tr><td colspan="6" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
+<tr><td colspan="4" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
 </tbody>
 </table>
 </div>
 <button type="button" id="cholCarteraMas" class="cc-mas" hidden></button>
 </section>
+</div>
+<aside id="cholAgenda" class="cs-agenda" aria-label="Agenda del equipo"></aside>
+</div>
 </div>
 </section>
 </div>
@@ -1325,10 +1357,10 @@ Exportar CSV
 <script src="/js/shared.js?v=10"></script>
 <script src="/js/canales.js?v=3"></script>
 <script src="/js/sidebar.js?v=11"></script>
-<script src="/js/topbar.js?v=29"></script>
+<script src="/js/topbar.js?v=30"></script>
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/sales.js?v=140"></script>
+<script src="/js/sales.js?v=143"></script>
 </body>
 </html>

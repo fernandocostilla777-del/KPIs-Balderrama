@@ -1517,13 +1517,15 @@
               : '<span class="top-bar-user-value">—</span>'}
           </div>
         </div>
+        <div class="top-bar-user-row top-bar-user-row--stack top-bar-conexion" data-conexion hidden>
+          <span class="top-bar-user-label">Canal de consulta</span>
+          <div class="top-bar-conexion-ops" role="group" aria-label="Canal de consulta">
+            <span class="top-bar-conexion-pildora" data-conexion-pildora aria-hidden="true"></span>
+          </div>
+          <p class="top-bar-conexion-nota" data-conexion-nota></p>
+        </div>
       </div>
       ${adminLink}
-      <div class="top-bar-conexion" data-conexion hidden>
-        <span class="top-bar-user-label">Conexión</span>
-        <div class="top-bar-conexion-ops" role="group" aria-label="Tipo de conexión"></div>
-        <p class="top-bar-conexion-nota" data-conexion-nota></p>
-      </div>
       <button type="button" class="top-bar-user-logout" data-user-logout>
         <span class="material-symbols-outlined">logout</span>
         Cerrar sesión
@@ -1538,7 +1540,7 @@
       }
     });
 
-    if (session?.canManageUsers) cargarConexion(panel);
+    cargarConexion(panel);
 
     pollNotifications();
   }
@@ -1549,15 +1551,18 @@
     const nota = panel.querySelector('[data-conexion-nota]');
     if (!caja || !ops) return;
     caja.hidden = false;
-    ops.innerHTML = (data.opciones || []).map((op) => {
-      const on = op.activo ? ' is-on' : '';
-      const off = op.disponible ? '' : ' is-soon';
-      const titulo = op.disponible
-        ? (op.host || op.label)
-        : (op.nota || 'Próximamente');
-      return `<button type="button" class="top-bar-conexion-btn${on}${off}" data-conexion-modo="${esc(op.id)}"${op.disponible ? '' : ' disabled'} title="${esc(titulo)}">${esc(op.label)}</button>`;
-    }).join('');
-    const activa = (data.opciones || []).find((op) => op.activo);
+    const opciones = data.opciones || [];
+    const indice = opciones.findIndex((op) => op.activo);
+    const activa = indice >= 0 ? opciones[indice] : null;
+    ops.innerHTML = `<span class="top-bar-conexion-pildora" data-conexion-pildora data-i="${indice < 0 ? 0 : indice}" aria-hidden="true"></span>`
+      + opciones.map((op) => {
+        const on = op.activo ? ' is-on' : '';
+        const off = op.disponible ? '' : ' is-soon';
+        const titulo = op.disponible
+          ? (op.host || op.label)
+          : (op.nota || 'Próximamente');
+        return `<button type="button" class="top-bar-conexion-btn${on}${off}" data-conexion-modo="${esc(op.id)}"${op.disponible ? '' : ' disabled'} title="${esc(titulo)}">${esc(op.label)}</button>`;
+      }).join('');
     if (nota) {
       nota.textContent = activa?.host
         ? activa.host

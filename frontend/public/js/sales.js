@@ -1388,8 +1388,8 @@
       actual = monthPoints.map((m) => Number(m.actual || 0));
       anterior = monthPoints.map((m) => Number(m.anterior || 0));
       els.ytdSubtitle.textContent = mesEnCursoExcluido
-        ? `Mensual al ${corteFmt} · ${anioActual} vs ${anioAnterior} · mes en curso excluido`
-        : `Mensual al ${corteFmt} · ${anioActual} vs ${anioAnterior}`;
+        ? `Mensual al ${corteFmt} · ${anioActual} vs ${anioAnterior} · mes en curso excluido${comparativoYtd.canalLabel ? ` · ${comparativoYtd.canalLabel}` : ''}`
+        : `Mensual al ${corteFmt} · ${anioActual} vs ${anioAnterior}${comparativoYtd.canalLabel ? ` · ${comparativoYtd.canalLabel}` : ''}`;
     } else {
       // Fallback si el API aún no trae trimestres
       labels = flatLabels || [];
@@ -3383,9 +3383,9 @@
   const TAB_SRC = {
     financiamiento: '/js/financiamiento.js?v=64',
     leads: '/js/leads.js?v=37',
-    afluencia: '/js/afluencia.js?v=18',
+    afluencia: '/js/afluencia.js?v=19',
     comisiones: '/js/comisiones.js?v=2',
-    vendedores: '/js/monitoreo-cholula.js?v=10',
+    vendedores: '/js/monitoreo-cholula.js?v=12',
   };
   const scriptListo = {};
   const tabListo = {};
@@ -4073,7 +4073,7 @@
             ? 'Afluencia'
             : (next === 'comisiones'
               ? 'Comisiones'
-              : (next === 'vendedores' ? 'Vendedores Cholula' : 'Ventas de Unidades'))));
+              : (next === 'vendedores' ? 'Seguimiento 1 a 1' : 'Ventas de Unidades'))));
     }
 
     if (next === 'financiamiento') {
@@ -4239,7 +4239,10 @@
       bindElements();
       bindEvents();
       await resolveGoalEditPermission();
-      await window.DashboardAuth?.getSession?.().catch(() => null);
+      const sesion = await window.DashboardAuth?.getSession?.().catch(() => null);
+      if (sesion?.alcanceSucursal) {
+        document.documentElement.dataset.alcanceSucursal = sesion.alcanceSucursal;
+      }
       ocultarComisionesCholula();
       compactFilters = Dashboard.initCompactFilters();
       // El periodo viene de la URL si existe (enlace compartido, recarga, «ir a» desde otra pantalla).

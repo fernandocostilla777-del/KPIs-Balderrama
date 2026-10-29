@@ -1,6 +1,6 @@
 const { getPool, sql } = require('../db');
 const { enrichVentasRows, countByCanal, CANALES_ORDEN, getCanalLabel } = require('./canales-venta');
-const { getNotificacionesEntrega, computeCoberturaSofia, annotateFlotillaGmfContrato } = require('./sofia-entregas');
+const { getNotificacionesEntrega, computeCoberturaSofia, annotateFlotillaGmfContrato, filtrarSofiaPorCanal } = require('./sofia-entregas');
 const { getComparativoYtd, buildYtdRanges } = require('./ytd-comparativo');
 const { getMejorUtilidadPorCarline } = require('./utilidadCarlineService');
 const { getInventory } = require('./inventoryService');
@@ -1121,7 +1121,14 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
   let tomasACuenta = { total: 0, montoTotal: 0, registros: [], porMes: null };
   let tomasYtdRaw = null;
   if (canal) {
-    [core, coreAnterior] = await Promise.all([corePromise, anteriorPromise]);
+    [core, coreAnterior, comparativoYtd] = await Promise.all([
+      corePromise,
+      anteriorPromise,
+      getComparativoYtd(fechaFin, canal).catch((err) => {
+        console.warn('[ventas] ytd sucursal:', err.message);
+        return null;
+      }),
+    ]);
   } else {
     [core, coreAnterior, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
       corePromise,
@@ -1163,9 +1170,10 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
     }
   }
   const rows = core.registros;
-  // SOFIA no trae sucursal: un perfil de sucursal no recibe sus totales (entregas con y sin
-  // previas, notificaciones por mes), que son de toda la agencia.
-  const sofiaEntregas = canal ? { registrosEntrega: [] } : core.sofiaEntregas;
+  // La notificación no trae sucursal; se ata a lo reportado por la forma de pago de su factura.
+  const sofiaEntregas = canal
+    ? filtrarSofiaPorCanal(core.sofiaEntregas, canal)
+    : core.sofiaEntregas;
   const tomasFuente = canal
     ? { total: 0, montoTotal: 0, registros: [], porMes: null }
     : tomasACuenta;
@@ -1204,7 +1212,7 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
       coreAnterior.registros,
       inicioAnterior,
       finAnterior,
-      canal ? { registrosEntrega: [] } : (coreAnterior.sofiaEntregas || {}),
+      canal ? filtrarSofiaPorCanal(coreAnterior.sofiaEntregas, canal) : (coreAnterior.sofiaEntregas || {}),
     );
     // Tomas del mismo periodo del año previo (consulta ligera ya hecha no; opcional omitir).
     resumenAnterior.totalTomasACuenta = 0;
@@ -1221,10 +1229,10 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
     filtros: { fechaInicio, fechaFin, canal: canal || null },
     resumen,
     comparativoPeriodo,
-    comparativoYtd: canal ? null : comparativoYtd,
+    comparativoYtd,
     utilidadCarline: canal ? { available: false, porCarline: [], reason: 'Perfil de sucursal' } : utilidadCarline,
     registros: rows,
-    entregasSofia: resumen.entregasSofiaEfectivas || (canal ? [] : (sofiaEntregas.registrosEntrega || [])),
+    entregasSofia: resumen.entregasSofiaEfectivas || (sofiaEntregas.registrosEntrega || []),
     apartadasInventario,
     tomasACuenta: tomasFuente.registros || [],
     tomasMensual: {

@@ -135,10 +135,14 @@
       </div>`;
   }
 
+  function perfilCholula() {
+    return document.documentElement.dataset.alcanceSucursal === 'cholula';
+  }
+
   function activeYtdBlock() {
     const cmp = state.data?.comparativoYtd;
     if (!cmp) return null;
-    const key = state.centro || 'todos';
+    const key = perfilCholula() ? 'cholula' : (state.centro || 'todos');
     const fromCentro = cmp.porCentro?.[key];
     if (fromCentro?.trimestres?.length) {
       return {
@@ -146,6 +150,14 @@
         trimestres: fromCentro.trimestres,
         centroKey: key,
         centroLabel: fromCentro.label || CENTRO_LABEL[key] || key,
+        centroReady: true,
+      };
+    }
+    if (perfilCholula()) {
+      return {
+        ...cmp,
+        centroKey: 'cholula',
+        centroLabel: 'Cholula',
         centroReady: true,
       };
     }
@@ -160,7 +172,9 @@
   }
 
   function hasPorCentro() {
-    return Boolean(state.data?.comparativoYtd?.porCentro?.todos?.trimestres);
+    const por = state.data?.comparativoYtd?.porCentro;
+    if (perfilCholula()) return Boolean(por?.cholula?.trimestres);
+    return Boolean(por?.todos?.trimestres);
   }
 
   function availableQuarters() {
@@ -177,6 +191,8 @@
   }
 
   function syncCentroChips() {
+    if (perfilCholula()) state.centro = 'cholula';
+    if (els.centroChips) els.centroChips.hidden = perfilCholula();
     els.centroChips?.querySelectorAll('[data-af-centro]').forEach((btn) => {
       const on = btn.dataset.afCentro === state.centro;
       btn.classList.toggle('active', on);
@@ -218,6 +234,7 @@
   }
 
   async function setCentro(centro) {
+    if (perfilCholula()) return;
     if (!CENTRO_LABEL[centro]) return;
     state.centro = centro;
     syncCentroChips();
@@ -1197,7 +1214,7 @@
       state.metric = 'afluenciaTotal';
       state.mktView = 'submedio';
       state.mktLeadsFilter = 'todas';
-      if (periodChanged) state.centro = 'todos';
+      if (periodChanged) state.centro = perfilCholula() ? 'cholula' : 'todos';
       afluenciaDrawerUi?.close?.();
     }
 

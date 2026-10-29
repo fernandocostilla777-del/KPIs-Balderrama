@@ -1,4 +1,5 @@
 const { getPool, sql } = require('../db');
+const { getCanalVenta, getCanalLabel } = require('./canales-venta');
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -66,12 +67,26 @@ function buildYtdRanges(fechaFin) {
   };
 }
 
-function buildYtdQuery() {
+function buildYtdQuery({ porCanal = false } = {}) {
+  const extra = porCanal
+    ? `,
+      LTRIM(RTRIM(ADE_VTAFI.VTE_FORMAPAGO)) AS FORMAPAGO_ORIGINAL,
+      LTRIM(RTRIM(
+        ISNULL(B.PER_PATERNO, '') + ' ' + ISNULL(B.PER_MATERNO, '') + ' ' + ISNULL(B.PER_NOMRAZON, '')
+      )) AS VENDEDOR`
+    : '';
+  const groupExtra = porCanal
+    ? `,
+      LTRIM(RTRIM(ADE_VTAFI.VTE_FORMAPAGO)),
+      LTRIM(RTRIM(
+        ISNULL(B.PER_PATERNO, '') + ' ' + ISNULL(B.PER_MATERNO, '') + ' ' + ISNULL(B.PER_NOMRAZON, '')
+      ))`
+    : '';
   return `
     SELECT
       YEAR(CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103)) AS anio,
       MONTH(CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103)) AS mes,
-      COUNT(DISTINCT ADE_VTAFI.VTE_DOCTO) AS cnt
+      COUNT(DISTINCT ADE_VTAFI.VTE_DOCTO) AS cnt${extra}
     FROM ADE_VTAFI
     INNER JOIN PER_PERSONAS AS A ON A.PER_IDPERSONA = ADE_VTAFI.VTE_IDCLIENTE
     INNER JOIN SER_VEHICULO
@@ -96,9 +111,23 @@ function buildYtdQuery() {
       )
     GROUP BY
       YEAR(CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103)),
-      MONTH(CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103))
+      MONTH(CONVERT(DATE, ADE_VTAFI.VTE_FECHDOCTO, 103))${groupExtra}
     ORDER BY anio, mes
   `;
+}
+
+/** Suma los conteos mensuales que corresponden al canal (Cholula = forma de pago CH). */
+function collapsePorCanal(rows, canal) {
+  if (!canal) return rows || [];
+  const map = new Map();
+  for (const row of rows || []) {
+    if (getCanalVenta(row.FORMAPAGO_ORIGINAL, row.VENDEDOR) !== canal) continue;
+    const key = `${Number(row.anio)}|${Number(row.mes)}`;
+    const prev = map.get(key) || { anio: Number(row.anio), mes: Number(row.mes), cnt: 0 };
+    prev.cnt += Number(row.cnt) || 0;
+    map.set(key, prev);
+  }
+  return [...map.values()];
 }
 
 function buildComparativoYtd(rows, ranges) {
@@ -177,7 +206,7 @@ function buildComparativoYtd(rows, ranges) {
   };
 }
 
-async function getComparativoYtd(fechaFin) {
+async function getComparativoYtd(fechaFin, canal = null) {
   const ranges = buildYtdRanges(fechaFin);
   const pool = await getPool();
 
@@ -186,13 +215,20 @@ async function getComparativoYtd(fechaFin) {
     .input('ytdFinActual', sql.Date, parseDateInput(ranges.finActual))
     .input('ytdInicioAnterior', sql.Date, parseDateInput(ranges.inicioAnterior))
     .input('ytdFinAnterior', sql.Date, parseDateInput(ranges.finAnterior))
-    .query(buildYtdQuery());
+    .query(buildYtdQuery({ porCanal: Boolean(canal) }));
 
-  return buildComparativoYtd(result.recordset, ranges);
+  const rows = canal ? collapsePorCanal(result.recordset, canal) : result.recordset;
+  const data = buildComparativoYtd(rows, ranges);
+  if (canal) {
+    data.canal = canal;
+    data.canalLabel = getCanalLabel(canal);
+  }
+  return data;
 }
 
 module.exports = {
   getComparativoYtd,
   getYtdEndDate,
   buildYtdRanges,
+  collapsePorCanal,
 };

@@ -100,6 +100,15 @@ test('el equipo pone la etiqueta y queda el historial', async () => {
   assert.equal(d.clientes.find((x) => x.idCrm === 'C3').etiqueta.origen, 'sugerida');
 });
 
+test('se puede actualizar solo la nota sin volver a elegir etiqueta', async () => {
+  m.etiquetarClienteCholula('C3', { etiqueta: 'caliente', nota: 'Primera', autor: 'cholula' });
+  m.etiquetarClienteCholula('C3', { etiqueta: '', nota: 'Nota revisada', autor: 'cholula' });
+  const c = await m.getCarteraCholula({ fechaFin: '2026-09-30' });
+  const c3 = c.clientes.find((x) => x.idCrm === 'C3');
+  assert.equal(c3.etiqueta.clave, 'caliente');
+  assert.equal(c3.etiqueta.nota, 'Nota revisada');
+});
+
 test('la compra del CRM manda sobre la etiqueta del equipo', async () => {
   m.etiquetarClienteCholula('C4', { etiqueta: 'frio', autor: 'cholula' });
   const c = await m.getCarteraCholula({ fechaFin: '2026-09-30' });

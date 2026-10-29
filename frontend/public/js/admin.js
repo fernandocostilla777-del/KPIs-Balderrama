@@ -447,6 +447,18 @@
     if (els.revealedPassword) els.revealedPassword.textContent = '';
   }
 
+  function cloudSyncNote(cloudSync) {
+    if (!cloudSync) return '';
+    if (cloudSync.ok) {
+      const n = cloudSync.authUsersTable?.total
+        || cloudSync.authUsersMirror?.total
+        || cloudSync.recordCount
+        || '';
+      return n ? ` · Nube actualizada (${n} usuarios)` : ' · Nube actualizada';
+    }
+    return cloudSync.error ? ` · Nube: ${cloudSync.error}` : ' · Nube no sincronizada';
+  }
+
   async function loadUsers() {
     showLoading(true);
     try {
@@ -454,7 +466,14 @@
       users = data.users || [];
       roles = data.roles || [];
       renderUsers();
-      setText('statusBadge', `${users.length} usuario(s)`);
+      const cloud = data.cloud;
+      let badge = `${users.length} usuario(s)`;
+      if (cloud?.ok && cloud.total != null) {
+        badge += ` · nube ${cloud.active ?? cloud.total}/${cloud.total}`;
+      } else if (cloud?.error) {
+        badge += ' · nube offline';
+      }
+      setText('statusBadge', badge);
     } catch (err) {
       showMessage(err.message || 'No se pudieron cargar los usuarios.', 'error');
     } finally {

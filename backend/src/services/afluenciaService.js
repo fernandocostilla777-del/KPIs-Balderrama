@@ -6,7 +6,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const { getLeadNotDuplicateSql } = require('./crmCiclosService');
 
-const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
 
 const SUCURSALES = [
   { key: 'matriz', label: 'Matriz Serdan' },

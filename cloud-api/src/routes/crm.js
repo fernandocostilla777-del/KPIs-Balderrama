@@ -2,11 +2,33 @@ const express = require('express');
 const { requireApiKey } = require('../middleware/apiKey');
 const { requireMobileAuth } = require('../middleware/mobileAuth');
 const { upsertCrmBatch, listCrm, getCrmSummary } = require('../services/crmCiclosCloudService');
+const {
+  upsertSheetBatch,
+  listSheetRows,
+  getSheetsSummary,
+  ALLOWED_TABLES,
+} = require('../services/crmSheetsCloudService');
 const { getBdcEmbudo } = require('../services/objetivosResultadosService');
 const monthlyObjectives = require('../services/monthlyObjectivesStore');
 const officeCommands = require('../services/officeCommandsStore');
 
 const router = express.Router();
+
+const ENTITY_TO_TABLE = {
+  lead: 'crm_leads',
+  leads: 'crm_leads',
+  trafico: 'crm_trafico_piso',
+  trafico_piso: 'crm_trafico_piso',
+  solicitud: 'crm_solicitudes',
+  solicitudes: 'crm_solicitudes',
+  prueba: 'crm_pruebas_manejo',
+  pruebas: 'crm_pruebas_manejo',
+  financiamiento: 'crm_financiamiento',
+  pago_gmf: 'crm_pagos_gmf',
+  pagos_gmf: 'crm_pagos_gmf',
+  csi_ventas: 'crm_csi_ventas',
+  csi_posventa: 'crm_csi_posventa',
+};
 
 const SHEETS_SYNC_FULL = 'crm-sheets-sync-full';
 const SHEETS_SYNC_PARTIAL = 'crm-sheets-sync';
@@ -176,6 +198,59 @@ router.get('/summary', requireApiKey, async (_req, res, next) => {
   try {
     const summary = await getCrmSummary();
     res.json({ ok: true, ...summary });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/sheets/summary', requireApiKey, async (_req, res, next) => {
+  try {
+    const summary = await getSheetsSummary();
+    res.json({ ok: true, ...summary });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Ingest de tablas Sheets (leads, tráfico, solicitudes…).
+ * Body: { table: 'crm_leads', records: [...], replaceAll?: false }
+ * También: { entity: 'lead', records: [...] }
+ */
+router.post('/sheets/ingest', requireApiKey, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const entity = String(body.entity || '').trim().toLowerCase();
+    const table = body.table || ENTITY_TO_TABLE[entity] || null;
+    const records = Array.isArray(body)
+      ? body
+      : (body.records || body.rows || []);
+    const result = await upsertSheetBatch(table, records, {
+      replaceAll: body.replaceAll === true || body.replaceAll === 'true',
+      source: String(body.source || 'api'),
+    });
+    res.status(201).json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/sheets/:table', requireApiKey, async (req, res, next) => {
+  try {
+    const table = String(req.params.table || '').trim();
+    if (!ALLOWED_TABLES.has(table)) {
+      return res.status(404).json({
+        ok: false,
+        error: `Tabla desconocida. Válidas: ${[...ALLOWED_TABLES].join(', ')}`,
+      });
+    }
+    const rows = await listSheetRows(table, {
+      limit: req.query.limit,
+      offset: req.query.offset,
+      idCrm: req.query.idCrm || req.query.id_crm,
+      q: req.query.q,
+    });
+    res.json({ ok: true, table, count: rows.length, rows });
   } catch (err) {
     next(err);
   }

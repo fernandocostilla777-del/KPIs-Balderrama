@@ -12,7 +12,7 @@ const {
   fechaCompraLeadSql,
 } = require('./crmCiclosService');
 
-const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
 const HORIZONTE = 180;
 const MIN_COMPRAS_FACTORES = 40;
 const MIN_COMPRAS_CURVA = 15;

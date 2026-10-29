@@ -576,7 +576,7 @@ function loadCrmContracts(fechaInicio, fechaFin) {
   const Database = require('better-sqlite3');
   const fs = require('fs');
   const path = require('path');
-  const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+  const DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
   if (!fs.existsSync(DB_PATH)) {
     return { available: false, contracts: [], reason: 'Base CRM no encontrada' };
   }
@@ -669,7 +669,7 @@ function loadSolicitudes(fechaInicio, fechaFin) {
   const Database = require('better-sqlite3');
   const fs = require('fs');
   const path = require('path');
-  const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+  const DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
   if (!fs.existsSync(DB_PATH)) return empty;
 
   const d = new Database(DB_PATH, { readonly: true, fileMustExist: true });

@@ -222,12 +222,18 @@ function run() {
     CREATE INDEX idx_leads_fecha ON crm_leads (fecha_entrada);
   `);
 
-  const cruzan = db.prepare(`
-    SELECT COUNT(DISTINCT l.id_crm) AS n
-    FROM crm_leads l
-    WHERE l.id_crm IS NOT NULL
-      AND EXISTS (SELECT 1 FROM crm_actividades a WHERE a.id_contacto = l.id_crm)
-  `).get().n;
+  let cruzan = null;
+  const hasAct = !!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = 'crm_actividades'",
+  ).get();
+  if (hasAct) {
+    cruzan = db.prepare(`
+      SELECT COUNT(DISTINCT l.id_crm) AS n
+      FROM crm_leads l
+      WHERE l.id_crm IS NOT NULL
+        AND EXISTS (SELECT 1 FROM crm_actividades a WHERE a.id_contacto = l.id_crm)
+    `).get().n;
+  }
 
   console.log('\nCarga completa → tabla crm_leads en', DB_PATH);
   console.table([{

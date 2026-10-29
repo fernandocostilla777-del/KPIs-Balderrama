@@ -11,6 +11,11 @@ const MODOS = {
 };
 
 const ARCHIVO = path.join(__dirname, '../../data/conexion-origen.json');
+const PROBE_MS = 4000;
+
+/** Último resultado de sonda (evita pantalla en blanco si falla la red). */
+let ultimoAviso = null;
+let ultimoConectado = null;
 
 function error(status, message) {
   const err = new Error(message);
@@ -43,7 +48,7 @@ function guardar(modo) {
   fs.writeFileSync(ARCHIVO, JSON.stringify({ modo }, null, 2));
 }
 
-function estado() {
+function estadoBase() {
   const modo = modoActivo();
   const actual = MODOS[modo];
   return {
@@ -61,6 +66,92 @@ function estado() {
   };
 }
 
+function estado() {
+  const base = estadoBase();
+  return {
+    ...base,
+    conectado: ultimoConectado,
+    aviso: ultimoAviso,
+  };
+}
+
+async function probarHost(host, timeoutMs = PROBE_MS) {
+  const sql = require('mssql');
+  const pool = new sql.ConnectionPool({
+    server: host,
+    port: parseInt(process.env.DB_PORT || '1433', 10),
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    options: {
+      encrypt: false,
+      trustServerCertificate: true,
+      connectTimeout: timeoutMs,
+    },
+    pool: { max: 1, min: 0, idleTimeoutMillis: 1000 },
+  });
+  try {
+    await Promise.race([
+      pool.connect().then(() => pool.request().query('SELECT 1 AS ok')),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`sin respuesta en ${Math.round(timeoutMs / 1000)} s`)), timeoutMs + 500);
+      }),
+    ]);
+  } finally {
+    try { await pool.close(); } catch { /* ignore */ }
+  }
+}
+
+async function sondearOpcion(op, probar = probarHost) {
+  if (!op.disponible || !op.host) {
+    return {
+      ...op,
+      alcanzable: false,
+      error: op.nota || 'No disponible',
+    };
+  }
+  try {
+    await probar(op.host);
+    return { ...op, alcanzable: true, error: null };
+  } catch (err) {
+    return {
+      ...op,
+      alcanzable: false,
+      error: err.message || 'Sin conexión',
+    };
+  }
+}
+
+/**
+ * Estado con prueba de red a local/remota.
+ * Marca alcanzable por opción y deja aviso si ninguna responde.
+ * @param {{ probar?: (host: string) => Promise<void> }} [opts]
+ */
+async function estadoConPrueba({ probar = probarHost } = {}) {
+  const base = estadoBase();
+  const opciones = await Promise.all(base.opciones.map((op) => sondearOpcion(op, probar)));
+  const activa = opciones.find((op) => op.activo);
+  const alguna = opciones.some((op) => op.alcanzable);
+  let aviso = null;
+  if (!alguna) {
+    aviso = 'No se pudo conectar a ninguna base de datos (local ni remota). Revise la red, VPN o SQL Server.';
+  } else if (activa && !activa.alcanzable) {
+    const otra = opciones.find((op) => op.alcanzable);
+    aviso = otra
+      ? `La conexión activa (${activa.label}) no responde. ${otra.label} sí está disponible.`
+      : `La conexión activa (${activa.label}) no responde.`;
+  }
+  ultimoAviso = aviso;
+  ultimoConectado = Boolean(activa?.alcanzable);
+  return {
+    ...base,
+    opciones,
+    conectado: ultimoConectado,
+    algunaAlcanzable: alguna,
+    aviso,
+  };
+}
+
 /** Aplica el modo guardado al arrancar, sin probar la red. */
 function aplicarGuardado() {
   const { setServer } = require('../db');
@@ -69,23 +160,47 @@ function aplicarGuardado() {
   return estado();
 }
 
-async function probarHost(host) {
-  const sql = require('mssql');
-  const pool = new sql.ConnectionPool({
-    server: host,
-    port: parseInt(process.env.DB_PORT || '1433', 10),
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    options: { encrypt: false, trustServerCertificate: true, connectTimeout: 8000 },
-    pool: { max: 1, min: 0, idleTimeoutMillis: 1000 },
-  });
-  try {
-    await pool.connect();
-    await pool.request().query('SELECT 1 AS ok');
-  } finally {
-    try { await pool.close(); } catch { /* ignore */ }
+/**
+ * Al arrancar: prueba el modo guardado; si falla, prueba la otra;
+ * si ninguna responde, deja el preferido y un aviso (sin tumbar el proceso).
+ */
+async function aplicarAlArranque() {
+  const { setServer } = require('../db');
+  const preferido = modoActivo();
+  const orden = [
+    preferido,
+    ...Object.keys(MODOS).filter((k) => MODOS[k].disponible && k !== preferido),
+  ];
+
+  for (const id of orden) {
+    const item = MODOS[id];
+    try {
+      await probarHost(item.host);
+      guardar(id);
+      await setServer(item.host);
+      try {
+        const dataSource = require('./dataSource');
+        if (typeof dataSource.forceSql === 'function') {
+          dataSource.forceSql(`${item.label} ${item.host}`);
+        }
+      } catch { /* ignore */ }
+      ultimoConectado = true;
+      ultimoAviso = id === preferido
+        ? null
+        : `Se usó ${item.label} porque ${MODOS[preferido].label} no respondió.`;
+      console.log(`[conexion] ${item.label} · ${item.host}${ultimoAviso ? ` (${ultimoAviso})` : ''}`);
+      return estado();
+    } catch (err) {
+      console.warn(`[conexion] ${item.label} (${item.host}) no responde: ${err.message}`);
+    }
   }
+
+  const fallback = MODOS[preferido];
+  await setServer(fallback.host);
+  ultimoConectado = false;
+  ultimoAviso = 'No se pudo conectar a ninguna base de datos (local ni remota). El tablero puede quedar sin datos.';
+  console.warn(`[conexion] ${ultimoAviso}`);
+  return estado();
 }
 
 /**
@@ -110,6 +225,20 @@ async function seleccionar(modo, { probar = probarHost } = {}) {
   } catch {
     /* el caché se vence solo */
   }
+  // Las vistas DMS (ventas, inventario, postventa…) deben leer SQL local/remota,
+  // no la réplica en nube, mientras esta IP responda.
+  try {
+    const dataSource = require('./dataSource');
+    if (typeof dataSource.forceSql === 'function') {
+      dataSource.forceSql(`${item.label} ${item.host}`);
+    } else {
+      await dataSource.refresh();
+    }
+  } catch {
+    /* dataSource opcional al arrancar tests */
+  }
+  ultimoConectado = true;
+  ultimoAviso = null;
   console.log(`[conexion] ${item.label} · ${item.host}`);
   return estado();
 }
@@ -117,6 +246,10 @@ async function seleccionar(modo, { probar = probarHost } = {}) {
 module.exports = {
   MODOS,
   estado,
+  estadoConPrueba,
   aplicarGuardado,
+  aplicarAlArranque,
   seleccionar,
+  guardar,
+  modoActivo,
 };

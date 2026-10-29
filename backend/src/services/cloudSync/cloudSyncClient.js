@@ -26,6 +26,18 @@ function assertConfigured() {
   return cfg;
 }
 
+/** Auth de usuarios: basta URL + API key (no exige CLOUD_SYNC_ENABLED). */
+function assertCloudCredentials() {
+  const cfg = getCloudConfig();
+  if (!cfg.baseUrl) {
+    throw new Error('CLOUD_SYNC_URL no configurada');
+  }
+  if (!cfg.apiKey) {
+    throw new Error('CLOUD_SYNC_API_KEY no configurada');
+  }
+  return cfg;
+}
+
 async function postJson(url, body, apiKey) {
   const res = await fetch(url, {
     method: 'POST',
@@ -49,10 +61,11 @@ async function postJson(url, body, apiKey) {
   return data;
 }
 
-async function pushPayload(payload) {
-  const cfg = assertConfigured();
+async function pushPayload(payload, { requireEnabled = true } = {}) {
+  const cfg = requireEnabled ? assertConfigured() : assertCloudCredentials();
   // personal: un solo lote (reemplazo completo de activos); no trocear
-  const chunks = payload.domain === 'personal'
+  // auth: un solo lote (replaceAll mensual en auth_users)
+  const chunks = (payload.domain === 'personal' || payload.domain === 'auth')
     ? [payload.records || []]
     : chunkArray(payload.records || [], cfg.chunkSize);
   if (!chunks.length || (chunks.length === 1 && !(chunks[0] || []).length)) {
@@ -90,6 +103,38 @@ async function pushPayload(payload) {
     updated: results.reduce((s, r) => s + (r.updated || 0), 0),
     history: results.reduce((s, r) => s + (r.history || 0), 0),
     archived: results.reduce((s, r) => s + (r.archived || 0), 0),
+    authUsersMirror: last.authUsersMirror || null,
+  };
+}
+
+/**
+ * Publica users.json → sync_entities + auth_users.
+ * No requiere CLOUD_SYNC_ENABLED (solo URL + API key).
+ */
+async function pushAuthUsersPayload(payload) {
+  const cfg = assertCloudCredentials();
+  const records = payload.records || [];
+
+  let tableMirror = null;
+  try {
+    tableMirror = await postJson(
+      `${cfg.baseUrl}/api/auth/users/ingest`,
+      {
+        records: records.map((r) => r.data || r),
+        replaceAll: true,
+        source: 'admin-crud',
+      },
+      cfg.apiKey,
+    );
+  } catch (err) {
+    // Endpoint viejo / en deploy: el sync_entities + mirror del ingest bastan.
+    console.warn('[cloud-sync] auth_users ingest:', err.message);
+  }
+
+  const syncResult = await pushPayload(payload, { requireEnabled: false });
+  return {
+    ...syncResult,
+    authUsersTable: tableMirror,
   };
 }
 
@@ -107,6 +152,8 @@ async function fetchCloudStatus() {
 
 module.exports = {
   getCloudConfig,
+  assertCloudCredentials,
   pushPayload,
+  pushAuthUsersPayload,
   fetchCloudStatus,
 };

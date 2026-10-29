@@ -1523,6 +1523,7 @@
             <span class="top-bar-conexion-pildora" data-conexion-pildora aria-hidden="true"></span>
           </div>
           <p class="top-bar-conexion-nota" data-conexion-nota></p>
+          <p class="top-bar-conexion-aviso" data-conexion-aviso hidden></p>
         </div>
       </div>
       ${adminLink}
@@ -1545,42 +1546,105 @@
     pollNotifications();
   }
 
+  function asegurarBannerConexion(aviso) {
+    let banner = document.querySelector('[data-conexion-banner]');
+    if (!aviso) {
+      banner?.remove();
+      return;
+    }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.className = 'conexion-banner';
+      banner.setAttribute('data-conexion-banner', '');
+      banner.setAttribute('role', 'alert');
+      const host = document.querySelector('.top-bar') || document.querySelector('header') || document.body;
+      host.insertAdjacentElement('afterend', banner);
+    }
+    banner.textContent = aviso;
+  }
+
   function pintarConexion(panel, data) {
     const caja = panel.querySelector('[data-conexion]');
     const ops = panel.querySelector('.top-bar-conexion-ops');
     const nota = panel.querySelector('[data-conexion-nota]');
+    const avisoEl = panel.querySelector('[data-conexion-aviso]');
     if (!caja || !ops) return;
     caja.hidden = false;
-    const opciones = data.opciones || [];
+    const opciones = Array.isArray(data?.opciones) ? data.opciones : [];
+    if (!opciones.length) {
+      ops.innerHTML = '';
+      if (nota) nota.textContent = 'Sin información de conexión.';
+      if (avisoEl) {
+        avisoEl.hidden = false;
+        avisoEl.textContent = data?.aviso
+          || data?.error
+          || 'No se pudo verificar la base de datos.';
+      }
+      asegurarBannerConexion(avisoEl?.textContent || 'No se pudo verificar la base de datos.');
+      return;
+    }
     const indice = opciones.findIndex((op) => op.activo);
     const activa = indice >= 0 ? opciones[indice] : null;
-    ops.innerHTML = `<span class="top-bar-conexion-pildora" data-conexion-pildora data-i="${indice < 0 ? 0 : indice}" aria-hidden="true"></span>`
+    const pildoraDown = activa?.alcanzable === false ? ' is-down' : '';
+    ops.innerHTML = `<span class="top-bar-conexion-pildora${pildoraDown}" data-conexion-pildora data-i="${indice < 0 ? 0 : indice}" aria-hidden="true"></span>`
       + opciones.map((op) => {
         const on = op.activo ? ' is-on' : '';
         const off = op.disponible ? '' : ' is-soon';
-        const titulo = op.disponible
-          ? (op.host || op.label)
-          : (op.nota || 'Próximamente');
-        return `<button type="button" class="top-bar-conexion-btn${on}${off}" data-conexion-modo="${esc(op.id)}"${op.disponible ? '' : ' disabled'} title="${esc(titulo)}">${esc(op.label)}</button>`;
+        const down = op.disponible && op.alcanzable === false ? ' is-down' : '';
+        const up = op.disponible && op.alcanzable === true ? ' is-up' : '';
+        let titulo = op.disponible ? (op.host || op.label) : (op.nota || 'Próximamente');
+        if (op.disponible && op.alcanzable === false) {
+          titulo = `${titulo} — no responde${op.error ? `: ${op.error}` : ''}`;
+        } else if (op.alcanzable === true) {
+          titulo = `${titulo} — en línea`;
+        }
+        return `<button type="button" class="top-bar-conexion-btn${on}${off}${down}${up}" data-conexion-modo="${esc(op.id)}"${op.disponible ? '' : ' disabled'} title="${esc(titulo)}">${esc(op.label)}</button>`;
       }).join('');
     if (nota) {
-      nota.textContent = activa?.host
-        ? activa.host
-        : (activa?.nota || '');
+      if (activa?.alcanzable === false) {
+        nota.textContent = `${activa.host || activa.label} · sin respuesta`;
+      } else if (activa?.host) {
+        nota.textContent = activa.host;
+      } else {
+        nota.textContent = activa?.nota || '';
+      }
     }
+    const aviso = data?.aviso || null;
+    if (avisoEl) {
+      avisoEl.hidden = !aviso;
+      avisoEl.textContent = aviso || '';
+    }
+    asegurarBannerConexion(aviso);
   }
 
   async function cargarConexion(panel) {
+    const caja = panel.querySelector('[data-conexion]');
+    const nota = panel.querySelector('[data-conexion-nota]');
+    const avisoEl = panel.querySelector('[data-conexion-aviso]');
+    if (caja) {
+      caja.hidden = false;
+      if (nota) nota.textContent = 'Comprobando conexión…';
+    }
     try {
-      const res = await fetch('/api/conexion', { credentials: 'same-origin' });
-      const data = await res.json();
-      if (!res.ok) return;
-      pintarConexion(panel, data);
+      const res = await fetch('/api/conexion?probe=1', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        pintarConexion(panel, {
+          opciones: [],
+          aviso: data.error || data.aviso || 'No se pudo verificar la conexión.',
+        });
+      } else {
+        pintarConexion(panel, data);
+      }
       panel.querySelector('.top-bar-conexion-ops')?.addEventListener('click', async (e) => {
         const btn = e.target.closest('[data-conexion-modo]');
         if (!btn || btn.disabled || btn.classList.contains('is-on')) return;
-        const nota = panel.querySelector('[data-conexion-nota]');
-        if (nota) nota.textContent = 'Conectando…';
+        const notaEl = panel.querySelector('[data-conexion-nota]');
+        if (notaEl) notaEl.textContent = 'Conectando…';
+        if (avisoEl) {
+          avisoEl.hidden = true;
+          avisoEl.textContent = '';
+        }
         btn.disabled = true;
         try {
           const resp = await fetch('/api/conexion', {
@@ -1593,12 +1657,19 @@
           if (!resp.ok) throw new Error(body.error || 'No se pudo cambiar la conexión.');
           window.location.reload();
         } catch (err) {
-          if (nota) nota.textContent = err.message || 'No se pudo cambiar la conexión.';
+          if (notaEl) notaEl.textContent = err.message || 'No se pudo cambiar la conexión.';
+          if (avisoEl) {
+            avisoEl.hidden = false;
+            avisoEl.textContent = err.message || 'No se pudo cambiar la conexión.';
+          }
           btn.disabled = false;
         }
       });
-    } catch {
-      /* el menú de usuario sigue usable */
+    } catch (err) {
+      pintarConexion(panel, {
+        opciones: [],
+        aviso: err.message || 'No se pudo verificar la conexión a la base de datos.',
+      });
     }
   }
 

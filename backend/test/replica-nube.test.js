@@ -233,7 +233,7 @@ test('publicar → pedir lo faltante → leer desde un backend sin SQL Server', 
   });
 });
 
-test('modo nube: un perfil de sucursal no lee la réplica (está publicada con toda la agencia)', () => enModoNube(async () => {
+test('modo nube: un perfil de sucursal no lee la réplica; sigue a SQL local con alcance', () => enModoNube(async () => {
   let llamadas = 0;
   const mw = createReplicaMiddleware({ fetchImpl: async () => { llamadas += 1; return new Response('{"agencia":1}'); } });
   const res = fakeRes();
@@ -241,8 +241,7 @@ test('modo nube: un perfil de sucursal no lee la réplica (está publicada con t
   let siguio = false;
   const req = { ...fakeReq('/ventas?fechaInicio=2026-10-01&fechaFin=2026-10-31'), session: { username: 'cholula', role: 'cholula' } };
   await mw(req, res, () => { siguio = true; });
-  assert.equal(llamadas, 0);
-  assert.equal(siguio, false);
-  assert.equal(res.statusCode, 503);
-  assert.equal(res.body.motivo, 'perfil_sucursal_sin_replica');
+  assert.equal(llamadas, 0, 'no debe pedir la réplica de toda la agencia');
+  assert.equal(siguio, true, 'debe atender en local con filtro de sucursal');
+  assert.equal(res.headers['x-data-source'], 'local-sucursal');
 }));

@@ -132,8 +132,31 @@ app.use((err, _req, res, _next) => {
 });
 
 const conexionOrigen = require('./src/services/conexionOrigen');
-conexionOrigen.aplicarGuardado();
-dataSource.start().catch((err) => console.error('[data-source]', err.message));
+conexionOrigen.aplicarAlArranque()
+  .then((st) => {
+    if (st?.aviso) console.warn('[conexion]', st.aviso);
+  })
+  .catch((err) => {
+    console.error('[conexion] Falló la detección al arrancar:', err.message);
+    try { conexionOrigen.aplicarGuardado(); } catch { /* ignore */ }
+  })
+  .finally(() => {
+    // Después de fijar local/remota, para no sondear el DB_HOST viejo del .env.
+    dataSource.start().catch((e) => console.error('[data-source]', e.message));
+  });
+
+async function startDesktopCrmIfNeeded() {
+  if (!desktopManaged && process.env.DESKTOP_CRM_CLOUD !== '1') return;
+  try {
+    const { bootstrapDesktopCrmFromCloud } = require('./src/services/desktopCrmBootstrap');
+    const result = await bootstrapDesktopCrmFromCloud({ force: false });
+    if (result?.ok === false) {
+      console.warn('[desktop-crm]', result.reason || result.error || 'pull incompleto');
+    }
+  } catch (err) {
+    console.error('[desktop-crm] bootstrap:', err.message);
+  }
+}
 
 const server = app.listen(PORT, HOST, () => {
   printStartupUrls();
@@ -145,11 +168,22 @@ const server = app.listen(PORT, HOST, () => {
       console.error('[cloud-replica] No se pudo iniciar el publicador:', err.message);
     }
   }
-  try {
-    const { startScheduler } = require('./src/services/crmSheetsSync');
-    startScheduler();
-  } catch (err) {
-    console.error('[crm-sheets-sync] No se pudo iniciar el scheduler:', err.message);
+  // Escritorio: CRM desde Railway (no ETL Sheets ni publicación a la nube).
+  if (!desktopManaged) {
+    try {
+      const { startScheduler } = require('./src/services/crmSheetsSync');
+      startScheduler();
+    } catch (err) {
+      console.error('[crm-sheets-sync] No se pudo iniciar el scheduler:', err.message);
+    }
+    try {
+      const { startScheduler: startCloudSync } = require('./src/services/cloudSync/cloudSyncScheduler');
+      startCloudSync();
+    } catch (err) {
+      console.error('[cloud-sync] No se pudo iniciar el scheduler:', err.message);
+    }
+  } else {
+    console.log('[desktop] CRM cloud · sin SQLite de oficina · sin sync Sheets/cloud-publish');
   }
   try {
     const { startCiclosLiveSync } = require('./src/services/crmCiclosLiveSync');
@@ -158,22 +192,18 @@ const server = app.listen(PORT, HOST, () => {
     console.error('[crm-ciclos-live] No se pudo iniciar el refresco:', err.message);
   }
   try {
-    const { startScheduler: startCloudSync } = require('./src/services/cloudSync/cloudSyncScheduler');
-    startCloudSync();
-  } catch (err) {
-    console.error('[cloud-sync] No se pudo iniciar el scheduler:', err.message);
-  }
-  try {
     const { startScheduler: startSofiaLive } = require('./src/services/sofiaMonthEndLive');
     startSofiaLive();
   } catch (err) {
     console.error('[sofia-live] No se pudo iniciar el scheduler:', err.message);
   }
-  try {
-    const { startPoller: startOfficeCommands } = require('./src/services/officeCommandPoller');
-    startOfficeCommands();
-  } catch (err) {
-    console.error('[office-commands] No se pudo iniciar el poller:', err.message);
+  if (!desktopManaged) {
+    try {
+      const { startPoller: startOfficeCommands } = require('./src/services/officeCommandPoller');
+      startOfficeCommands();
+    } catch (err) {
+      console.error('[office-commands] No se pudo iniciar el poller:', err.message);
+    }
   }
   // Precalienta el presupuesto de la empresa (Pronóstico) para que la primera consulta sea inmediata.
   if (process.env.PRESUPUESTO_WARMUP !== 'false') {
@@ -193,20 +223,25 @@ const server = app.listen(PORT, HOST, () => {
       }
     }, 45 * 1000).unref();
   }
-  // Precalienta Seguimiento 360 (índices VIN/nombre/teléfono y conteos del CRM):
-  // en frío cuestan 15–30 s y bloquean la primera carga de la pantalla.
-  if (process.env.CRM_WARMUP !== 'false') {
-    setTimeout(() => {
-      try {
-        const crm = require('./src/services/crmCiclosService');
-        crm.warmCaches().then(
-          (r) => console.log(`[crm] precalentamiento listo en ${r?.ms ?? '?'} ms`),
-          (err) => console.error('[crm] warmup:', err.message),
-        );
-      } catch (err) {
-        console.error('[crm] warmup:', err.message);
-      }
-    }, 3 * 1000).unref();
+  // Escritorio: primero baja CRM de la nube; luego precalienta índices.
+  const warmupCrm = () => {
+    if (process.env.CRM_WARMUP === 'false') return;
+    try {
+      const crm = require('./src/services/crmCiclosService');
+      crm.warmCaches().then(
+        (r) => console.log(`[crm] precalentamiento listo en ${r?.ms ?? '?'} ms`),
+        (err) => console.error('[crm] warmup:', err.message),
+      );
+    } catch (err) {
+      console.error('[crm] warmup:', err.message);
+    }
+  };
+  if (desktopManaged || process.env.DESKTOP_CRM_CLOUD === '1') {
+    startDesktopCrmIfNeeded().finally(() => {
+      setTimeout(warmupCrm, 500).unref();
+    });
+  } else if (process.env.CRM_WARMUP !== 'false') {
+    setTimeout(warmupCrm, 3 * 1000).unref();
   }
 });
 

@@ -56,7 +56,29 @@ function getEnvUsers() {
   }).filter((user) => user.username && user.password);
 }
 
+async function getTableUsers() {
+  try {
+    const { query } = require('../db');
+    const result = await query(
+      `SELECT username, password_hash, role, active FROM auth_users ORDER BY username`,
+    );
+    return (result.rows || []).map((row) => ({
+      username: normalizeUsername(row.username),
+      passwordHash: row.password_hash || null,
+      role: String(row.role || 'direccion').trim(),
+      active: row.active !== false,
+      source: 'auth_users',
+    })).filter((u) => u.username && u.passwordHash);
+  } catch (err) {
+    console.warn('[mobile-auth] No se pudieron leer auth_users:', err.message);
+    return [];
+  }
+}
+
 async function getSyncedUsers() {
+  const fromTable = await getTableUsers();
+  if (fromTable.length) return fromTable;
+
   try {
     const { query } = require('../db');
     const result = await query(

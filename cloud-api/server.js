@@ -17,6 +17,11 @@ const desktopCacheRoutes = require('./src/routes/desktopCache');
 const { ensurePersonalTable } = require('./src/services/dmsPersonalService');
 const { ensureCrmCiclosTable } = require('./src/services/crmCiclosCloudService');
 const { ensureCrmTables } = require('./src/services/crmCiclosCloud');
+const { ensureCrmSheetsTables } = require('./src/services/crmSheetsCloudService');
+const {
+  ensureAuthUsersTable,
+  backfillAuthUsersFromSync,
+} = require('./src/services/authUsersStore');
 const { ensureIemcFinancieroTables } = require('./src/services/iemcFinancieroStore');
 
 const app = express();
@@ -98,9 +103,22 @@ async function ensureSchema() {
     return;
   }
   await query('ALTER TABLE sync_batches ADD COLUMN IF NOT EXISTS meta JSONB');
+  // period_key era VARCHAR(7) (YYYY-MM); ampliar para claves de tablas Sheets.
+  for (const table of ['sync_batches', 'sync_entities', 'sync_entity_history']) {
+    await query(`ALTER TABLE ${table} ALTER COLUMN period_key TYPE VARCHAR(32)`).catch(() => {});
+  }
   await ensurePersonalTable();
   await ensureCrmCiclosTable();
   await ensureCrmTables();
+  await ensureCrmSheetsTables();
+  await ensureAuthUsersTable();
+  const authBackfill = await backfillAuthUsersFromSync().catch((err) => {
+    console.warn('[cloud-api] backfill auth_users:', err.message);
+    return null;
+  });
+  if (authBackfill && !authBackfill.skipped) {
+    console.log(`[cloud-api] auth_users backfill: ${authBackfill.total} usuarios`);
+  }
   await ensureIemcFinancieroTables();
   const { ensureTable: ensureOfficeCommands } = require('./src/services/officeCommandsStore');
   await ensureOfficeCommands();

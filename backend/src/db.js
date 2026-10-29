@@ -18,6 +18,8 @@ const config = {
 
 let pool = null;
 let connecting = null;
+/** Evita bucles de failover en la misma ráfaga de errores. */
+let lastFailoverAt = 0;
 
 function isConnError(err) {
   const msg = String(err?.message || err || '');
@@ -34,6 +36,43 @@ async function resetPool() {
   if (old) {
     try { await old.close(); } catch { /* ignore */ }
   }
+}
+
+/** Host alterno Local ↔ Remota para modo híbrido. */
+function alternateSqlHost(currentHost) {
+  try {
+    const { MODOS } = require('./services/conexionOrigen');
+    const h = String(currentHost || '').trim();
+    const actual = Object.values(MODOS).find((m) => m.disponible && m.host === h);
+    const alt = Object.values(MODOS).find((m) => m.disponible && m.host && m.host !== h);
+    if (!alt) return null;
+    return { from: actual?.id || h, to: alt.id, host: alt.host, label: alt.label };
+  } catch {
+    return null;
+  }
+}
+
+async function failoverToAlternateHost(reason) {
+  const now = Date.now();
+  if (now - lastFailoverAt < 15000) return false;
+  const alt = alternateSqlHost(config.server);
+  if (!alt) return false;
+  lastFailoverAt = now;
+  console.warn(`[db] Failover SQL ${config.server} → ${alt.host} (${alt.label}): ${reason}`);
+  await setServer(alt.host);
+  try {
+    const { guardar } = require('./services/conexionOrigen');
+    if (typeof guardar === 'function') guardar(alt.to);
+  } catch {
+    /* el archivo de modo es opcional aquí */
+  }
+  try {
+    const dataSource = require('./services/dataSource');
+    if (typeof dataSource.forceSql === 'function') {
+      dataSource.forceSql(`failover → ${alt.label} ${alt.host}`);
+    }
+  } catch { /* ignore */ }
+  return true;
 }
 
 async function getPool() {
@@ -57,7 +96,7 @@ async function getPool() {
 
 async function query(text, params = {}) {
   let lastErr;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const p = await getPool();
       const request = p.request();
@@ -68,11 +107,14 @@ async function query(text, params = {}) {
       return result.recordset;
     } catch (err) {
       lastErr = err;
-      if (attempt < 2 && isConnError(err)) {
-        await resetPool();
+      if (!isConnError(err)) throw err;
+      await resetPool();
+      if (attempt === 2) {
+        const switched = await failoverToAlternateHost(err.message);
+        if (!switched) break;
         continue;
       }
-      throw err;
+      if (attempt >= 3) break;
     }
   }
   throw lastErr;
@@ -88,5 +130,5 @@ async function setServer(host) {
   try { await sql.close(); } catch { /* el pool global ya estaba cerrado */ }
 }
 
-module.exports = { getPool, query, sql, resetPool, getServer, setServer };
+module.exports = { getPool, query, sql, resetPool, getServer, setServer, alternateSqlHost };
 

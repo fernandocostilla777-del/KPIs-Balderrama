@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MODOS, seleccionar } = require('../src/services/conexionOrigen');
+const { MODOS, seleccionar, estadoConPrueba } = require('../src/services/conexionOrigen');
 
 test('las tres conexiones son local, remota y la nube', () => {
   assert.equal(MODOS.local.host, '192.168.0.2');
@@ -14,4 +14,27 @@ test('la nube no se puede activar', async () => {
     () => seleccionar('nube', { probar: async () => {} }),
     (err) => err.status === 400 && /próxima/i.test(err.message),
   );
+});
+
+test('estadoConPrueba avisa si ninguna base responde', async () => {
+  const data = await estadoConPrueba({
+    probar: async () => {
+      throw new Error('rechazado');
+    },
+  });
+  assert.equal(data.algunaAlcanzable, false);
+  assert.equal(data.conectado, false);
+  assert.match(data.aviso || '', /ninguna base/i);
+  const local = data.opciones.find((o) => o.id === 'local');
+  assert.equal(local.alcanzable, false);
+});
+
+test('estadoConPrueba marca alcanzable cuando responde', async () => {
+  const data = await estadoConPrueba({
+    probar: async () => {},
+  });
+  assert.equal(data.algunaAlcanzable, true);
+  assert.equal(data.aviso, null);
+  assert.equal(data.opciones.find((o) => o.id === 'local').alcanzable, true);
+  assert.equal(data.opciones.find((o) => o.id === 'nube').alcanzable, false);
 });

@@ -15,6 +15,7 @@ const SEED_USERS = [
   { username: 'contraloria', password: 'Contraloria2026!', role: 'contabilidad' },
   { username: 'mtk', password: 'MtkBalderrama2026!', role: 'marketing' },
   { username: 'inventario', password: 'Inventario2026!', role: 'gestion_inventario' },
+  { username: 'cholula', password: 'Cholula2026!', role: 'cholula' },
 ];
 
 function nowIso() {
@@ -96,13 +97,25 @@ function ensureAdminUser(store) {
   return store;
 }
 
+/** Agrega seeds faltantes (p. ej. cholula) sin pisar contraseñas ya guardadas. */
+function ensureSeedUsers(store) {
+  let changed = false;
+  for (const seed of buildSeedUsers()) {
+    if (store.users.some((u) => u.username === seed.username)) continue;
+    store.users.push(toStoredUser(seed));
+    changed = true;
+  }
+  if (changed) saveStore(store);
+  return store;
+}
+
 function loadStore() {
   ensureStore();
   try {
     const raw = fs.readFileSync(USERS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     if (parsed?.users && Array.isArray(parsed.users)) {
-      return backfillPasswordEnc(ensureAdminUser(parsed));
+      return backfillPasswordEnc(ensureSeedUsers(ensureAdminUser(parsed)));
     }
   } catch {
     /* archivo corrupto */

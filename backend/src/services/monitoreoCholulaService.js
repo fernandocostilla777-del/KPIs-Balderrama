@@ -239,9 +239,13 @@ function abrirCrm(ruta) {
   return new Database(archivo, { readonly: true, fileMustExist: true });
 }
 
+/**
+ * ¿Existe la tabla? También cuenta una vista: en el escritorio, la caché del CRM que baja de la
+ * nube deja crm_actividades como vista sobre crm_ciclos_live.
+ */
 function hayTabla(d, nombre) {
   return !!d.prepare(
-    `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    `SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?`,
   ).get(nombre);
 }
 

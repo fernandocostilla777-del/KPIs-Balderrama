@@ -66,6 +66,12 @@ async function failoverToAlternateHost(reason) {
   } catch {
     /* el archivo de modo es opcional aquí */
   }
+  try {
+    const dataSource = require('./services/dataSource');
+    if (typeof dataSource.forceSql === 'function') {
+      dataSource.forceSql(`failover → ${alt.label} ${alt.host}`);
+    }
+  } catch { /* ignore */ }
   return true;
 }
 

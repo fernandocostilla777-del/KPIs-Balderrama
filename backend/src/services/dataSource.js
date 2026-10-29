@@ -48,6 +48,15 @@ function setMode(mode, reason) {
   state.checkedAt = new Date().toISOString();
 }
 
+/**
+ * Fuerza modo SQL (Local/Remota). Las vistas DMS dejan de leer la réplica nube
+ * hasta el próximo probe si DATA_SOURCE=auto y ambos hosts caen.
+ */
+function forceSql(reason = 'conexión Local/Remota activa') {
+  setMode('sql', reason);
+  return state.mode;
+}
+
 async function probeSql() {
   const { query, getServer } = require('../db');
   const host = String(getServer?.() || process.env.DB_HOST || '').trim();
@@ -152,6 +161,7 @@ module.exports = {
   refresh,
   getMode,
   isCloud,
+  forceSql,
   getStatus,
   cloudReadUrl,
   cloudReadKey,

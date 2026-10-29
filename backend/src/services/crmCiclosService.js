@@ -1,6 +1,8 @@
 /**
  * Base interna CRM — histórico de actividad del cliente en el distribuidor.
- * Fuente: backend/data/crm-ciclos.db (cargada con scripts/etl-crm-ciclos.js).
+ * Fuente:
+ *   - Oficina: backend/data/crm-ciclos.db (ETL Sheets / Excel)
+ *   - Escritorio Electron: caché en CRM_SQLITE_PATH bajada desde Railway (sin .db de oficina)
  * Clave de rastreo: id_contacto (= ID CRM).
  *
  * Compra en ciclo de venta = fila con VIN (columna T del export CRM).
@@ -13,7 +15,8 @@ const Database = require('better-sqlite3');
 const { query } = require('../db');
 const { firstLetter, AREA_LETRAS } = require('./postSalesOrderTypes');
 
-const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const DB_PATH = process.env.CRM_SQLITE_PATH
+  || path.join(__dirname, '../../data/crm-ciclos.db');
 const HYP_LETRAS = new Set(AREA_LETRAS.hyp || ['A', 'F', 'H', 'J', 'V', 'Z', 'Ó']);
 
 function normalizeVin(v) {
@@ -28,8 +31,11 @@ let db = null;
 function getDb() {
   if (db) return db;
   if (!fs.existsSync(DB_PATH)) {
+    const desktop = process.env.DESKTOP_MANAGED === '1' || process.env.DESKTOP_CRM_CLOUD === '1';
     throw new Error(
-      'Base CRM no encontrada. Ejecute: node backend/scripts/etl-crm-ciclos.js "<ruta al XLSX/CSV Balderrama Ciclos>"'
+      desktop
+        ? 'Caché CRM de la nube aún no lista. Espere el pull inicial o revise CLOUD_SYNC_URL / CLOUD_SYNC_API_KEY.'
+        : 'Base CRM no encontrada. Ejecute: node backend/scripts/etl-crm-ciclos.js "<ruta al XLSX/CSV Balderrama Ciclos>"'
     );
   }
   db = new Database(DB_PATH, { readonly: true, fileMustExist: true });

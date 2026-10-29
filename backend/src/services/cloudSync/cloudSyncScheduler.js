@@ -126,7 +126,14 @@ async function syncDomain(domain, options = {}) {
 /** Empuja usuarios del dashboard a Cloud API (login móvil unificado). */
 async function syncAuthUsers({ reason = 'manual' } = {}) {
   try {
-    const result = await syncDomain('auth', {});
+    const { pushAuthUsersPayload } = require('./cloudSyncClient');
+    const payload = await collectDomain('auth', {});
+    if (!payload.records?.length) {
+      const skipped = { ok: true, domain: 'auth', skipped: true, reason: 'Sin usuarios' };
+      state.lastResults.auth = { reason, at: new Date().toISOString(), result: skipped };
+      return skipped;
+    }
+    const result = await pushAuthUsersPayload(payload);
     state.lastResults.auth = { reason, at: new Date().toISOString(), result };
     return result;
   } catch (err) {

@@ -338,7 +338,7 @@ function loadTraficoDiario(fechaInicio, fechaFin) {
   const fs = require('fs');
   const path = require('path');
   const Database = require('better-sqlite3');
-  const dbPath = path.join(__dirname, '../../data/crm-ciclos.db');
+  const dbPath = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
   if (!fs.existsSync(dbPath)) return empty;
 
   const d = new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -438,7 +438,7 @@ function loadTraficoPorLinea(fechaInicio, fechaFin) {
   const fs = require('fs');
   const path = require('path');
   const Database = require('better-sqlite3');
-  const dbPath = path.join(__dirname, '../../data/crm-ciclos.db');
+  const dbPath = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
   if (!fs.existsSync(dbPath)) return empty;
 
   const d = new Database(dbPath, { readonly: true, fileMustExist: true });

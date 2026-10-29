@@ -92,11 +92,21 @@ En Railway conviene un volumen montado en `/data/desktop-updates` y la variable 
 - `assets/icon.png` — 1024×1024 (stores / generico)
 - `assets/icon.icns` — macOS Dock / Finder / DMG
 
+### CRM en escritorio (sin SQLite de oficina)
+
+Electron **no usa** `backend/data/crm-ciclos.db`. Al arrancar:
+
+1. Baja ciclos + leads/tráfico/etc. desde Railway (`CLOUD_SYNC_URL` + `CLOUD_SYNC_API_KEY`).
+2. Guarda una caché en `userData/crm-cloud-cache.db` (solo lectura para el tablero).
+3. Desactiva ETL Sheets y la publicación cloud (eso queda en el servidor de oficina).
+
+Requiere `.env` con `CLOUD_SYNC_URL`, `CLOUD_SYNC_API_KEY` y, para SQL, `DB_HOST` o réplica (`CLOUD_READ_API_KEY`).
+
 ### Notas de empaquetado
 
 - Se empaquetan `backend/` y `frontend/` (con `node_modules`) como `extraResources`.
 - En producción se intenta `node` del PATH; si no hay, cae a `ELECTRON_RUN_AS_NODE` (módulos nativos pueden fallar).
-- `better-sqlite3` es nativo: compile en la misma arquitectura del instalador.
+- `better-sqlite3` sigue en el backend solo como motor de la **caché cloud** local.
 - El `.env` con secretos se incluye en builds internos hechos en esta máquina.
   En el primer arranque también se copia a la carpeta de datos de usuario (**Archivo → Abrir carpeta de configuración**).
   Si `DB_HOST` está vacío, la app avisa y no habrá datos.

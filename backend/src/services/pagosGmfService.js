@@ -11,7 +11,7 @@ const {
   resolveHistoricoByContrato,
 } = require('../../scripts/lib/crmContratoNorm');
 
-const DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
 
 function openDb() {
   if (!fs.existsSync(DB_PATH)) return null;

@@ -308,8 +308,20 @@ async function startServers() {
     FRONTEND_PORT = await pickPort(FRONTEND_PORT + 1, 'frontend');
   }
 
+  // CRM del escritorio: solo nube (Railway). Caché en userData — no usa
+  // backend/data/crm-ciclos.db de la oficina ni corre ETL Sheets.
+  const crmCloudCachePath = path.join(app.getPath('userData'), 'crm-cloud-cache.db');
   const sharedEnv = {
     DESKTOP_MANAGED: '1',
+    DESKTOP_CRM_CLOUD: '1',
+    CRM_SOURCE: 'cloud',
+    CRM_SQLITE_PATH: crmCloudCachePath,
+    CRM_CLOUD_PULL_ON_START: 'true',
+    CRM_SHEETS_SYNC_ENABLED: 'false',
+    CLOUD_SYNC_ENABLED: 'false',
+    AUTH_CLOUD_FALLBACK: 'true',
+    // Vistas DMS: SQL Local (192.168.0.2) o Remota (189.197.60.78); no forzar réplica.
+    DATA_SOURCE: process.env.DATA_SOURCE || 'auto',
     PORT: String(BACKEND_PORT),
     FRONTEND_PORT: String(FRONTEND_PORT),
     FRONTEND_HOST: '127.0.0.1',
@@ -317,6 +329,7 @@ async function startServers() {
     FRONTEND_URL: `http://127.0.0.1:${FRONTEND_PORT}`,
     HOST: '127.0.0.1',
   };
+  console.log(`[desktop] CRM cloud cache: ${crmCloudCachePath}`);
   if (envFile) {
     // Los servers cargan backend/.env; en app empaquetada sincronizamos desde userData.
     if (!isDev) {

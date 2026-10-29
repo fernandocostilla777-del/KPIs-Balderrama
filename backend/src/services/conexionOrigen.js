@@ -178,6 +178,12 @@ async function aplicarAlArranque() {
       await probarHost(item.host);
       guardar(id);
       await setServer(item.host);
+      try {
+        const dataSource = require('./dataSource');
+        if (typeof dataSource.forceSql === 'function') {
+          dataSource.forceSql(`${item.label} ${item.host}`);
+        }
+      } catch { /* ignore */ }
       ultimoConectado = true;
       ultimoAviso = id === preferido
         ? null
@@ -218,6 +224,18 @@ async function seleccionar(modo, { probar = probarHost } = {}) {
     require('./ventas').clearVentasSofiaCaches();
   } catch {
     /* el caché se vence solo */
+  }
+  // Las vistas DMS (ventas, inventario, postventa…) deben leer SQL local/remota,
+  // no la réplica en nube, mientras esta IP responda.
+  try {
+    const dataSource = require('./dataSource');
+    if (typeof dataSource.forceSql === 'function') {
+      dataSource.forceSql(`${item.label} ${item.host}`);
+    } else {
+      await dataSource.refresh();
+    }
+  } catch {
+    /* dataSource opcional al arrancar tests */
   }
   ultimoConectado = true;
   ultimoAviso = null;

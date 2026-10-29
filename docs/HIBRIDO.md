@@ -5,20 +5,24 @@ los datos del CRM ni las consultas al DMS.
 
 ## Orden de lectura
 
-### SQL Server (GMOFARRIL)
+### SQL Server (GMOFARRIL) — vistas DMS
+Ventas, inventario, postventa, overview, forecast, etc. **siempre** consultan
+SQL Server por una de estas IPs (nunca la réplica mientras haya SQL):
+
 1. **Local** `192.168.0.2` (LAN Business Pro)
 2. Si no responde → **Remota** `189.197.60.78`
-3. Si ninguno responde → **réplica** en Railway (`desktop-cache` + `CLOUD_READ_API_KEY`)
+3. Solo si **ninguna** responde y `DATA_SOURCE=auto` → réplica Railway
 
-El selector del menú (admin) fuerza Local / Remota. Al fallar una consulta de
-conexión, el backend también hace failover automático al otro host.
+El selector del menú (admin) fija Local / Remota y deja el backend en modo SQL.
+Hay failover automático entre las dos IPs si cae la conexión activa.
 
-### CRM (antes solo SQLite)
-1. **SQLite local** `backend/data/crm-ciclos.db` (Sheets + Excel + `crm_ciclos_live`)
-2. Si no hay archivo / está vacío → **pull desde Railway** `GET /api/crm`
-   hacia la tabla local `crm_ciclos_live`
-3. Opcional: `PG_READONLY_URL` (Postgres de solo lectura) con el script
-   `sync-crm-ciclos-live.js`
+### CRM
+| Entorno | Fuente |
+|---------|--------|
+| **Oficina** | SQLite `backend/data/crm-ciclos.db` (ETL Sheets) → publica a Railway |
+| **Electron** | **Solo nube** — no usa el `.db` de oficina. Al arrancar baja ciclos + Sheets a `userData/crm-cloud-cache.db` |
+
+Escritorio fuerza: `DESKTOP_CRM_CLOUD=1`, `CRM_SOURCE=cloud`, `CRM_SHEETS_SYNC_ENABLED=false`.
 
 ## Orden de escritura / publicación
 

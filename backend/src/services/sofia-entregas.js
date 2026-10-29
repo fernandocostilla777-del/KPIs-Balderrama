@@ -4,7 +4,7 @@ const Database = require('better-sqlite3');
 const { getPool, sql } = require('../db');
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-const CRM_DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const CRM_DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
 
 /** Caché corta: Consultar ventas y Financiamiento comparten la misma consulta SOFIA. */
 const ENTREGAS_CACHE_TTL_MS = 5 * 60 * 1000;

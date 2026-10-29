@@ -125,7 +125,7 @@ function roundMoney(n) {
   return Math.round(x * 100) / 100;
 }
 
-const CRM_DB_PATH = path.join(__dirname, '../../data/crm-ciclos.db');
+const CRM_DB_PATH = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
 const COMISION_EV_LEASING_PCT = 1;
 
 function previousCalendarMonth(fechaInicio) {
@@ -1191,7 +1191,7 @@ function loadPruebasManejoCountByVin8() {
   const map = new Map();
   try {
     const Database = require('better-sqlite3');
-    const dbPath = path.join(__dirname, '../../data/crm-ciclos.db');
+    const dbPath = process.env.CRM_SQLITE_PATH || path.join(__dirname, '../../data/crm-ciclos.db');
     if (!fs.existsSync(dbPath)) return map;
     const db = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {

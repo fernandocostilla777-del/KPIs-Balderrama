@@ -88,7 +88,8 @@ router.get('/ventas/objetivos', (req, res) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(getGoals({ fechaInicio, fechaFin }));
+    const alcance = alcanceDe(req)?.id || null;
+    res.json(getGoals({ fechaInicio, fechaFin, alcance }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -96,7 +97,10 @@ router.get('/ventas/objetivos', (req, res) => {
 
 router.put('/ventas/objetivos', requireSession, (req, res) => {
   try {
-    if (isAuthEnabled() && !canManageUsers(req.session?.role)) {
+    const alcance = alcanceDe(req)?.id || null;
+    const esAdmin = !isAuthEnabled() || canManageUsers(req.session?.role);
+    // Administración edita el objetivo de la agencia. El perfil de sucursal edita solo el suyo.
+    if (!esAdmin && !alcance) {
       return res.status(403).json({
         error: 'Solo Administración puede modificar los objetivos de Avance Facturas GMMX y Entregas SOFIA.',
       });
@@ -111,6 +115,7 @@ router.put('/ventas/objetivos', requireSession, (req, res) => {
       retail,
       sofia,
       updatedBy: req.session?.username || null,
+      alcance: esAdmin ? null : alcance,
     }));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -936,7 +941,12 @@ router.get('/ventas/analisis-comercial', async (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(await getAnalisisComercial({ fechaInicio, fechaFin }));
+    const alcance = alcanceDe(req);
+    res.json(await getAnalisisComercial({
+      fechaInicio,
+      fechaFin,
+      canal: alcance?.canalVenta || null,
+    }));
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

@@ -321,6 +321,7 @@
             <div class="cc-avance">${avance(c.pasos)}</div>
             ${detalleCredito(c)}
             ${historial ? `<details class="cc-hist"><summary>Historial de etiquetas (${c.historial.length})</summary><ul>${historial}</ul></details>` : ''}
+            <a class="cc-btn cc-btn--chico" href="/seguimiento.html?id=${encodeURIComponent(c.idCrm)}" target="_blank" rel="noopener">Ver en 360</a>
             <button type="button" class="cc-btn" data-cc-cancelar>Cerrar</button>
           </div>
         </div>

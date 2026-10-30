@@ -4,6 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>Rendimiento de Ventas | BALDERRAMA</title>
+<link rel="icon" href="/favicon.ico" type="image/x-icon"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="/css/dashboard.css?v=182" rel="stylesheet"/>
@@ -439,7 +440,7 @@ Seguimiento 1 a 1
 <section id="ventasActOperacion" class="ventas-act" aria-labelledby="ventasActOperacionLabel">
 <div class="ventas-act__head">
   <span class="ventas-act__label" id="ventasActOperacionLabel">5 · Operación</span>
-  <p class="ventas-act__sub">Utilidad por carline, tomas a cuenta y cumplimiento del mix</p>
+  <p class="ventas-act__sub">Utilidad por carline, cumplimiento del mix y tomas a cuenta</p>
 </div>
 
 <section class="section-panel dashboard-section" id="secCarlineUtilidad" aria-label="Mejor utilidad por carline">
@@ -470,6 +471,76 @@ Seguimiento 1 a 1
 <tr><td colspan="4" class="empty-row">Consulte un periodo para ver utilidad por carline.</td></tr>
 </tbody>
 </table>
+</div>
+</section>
+
+<section class="section-panel dashboard-section" id="secMixAutos" aria-label="Mix de entregas">
+<div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between;margin-bottom:12px">
+<div>
+<h3 class="section-title" style="margin-bottom:0">Mix de entregas</h3>
+<p id="mixAutosSub" class="section-subtitle" style="margin:4px 0 0">Por carline · real vs meta de la plantilla Objetivos · <span id="mixAutosPeriod">—</span></p>
+</div>
+<button type="button" id="btnMixAutosDetalle" class="btn-glass btn-glass--sm" title="Abrir detalle de unidades">
+<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">analytics</span>
+Ver unidades
+</button>
+</div>
+
+<div class="mix-summary" id="mixSummary" aria-label="Cumplimiento y brecha del mix">
+  <div class="mix-summary__grid">
+    <article class="mix-summary__card mix-summary__card--cumplimiento">
+      <span class="mix-summary__kicker">Cumplimiento del mix</span>
+      <strong id="mixSummaryCumplimiento" class="mix-summary__value">—</strong>
+      <span id="mixSummaryCumplimientoHint" class="mix-summary__hint">líneas que ya cubrieron su meta</span>
+      <div class="mix-summary__bar" aria-hidden="true"><span id="mixSummaryCumplimientoBar" class="mix-summary__bar-fill" style="width:0%"></span></div>
+    </article>
+    <article class="mix-summary__card mix-summary__card--volumen">
+      <span class="mix-summary__kicker">Volumen del periodo</span>
+      <strong id="mixSummaryVolumen" class="mix-summary__value mix-summary__value--md">—</strong>
+      <span id="mixSummaryVolumenHint" class="mix-summary__hint">real / meta (facturas)</span>
+    </article>
+    <article class="mix-summary__card mix-summary__card--brecha">
+      <span class="mix-summary__kicker">Desvío total</span>
+      <strong id="mixSummaryBrecha" class="mix-summary__value">—</strong>
+      <span id="mixSummaryBrechaHint" class="mix-summary__hint">suma de |real − meta| por línea</span>
+    </article>
+  </div>
+  <div class="mix-summary__gaps" id="mixSummaryGaps" hidden>
+    <span class="mix-summary__gaps-label">Mayor atraso</span>
+    <div class="mix-summary__chips" id="mixSummaryChips"></div>
+  </div>
+  <p id="mixSummaryEmpty" class="liquidez-note" aria-live="polite">Consulte un periodo para ver cumplimiento y brecha del mix.</p>
+</div>
+
+<div id="mixOtrosControls" class="mix-otros-controls" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between">
+  <div>
+    <h4 class="section-subtitle" style="margin:0;font-weight:600;color:inherit">Detalle por línea</h4>
+    <span id="mixOtrosMeta" class="section-subtitle" style="margin:0"></span>
+  </div>
+  <button type="button" id="btnMixOtrosToggle" class="btn-glass btn-glass--sm hidden" aria-expanded="true" aria-controls="mixOtrosDetalle">
+    <span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">unfold_less</span>
+    <span data-mix-otros-label>Ocultar tabla</span>
+  </button>
+</div>
+<div id="mixOtrosDetalle" class="mix-otros-detalle" style="margin-top:10px">
+<p class="section-subtitle" style="margin:0 0 8px">Clic en una fila para ver las unidades de esa línea</p>
+<div class="table-scroll">
+<table class="data-table">
+<thead>
+<tr>
+<th>Línea / carline</th>
+<th class="cell-num">Meta</th>
+<th class="cell-num">Real</th>
+<th class="cell-num">Brecha</th>
+<th class="cell-num">Avance</th>
+<th>Estado</th>
+</tr>
+</thead>
+<tbody id="mixOtrosBody">
+<tr class="empty-row"><td colspan="6">Consulte un periodo.</td></tr>
+</tbody>
+</table>
+</div>
 </div>
 </section>
 
@@ -530,80 +601,6 @@ Detalle
   <p data-ac-empty class="liquidez-note" aria-live="polite">Consulte un periodo para ver el avance de tomas.</p>
   <div class="eeff-edo-kpi-row af-kpi-row" data-ac-row></div>
 </section>
-</div>
-</div>
-</section>
-
-<section class="section-panel dashboard-section" id="secMixAutos" aria-label="Mix de entregas">
-<div class="table-header-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between;margin-bottom:12px">
-<div>
-<h3 class="section-title" style="margin-bottom:0">Mix de entregas</h3>
-<p class="section-subtitle" style="margin:4px 0 0">Por carline · real vs meta de la plantilla Objetivos · <span id="mixAutosPeriod">—</span></p>
-</div>
-<button type="button" id="btnMixAutosDetalle" class="btn-glass btn-glass--sm" title="Abrir detalle de unidades">
-<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">analytics</span>
-Ver unidades
-</button>
-</div>
-
-<div class="mix-summary" id="mixSummary" aria-label="Cumplimiento y brecha del mix">
-  <div class="mix-summary__grid">
-    <article class="mix-summary__card mix-summary__card--cumplimiento">
-      <span class="mix-summary__kicker">Cumplimiento del mix</span>
-      <strong id="mixSummaryCumplimiento" class="mix-summary__value">—</strong>
-      <span id="mixSummaryCumplimientoHint" class="mix-summary__hint">líneas que ya cubrieron su meta</span>
-      <div class="mix-summary__bar" aria-hidden="true"><span id="mixSummaryCumplimientoBar" class="mix-summary__bar-fill" style="width:0%"></span></div>
-    </article>
-    <article class="mix-summary__card mix-summary__card--volumen">
-      <span class="mix-summary__kicker">Volumen del periodo</span>
-      <strong id="mixSummaryVolumen" class="mix-summary__value mix-summary__value--md">—</strong>
-      <span id="mixSummaryVolumenHint" class="mix-summary__hint">real / meta (facturas)</span>
-    </article>
-    <article class="mix-summary__card mix-summary__card--brecha">
-      <span class="mix-summary__kicker">Desvío total</span>
-      <strong id="mixSummaryBrecha" class="mix-summary__value">—</strong>
-      <span id="mixSummaryBrechaHint" class="mix-summary__hint">suma de |real − meta| por línea</span>
-    </article>
-  </div>
-  <div class="mix-summary__gaps" id="mixSummaryGaps" hidden>
-    <span class="mix-summary__gaps-label">Mayor atraso</span>
-    <div class="mix-summary__chips" id="mixSummaryChips"></div>
-  </div>
-  <p id="mixSummaryEmpty" class="liquidez-note" aria-live="polite">Consulte un periodo para ver cumplimiento y brecha del mix.</p>
-</div>
-
-<div class="chart-card chart-card--interactive" id="chartMixAutosCard" title="Clic en una barra para ver las unidades">
-  <p class="section-subtitle" style="margin:0 0 8px">Meta (gris) vs real · verde = meta cubierta · clic en la barra para ver unidades</p>
-  <div class="chart-wrap chart-wrap-lg"><canvas id="chartMixAutos" aria-label="Gráfico mix real vs meta por carline"></canvas></div>
-</div>
-<div id="mixOtrosControls" class="mix-otros-controls" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between">
-  <div>
-    <h4 class="section-subtitle" style="margin:0;font-weight:600;color:inherit">Detalle por línea</h4>
-    <span id="mixOtrosMeta" class="section-subtitle" style="margin:0"></span>
-  </div>
-  <button type="button" id="btnMixOtrosToggle" class="btn-glass btn-glass--sm hidden" aria-expanded="true" aria-controls="mixOtrosDetalle">
-    <span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">unfold_less</span>
-    <span data-mix-otros-label>Ocultar tabla</span>
-  </button>
-</div>
-<div id="mixOtrosDetalle" class="mix-otros-detalle" style="margin-top:10px">
-<p class="section-subtitle" style="margin:0 0 8px">Clic en una fila para ver las unidades de esa línea</p>
-<div class="table-scroll">
-<table class="data-table">
-<thead>
-<tr>
-<th>Línea / carline</th>
-<th class="cell-num">Meta</th>
-<th class="cell-num">Real</th>
-<th class="cell-num">Brecha</th>
-<th class="cell-num">Avance</th>
-<th>Estado</th>
-</tr>
-</thead>
-<tbody id="mixOtrosBody">
-<tr class="empty-row"><td colspan="6">Consulte un periodo.</td></tr>
-</tbody>
-</table>
 </div>
 </div>
 </section>
@@ -1138,6 +1135,7 @@ Ver unidades
 <th>Vendedor</th>
 <th class="cv-col-ventas">Ventas</th>
 <th class="num">Leads</th>
+<th class="num" title="Clientes en cartera al corte del periodo">Cartera</th>
 <th class="num cv-col-op">Contacto</th>
 <th class="num cv-col-op">Cita</th>
 <th class="num">Lead → compra</th>
@@ -1148,7 +1146,7 @@ Ver unidades
 </tr>
 </thead>
 <tbody id="cholVendBody">
-<tr><td colspan="10" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
+<tr><td colspan="11" class="empty-row">Elija el periodo y abra esta pestaña.</td></tr>
 </tbody>
 <tfoot id="cholVendFoot"></tfoot>
 </table>
@@ -1361,6 +1359,6 @@ Exportar CSV
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/sales.js?v=143"></script>
+<script src="/js/sales.js?v=150"></script>
 </body>
 </html>

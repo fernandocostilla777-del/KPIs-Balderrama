@@ -1,5 +1,5 @@
 const { getPool, sql } = require('../db');
-const { enrichVentasRows, countByCanal, CANALES_ORDEN, getCanalLabel } = require('./canales-venta');
+const { enrichVentasRows, countByCanal, CANALES_ORDEN, getCanalLabel, getCanalVenta } = require('./canales-venta');
 const { getNotificacionesEntrega, computeCoberturaSofia, annotateFlotillaGmfContrato, filtrarSofiaPorCanal } = require('./sofia-entregas');
 const { getComparativoYtd, buildYtdRanges } = require('./ytd-comparativo');
 const { getMejorUtilidadPorCarline } = require('./utilidadCarlineService');
@@ -794,7 +794,7 @@ function summarizeVentas(rows, inicio, fin, sofiaEntregas = {}) {
   };
 }
 
-async function getTomasACuenta({ fechaInicio, fechaFin }) {
+async function getTomasACuenta({ fechaInicio, fechaFin, canal = null } = {}) {
   const inicio = parseDateInput(fechaInicio);
   const fin = parseDateInput(fechaFin);
   const pool = await getPool();
@@ -832,6 +832,7 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
         ventaUsado.PMS_NUMPEDIDO AS pedidoUsn,
         ventaUsado.PMS_FECHOPE AS fechaVentaUsado,
         ventaUsado.PMS_TOTAL AS montoVentaUsado,
+        LTRIM(RTRIM(ISNULL(v.VTE_FORMAPAGO, ''))) AS formaPagoNuevo,
         LTRIM(RTRIM(
           ISNULL(cliUsado.PER_NOMRAZON, '') + ' ' +
           ISNULL(cliUsado.PER_PATERNO, '') + ' ' +
@@ -849,7 +850,8 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
         SELECT TOP 1
           fv.VTE_DOCTO,
           fv.VTE_FECHDOCTO,
-          fv.VTE_IDCLIENTE
+          fv.VTE_IDCLIENTE,
+          fv.VTE_FORMAPAGO
         FROM ADE_VTAFI fv
         WHERE p.PEN_NUMSERIE IS NOT NULL
           AND LTRIM(RTRIM(p.PEN_NUMSERIE)) <> ''
@@ -900,6 +902,9 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
     seen.add(key);
     const fechaToma = row.fechaToma || null;
     const fechaVentaUsado = row.fechaVentaUsado || null;
+    const vendedor = String(row.vendedor || '').replace(/\s+/g, ' ').trim() || null;
+    const formaPago = String(row.formaPagoNuevo || '').trim();
+    if (canal && getCanalVenta(formaPago, vendedor) !== canal) continue;
     const vendido = row.pedidoUsn != null && row.pedidoUsn !== '';
     const tomaParsed = parseFechaDoc(fechaToma);
     const ventaParsed = parseFechaDoc(fechaVentaUsado);
@@ -919,7 +924,7 @@ async function getTomasACuenta({ fechaInicio, fechaFin }) {
       facturaNuevo: String(row.facturaNuevo || '').trim() || null,
       fechaFactura: row.fechaFactura || null,
       cliente: String(row.cliente || '').replace(/\s+/g, ' ').trim() || null,
-      vendedor: String(row.vendedor || '').replace(/\s+/g, ' ').trim() || null,
+      vendedor,
       modeloToma: String(row.modeloToma || '').trim() || null,
       anModeloToma: String(row.anModeloToma || '').trim() || null,
       modeloNuevo: String(row.modeloNuevo || '').trim() || null,
@@ -1109,25 +1114,50 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
     console.warn('[ventas] periodo año anterior:', err.message);
     return null;
   });
-  // Un perfil de sucursal solo pinta sus facturas. Inventario, utilidad de agencia
-  // y tomas no se usan y retrasaban la respuesta más de medio minuto.
+  // Un perfil de sucursal pinta sus facturas, su utilidad por carline
+  // y las tomas de su canal. El inventario de la agencia no se usa.
+  const utilidadCarlinePromise = getMejorUtilidadPorCarline({
+    fechaInicio: ytdRanges.inicioActual,
+    fechaFin: ytdRanges.finActual,
+    metric: 'utilidad_neta',
+    minUnidades: 1,
+    canal: canal || null,
+  }).catch((err) => {
+    console.warn('[ventas] utilidad carline:', err.message);
+    return { available: false, reason: err.message, porCarline: [] };
+  });
   let core;
   let coreAnterior;
   let comparativoYtd = null;
   let inventorySnap = null;
-  let utilidadCarline = canal
-    ? { available: false, porCarline: [], reason: 'Perfil de sucursal' }
-    : null;
+  let utilidadCarline = null;
   let tomasACuenta = { total: 0, montoTotal: 0, registros: [], porMes: null };
   let tomasYtdRaw = null;
+  const tomasPeriodoPromise = getTomasACuenta({ fechaInicio, fechaFin, canal }).catch((err) => {
+    console.warn('[ventas] tomas a cuenta:', err.message);
+    return { total: 0, montoTotal: 0, registros: [], porMes: null, error: err.message };
+  });
+  const tomasYtdPromise = sameAsTomasChart
+    ? Promise.resolve(null)
+    : getTomasACuenta({
+      fechaInicio: tomasChartInicio,
+      fechaFin: tomasChartFin,
+      canal,
+    }).catch((err) => {
+      console.warn('[ventas] tomas mensual YTD:', err.message);
+      return { total: 0, registros: [], porMes: null, error: err.message };
+    });
   if (canal) {
-    [core, coreAnterior, comparativoYtd] = await Promise.all([
+    [core, coreAnterior, comparativoYtd, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
       corePromise,
       anteriorPromise,
       getComparativoYtd(fechaFin, canal).catch((err) => {
         console.warn('[ventas] ytd sucursal:', err.message);
         return null;
       }),
+      utilidadCarlinePromise,
+      tomasPeriodoPromise,
+      tomasYtdPromise,
     ]);
   } else {
     [core, coreAnterior, comparativoYtd, inventorySnap, utilidadCarline, tomasACuenta, tomasYtdRaw] = await Promise.all([
@@ -1135,28 +1165,9 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
       anteriorPromise,
       getComparativoYtd(fechaFin),
       getInventory({ planPisoPeriod: 'all' }).catch(() => null),
-      getMejorUtilidadPorCarline({
-        fechaInicio: ytdRanges.inicioActual,
-        fechaFin: ytdRanges.finActual,
-        metric: 'utilidad_neta',
-        minUnidades: 1,
-      }).catch((err) => {
-        console.warn('[ventas] utilidad carline:', err.message);
-        return { available: false, reason: err.message, porCarline: [] };
-      }),
-      getTomasACuenta({ fechaInicio, fechaFin }).catch((err) => {
-        console.warn('[ventas] tomas a cuenta:', err.message);
-        return { total: 0, montoTotal: 0, registros: [], porMes: null, error: err.message };
-      }),
-      sameAsTomasChart
-        ? Promise.resolve(null)
-        : getTomasACuenta({
-          fechaInicio: tomasChartInicio,
-          fechaFin: tomasChartFin,
-        }).catch((err) => {
-          console.warn('[ventas] tomas mensual YTD:', err.message);
-          return { total: 0, registros: [], porMes: null, error: err.message };
-        }),
+      utilidadCarlinePromise,
+      tomasPeriodoPromise,
+      tomasYtdPromise,
     ]);
   }
 
@@ -1174,10 +1185,8 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
   const sofiaEntregas = canal
     ? filtrarSofiaPorCanal(core.sofiaEntregas, canal)
     : core.sofiaEntregas;
-  const tomasFuente = canal
-    ? { total: 0, montoTotal: 0, registros: [], porMes: null }
-    : tomasACuenta;
-  const tomasYtdFuente = canal ? tomasFuente : tomasYtdRaw;
+  const tomasFuente = tomasACuenta;
+  const tomasYtdFuente = tomasYtdRaw;
   const invFuente = canal ? null : inventorySnap;
   const resumen = summarizeVentas(rows, inicio, fin, sofiaEntregas);
   resumen.unidadesApartadas = Number(invFuente?.summary?.availableApartadas ?? 0);
@@ -1230,7 +1239,7 @@ async function getVentas({ fechaInicio, fechaFin, fresh = false, canal = null } 
     resumen,
     comparativoPeriodo,
     comparativoYtd,
-    utilidadCarline: canal ? { available: false, porCarline: [], reason: 'Perfil de sucursal' } : utilidadCarline,
+    utilidadCarline,
     registros: rows,
     entregasSofia: resumen.entregasSofiaEfectivas || (sofiaEntregas.registrosEntrega || []),
     apartadasInventario,

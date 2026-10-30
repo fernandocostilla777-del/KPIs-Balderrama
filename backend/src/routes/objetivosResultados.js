@@ -110,7 +110,13 @@ router.get('/lineas', async (req, res, next) => {
   try {
     const period = periodFromQuery(req, res);
     if (!period) return;
-    res.json(await getLineasResultados(period));
+    const { alcanceDeRol } = require('../auth/alcanceSucursal');
+    const alcance = alcanceDeRol(req.session?.role);
+    res.json(await getLineasResultados({
+      ...period,
+      canal: alcance?.canalVenta || null,
+      alcance: alcance?.id || null,
+    }));
   } catch (err) {
     sendError(res, next, err);
   }

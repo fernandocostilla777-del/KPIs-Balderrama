@@ -74,12 +74,12 @@ function kpiBase(opts) {
 /**
  * @param {{ fechaInicio: string, fechaFin: string }} opts
  */
-async function getAnalisisComercial({ fechaInicio, fechaFin } = {}) {
+async function getAnalisisComercial({ fechaInicio, fechaFin, canal = null } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw Object.assign(new Error('Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).'), { status: 400 });
   }
 
-  const ventas = await getVentas({ fechaInicio, fechaFin });
+  const ventas = await getVentas({ fechaInicio, fechaFin, canal: canal || null });
   const tomasFromVentas = {
     total: ventas?.resumen?.totalTomasACuenta ?? ventas?.tomasACuenta?.total ?? null,
     montoTotal: ventas?.resumen?.montoTomasACuenta ?? ventas?.tomasACuenta?.montoTotal ?? null,

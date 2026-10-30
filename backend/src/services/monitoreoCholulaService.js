@@ -36,6 +36,7 @@ const CAMPOS = [
   'ventasRetail',
   'ventasFlotilla',
   'leads',
+  'cartera',
   'contactados',
   'citas',
   'citasAsistidas',
@@ -162,7 +163,7 @@ function fusionar(filas) {
       grupos.push({ ...fila, aliases: [...fila.aliases] });
       continue;
     }
-    for (const campo of CAMPOS) destino[campo] += Number(fila[campo] || 0);
+    for (const campo of CAMPOS) destino[campo] = Number(destino[campo] || 0) + Number(fila[campo] || 0);
     destino.aliases.push(...fila.aliases);
     if (personTokens(fila.vendedor).length > personTokens(destino.vendedor).length) {
       destino.vendedor = fila.vendedor;
@@ -239,9 +240,13 @@ function abrirCrm(ruta) {
   return new Database(archivo, { readonly: true, fileMustExist: true });
 }
 
+/**
+ * ¿Existe la tabla? También cuenta una vista: en el escritorio, la caché del CRM que baja de la
+ * nube deja crm_actividades como vista sobre crm_ciclos_live.
+ */
 function hayTabla(d, nombre) {
   return !!d.prepare(
-    `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    `SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?`,
   ).get(nombre);
 }
 
@@ -389,6 +394,7 @@ function leerCrm(fechaInicio, fechaFin) {
       }
     }
 
+    aplicarCartera(d, mapa, corteCartera(hasta));
     return mapa;
   } finally {
     d.close();
@@ -444,6 +450,7 @@ function notaPeriodo() {
     + 'Las solicitudes entran si su fuerza es Cholula o si el lead ligado es de Cholula. '
     + `Una compra de lead cuenta si la factura cayó dentro de ${LEAD_VIDA_DIAS} días de la entrada. `
     + 'Los seguimientos son actividades del periodo sobre leads de Cholula que entraron en los 120 días previos al cierre. '
+    + 'Cartera = clientes de Cholula cuyo último ciclo, al corte del periodo (sin pasar de hoy), sigue en prospección, ofrecimiento, negociación caliente, pre-pedido o cartera. '
     + 'Contacto = contactados ÷ leads; cita = citas ÷ contactados; lead → compra = compras de lead ÷ leads; '
     + 'aprobación = solicitudes aprobadas ÷ solicitudes. El periodo anterior es el mes (o los días) inmediatamente antes.';
 }
@@ -844,6 +851,36 @@ function leerCiclosCartera(d, hasta) {
     ...ciclo,
     gestionVigente: !!(ciclo.accionSiguiente && ciclo.accionSiguiente >= hasta),
   }));
+}
+
+/** Suma al ranking los clientes que siguen en cartera al corte, con el mismo dueño que la vista de cartera. */
+function aplicarCartera(d, mapa, hasta) {
+  const ciclos = leerCiclosCartera(d, hasta);
+  if (!ciclos.length) return;
+  const duenoLead = new Map();
+  porLotes(ciclos.map((c) => c.idCrm), (lote) => {
+    const filas = d.prepare(`
+      SELECT trim(CAST(id_crm AS TEXT)) AS idCrm,
+             TRIM(COALESCE(ejecutivo_asignado, '')) AS ejecutivo
+      FROM crm_leads
+      WHERE trim(CAST(id_crm AS TEXT)) IN (${lote.map(() => '?').join(',')})
+        AND substr(fecha_entrada, 1, 10) <= ?
+        AND ${predCholula(['sucursal', 'fuerza_ventas'])}
+      ORDER BY fecha_entrada DESC
+    `).all(...lote, hasta);
+    for (const fila of filas) {
+      if (!duenoLead.has(fila.idCrm)) duenoLead.set(fila.idCrm, fila.ejecutivo || '');
+    }
+    return filas;
+  });
+  const vistos = new Set();
+  for (const ciclo of ciclos) {
+    if (vistos.has(ciclo.idCrm) || !duenoLead.has(ciclo.idCrm)) continue;
+    vistos.add(ciclo.idCrm);
+    const nombre = oficialDe(ciclo.vendedor) || oficialDe(duenoLead.get(ciclo.idCrm));
+    if (!nombre) continue;
+    tomar(mapa, nombre).cartera += 1;
+  }
 }
 
 function porLotes(ids, fn, tam = 400) {

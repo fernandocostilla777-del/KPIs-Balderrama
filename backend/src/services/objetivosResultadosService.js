@@ -543,6 +543,45 @@ function buildLineasDesdeVentas(registros = [], entregasRows = [], metasLineas =
   return { reales, metaMatch, sinMeta };
 }
 
+/** Reparte un entero con los pesos de la plantilla. La suma queda igual al objetivo. */
+function repartirPorPeso(pesos, total) {
+  const n = Math.max(0, Math.round(Number(total) || 0));
+  const weights = (pesos || []).map((p) => Math.max(0, Number(p) || 0));
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (!n || !sum) return weights.map(() => 0);
+  const raw = weights.map((w) => (n * w) / sum);
+  const floors = raw.map((v) => Math.floor(v));
+  let resto = n - floors.reduce((a, b) => a + b, 0);
+  const orden = raw
+    .map((v, i) => ({ i, frac: v - floors[i] }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let k = 0; k < resto; k += 1) floors[orden[k].i] += 1;
+  return floors;
+}
+
+/**
+ * En sucursal el mix vigila entregas SOFIA, no las facturas de la agencia.
+ * La meta de cada línea es el objetivo SOFIA de la sucursal, con el mix de la plantilla.
+ */
+function adaptarMixEntregasSucursal(metaMatch, metaTotal) {
+  const metas = repartirPorPeso(metaMatch.map((m) => m.entregas || m.facturas || 0), metaTotal);
+  return metaMatch.map((m, i) => {
+    const meta = metas[i];
+    const real = Number(m.entregasReal || 0);
+    return {
+      ...m,
+      facturas: meta,
+      entregas: meta,
+      facturasReal: real,
+      avanceFacturasPct: pct(real, meta),
+      avanceEntregasPct: pct(real, meta),
+      pendienteFacturas: Math.max(0, meta - real),
+      cumplida: meta > 0 && real >= meta,
+      modoSucursal: 'entregas',
+    };
+  });
+}
+
 const VENDEDOR_SIN_DATO = /^\(?\s*(sin dato|sin vendedor|n\/?a)\s*\)?$/i;
 
 function normalizePersonName(value) {
@@ -744,11 +783,11 @@ async function getVolumenResultados({ fechaInicio, fechaFin, ventas: ventasPrefe
   };
 }
 
-async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefetch = null }) {
+async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefetch = null, canal = null, alcance = null } = {}) {
   requirePeriod(fechaInicio, fechaFin);
   const metas = getPlantillaMetas({ fechaInicio, fechaFin });
   const [ventas, sol, trafico, inventario] = await Promise.all([
-    ventasPrefetch || getVentas({ fechaInicio, fechaFin }),
+    ventasPrefetch || getVentas({ fechaInicio, fechaFin, canal: canal || null }),
     Promise.resolve().then(() => {
       try {
         return loadSolicitudes(fechaInicio, fechaFin);
@@ -838,7 +877,7 @@ async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefet
   allocateGeneric('AVEO', 'AVEO ');
   allocateGeneric('S10', 'S10');
 
-  const metaMatch = built.metaMatch.map((m) => {
+  let metaMatch = built.metaMatch.map((m) => {
     const carline = carlineFromLineaPdf(m.linea);
     const solicitudesReal = Number(solicitudesAsignadas.get(m.linea) || 0);
     const carlineKey = carline ? String(carline).toUpperCase() : '';
@@ -863,6 +902,13 @@ async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefet
     };
   });
 
+  let metaEntregasSucursal = null;
+  if (canal) {
+    const { getGoals } = require('./salesGoals');
+    metaEntregasSucursal = getGoals({ fechaInicio, fechaFin, alcance }).sofia ?? null;
+    metaMatch = adaptarMixEntregasSucursal(metaMatch, metaEntregasSucursal);
+  }
+
   const carlinesUsados = new Set(
     metaMatch.map((m) => String(m.carline || '').toUpperCase()).filter(Boolean)
   );
@@ -880,7 +926,12 @@ async function getLineasResultados({ fechaInicio, fechaFin, ventas: ventasPrefet
     periodo: { fechaInicio, fechaFin },
     formato: 'objetivos-resultados-v1',
     disponible: true,
-    nota: 'Real facturas/entregas = DMS + SOFIA. Solicitudes = col. M. Tráfico = crm_trafico_piso (NUEVOS · Fresh up + Citas).',
+    nota: canal
+      ? 'Mix de la sucursal: real = entregas SOFIA del canal. La meta reparte el objetivo SOFIA de la sucursal con el mix de la plantilla.'
+      : 'Real facturas/entregas = DMS + SOFIA. Solicitudes = col. M. Tráfico = crm_trafico_piso (NUEVOS · Fresh up + Citas).',
+    modo: canal ? 'entregas-sucursal' : 'facturas-agencia',
+    alcance: alcance || null,
+    metaEntregasSucursal,
     resultados: {
       porModeloReal: built.reales,
       vsMetaPlantilla: metaMatch,

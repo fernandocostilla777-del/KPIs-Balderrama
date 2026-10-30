@@ -83,10 +83,35 @@ function getHistoricCatalog() {
   return loadHistoric();
 }
 
-function getGoals({ fechaInicio, fechaFin }) {
+function alcanceId(alcance) {
+  const id = String(alcance || '').trim().toLowerCase();
+  return id || null;
+}
+
+function getGoals({ fechaInicio, fechaFin, alcance } = {}) {
   const store = loadStore();
   const key = periodKey(fechaInicio, fechaFin);
   const period = store.periods[key] || {};
+  const sucursal = alcanceId(alcance);
+  // El perfil de sucursal guarda su propio objetivo. El histórico es el de la agencia.
+  if (sucursal) {
+    const propio = period.sucursales?.[sucursal] || {};
+    const retailSaved = propio.retail ?? null;
+    const sofiaSaved = propio.sofia ?? null;
+    return {
+      fechaInicio,
+      fechaFin,
+      alcance: sucursal,
+      retail: retailSaved,
+      sofia: sofiaSaved,
+      updatedAt: propio.updatedAt ?? null,
+      updatedBy: propio.updatedBy ?? null,
+      retailSource: retailSaved != null ? 'saved' : null,
+      sofiaSource: sofiaSaved != null ? 'saved' : null,
+      historicMonth: null,
+    };
+  }
+
   const monthInfo = isFullCalendarMonth(fechaInicio, fechaFin);
   const historic = monthInfo ? getHistoricForMonth(monthInfo.month) : null;
 
@@ -96,6 +121,7 @@ function getGoals({ fechaInicio, fechaFin }) {
   return {
     fechaInicio,
     fechaFin,
+    alcance: null,
     retail: retailSaved ?? historic?.retail ?? null,
     sofia: sofiaSaved ?? historic?.sofia ?? null,
     updatedAt: period.updatedAt ?? null,
@@ -106,7 +132,7 @@ function getGoals({ fechaInicio, fechaFin }) {
   };
 }
 
-function setGoals({ fechaInicio, fechaFin, retail, sofia, updatedBy }) {
+function setGoals({ fechaInicio, fechaFin, retail, sofia, updatedBy, alcance } = {}) {
   if (!fechaInicio || !fechaFin) {
     throw new Error('fechaInicio y fechaFin son requeridos.');
   }
@@ -114,9 +140,24 @@ function setGoals({ fechaInicio, fechaFin, retail, sofia, updatedBy }) {
   const store = loadStore();
   const key = periodKey(fechaInicio, fechaFin);
   const prev = store.periods[key] || {};
+  const sucursal = alcanceId(alcance);
+  const ahora = new Date().toISOString();
+
+  if (sucursal) {
+    const sucursales = { ...(prev.sucursales || {}) };
+    const propio = { ...(sucursales[sucursal] || {}), updatedAt: ahora };
+    if (retail !== undefined) propio.retail = parseGoal(retail);
+    if (sofia !== undefined) propio.sofia = parseGoal(sofia);
+    if (updatedBy) propio.updatedBy = String(updatedBy);
+    sucursales[sucursal] = propio;
+    store.periods[key] = { ...prev, sucursales };
+    saveStore(store);
+    return getGoals({ fechaInicio, fechaFin, alcance: sucursal });
+  }
+
   const next = {
     ...prev,
-    updatedAt: new Date().toISOString(),
+    updatedAt: ahora,
   };
 
   if (retail !== undefined) next.retail = parseGoal(retail);

@@ -144,4 +144,23 @@ test('la agenda con nombres de clientes no se publica en la réplica de la nube'
   assert.equal(esRutaExcluida('/ventas/monitoreo-cholula/calendario'), true);
 });
 
-test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+test('en el escritorio, con las actividades como vista, el seguimiento no sale en ceros', () => {
+  // La caché del CRM del escritorio deja crm_actividades como vista sobre crm_ciclos_live.
+  const copia = path.join(dir, 'crm-escritorio.db');
+  fs.copyFileSync(process.env.CRM_SQLITE_PATH, copia);
+  const d = new Database(copia);
+  d.exec('ALTER TABLE crm_actividades RENAME TO crm_ciclos_live; CREATE VIEW crm_actividades AS SELECT * FROM crm_ciclos_live;');
+  d.close();
+  const cal = m.getCalendarioCholula({ mes: '2026-10', hoy: HOY, dbPath: copia });
+  assert.ok(cal.total > 0);
+  assert.equal(cal.vencidas, 3);
+});
+
+test.after(() => {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    // En Windows SQLite a veces sigue con el archivo un momento después de close().
+    if (err.code !== 'EPERM' && err.code !== 'EBUSY') throw err;
+  }
+});

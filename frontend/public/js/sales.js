@@ -27,6 +27,7 @@
   let lastTomasMensual = null;
   let lastMixAutos = null;
   let lineasVsMetaActual = null;
+  let lineasVsMetaModo = null;
   let mixOtrosExpanded = false;
   let mixOtrosFloat = null;
   let comparativoPeriodoActual = null;
@@ -64,6 +65,8 @@
     const periodEl = document.getElementById('mixAutosPeriod');
     const fi = els?.fechaInicio?.value;
     const ff = els?.fechaFin?.value;
+    const entregasSucursal = lineasVsMetaModo === 'entregas-sucursal';
+    const subMix = document.getElementById('mixAutosSub');
     if (periodEl) {
       const fmt = (iso) => {
         const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -71,7 +74,12 @@
       };
       periodEl.textContent = (fi && ff) ? `${fmt(fi)} – ${fmt(ff)}` : '—';
     }
-
+    if (subMix && periodEl) {
+      const periodo = periodEl.textContent || '—';
+      subMix.innerHTML = entregasSucursal
+        ? `Entregas SOFIA de la sucursal vs meta repartida de su objetivo · <span id="mixAutosPeriod">${periodo}</span>`
+        : `Por carline · real vs meta de la plantilla Objetivos · <span id="mixAutosPeriod">${periodo}</span>`;
+    }
     if (!mix || mix.mode !== 'vsMeta' || !(mix.items || []).length) {
       if (cumplimientoEl) cumplimientoEl.textContent = '—';
       if (cumplimientoHint) cumplimientoHint.textContent = 'Sin meta de mix para el periodo';
@@ -122,7 +130,12 @@
     if (volumenHint) {
       const gapVol = Number(mix.totalReal || 0) - Number(mix.totalMeta || 0);
       const sign = gapVol > 0 ? '+' : '';
-      volumenHint.textContent = `facturas · diferencia ${sign}${gapVol}`;
+      const base = entregasSucursal ? 'entregas SOFIA' : 'facturas';
+      volumenHint.textContent = Number(mix.totalMeta || 0) > 0
+        ? `${base} · diferencia ${sign}${gapVol}`
+        : (entregasSucursal
+          ? 'entregas SOFIA · falta el objetivo de la sucursal para armar la meta'
+          : `${base} · diferencia ${sign}${gapVol}`);
     }
     if (brechaEl) {
       brechaEl.textContent = String(Math.round(desvio * 10) / 10);
@@ -224,6 +237,7 @@
     const fechaFin = els?.fechaFin?.value;
     if (!fechaInicio || !fechaFin) {
       lineasVsMetaActual = null;
+      lineasVsMetaModo = null;
       return null;
     }
     try {
@@ -236,10 +250,12 @@
       lineasVsMetaActual = Array.isArray(data?.resultados?.vsMetaPlantilla)
         ? data.resultados.vsMetaPlantilla
         : [];
+      lineasVsMetaModo = data?.modo || null;
       return lineasVsMetaActual;
     } catch (err) {
       console.warn('[Sales] lineas vs meta', err.message || err);
       lineasVsMetaActual = null;
+      lineasVsMetaModo = null;
       return null;
     }
   }
@@ -254,7 +270,9 @@
           : (meta > 0 ? Math.round((real / meta) * 1000) / 10 : null);
         return {
           linea: String(r.linea || '').trim() || '—',
-          carline: String(r.carline || r.linea || '').trim() || '—',
+          carline: lineasVsMetaModo === 'entregas-sucursal'
+            ? (String(r.linea || r.carline || '').trim() || '—')
+            : (String(r.carline || r.linea || '').trim() || '—'),
           meta,
           real,
           avance,
@@ -438,17 +456,24 @@
     sofia: 'autointel_goal_sofia',
   };
   let goalsSaveTimer = null;
-  /** Solo Administración (canManageUsers) puede editar; el resto solo lee el valor compartido. */
+  /** Administración edita el de la agencia. El perfil de sucursal edita el de su sucursal. */
   let canEditGoals = false;
+  let goalAlcance = null;
+
+  function nombreAlcance() {
+    if (!goalAlcance) return '';
+    return goalAlcance.charAt(0).toUpperCase() + goalAlcance.slice(1);
+  }
 
   function applyGoalEditMode() {
     const editable = Boolean(canEditGoals);
+    const sucursal = nombreAlcance();
     [els.goalRetailInput, els.goalSofiaInput].forEach((input) => {
       if (!input) return;
       input.readOnly = !editable;
       input.tabIndex = editable ? 0 : -1;
       input.title = editable
-        ? 'Escriba el objetivo del periodo'
+        ? (sucursal ? `Escriba el objetivo de ${sucursal}` : 'Escriba el objetivo del periodo')
         : 'Solo Administración puede modificar este objetivo';
     });
     els.goalRetailPanel?.classList.toggle('goal-chart-panel--readonly', !editable);
@@ -458,7 +483,8 @@
   async function resolveGoalEditPermission() {
     try {
       const session = await window.DashboardAuth?.getSession?.();
-      canEditGoals = Boolean(session?.canManageUsers || session?.devBypass);
+      goalAlcance = session?.alcanceSucursal || null;
+      canEditGoals = Boolean(session?.canManageUsers || session?.devBypass || goalAlcance);
     } catch {
       canEditGoals = false;
     }
@@ -499,12 +525,14 @@
     const retailLabel = els.goalRetailPanel?.querySelector('.goal-target-label');
     const sofiaLabel = els.goalSofiaPanel?.querySelector('.goal-target-label');
     const month = data?.historicMonth;
+    const sucursal = nombreAlcance();
+    const marca = sucursal ? ` · ${sucursal}` : '';
     const baseRetail = month && data.retailSource === 'historic'
-      ? `Objetivo del periodo · histórico ${month}`
-      : 'Objetivo del periodo';
+      ? `Objetivo del periodo · histórico ${month}${marca}`
+      : `Objetivo del periodo${marca}`;
     const baseSofia = month && data.sofiaSource === 'historic'
-      ? `Objetivo del periodo · histórico ${month}`
-      : 'Objetivo del periodo';
+      ? `Objetivo del periodo · histórico ${month}${marca}`
+      : `Objetivo del periodo${marca}`;
     if (retailLabel) {
       retailLabel.textContent = canEditGoals
         ? baseRetail
@@ -1473,7 +1501,10 @@
       const rango = fi && ff
         ? `${String(fi).slice(0, 10).split('-').reverse().join('/')} → ${String(ff).slice(0, 10).split('-').reverse().join('/')}`
         : 'YTD';
-      sub.textContent = `Cierre vendidos · mejor versión por utilidad neta (+ F&I) · ${rango}`;
+      const sucursal = document.documentElement.dataset.alcanceSucursal
+        ? ` · ${document.documentElement.dataset.alcanceSucursal.charAt(0).toUpperCase()}${document.documentElement.dataset.alcanceSucursal.slice(1)}`
+        : '';
+      sub.textContent = `Cierre vendidos · mejor versión por utilidad neta (+ F&I)${sucursal} · ${rango}`;
     }
 
     const rows = utilidadCarline?.porCarline || [];
@@ -1581,147 +1612,6 @@
       destroyChart('mixAutos', 'chartMixAutos');
       wireMixOtrosControls();
       renderMixOtrosDetalle(mix);
-      if (mix.labels.length) {
-        if (mix.mode === 'vsMeta') {
-          createChart('mixAutos', 'chartMixAutos', {
-            type: 'bar',
-            data: {
-              labels: mix.labels,
-              datasets: [
-                {
-                  label: 'Meta facturas',
-                  data: mix.meta,
-                  backgroundColor: 'rgba(148, 163, 184, 0.55)',
-                  borderColor: '#64748b',
-                  borderWidth: 1,
-                  borderRadius: 6,
-                  maxBarThickness: 18,
-                },
-                {
-                  label: 'Real facturas',
-                  data: mix.real,
-                  backgroundColor: mix.items.map((r) => (r.cumplida ? 'rgba(16, 185, 129, 0.75)' : 'rgba(45, 91, 255, 0.75)')),
-                  borderColor: mix.items.map((r) => (r.cumplida ? '#059669' : '#2D5BFF')),
-                  borderWidth: 1,
-                  borderRadius: 6,
-                  maxBarThickness: 18,
-                },
-              ],
-            },
-            options: chartOptions({
-              indexAxis: 'y',
-              onClick(_evt, elements) {
-                if (!elements?.length) {
-                  openMixAutosDrawer();
-                  return;
-                }
-                const idx = elements[0].index;
-                const item = mix.items[idx];
-                if (!item) {
-                  openMixAutosDrawer();
-                  return;
-                }
-                openMixAutosDrawer({
-                  filter: { dim: 'carline', value: item.carline || item.linea, label: item.linea },
-                });
-              },
-              onHover(evt, elements) {
-                const canvas = evt?.native?.target || evt?.chart?.canvas;
-                if (!canvas?.style) return;
-                canvas.style.cursor = elements?.length ? 'pointer' : 'default';
-              },
-              plugins: {
-                legend: { display: true, position: 'bottom' },
-                tooltip: {
-                  callbacks: {
-                    afterBody(items) {
-                      const idx = items?.[0]?.dataIndex;
-                      const row = mix.items[idx];
-                      if (!row) return '';
-                      const avance = row.avance == null ? '—' : `${row.avance}%`;
-                      return [
-                        `Avance: ${avance}`,
-                        row.cumplida ? 'Estado: cumplida' : 'Estado: pendiente',
-                      ];
-                    },
-                  },
-                },
-              },
-              scales: {
-                x: { beginAtZero: true, ticks: { precision: 0 }, stacked: false },
-                y: { grid: { display: false }, stacked: false },
-              },
-            }),
-          });
-          setMixOtrosExpanded(true);
-        } else {
-          const palette = (chartPalette && chartPalette.length)
-            ? chartPalette
-            : ['#2D5BFF', '#9B51E0', '#27AE60', '#E056FD', '#f59e0b', '#14b8a6', '#ef4444', '#64748b', '#0ea5e9', '#2C3E50'];
-          createChart('mixAutos', 'chartMixAutos', {
-            type: 'bar',
-            data: {
-              labels: mix.labels,
-              datasets: [{
-                label: 'Unidades',
-                data: mix.data,
-                backgroundColor: mix.labels.map((label, i) => {
-                  if (label === 'Otros') return '#94a3b8';
-                  return palette[i % palette.length];
-                }),
-                borderRadius: 8,
-                maxBarThickness: 28,
-              }],
-            },
-            options: chartOptions({
-              indexAxis: 'y',
-              onClick(_evt, elements) {
-                if (!elements?.length) {
-                  openMixAutosDrawer();
-                  return;
-                }
-                const idx = elements[0].index;
-                const label = mix.labels[idx];
-                if (!label) {
-                  openMixAutosDrawer();
-                  return;
-                }
-                openMixAutosDrawer({
-                  filter: { dim: 'carline', value: label, label },
-                });
-                if (label === 'Otros' && (mix.otrosDetalle || []).length) {
-                  setMixOtrosExpanded(true);
-                }
-              },
-              onHover(evt, elements) {
-                const canvas = evt?.native?.target || evt?.chart?.canvas;
-                if (!canvas?.style) return;
-                canvas.style.cursor = elements?.length ? 'pointer' : 'default';
-              },
-              plugins: {
-                legend: { display: false },
-                tooltip: {
-                  callbacks: {
-                    label(ctx) {
-                      const val = Number(ctx.raw || 0);
-                      const total = mix.total || 0;
-                      const p = total > 0 ? Math.round((val / total) * 1000) / 10 : 0;
-                      return ` ${val} uds · ${p}% del mix · clic para analizar`;
-                    },
-                  },
-                },
-              },
-              scales: {
-                x: { beginAtZero: true, ticks: { precision: 0 } },
-                y: { grid: { display: false } },
-              },
-            }),
-          });
-        }
-      } else {
-        renderMixOtrosDetalle(mix);
-        setMixOtrosExpanded(false);
-      }
     } catch (err) {
       console.error('[Sales] chartMixAutos', err);
       destroyChart('mixAutos', 'chartMixAutos');
@@ -1993,7 +1883,10 @@
     if (key === 'sofia') return entregasActuales;
     if (key === 'carryOver') return apartadasActuales;
     if (key === 'tomasACuenta') return tomasACuentaActuales;
-    if (key === 'mixAutos') return Array.isArray(registrosActuales) ? registrosActuales : [];
+    if (key === 'mixAutos') {
+      if (lineasVsMetaModo === 'entregas-sucursal' && Array.isArray(entregasActuales)) return entregasActuales;
+      return Array.isArray(registrosActuales) ? registrosActuales : [];
+    }
     return [];
   }
 
@@ -2267,9 +2160,13 @@
     if (els.tomasStatVendidos) els.tomasStatVendidos.textContent = String(vendidas);
     if (els.tomasStatPct) els.tomasStatPct.textContent = tomas > 0 ? `${pct}%` : '—';
     if (els.tomasSectionSubtitle) {
+      const deSucursal = nombreSucursalActiva();
+      const alcance = deSucursal ? ` de ${deSucursal}` : '';
       els.tomasSectionSubtitle.textContent = tomas > 0
-        ? `${vendidas} de ${tomas} ya se vendieron · ${enInventario} siguen en inventario · ${pct}%`
-        : 'Usados tomados del periodo · revendidos vs inventario pendiente';
+        ? `${vendidas} de ${tomas} tomas${alcance} ya se vendieron · ${enInventario} siguen en inventario · ${pct}%`
+        : (deSucursal
+          ? `Sin tomas${alcance} en el periodo · el gráfico usa el canal de la sucursal`
+          : 'Usados tomados del periodo · revendidos vs inventario pendiente');
     }
 
     const fi = els.fechaInicio?.value || '';
@@ -2352,9 +2249,11 @@
     const vendidos = monthPoints.map((m) => Number(m.vendidos || 0));
 
     if (els.tomasChartSubtitle) {
+      const deSucursal = nombreSucursalActiva();
+      const quien = deSucursal ? `${deSucursal} · ` : '';
       els.tomasChartSubtitle.textContent = data.mesEnCursoExcluido
-        ? `Acumulado ${anio} al ${corteFmt || 'corte'} · clic en una barra para ver unidades · mes en curso excluido`
-        : `Acumulado ${anio}${corteFmt ? ` al ${corteFmt}` : ''} · clic en una barra para ver las unidades`;
+        ? `${quien}Acumulado ${anio} al ${corteFmt || 'corte'} · clic en una barra para ver unidades · mes en curso excluido`
+        : `${quien}Acumulado ${anio}${corteFmt ? ` al ${corteFmt}` : ''} · tomados vs ya vendidos · clic en una barra`;
     }
 
     createChart('tomasMensual', 'chartTomasMensual', {
@@ -2606,6 +2505,8 @@
       if (currentMeta.kpi === 'mixAutos') {
         if (dim === 'carline') {
           const carline = normalizeCarlineLabel(r.VEH_TIPOAUTO);
+          const pedido = String(value || '');
+          if (pedido === 'Aveo NB' && (carline === 'Aveo Sedán' || carline === 'Aveo NB')) return true;
           if (value === 'Otros') {
             const otrosKeys = new Set((lastMixAutos?.otrosDetalle || []).map(([k]) => k));
             return otrosKeys.has(carline);
@@ -3362,6 +3263,12 @@
     URL.revokeObjectURL(link.href);
   }
 
+  function nombreSucursalActiva() {
+    const id = document.documentElement.dataset.alcanceSucursal || '';
+    if (!id) return '';
+    return id.charAt(0).toUpperCase() + id.slice(1);
+  }
+
   function esPerfilCholula() {
     return document.documentElement.dataset.alcanceSucursal === 'cholula';
   }
@@ -3380,12 +3287,26 @@
     });
   }
 
+  /** En un perfil de sucursal no se muestra de dónde vienen las ventas ni el reparto de entregas. */
+  function ocultarComposicionSucursal() {
+    if (!document.documentElement.dataset.alcanceSucursal) return;
+    const sec = document.getElementById('ventasActComposicion');
+    if (sec) {
+      sec.hidden = true;
+      sec.classList.add('hidden');
+    }
+    const ritmo = document.getElementById('ventasActRitmoLabel');
+    const operacion = document.getElementById('ventasActOperacionLabel');
+    if (ritmo) ritmo.textContent = '3 · Ritmo del año';
+    if (operacion) operacion.textContent = '4 · Operación';
+  }
+
   const TAB_SRC = {
     financiamiento: '/js/financiamiento.js?v=64',
     leads: '/js/leads.js?v=37',
     afluencia: '/js/afluencia.js?v=19',
     comisiones: '/js/comisiones.js?v=2',
-    vendedores: '/js/monitoreo-cholula.js?v=12',
+    vendedores: '/js/monitoreo-cholula.js?v=13',
   };
   const scriptListo = {};
   const tabListo = {};
@@ -4244,6 +4165,7 @@
         document.documentElement.dataset.alcanceSucursal = sesion.alcanceSucursal;
       }
       ocultarComisionesCholula();
+      ocultarComposicionSucursal();
       compactFilters = Dashboard.initCompactFilters();
       // El periodo viene de la URL si existe (enlace compartido, recarga, «ir a» desde otra pantalla).
       const desdeUrl = Dashboard.getDateParamsFromUrl();

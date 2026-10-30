@@ -137,7 +137,8 @@
         <td class="cv-col-ventas">
           <span class="cv-ventas"><span class="cv-barra"><i style="width:${ancho}%"></i></span><strong>${num(fila.ventas)}</strong>${variacionChip(fila.variacionVentasPct)}</span>
         </td>
-        <td class="num">${num(fila.leads)}</td>
+        <td class="num" title="Leads del periodo">${num(fila.leads)}</td>
+        <td class="num" title="En cartera al corte del periodo">${num(fila.cartera)}</td>
         ${celdaTasa(fila.pctContacto, t.pctContacto, fila.leads, `${num(fila.contactados)} de ${num(fila.leads)} leads`, 'num cv-col-op')}
         ${celdaTasa(fila.pctCita, t.pctCita, fila.leads, `${num(fila.citas)} de ${num(fila.contactados)} contactados`, 'num cv-col-op')}
         ${celdaTasa(fila.pctCierreLead, t.pctCierreLead, fila.leads, `${num(fila.comprasLead)} compras de ${num(fila.leads)} leads`)}
@@ -155,7 +156,7 @@
     const t = data?.totales || {};
     const filas = (data?.vendedores || []).filter((f) => f.vendedor !== 'Sin asignar');
     if (!filas.length) {
-      body.innerHTML = '<tr><td colspan="10" class="empty-row">Sin actividad del equipo en el periodo.</td></tr>';
+      body.innerHTML = '<tr><td colspan="11" class="empty-row">Sin actividad del equipo en el periodo.</td></tr>';
       if (foot) foot.innerHTML = '';
       return;
     }
@@ -167,6 +168,7 @@
           <td>Equipo</td>
           <td class="cv-col-ventas"><span class="cv-ventas"><strong>${num(t.ventas)}</strong>${variacionChip(t.variacionVentasPct)}<span class="cv-de cv-prom">prom. ${t.promedioVentas ?? '—'} por vendedor</span></span></td>
           <td class="num">${num(t.leads)}</td>
+          <td class="num">${num(t.cartera)}</td>
           <td class="num cv-col-op">${pct(t.pctContacto)}</td>
           <td class="num cv-col-op">${pct(t.pctCita)}</td>
           <td class="num">${pct(t.pctCierreLead)}</td>
@@ -221,6 +223,7 @@
         ${id}
         ${extra ? `<p class="cc-sub">${extra}</p>` : ''}
         <div class="cc-avance">${avancePasosHtml(a)}</div>
+        ${r.idCrm ? `<a class="cc-btn cc-btn--chico" href="/seguimiento.html?id=${encodeURIComponent(r.idCrm)}" target="_blank" rel="noopener">Ver en 360</a>` : ''}
         ${r.idCrm ? `<button type="button" class="cc-btn cc-btn--chico" data-cv-seguir-cli="${esc(r.idCrm)}">Abrir en seguimiento 1 a 1</button>` : ''}
       </div>`;
   }
@@ -362,6 +365,11 @@
           <span class="cv-mini__sub">${num(r.ventasAnterior)} el periodo anterior · prom. del equipo ${t.promedioVentas ?? '—'}</span>
         </div>
         ${comparativo('Lead → compra', r.pctCierreLead, t.pctCierreLead, `${num(r.comprasLead)} de ${num(r.leads)} leads`)}
+        <div class="cv-mini">
+          <span class="cv-mini__titulo">Cartera</span>
+          <strong>${num(r.cartera)}</strong>
+          <span class="cv-mini__sub">en cartera al corte · ${num(r.leads)} leads del periodo</span>
+        </div>
         ${comparativo('Contacto', r.pctContacto, t.pctContacto, `${num(r.contactados)} de ${num(r.leads)} leads`)}
         ${comparativo('Solicitudes aprobadas', r.pctAprobacion, t.pctAprobacion, `${num(r.solicitudesAprobadas)} de ${num(r.solicitudes)}`)}
       </div>
@@ -403,7 +411,7 @@
       carteraLista = new Promise((resolve) => {
         if (window.CarteraCholula) return resolve(window.CarteraCholula);
         const tag = document.createElement('script');
-        tag.src = '/js/cartera-cholula.js?v=6';
+        tag.src = '/js/cartera-cholula.js?v=7';
         tag.onload = () => resolve(window.CarteraCholula || null);
         tag.onerror = () => resolve(null);
         document.body.appendChild(tag);

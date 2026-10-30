@@ -305,6 +305,7 @@ async function getMejorUtilidadPorCarline({
   fechaFin = null,
   metric = 'utilidad_neta',
   minUnidades = 1,
+  canal = null,
 } = {}) {
   if (!fechaInicio || !fechaFin) {
     return {
@@ -327,7 +328,12 @@ async function getMejorUtilidadPorCarline({
   }
 
   const minU = Math.min(20, Math.max(1, Number(minUnidades) || 1));
-  const table = Array.isArray(vendidos?.vendidosTable) ? vendidos.vendidosTable : [];
+  const canalClave = String(canal || '').trim().toUpperCase();
+  let table = Array.isArray(vendidos?.vendidosTable) ? vendidos.vendidosTable : [];
+  if (canalClave) {
+    const { getCanalVenta } = require('./canales-venta');
+    table = table.filter((row) => getCanalVenta(row.formaPago, row.vendedor) === canalClave);
+  }
   const byKey = new Map();
 
   for (const row of table) {
@@ -475,6 +481,7 @@ async function getMejorUtilidadPorCarline({
     filtros: {
       metric: metricKey,
       minUnidades: minU,
+      canal: canalClave || null,
     },
     resumen: {
       carlines: porCarline.length,

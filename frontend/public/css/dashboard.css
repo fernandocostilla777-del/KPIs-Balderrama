@@ -19148,3 +19148,27 @@ button.cc-pill .material-symbols-outlined { font-size: 16px; margin-right: -4px;
   .cv-cal-dia, .cv-cal-vacio { min-height: 40px; }
   .cv-cal-dia { font-size: 12px; }
 }
+
+/* ── PostVenta: inicio comparativo y grupos con pregunta ─────────────────── */
+.ps-lectura { margin: 10px 0 14px; padding: 12px 16px; list-style: none; display: grid; gap: 6px; border-radius: 14px; background: #ffffff; border: 1px solid #dfe5ee; border-left: 4px solid #2d5bff; }
+.ps-lectura li { position: relative; padding-left: 16px; font-size: 14px; line-height: 1.5; color: #1e293b; }
+.ps-lectura li::before { content: ''; position: absolute; left: 0; top: 0.55em; width: 7px; height: 7px; border-radius: 50%; background: #2d5bff; }
+.ps-areas th.cell-num, .ps-areas td.cell-num { text-align: right; }
+.ps-areas tbody tr.ps-areas__fila { cursor: pointer; }
+.ps-areas tbody tr.ps-areas__fila:hover { background: #f5f8ff; }
+.ps-areas .cv-de { display: block; font-size: 11.5px; color: #64748b; font-weight: 500; }
+.ps-areas .ps-sub { display: block; font-size: 11.5px; color: #64748b; }
+.ps-areas tfoot .cv-total td { font-weight: 700; background: #f1f5ff; border-top: 2px solid #c7d2fe; }
+.ps-mas60 { font-weight: 700; color: #92400e; }
+.ps-areas-nota { margin-top: 10px; font-size: 12.5px; }
+.ps-grupo-nota { margin-left: 8px; font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #92400e; }
+.ps-aging-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 900px) { .ps-aging-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .ps-aging-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 639px) {
+  #kpiOperational .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; }
+  #kpiOperational .kpi-card { padding: 12px; min-height: 0; }
+  #kpiOperational .kpi-value { font-size: 1.35rem; }
+  #kpiOperational .kpi-subtitle { font-size: 11.5px; }
+  .ps-areas td, .ps-areas th { padding-left: 8px; padding-right: 8px; }
+}

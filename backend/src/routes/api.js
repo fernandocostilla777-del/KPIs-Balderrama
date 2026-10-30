@@ -701,7 +701,12 @@ router.get('/post-sales', async (req, res, next) => {
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
-    res.json(await getPostSales({ fechaInicio, fechaFin }));
+    const alcance = alcanceDe(req);
+    res.json(await getPostSales({
+      fechaInicio,
+      fechaFin,
+      letras: alcance?.tallerLetras || null,
+    }));
   } catch (err) {
     next(err);
   }
@@ -709,6 +714,9 @@ router.get('/post-sales', async (req, res, next) => {
 
 router.get('/post-sales/hyp/aseguradoras-cobranza', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'HyP de la agencia no está en este perfil.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     res.json(await getHypAseguradorasCobranza({ fechaInicio, fechaFin }));
   } catch (err) {
@@ -719,6 +727,9 @@ router.get('/post-sales/hyp/aseguradoras-cobranza', async (req, res, next) => {
 
 router.get('/post-sales/hyp/garantias-cobranza', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'HyP de la agencia no está en este perfil.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     res.json(await getHypGarantiasCobranza({ fechaInicio, fechaFin }));
   } catch (err) {
@@ -730,6 +741,9 @@ router.get('/post-sales/hyp/garantias-cobranza', async (req, res, next) => {
 /** Cuadre de Órdenes HyP · 0470/0476/0477/0479 · Contpaq MOVDET ↔ DMS */
 async function handleCuadreOrdenesHyp(req, res, next) {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'HyP de la agencia no está en este perfil.' });
+    }
     const { fechaInicio, fechaFin, sql } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
@@ -751,6 +765,9 @@ router.get('/post-sales/hyp/cuadre', handleCuadreOrdenesHyp);
 
 router.get('/post-sales/refacciones-pedidos', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'Refacciones de la agencia no está en este perfil.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
@@ -764,6 +781,9 @@ router.get('/post-sales/refacciones-pedidos', async (req, res, next) => {
 
 router.get('/post-sales/refacciones', async (req, res, next) => {
   try {
+    if (alcanceDe(req)) {
+      return res.status(403).json({ error: 'Refacciones de la agencia no está en este perfil.' });
+    }
     const { fechaInicio, fechaFin } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
@@ -777,7 +797,13 @@ router.get('/post-sales/refacciones', async (req, res, next) => {
 
 router.get('/post-sales/orden/:orden', async (req, res, next) => {
   try {
-    const data = await getPostSalesOrderDetail(req.params.orden);
+    const alcance = alcanceDe(req);
+    const folio = String(req.params.orden || '');
+    const letra = folio.trim().charAt(0).toUpperCase();
+    if (alcance?.tallerLetras?.length && !alcance.tallerLetras.includes(letra)) {
+      return res.status(403).json({ error: 'Esta orden no es de la sucursal.' });
+    }
+    const data = await getPostSalesOrderDetail(folio);
     res.json(data);
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });

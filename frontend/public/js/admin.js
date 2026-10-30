@@ -298,7 +298,8 @@
       { actions: JSON.parse(JSON.stringify(roleActionsByRole[role.id] || {})) },
     ]));
     const selected = next[selectedPermissionRole] || { actions: {} };
-    selected.actions = {};
+    // Cada módulo viaja en el guardado, también vacío, para que no se rellene con el permiso de fábrica.
+    selected.actions = Object.fromEntries(pageCatalog.map((page) => [page.id, []]));
     els.rolePermissionsGrid?.querySelectorAll('input[type="checkbox"][data-role-perm][data-page][data-action]').forEach((input) => {
       if (!input.checked && !input.disabled) return;
       const page = input.dataset.page;

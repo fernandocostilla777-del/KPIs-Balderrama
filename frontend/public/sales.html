@@ -7,7 +7,7 @@
 <link rel="icon" href="/favicon.ico" type="image/x-icon"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=182" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=184" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=2"></script>
 </head>
@@ -696,13 +696,35 @@ Detalle
 <p id="ldSubtitle" class="section-subtitle" style="margin:0">Cuántos leads del periodo llegaron a compra y dónde se quedan. Un lead cuenta como compra si su VIN se factura dentro de 90 días.</p>
 </header>
 
+<section id="ldLectura" class="ld-lectura" aria-labelledby="ldLecturaTitulo" hidden>
+<h3 class="ld-lectura__titulo" id="ldLecturaTitulo">Lectura del periodo</h3>
+<ul id="ldLecturaLista" class="ld-lectura__lista"></ul>
+</section>
+
+<details class="ld-glosario" id="ldGlosario">
+<summary>¿Qué significa cada término?</summary>
+<dl class="ld-glosario__lista">
+<div><dt>Lead</dt><dd>Un prospecto registrado en la hoja de leads del CRM, contado por la fecha en que entró. Los duplicados no cuentan.</dd></div>
+<div><dt>Contactado, cita, cotizado</dt><dd>Pasos que registra el CRM para cada lead: se logró hablar con él, agendó cita y recibió cotización.</dd></div>
+<div><dt>Compra</dt><dd>El VIN ligado al lead (por su ID del CRM) se facturó dentro de los 90 días siguientes a su entrada. No es el total de facturas del mes; ese está en la pestaña Ventas.</dd></div>
+<div><dt>Vida del lead (90 días)</dt><dd>Plazo para que una compra cuente como conversión. Si compra después, la venta existe pero no suma a la conversión.</dd></div>
+<div><dt>En seguimiento</dt><dd>Leads de los últimos 90 días, sin compra ni descarte, que el equipo sigue trabajando. Usa otra ventana que el periodo.</dd></div>
+<div><dt>Perdidos</dt><dd>Leads del periodo que el equipo marcó como descartados, desistidos o perdidos.</dd></div>
+<div><dt>One Pager</dt><dd>Reporte de Chevrolet que mide las campañas de leads por año de la planta: de octubre a septiembre.</dd></div>
+<div><dt>Campañas reactivas y proactivas</dt><dd>Reactivas: el cliente llega solo (anuncios de GM, Chevrolet y el sitio de la agencia). Proactivas: la agencia lo busca (GMF Retención y Lealtad, Equity Mining, AMDGM).</dd></div>
+<div><dt>Hito</dt><dd>Un paso que muestra intención de compra: cita asistida, prueba de manejo o solicitud de crédito.</dd></div>
+<div><dt>Conv. 180 d</dt><dd>Solo referencia: cuántos compran si se les da el doble de plazo. El asterisco indica que parte de esos leads aún no cumple 180 días.</dd></div>
+<div><dt>Kaplan–Meier</dt><dd>Método para medir el tiempo a compra sin contar como «no compró» a los leads que todavía están dentro de su plazo.</dd></div>
+</dl>
+</details>
+
 <div id="ldPeriodoVacio" class="ld-periodo-vacio hidden" role="status" aria-live="polite"></div>
 
 <!-- 1 · Resultado: el embudo responde "¿cuántos compraron y dónde se pierden?" -->
 <section class="ventas-act" aria-labelledby="ldAct1">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldAct1">1 · Resultado del periodo</span>
-<p class="ventas-act__sub">De los leads que entraron, cuántos avanzan en cada paso hasta la compra</p>
+<span class="ventas-act__label" id="ldAct1">1 · Resultado del periodo <span class="ld-ventana" data-ld-ventana="periodo"></span></span>
+<p class="ventas-act__sub ld-pregunta">¿Cuántos de los leads que entraron llegaron a comprar y en qué paso se quedan los demás?</p>
 </div>
 <div id="ldKpiOperational" class="fi-kpi-root"></div>
 <section id="ldKpiDetail" class="kpi-detail-panel kpi-detail-panel--fi hidden" aria-labelledby="ldDetailTitle">
@@ -721,13 +743,16 @@ Detalle
 <!-- 2 · Origen: de dónde vienen y quién los convierte -->
 <section class="ventas-act" aria-labelledby="ldAct2">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldAct2">2 · De dónde vienen y quién los convierte</span>
-<p class="ventas-act__sub">Los mismos leads del periodo, repartidos por fuente, canal, fuerza de ventas, ejecutivo o vehículo</p>
+<span class="ventas-act__label" id="ldAct2">2 · De dónde vienen y quién los convierte <span class="ld-ventana" data-ld-ventana="periodo"></span></span>
+<p class="ventas-act__sub ld-pregunta">¿Qué fuentes, canales, fuerzas de venta y ejecutivos convierten mejor? Son los mismos leads del bloque 1, agrupados de otra forma.</p>
 </div>
 <div id="ldOrigen" class="section-panel dashboard-section ld-origen" style="margin-bottom:12px"></div>
 <section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
 <div class="table-header-row ld-group-head">
+<div>
 <p id="ldGroupMeta" class="section-subtitle" style="margin:0">Los mismos leads del periodo, agrupados de distinta forma.</p>
+<p id="ldGroupLeyenda" class="ld-meta" style="margin:4px 0 0"></p>
+</div>
 <nav class="eeff-tabs" id="ldGroupTabs" aria-label="Agrupar leads">
 <button type="button" class="eeff-tab active" data-ld-group="canal" aria-pressed="true">Canal</button>
 <button type="button" class="eeff-tab" data-ld-group="fuerza" aria-pressed="false">Fuerza de ventas</button>
@@ -761,8 +786,9 @@ Detalle
 <!-- 3 · Tiempo a compra: últimos 12 meses, no el mes consultado -->
 <section class="ventas-act" id="ldSupervivencia" aria-labelledby="ldActTiempo">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldActTiempo">3 · Tiempo a compra <span class="ld-ventana" title="No cambia con el periodo de arriba">Últimos 12 meses</span></span>
-<p id="ldSuperNota" class="ventas-act__sub">Cuántos días tarda la compra y qué la acelera</p>
+<span class="ventas-act__label" id="ldActTiempo">3 · Tiempo a compra <span class="ld-ventana ld-ventana--otra" id="ldVentanaSuper" title="No cambia con el periodo de arriba">Últimos 12 meses</span></span>
+<p class="ventas-act__sub ld-pregunta">¿Cuántos días tarda un lead en comprar y qué lo acelera? Usa los últimos 12 meses para tener suficientes compras.</p>
+<p id="ldSuperNota" class="ld-meta"></p>
 </div>
 <div id="ldSuperBody" class="ld-super">
 <p class="section-subtitle" style="margin:0">Consulte un periodo.</p>
@@ -772,8 +798,9 @@ Detalle
 <!-- 4 · Calidad de la atención: proceso de prospección y alertas -->
 <section class="ventas-act" id="secProspeccionPpro" aria-labelledby="ldAct5">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldAct5">4 · Calidad de la atención</span>
-<p id="ldPproNota" class="ventas-act__sub">Cómo se atiende al lead: intento de contacto, citas y cartera</p>
+<span class="ventas-act__label" id="ldAct5">4 · Calidad de la atención <span class="ld-ventana" data-ld-ventana="periodo"></span></span>
+<p class="ventas-act__sub ld-pregunta">¿Se atiende bien al lead? Intento de contacto, citas que se cumplen y cartera trabajada, contra su meta.</p>
+<p id="ldPproNota" class="ld-meta">Cómo se atiende al lead: intento de contacto, citas y cartera</p>
 </div>
 <section class="section-panel dashboard-section" style="margin-bottom:0">
 <div id="ldPproGrid" class="ld-ppro-grid"></div>
@@ -824,8 +851,9 @@ Detalle
 <!-- 5 · Tendencia: gráfica a todo lo ancho; la tabla queda a un clic -->
 <section class="ventas-act" aria-labelledby="ldAct4">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldAct4">5 · Tendencia del One Pager <span class="ld-ventana" id="ldVentanaAnio" title="Año de la planta: octubre a septiembre. No cambia con el mes consultado">oct – sep</span></span>
-<p id="ldConvMesMeta" class="ventas-act__sub">Octubre a septiembre, como lo publica Chevrolet</p>
+<span class="ventas-act__label" id="ldAct4">5 · Tendencia del One Pager <span class="ld-ventana ld-ventana--otra" id="ldVentanaAnio" title="Año de la planta: octubre a septiembre. No cambia con el mes consultado">oct – sep</span></span>
+<p class="ventas-act__sub ld-pregunta">¿Cómo va la conversión de las campañas mes a mes en el año de la planta?</p>
+<p id="ldConvMesMeta" class="ld-meta">Octubre a septiembre, como lo publica Chevrolet</p>
 </div>
 <section class="section-panel dashboard-section" style="margin-bottom:0" aria-label="Conversión por mes">
 <div class="chart-card ld-conv-mes-chart-card">
@@ -833,6 +861,7 @@ Detalle
 <canvas id="ldConvMesChart" aria-label="Leads y conversión por mes"></canvas>
 </div>
 </div>
+<p id="ldConvMesLectura" class="ld-super-lectura" style="margin:10px 4px 0"></p>
 <details class="ld-details">
 <summary>Ver la tabla por mes</summary>
 <div class="table-scroll">
@@ -860,8 +889,9 @@ Detalle
 <!-- 6 · Campañas: reactivas (catálogo GM y sitio de la agencia) y proactivas (GMF, Equity Mining, AMDGM) -->
 <section class="ventas-act" id="ldOnePager" aria-labelledby="ldAct3">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldAct3">6 · Campañas del One Pager</span>
-<p id="ldOnePagerResumen" class="ventas-act__sub">Mismo año de la planta (octubre a septiembre). La compra cuenta si ocurre dentro de 90 días desde la entrada</p>
+<span class="ventas-act__label" id="ldAct3">6 · Campañas del One Pager <span class="ld-ventana ld-ventana--otra" data-ld-ventana="anio"></span></span>
+<p class="ventas-act__sub ld-pregunta">¿Qué campañas traen leads que sí compran?</p>
+<p id="ldOnePagerResumen" class="ld-meta">Mismo año de la planta (octubre a septiembre). La compra cuenta si ocurre dentro de 90 días desde la entrada</p>
 </div>
 <div class="chart-grid ld-leads-pair-grid" id="ldCampGrid" style="margin-top:0">
 <section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
@@ -911,13 +941,14 @@ Detalle
 </div>
 </section>
 </div>
+<p class="ld-meta ld-camp-nota" id="ldCampNota"></p>
 </section>
 
 <!-- 7 · Detalle -->
 <section class="ventas-act" aria-labelledby="ldAct6" style="margin-bottom:0">
 <div class="ventas-act__head">
-<span class="ventas-act__label" id="ldAct6">7 · Detalle de leads</span>
-<p class="ventas-act__sub">Busque un cliente, ejecutivo, VIN o ID CRM; un clic abre su ficha</p>
+<span class="ventas-act__label" id="ldAct6">7 · Detalle de leads <span class="ld-ventana" data-ld-ventana="periodo"></span></span>
+<p class="ventas-act__sub ld-pregunta">¿Quién es cada lead y en qué paso va? Busque un cliente, ejecutivo, VIN o ID CRM; un clic abre su ficha.</p>
 </div>
 <section class="section-panel table-panel dashboard-section" style="margin-bottom:0">
 <div class="kpi-detail-toolbar">
@@ -1359,6 +1390,6 @@ Exportar CSV
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/sales.js?v=150"></script>
+<script src="/js/sales.js?v=151"></script>
 </body>
 </html>

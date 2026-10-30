@@ -182,7 +182,55 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas', tipo = 
   };
 }
 
-async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo } = {}) {
+function letraDeOrden(row) {
+  return String(row?.letraOrden || String(row?.orden || '').charAt(0) || '').trim().toUpperCase();
+}
+
+function filtrarOrdenesPorLetras(rows, letras) {
+  if (!letras?.length) return rows || [];
+  const allow = new Set(letras.map((l) => String(l || '').trim().toUpperCase()).filter(Boolean));
+  if (!allow.size) return rows || [];
+  return (rows || []).filter((row) => allow.has(letraDeOrden(row)));
+}
+
+/** El mes en curso trae matriz, Zacatelco y Cholula. Una sucursal se queda con sus letras. */
+function recortarMesCurso(mes, letras) {
+  if (!mes || !letras?.length) return mes;
+  const conocidas = new Set(mes.letras || []);
+  const allow = letras.map((l) => String(l || '').trim().toUpperCase()).filter((l) => conocidas.has(l));
+  if (!allow.length) return mes;
+  let acum = 0;
+  const days = (mes.days || []).map((row) => {
+    const total = allow.reduce((sum, l) => sum + Number(row[l] || 0), 0);
+    acum += total;
+    return { ...row, total, acumulado: acum };
+  });
+  const totals = { ...(mes.totals || {}), fechaLabel: mes.totals?.fechaLabel || 'Total', total: 0, acumulado: acum };
+  for (const l of mes.letras || []) totals[l] = allow.includes(l) ? days.reduce((sum, row) => sum + Number(row[l] || 0), 0) : 0;
+  totals.total = days.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const labels = {};
+  for (const l of allow) labels[l] = mes.labels?.[l] || l;
+  return { ...mes, letras: allow, labels, days, totals };
+}
+
+function aplicarAlcanceLetras(raw, letras) {
+  if (!raw || !letras?.length) return raw;
+  const records = filtrarOrdenesPorLetras(raw.records, letras);
+  const recordsYtd = filtrarOrdenesPorLetras(raw.recordsYtd, letras);
+  const openSnapshot = filtrarOrdenesPorLetras(raw.openSnapshot, letras);
+  return {
+    ...raw,
+    records,
+    recordsYtd,
+    openSnapshot,
+    mesCursoNomenclatura: recortarMesCurso(raw.mesCursoNomenclatura, letras),
+    total: records.length,
+    openTotal: openSnapshot.length,
+    alcanceLetras: letras.map((l) => String(l).toUpperCase()),
+  };
+}
+
+async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo, letras = null } = {}) {
   const estatusKey = normalizeEstatus(estatus);
   const areaKey = normalizeArea(area);
   const wantsOpenSnap = estatusKey === 'abiertas' && (!fechaInicio || !fechaFin);
@@ -199,7 +247,7 @@ async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo } = {})
       total: 0,
       openTotal: openSnapshot.length,
     };
-    return summarizePostSales(raw, { area: areaKey, estatus: 'abiertas', tipo });
+    return summarizePostSales(aplicarAlcanceLetras(raw, letras), { area: areaKey, estatus: 'abiertas', tipo });
   }
 
   if (!fechaInicio || !fechaFin) {
@@ -241,12 +289,14 @@ async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo } = {})
     openTotal: openSnapshot.length,
   };
 
+  const conAlcance = aplicarAlcanceLetras(raw, letras);
+
   // Asistente IA: siempre devolver resumen compacto filtrable por área/estatus/tipo.
   if (area || estatus || tipo) {
-    return summarizePostSales(raw, { area: areaKey, estatus: estatusKey, tipo });
+    return summarizePostSales(conAlcance, { area: areaKey, estatus: estatusKey, tipo });
   }
 
-  return raw;
+  return conAlcance;
 }
 
 async function getPostSalesOrderDetail(ordenId) {

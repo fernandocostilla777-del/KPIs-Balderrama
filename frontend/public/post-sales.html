@@ -7,7 +7,7 @@
 <link rel="icon" href="/favicon.ico" type="image/x-icon"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/css/dashboard.css?v=181" rel="stylesheet"/>
+<link href="/css/dashboard.css?v=184" rel="stylesheet"/>
 <link href="/css/balvo.css?v=1" rel="stylesheet"/>
 <script src="/js/theme.js?v=2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -134,13 +134,26 @@ HyP
 <section id="panelPosVentaHome" class="postventa-area-panel" data-ps-panel="posventa">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">PostVenta</h3>
-<p class="section-subtitle" id="postSalesAreaHint">Vista principal · Servicio, Refacciones y HyP</p>
-<div id="posVentaHomeSections" class="kpi-grid"></div>
-</section>
-<section class="section-panel dashboard-section">
-<h3 class="section-title">Resumen consolidado</h3>
-<p class="section-subtitle">Indicadores del periodo sin filtrar por sección</p>
-<div class="kpi-grid kpi-grid--eeff" id="kpiPosVentaHome"></div>
+<p class="section-subtitle" id="postSalesAreaHint">Servicio, HyP y Refacciones lado a lado, con las mismas columnas. Clic en un área para ver su detalle.</p>
+<ul id="psHomeLectura" class="ps-lectura" hidden></ul>
+<div class="table-scroll table-scroll--auto">
+<table class="data-table ps-areas" id="psAreasTabla">
+<thead>
+<tr>
+<th>Área</th>
+<th class="cell-num">Facturado</th>
+<th class="cell-num">Órdenes ingresadas</th>
+<th class="cell-num">Ya facturadas</th>
+<th class="cell-num">Abierto hoy</th>
+<th class="cell-num">Entregadas a tiempo</th>
+<th class="cell-num">Abiertas de más de 60 días</th>
+</tr>
+</thead>
+<tbody id="psAreasBody"><tr><td colspan="7" class="empty-row">Consulte un periodo.</td></tr></tbody>
+<tfoot id="psAreasFoot"></tfoot>
+</table>
+</div>
+<p class="section-subtitle ps-areas-nota" id="psAreasNota"></p>
 </section>
 </section>
 
@@ -148,7 +161,7 @@ HyP
 
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Indicadores operativos</h3>
-<p class="section-subtitle">Volumen, importes, antigüedad y operación de taller · clic en un KPI para ver el detalle</p>
+<p class="section-subtitle">Tres preguntas: qué se facturó, qué sigue abierto y cómo opera el taller. Clic en una tarjeta para ver sus órdenes.</p>
 <div id="kpiOperational"></div>
 <div id="opsKpiDetail" class="kpi-detail-panel hidden" style="margin-top:14px"></div>
 </section>
@@ -225,7 +238,7 @@ HyP
 </section>
 
 <section class="chart-grid">
-<div class="section-panel table-panel"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada · clic en una fila para ver el resumen</p><div class="table-scroll"><table class="data-table data-table--selectable"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
+<div class="section-panel table-panel" id="panelControlAseg"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada · clic en una fila para ver el resumen</p><div class="table-scroll"><table class="data-table data-table--selectable"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
 <div class="section-panel table-panel"><h3 class="section-title">Control de órdenes</h3><p class="section-subtitle">Sin aseguradora · tipo por letra del folio</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Tipo de orden</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody></table></div></div>
 </section>
 
@@ -275,18 +288,12 @@ HyP
 <div class="section-panel table-panel"><h3 class="section-title">Productividad por asesor</h3><div class="table-scroll"><table class="data-table"><thead><tr><th>Asesor</th><th>Órdenes</th><th>Facturadas</th><th>Abiertas</th><th>Importe</th></tr></thead><tbody id="tblAsesor"></tbody></table></div></div>
 </section>
 
-<section class="section-panel dashboard-section" data-hyp-hide>
-<h3 class="section-title">Resumen directivo</h3>
-<p class="section-subtitle">Indicadores clave del periodo · vista gerencial</p>
-<div class="kpi-grid kpi-grid--eeff" id="kpiExecutive"></div>
-</section>
-
 </section>
 
 <section id="panelPostVentaRefacciones" class="postventa-area-panel hidden" data-ps-panel="refacciones">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Refacciones</h3>
-<p class="section-subtitle">Ventas financieras · catálogo/existencias · pedidos a planta · pendientes</p>
+<p class="section-subtitle">Ventas, inventario, pedidos a planta y lo que falta por surtir</p>
 <nav class="eeff-tabs" id="refaccionesSubTabs" aria-label="Subsecciones de Refacciones">
 <button type="button" class="eeff-tab active" data-ref-tab="ventas" aria-pressed="true">
 <span class="material-symbols-outlined" aria-hidden="true">point_of_sale</span>
@@ -310,12 +317,12 @@ Pendientes
 <section id="refPanelVentas" class="refacciones-subpanel" data-ref-panel="ventas">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Ventas de refacciones</h3>
-<p class="section-subtitle">Contabilidad CON_CTAS 0481–0484 · margen y canales</p>
+<p class="section-subtitle">Venta de refacciones según la contabilidad, con su margen y por canal</p>
 <div id="kpiRefaccionesVentas" class="kpi-summary"></div>
 </section>
 <section class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Por canal (0481–0484)</h3>
+<h3 class="section-title" style="margin-bottom:0">Por canal</h3>
 <span id="refaccionesVentasCanalesMeta" class="top-bar-meta">—</span>
 </div>
 <div class="table-scroll">
@@ -333,7 +340,7 @@ Pendientes
 </section>
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Mostrador operativo</h3>
-<p class="section-subtitle">PAR_PEDMOST · pedidos del periodo (excluye cotizaciones)</p>
+<p class="section-subtitle">Pedidos de mostrador del periodo, sin cotizaciones</p>
 <div id="kpiRefaccionesMostrador" class="kpi-summary"></div>
 </section>
 <section class="section-panel table-panel dashboard-section">
@@ -364,7 +371,7 @@ Pendientes
 <section id="refPanelInventario" class="refacciones-subpanel hidden" data-ref-panel="inventario">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Existencias actuales</h3>
-<p class="section-subtitle">PAR_ALMACEN + PAR_PARTES · stock con existencia &gt; 0</p>
+<p class="section-subtitle">Piezas con existencia hoy en los almacenes</p>
 <div id="kpiRefaccionesInventario" class="kpi-summary"></div>
 </section>
 <section class="section-panel dashboard-section">
@@ -437,7 +444,7 @@ Pendientes
 <section id="refPanelPedidos" class="refacciones-subpanel hidden" data-ref-panel="pedidos">
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Pedidos de refacciones</h3>
-<p class="section-subtitle">PAR_PEDIDO / PAR_PEDIDETA · compras a planta/proveedor</p>
+<p class="section-subtitle">Compras a planta y proveedores del periodo</p>
 <div id="kpiRefaccionesPedidos" class="kpi-summary"></div>
 </section>
 <section class="section-panel dashboard-section">
@@ -580,6 +587,6 @@ Pendientes
 <script src="/js/mobile-nav.js"></script>
 <script src="/js/kpi-insights.js?v=13"></script>
 <script src="/js/assistant-bubble.js?v=20"></script>
-<script src="/js/post-sales.js?v=90"></script>
+<script src="/js/post-sales.js?v=92"></script>
 </body>
 </html>

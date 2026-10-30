@@ -10,6 +10,10 @@
   let openOpsKpiKey = null;
   let openAseguradoraKey = null;
   let currentArea = 'posventa';
+
+  function esAlcanceSucursal() {
+    return Boolean(document.documentElement.dataset.alcanceSucursal);
+  }
   let refaccionesData = null;
   let refaccionesLoadedKey = '';
   let refaccionesSubTab = 'ventas';
@@ -344,24 +348,16 @@
     return `<div class="kpi-group"><h4 class="kpi-group-title">${title}</h4><div class="kpi-grid${gridCls}">${cards.join('')}</div></div>`;
   }
 
-  /** Importes + antigüedad a la izquierda; Resultado mensual (vs mejor) a la derecha. */
-  function kpiImportesAgingConMejorMes(importesCards, agingCards, mejorMesCard) {
-    return `<div class="kpi-ops-mejor-duo">
-      <div class="kpi-ops-mejor-duo__main">
-        ${kpiGroup('Importes y tickets', importesCards)}
-        ${kpiGroup('Antigüedad de abiertas', agingCards)}
-      </div>
-      <div class="kpi-ops-mejor-duo__side">
-        <h4 class="kpi-group-title kpi-ops-mejor-duo__side-title">Resultado mensual</h4>
-        <div class="kpi-ops-mejor-duo__side-body">${mejorMesCard}</div>
-      </div>
-    </div>`;
+  /** «Oct 26» (mes y año corto) → «oct 2026»; así no se confunde con el día 26. */
+  function mesLegible(label) {
+    const m = /^([A-Za-zÁÉÍÓÚáéíóú]{3})\.?\s+(\d{2})$/.exec(String(label || '').trim());
+    return m ? `${m[1].toLowerCase()} 20${m[2]}` : String(label || '');
   }
 
   function kpiMesEnCursoCard(s) {
     const mc = s.mesEnCursoStats;
     if (!mc) {
-      return kpiCard('Resultado mensual', '—', 'Sin datos del año', 'green', null, 'mejorMes', 'kpi-card--mejor-mes');
+      return kpiCard('Facturado en el mes', '—', 'Sin datos del año', 'green', null, 'mejorMes', 'kpi-card--mejor-mes');
     }
     const pct = mc.pctVsMejor == null ? '—' : `${mc.pctVsMejor}%`;
     const ritmo = mc.pctRitmoVsMejor == null
@@ -374,7 +370,7 @@
       ? `Resultado ${Dashboard.fmt.currency(mc.importeFacturado)} vs mejor ${Dashboard.fmt.currency(mc.mejorMesImporte)}${pct !== '—' ? ` · ${pct} del mejor` : ''}`
       : `Proyección ${Dashboard.fmt.currency(mc.ritmoProyectado)} vs mejor ${Dashboard.fmt.currency(mc.mejorMesImporte)}${ritmo}`;
     return `<div class="kpi-card kpi-card--green kpi-card--clickable kpi-card--mejor-mes kpi-card--mes-curso" data-ops-kpi="mejorMes" role="button" tabindex="0" title="Clic para ver desglose">
-      <span class="kpi-title">Resultado mensual · ${escHtml(mc.label)}</span>
+      <span class="kpi-title">Facturado en ${escHtml(mesLegible(mc.label))}</span>
       <div class="mes-curso-head">
         <div class="mes-curso-total">
           <div class="kpi-value money">${Dashboard.fmt.currency(mc.importeFacturado)}</div>
@@ -382,7 +378,7 @@
         </div>
         <div class="mes-curso-mini">
           <div class="mes-curso-mini-chart"><canvas id="cMesCursoMini" aria-label="Comparativo mes vs mejor"></canvas></div>
-          <p class="mes-curso-mini-caption">${pct} del mejor (${escHtml(mc.mejorMesLabel)})</p>
+          <p class="mes-curso-mini-caption">${pct} del mejor mes (${escHtml(mesLegible(mc.mejorMesLabel))})</p>
         </div>
       </div>
       <div class="mes-curso-chart-wrap">
@@ -393,12 +389,6 @@
       <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">expand_more</span>
       <div class="kpi-accent"></div>
     </div>`;
-  }
-
-  function growthLabel(value, prevHasData) {
-    if (!prevHasData) return 'sin mes anterior en el periodo';
-    if (value === 0 || value == null || Number.isNaN(value)) return 'sin variación vs mes anterior';
-    return 'vs mes anterior';
   }
 
   function executiveCard(title, value, sub, cls, icon, id) {
@@ -457,6 +447,7 @@
         );
         return open.filter((r) => !periodoKeys.has(String(r.orden || '').trim().toUpperCase()));
       }
+      case 'abiertasHoy': return open;
       case 'abiertasPeriodo': return filtered.filter((r) => ['A', 'T', 'D', 'P'].includes(String(r.status || '').trim().toUpperCase()));
       case 'canceladas': return filtered.filter((r) => r.status === 'C');
       case 'cerradas': return filtered.filter((r) => {
@@ -544,29 +535,30 @@
         title: 'Órdenes ingresadas',
         hint: 'Órdenes del periodo · unidades únicas validadas por VIN (MO+RE de misma serie = 1 unidad)',
       },
-      facturadas: { title: 'Facturadas', hint: 'Status I · importe facturado' },
+      facturadas: { title: 'Facturado', hint: 'Órdenes del periodo ya facturadas y su importe' },
+      abiertasHoy: { title: 'Abierto hoy', hint: 'Todas las órdenes que siguen abiertas hoy, sin importar cuándo entraron' },
       abiertas: {
-        title: 'Abiertas acumuladas',
-        hint: 'Backlog abierto actual menos las abiertas ingresadas en el periodo',
+        title: 'Abiertas de periodos anteriores',
+        hint: 'Órdenes abiertas hoy que entraron antes del periodo consultado',
       },
       abiertasPeriodo: {
         title: 'Abiertas del periodo',
-        hint: 'De las ingresadas en el rango, las que siguen abiertas (A/T/D/P)',
+        hint: 'Órdenes que entraron en el periodo y siguen abiertas',
       },
-      canceladas: { title: 'Canceladas', hint: 'Status C en el periodo' },
+      canceladas: { title: 'Canceladas', hint: 'Órdenes que entraron en el periodo y se cancelaron' },
       cerradas: {
-        title: 'Cerradas',
-        hint: 'Ingresadas del periodo que no están abiertas, ni facturadas (I), ni canceladas (C)',
+        title: 'Cerradas sin facturar',
+        hint: 'Órdenes del periodo que el taller cerró y todavía no se facturan',
       },
       importeIngresado: { title: 'Importe ingresado', hint: 'Suma de importes de órdenes del periodo' },
-      ticketFacturado: { title: 'Ticket prom. facturado', hint: 'Promedio por orden facturada de aseguradoras (A / F / V)' },
-      facturadoUltimoMes: { title: `Facturado · ${s.ultimoMesLabel || 'último mes'}`, hint: 'Órdenes facturadas del último mes del periodo' },
+      ticketFacturado: { title: 'Ticket de aseguradoras', hint: 'Promedio por orden facturada a una aseguradora' },
+      facturadoUltimoMes: { title: `Facturado en ${mesLegible(s.ultimoMesLabel) || 'el último mes'}`, hint: 'Órdenes facturadas del último mes del periodo' },
       mejorMes: {
         title: s.mesEnCursoStats
-          ? `Resultado mensual · ${s.mesEnCursoStats.label}`
+          ? `Facturado en ${mesLegible(s.mesEnCursoStats.label)}`
           : `Mejor mes · ${s.mejorMes || '—'}`,
         hint: s.mesEnCursoStats
-          ? `Facturado del mes del filtro (${s.mesEnCursoStats.label}) vs mejor mes ${s.mesEnCursoStats.mejorMesLabel || ''} (${ytdMeta?.year || 'YTD'})`
+          ? `Facturado del mes (${mesLegible(s.mesEnCursoStats.label)}) contra el mejor mes del año (${mesLegible(s.mesEnCursoStats.mejorMesLabel || '')})`
           : (s.mejorMesStats
             ? `Acumulado ${ytdMeta?.year || 'del año'} · #1 de ${s.mejorMesStats.mesesComparados} meses`
             : 'Comparativo mensual del año'),
@@ -575,45 +567,47 @@
       aging31_60: { title: 'Abiertas 31-60 días', hint: 'Antigüedad media' },
       aging61_90: { title: 'Abiertas 61-90 días', hint: 'Riesgo creciente' },
       aging91_120: { title: 'Abiertas 91-120 días', hint: 'Backlog crítico' },
-      aging120p: { title: 'Abiertas +120 días', hint: 'Riesgo máximo de cartera' },
+      aging120p: { title: 'Abiertas más de 120 días', hint: 'Las más atrasadas: importe en riesgo de no cobrarse' },
       criticas60: { title: 'Críticas +60 días', hint: 'Órdenes abiertas con más de 60 días en taller' },
       conRefacciones: { title: 'Con refacciones', hint: 'Abiertas con líneas de refacciones (RE) cargadas' },
-      promesasVencidas: { title: 'Promesas vencidas', hint: 'Fecha promesa menor a hoy' },
+      promesasVencidas: { title: 'Promesa vencida', hint: 'Órdenes abiertas cuya fecha de entrega prometida ya pasó' },
       promedioSemanal: { title: 'Promedio semanal', hint: 'Ritmo de ingreso por semana del periodo' },
       tiempoPromCiclo: {
-        title: 'Tiempo promedio de ciclo',
-        hint: `ORE_FECHAORD → ORE_FECHACIE − ${o.cicloAjusteValuacionDias || 3} d valuación · letras A/F/H/J/V/Z/Ó (${o.ciclosConDato || 0} con cierre)`,
+        title: 'Tiempo de ciclo',
+        hint: currentArea === 'hyp'
+          ? `Días promedio del ingreso al cierre de las órdenes facturadas, sin los ${o.cicloAjusteValuacionDias || 3} días de valuación (${o.ciclosConDato || 0} con fecha de cierre)`
+          : `Días promedio del ingreso al cierre de las órdenes facturadas (${o.ciclosConDato || 0} con fecha de cierre)`,
       },
       tiempoMedCiclo: {
         title: 'Tiempo mediano de ciclo',
-        hint: `Mediana ORE_FECHAORD → ORE_FECHACIE − ${o.cicloAjusteValuacionDias || 3} d valuación (A/F/H/J/V/Z/Ó)`,
+        hint: 'Mediana de días del ingreso al cierre de las órdenes facturadas',
       },
       estanciaPromAbiertas: {
-        title: 'Estancia promedio abiertas',
-        hint: 'Días promedio desde ingreso hasta hoy en el backlog abierto',
+        title: 'Días abiertas',
+        hint: 'Días promedio desde el ingreso hasta hoy de las órdenes abiertas',
       },
       diasPromMecanica: {
-        title: 'Reparación mecánica',
-        hint: 'Días promedio de abiertas Servicio en taller/activas (T/A)',
+        title: 'En reparación',
+        hint: 'Días promedio de las órdenes de Servicio que están en taller ahora',
       },
       diasPromEsperaRefacc: {
-        title: 'Espera de refacciones',
-        hint: 'Días promedio de detenidas (D) o pendientes con refacciones',
+        title: 'Esperando refacciones',
+        hint: 'Días promedio de las órdenes detenidas o pendientes por refacciones',
       },
       diasPromPintura: {
         title: 'Pintura / HyP',
         hint: 'Días promedio de abiertas en Hojalatería y Pintura',
       },
       cumplimientoPromesa: {
-        title: 'Cumplimiento de promesa',
-        hint: '% de facturadas cerradas en o antes de la fecha promesa',
+        title: 'Entregadas a tiempo',
+        hint: 'De las facturadas con fecha promesa, cuántas se cerraron en esa fecha o antes',
       },
       retrasoPromesa: {
         title: 'Retraso promedio vs promesa',
         hint: 'Días promedio de atraso solo en facturadas fuera de promesa',
       },
       facturasPorSemana: {
-        title: 'Facturación por semana',
+        title: 'Facturadas por semana',
         hint: 'Órdenes facturadas ÷ semanas con ingreso en el periodo',
       },
       sinImporte: { title: 'Sin importe', hint: 'Abiertas sin monto capturado' },
@@ -2037,7 +2031,7 @@
     charts.cMesCursoRanking = new Chart(rankEl, {
       type: 'bar',
       data: {
-        labels: top.map((m) => m.label),
+        labels: top.map((m) => mesLegible(m.label)),
         datasets: [{
           data: top.map((m) => m.importeFacturado || 0),
           backgroundColor: bg,
@@ -2084,138 +2078,129 @@
     const r = d.risk;
     const o = d.operations || {};
 
-    document.getElementById('kpiExecutive').innerHTML = [
-      executiveCard('Importe facturado', fmt.currency(s.importeFacturado), `${fmt.number(s.facturadas)} órdenes · ${s.pctFacturado}% del total`, 'green', 'payments', 'psImporteFacturado'),
-      executiveCard('Tasa de facturación', `${s.pctImporteFacturado}%`, `del ${fmt.currency(s.importeIngresado)} ingresado`, 'blue', 'percent', 'psTasaFacturacion'),
-      executiveCard('Backlog abierto', fmt.currency(s.importeAbierto), `${fmt.number(s.abiertas)} órdenes en taller hoy`, 'amber', 'pending_actions', 'psBacklog'),
-      executiveCard(
-        'Crecimiento facturado',
-        `${s.crecimientoFacturado > 0 ? '+' : ''}${s.crecimientoFacturado}%`,
-        growthLabel(s.crecimientoFacturado, s.tieneMesAnterior),
-        s.crecimientoFacturado >= 0 ? 'gain' : 'loss',
-        'trending_up',
-        'psCrecimiento',
+    const esHyp = currentArea === 'hyp';
+    const esServicio = currentArea === 'servicio';
+    const n = (v) => fmt.number(v || 0);
+    const plural = (v, uno, varios) => `${n(v)} ${Number(v) === 1 ? uno : varios}`;
+    const abiertasAnteriores = s.abiertasAcumuladas ?? Math.max(0, (s.abiertas || 0) - (s.abiertasPeriodo || 0));
+    const crec = s.tieneMesAnterior && s.crecimientoFacturado != null && !Number.isNaN(s.crecimientoFacturado)
+      ? `${s.crecimientoFacturado > 0 ? '+' : ''}${s.crecimientoFacturado}% vs mes anterior`
+      : '';
+    const cumplidas = Math.max(0, (o.cumplimientoBase || 0) - (o.retrasadas || 0));
+    const mas60 = (a.b61_90 || 0) + (a.b91_120 || 0) + (a.b120p || 0);
+
+    // 1 · ¿Qué se facturó? — a la derecha, el mes contra el mejor mes del año.
+    const facturado = [
+      kpiCard(
+        'Facturado',
+        fmt.currency(s.importeFacturado),
+        `<span id="psImporteFacturado">${plural(s.facturadas, 'orden facturada', 'órdenes facturadas')} · ${n(o.facturasPorSemana)} por semana</span>`
+          + `${esHyp ? ` · ticket de aseguradoras ${fmt.currency(s.ticketPromFacturado)}` : ''}<span id="psCrecimiento">${crec ? ` · ${crec}` : ''}</span>`,
+        'green',
+        null,
+        'facturadas',
       ),
-      executiveCard('Riesgo +120 días', fmt.currency(s.riesgo120), 'importe abierto en órdenes críticas', 'loss', 'warning', 'psRiesgo120'),
-    ].join('');
+      kpiCard(
+        'Órdenes ingresadas',
+        n(s.totalOrdenes),
+        `<span id="psTasaFacturacion">${s.pctFacturado}% ya facturadas · ${s.pctImporteFacturado}% del importe</span>`,
+        'blue',
+        null,
+        'ingresadas',
+      ),
+      kpiCard('Importe ingresado', fmt.currency(s.importeIngresado), `ticket promedio ${fmt.currency(s.ticketPromIngresado)}`, 'violet', null, 'importeIngresado'),
+      kpiCard('Canceladas', n(s.canceladas), 'ingresadas en el periodo y canceladas', 'slate', null, 'canceladas'),
+    ];
+
+    // 2 · ¿Qué sigue abierto hoy?
+    const abierto = [
+      kpiCard(
+        'Abierto hoy',
+        fmt.currency(s.importeAbierto),
+        `<span id="psBacklog">${plural(s.abiertas, 'orden en taller', 'órdenes en taller')}</span>`,
+        'amber',
+        null,
+        'abiertasHoy',
+      ),
+      kpiCard(
+        'Abiertas del periodo',
+        n(s.abiertasPeriodo),
+        `entraron en el periodo · ${fmt.currency(s.importeAbiertoPeriodo || 0)}`,
+        'amber',
+        null,
+        'abiertasPeriodo',
+      ),
+      kpiCard(
+        'De periodos anteriores',
+        n(abiertasAnteriores),
+        `siguen abiertas · ${fmt.currency(s.importeAbiertoAcumulado ?? 0)}`,
+        'amber',
+        null,
+        'abiertas',
+      ),
+      kpiCard('Cerradas sin facturar', n(s.cerradas), 'el taller terminó; falta facturar', 'slate', null, 'cerradas'),
+      kpiCard(
+        'Promesa vencida',
+        n(o.promesasVencidas || r.promesasVencidas || 0),
+        'abiertas que ya pasaron su fecha de entrega',
+        'amber',
+        'psPromesasVencidas',
+        'promesasVencidas',
+      ),
+    ];
+    const antiguedad = [
+      kpiCard('0-30 días', n(a.b0_30), 'recientes', 'green', null, 'aging0_30'),
+      kpiCard('31-60 días', n(a.b31_60), '', 'blue', null, 'aging31_60'),
+      kpiCard('61-90 días', n(a.b61_90), '', 'amber', null, 'aging61_90'),
+      kpiCard('91-120 días', n(a.b91_120), '', 'amber', null, 'aging91_120'),
+      kpiCard('Más de 120 días', n(a.b120p), `<span id="psRiesgo120">${fmt.currency(s.riesgo120 || 0)} sin facturar</span>`, 'rose', 'psAging120', 'aging120p'),
+    ];
+
+    // 3 · ¿Cómo opera el taller?
+    const taller = [
+      kpiCard(
+        'Entregadas a tiempo',
+        o.cumplimientoBase ? `${fmt.number(o.cumplimientoPromesaPct || 0)}%` : '—',
+        o.cumplimientoBase
+          ? `${n(cumplidas)} de ${n(o.cumplimientoBase)} facturadas con promesa${o.retrasadas ? ` · ${n(o.retrasadas)} tarde, ${n(o.retrasoPromDias)} d en promedio` : ''}`
+          : 'sin facturadas con fecha promesa',
+        'blue',
+        null,
+        'cumplimientoPromesa',
+      ),
+      kpiCard(
+        'Tiempo de ciclo',
+        `${n(o.tiempoPromCiclo)} d`,
+        `del ingreso al cierre · ${plural(o.ciclosConDato, 'orden', 'órdenes')}${esHyp ? ` · sin los ${o.cicloAjusteValuacionDias || 3} d de valuación` : ''}`,
+        'blue',
+        'psTiempoCiclo',
+        'tiempoPromCiclo',
+      ),
+      kpiCard('Días abiertas', `${n(o.estanciaPromAbiertas)} d`, 'promedio de las órdenes abiertas hoy', 'amber', null, 'estanciaPromAbiertas'),
+      ...(esServicio
+        ? [kpiCard('En reparación', `${n(o.diasPromMecanica)} d`, `${plural(o.ordenesMecanica, 'orden', 'órdenes')} en taller ahora`, 'blue', 'psDiasMecanica', 'diasPromMecanica')]
+        : []),
+      kpiCard(
+        'Esperando refacciones',
+        `${n(o.diasPromEsperaRefacc)} d`,
+        `${plural(o.ordenesEsperaRefacc, 'orden detenida', 'órdenes detenidas')} por refacciones`,
+        'amber',
+        'psDiasEsperaRefacc',
+        'diasPromEsperaRefacc',
+      ),
+    ];
 
     document.getElementById('kpiOperational').innerHTML = [
-      kpiGroup('Volumen del periodo', [
-        kpiCard(
-          'Órdenes ingresadas',
-          fmt.number(s.totalOrdenes),
-          'En el periodo',
-          'blue',
-          null,
-          'ingresadas',
-        ),
-        kpiCard('Facturadas', fmt.number(s.facturadas), `${s.pctFacturado}% del total`, 'green', null, 'facturadas'),
-        kpiCard('Canceladas', fmt.number(s.canceladas), 'en el periodo', 'rose', null, 'canceladas'),
-        kpiCard(
-          'Abiertas del periodo',
-          fmt.number(s.abiertasPeriodo || 0),
-          `${s.pctAbiertasPeriodo || 0}% de ingresadas · ${fmt.currency(s.importeAbiertoPeriodo || 0)}`,
-          'amber',
-          null,
-          'abiertasPeriodo',
-        ),
-        kpiCard(
-          'Cerradas',
-          fmt.number(s.cerradas),
-          `${s.pctCerrado || 0}% del periodo · sin facturar ni cancelar`,
-          'violet',
-          null,
-          'cerradas',
-        ),
-        kpiCard(
-          'Abiertas acumuladas',
-          fmt.number(s.abiertasAcumuladas ?? Math.max(0, (s.abiertas || 0) - (s.abiertasPeriodo || 0))),
-          `${fmt.currency(s.importeAbiertoAcumulado ?? s.importeAbierto)} · excluye abiertas del periodo`,
-          'amber',
-          null,
-          'abiertas',
-        ),
-      ]),
-        kpiImportesAgingConMejorMes(
-        [
-          kpiCard('Importe ingresado', fmt.currency(s.importeIngresado), `ticket prom. ${fmt.currency(s.ticketPromIngresado)}`, 'violet', null, 'importeIngresado'),
-          kpiCard('Ticket prom. facturado', fmt.currency(s.ticketPromFacturado), 'aseguradoras A / F / V', 'blue', null, 'ticketFacturado'),
-          kpiCard(`Facturado · ${s.ultimoMesLabel}`, fmt.currency(s.facturadoUltimoMes), 'último mes del periodo', 'violet', null, 'facturadoUltimoMes'),
-        ],
-        [
-          kpiCard('0-30 días', fmt.number(a.b0_30), 'backlog reciente', 'green', null, 'aging0_30'),
-          kpiCard('31-60 días', fmt.number(a.b31_60), '', 'amber', null, 'aging31_60'),
-          kpiCard('61-90 días', fmt.number(a.b61_90), '', 'rose', null, 'aging61_90'),
-          kpiCard('+120 días', fmt.number(a.b120p), '', 'rose', 'psAging120', 'aging120p'),
-        ],
-        kpiMesEnCursoCard(s),
-      ),
-      kpiGroup('Operación de taller', [
-        kpiCard(
-          'Tiempo prom. ciclo',
-          `${fmt.number(o.tiempoPromCiclo || 0)} d`,
-          `${fmt.number(o.ciclosConDato || 0)} con ORE_FECHACIE · A/F/H/J/V/Z/Ó · −${o.cicloAjusteValuacionDias || 3} d`,
-          'blue',
-          'psTiempoCiclo',
-          'tiempoPromCiclo',
-        ),
-        kpiCard(
-          'Estancia prom. abiertas',
-          `${fmt.number(o.estanciaPromAbiertas || 0)} d`,
-          'días promedio en backlog actual',
-          'amber',
-          null,
-          'estanciaPromAbiertas',
-        ),
-        kpiCard(
-          'Reparación mecánica',
-          `${fmt.number(o.diasPromMecanica || 0)} d`,
-          `${fmt.number(o.ordenesMecanica || 0)} abiertas Servicio en taller`,
-          'blue',
-          'psDiasMecanica',
-          'diasPromMecanica',
-        ),
-        kpiCard(
-          'Espera de refacciones',
-          `${fmt.number(o.diasPromEsperaRefacc || 0)} d`,
-          `${fmt.number(o.ordenesEsperaRefacc || 0)} detenidas / pend. con RE`,
-          'amber',
-          'psDiasEsperaRefacc',
-          'diasPromEsperaRefacc',
-        ),
-        kpiCard(
-          'Pintura / HyP',
-          `${fmt.number(o.diasPromPintura || 0)} d`,
-          `${fmt.number(o.ordenesPintura || 0)} abiertas en Hojalatería y Pintura`,
-          'violet',
-          'psDiasPintura',
-          'diasPromPintura',
-        ),
-        kpiCard(
-          'Retraso prom. vs promesa',
-          `${fmt.number(o.retrasoPromDias || 0)} d`,
-          `${fmt.number(o.retrasadas || 0)} órdenes fuera de promesa`,
-          (o.retrasoPromDias || 0) > 0 ? 'rose' : 'green',
-          null,
-          'retrasoPromesa',
-        ),
-        kpiCard(
-          'Promesas vencidas',
-          fmt.number(o.promesasVencidas || r.promesasVencidas || 0),
-          'abiertas con fecha promesa menor a hoy',
-          'amber',
-          'psPromesasVencidas',
-          'promesasVencidas',
-        ),
-        kpiCard(
-          'Facturación / semana',
-          fmt.number(o.facturasPorSemana || 0),
-          'órdenes facturadas por semana del periodo',
-          'green',
-          null,
-          'facturasPorSemana',
-        ),
-      ]),
+      `<div class="kpi-ops-mejor-duo">
+        <div class="kpi-ops-mejor-duo__main">${kpiGroup('1 · ¿Qué se facturó en el periodo?', facturado)}</div>
+        <div class="kpi-ops-mejor-duo__side">
+          <h4 class="kpi-group-title kpi-ops-mejor-duo__side-title">El mes contra el mejor del año</h4>
+          <div class="kpi-ops-mejor-duo__side-body">${kpiMesEnCursoCard(s)}</div>
+        </div>
+      </div>`,
+      kpiGroup(`2 · ¿Qué sigue abierto hoy?${mas60 ? ` <span class="ps-grupo-nota">${plural(mas60, 'orden lleva', 'órdenes llevan')} más de 60 días</span>` : ''}`, abierto),
+      kpiGroup('Antigüedad de las abiertas', antiguedad, 'ps-aging-grid'),
+      kpiGroup('3 · ¿Cómo opera el taller?', taller),
     ].join('');
 
     bindOpsKpiCards();
@@ -2240,6 +2225,11 @@
 
     const data = raw || resolveMesCursoData();
     const letras = data?.letras || MES_CURSO_LETRAS;
+    const head = body.closest('table')?.querySelector('thead tr');
+    if (head) {
+      const labels = data?.labels || MES_CURSO_LABELS;
+      head.innerHTML = `<th>Fecha</th>${letras.map((L) => `<th class="cell-num" title="${L} · ${labels[L] || L}">${labels[L] || L}</th>`).join('')}<th class="cell-num">Total día</th><th class="cell-num">Acum.</th>`;
+    }
     if (labelEl) {
       labelEl.textContent = data?.periodo?.label
         ? `${data.periodo.label} · sin canceladas`
@@ -2252,7 +2242,7 @@
 
     const activeDays = (data?.days || []).filter((r) => (r.total || 0) > 0);
     if (!activeDays.length) {
-      body.innerHTML = `<tr class="empty-row"><td colspan="9">Sin órdenes N/D/Q/C/X/Y en el mes en curso (excluye canceladas). Usa periodo “Mes actual” y reinicia el backend si acabas de actualizar.</td></tr>`;
+      body.innerHTML = `<tr class="empty-row"><td colspan="${letras.length + 3}">Sin órdenes ${letras.join('/')} en el mes en curso (excluye canceladas).</td></tr>`;
       return;
     }
 
@@ -2459,9 +2449,6 @@
   }
 
   function updateAreaUI() {
-    const meta = window.PostSalesOrderTypes?.areaMeta?.(currentArea) || { label: 'PostVenta', hint: '' };
-    const hintEl = document.getElementById('postSalesAreaHint');
-    if (hintEl) hintEl.textContent = meta.hint || '';
 
     document.querySelectorAll('#postVentaMainTabs [data-ps-section]').forEach((btn) => {
       const active = btn.getAttribute('data-ps-section') === currentArea;
@@ -2475,11 +2462,23 @@
     const isServicio = currentArea === 'servicio';
     const isHyp = currentArea === 'hyp';
 
+    document.querySelectorAll('[data-ps-section="hyp"], [data-ps-section="refacciones"]').forEach((el) => {
+      const ocultar = esAlcanceSucursal();
+      el.hidden = ocultar;
+      el.classList.toggle('hidden', ocultar);
+    });
+    const hint = document.getElementById('postSalesAreaHint');
+    if (hint && esAlcanceSucursal()) {
+      hint.textContent = 'Solo el taller de Cholula: órdenes Y (normal) y X (reparación).';
+    }
+
     document.getElementById('panelPosVentaHome')?.classList.toggle('hidden', !isHome);
     document.getElementById('panelPostVentaOrdenes')?.classList.toggle('hidden', !isOrdenes);
     document.getElementById('panelPostVentaRefacciones')?.classList.toggle('hidden', !isRef);
     document.getElementById('panelMesCursoNomenclatura')?.classList.toggle('hidden', !isServicio);
     document.getElementById('panelHypCobranza')?.classList.toggle('hidden', !isHyp);
+    // Las aseguradoras son de HyP: en Servicio la tabla siempre salía vacía.
+    document.getElementById('panelControlAseg')?.classList.toggle('hidden', isServicio);
     document.getElementById('panelCuadreOrdenesHyp')?.classList.toggle('hidden', !isHyp);
     document.querySelectorAll('#panelPostVentaOrdenes [data-hyp-hide]').forEach((el) => {
       el.classList.toggle('hidden', isHyp);
@@ -2487,56 +2486,149 @@
     updateHypOpsChipsVisibility();
   }
 
-  function countOrdersByArea(area) {
-    const OT = window.PostSalesOrderTypes;
-    if (!OT?.matchesArea) return (allRecords || []).length;
-    return (allRecords || []).filter((r) => OT.matchesArea(r, area)).length;
-  }
-
+  /**
+   * Inicio de PostVenta: Servicio, HyP y Refacciones en una tabla con las mismas columnas,
+   * más tres frases de lectura. Refacciones viene de la contabilidad (venta de refacciones),
+   * no de órdenes, así que no entra al total de órdenes.
+   */
   function renderPosVentaHome() {
     const { fmt } = Dashboard;
-    const OT = window.PostSalesOrderTypes;
-    const sectionsEl = document.getElementById('posVentaHomeSections');
-    const homeKpi = document.getElementById('kpiPosVentaHome');
+    const body = document.getElementById('psAreasBody');
+    const foot = document.getElementById('psAreasFoot');
+    const nota = document.getElementById('psAreasNota');
+    const lectura = document.getElementById('psHomeLectura');
+    if (!body) return;
 
-    const servicioN = countOrdersByArea('servicio');
-    const hypN = countOrdersByArea('hyp');
-    const refVentas = Number(refaccionesData?.ventas?.financieras?.summary?.ventas || 0);
-    const refN = Number(refaccionesData?.pedidos?.summary?.totalPedidos || refaccionesData?.summary?.totalPedidos || 0);
+    const base = { ...getFilters(), hypLetras: null };
+    const resumen = (area) => {
+      const dash = PostSalesAnalytics.computeDashboard(allRecords, { ...base, area }, openSnapshot, ytdRecords);
+      const s = dash.summary || { ...dash.executive, ...dash.finance };
+      const a = dash.aging || {};
+      const o = dash.operations || {};
+      return {
+        area,
+        facturado: Number(s.importeFacturado || 0),
+        ingresadas: Number(s.totalOrdenes || 0),
+        facturadas: Number(s.facturadas || 0),
+        pctFacturado: s.pctFacturado,
+        abiertoImporte: Number(s.importeAbierto || 0),
+        abiertas: Number(s.abiertas || 0),
+        aTiempo: o.cumplimientoBase ? Number(o.cumplimientoPromesaPct || 0) : null,
+        baseTiempo: Number(o.cumplimientoBase || 0),
+        mas60: Number(a.b61_90 || 0) + Number(a.b91_120 || 0) + Number(a.b120p || 0),
+      };
+    };
+    const servicio = resumen('servicio');
+    const hyp = resumen('hyp');
     const refLoaded = Boolean(refaccionesData);
+    const refVentas = Number(refaccionesData?.ventas?.financieras?.summary?.ventas || 0);
+    const refMargen = refaccionesData?.ventas?.financieras?.summary?.margenBrutoPct;
 
-    if (sectionsEl) {
-      const card = (id, icon, title, value, sub, cls) => `
-        <button type="button" class="kpi-card kpi-card--${cls} kpi-card--clickable" data-ps-home-section="${id}" title="Ir a ${title}">
-          <div class="kpi-card-head">
-            <span class="kpi-title">${title}</span>
-            <span class="material-symbols-outlined kpi-icon">${icon}</span>
-          </div>
-          <div class="kpi-value">${value}</div>
-          <p class="kpi-subtitle">${sub}</p>
-          <span class="material-symbols-outlined kpi-card-chevron" aria-hidden="true">arrow_forward</span>
-          <div class="kpi-accent"></div>
-        </button>`;
-      sectionsEl.innerHTML = [
-        card('servicio', 'build', 'Servicio', fmt.number(servicioN), OT?.areaMeta?.('servicio')?.hint || 'Órdenes de servicio', 'blue'),
-        card('refacciones', 'warehouse', 'Refacciones', refLoaded ? fmt.money(refVentas) : '—', refLoaded ? `${fmt.number(refN)} pedidos compra · ventas 048x` : (OT?.areaMeta?.('refacciones')?.hint || 'Ventas e inventario'), 'amber'),
-        card('hyp', 'format_paint', 'HyP', fmt.number(hypN), OT?.areaMeta?.('hyp')?.hint || 'Órdenes HyP', 'violet'),
-      ].join('');
-      sectionsEl.querySelectorAll('[data-ps-home-section]').forEach((btn) => {
-        btn.addEventListener('click', () => setPostVentaArea(btn.getAttribute('data-ps-home-section')));
+    const pct = (v) => (v == null ? '—' : `${fmt.number(v)}%`);
+    const fila = (key, nombre, r) => `
+      <tr class="ps-areas__fila" data-ps-home-section="${key}" tabindex="0" title="Ver ${nombre}">
+        <td><strong>${nombre}</strong></td>
+        <td class="cell-num">${fmt.currency(r.facturado)}</td>
+        <td class="cell-num">${fmt.number(r.ingresadas)}</td>
+        <td class="cell-num">${fmt.number(r.facturadas)} <span class="cv-de">${pct(r.pctFacturado)}</span></td>
+        <td class="cell-num">${fmt.currency(r.abiertoImporte)} <span class="cv-de">${fmt.number(r.abiertas)} órdenes</span></td>
+        <td class="cell-num">${pct(r.aTiempo)}</td>
+        <td class="cell-num">${r.mas60 ? `<span class="ps-mas60">${fmt.number(r.mas60)}</span>` : '0'}</td>
+      </tr>`;
+    if (esAlcanceSucursal()) {
+      body.innerHTML = fila('servicio', 'Taller Cholula', servicio);
+      if (foot) {
+        foot.innerHTML = `<tr class="cv-total">
+          <td>Cholula</td>
+          <td class="cell-num">${fmt.currency(servicio.facturado)}</td>
+          <td class="cell-num">${fmt.number(servicio.ingresadas)}</td>
+          <td class="cell-num">${fmt.number(servicio.facturadas)} <span class="cv-de">${pct(servicio.pctFacturado)}</span></td>
+          <td class="cell-num">${fmt.currency(servicio.abiertoImporte)} <span class="cv-de">${fmt.number(servicio.abiertas)} órdenes</span></td>
+          <td class="cell-num">${pct(servicio.aTiempo)}</td>
+          <td class="cell-num">${fmt.number(servicio.mas60)}</td>
+        </tr>`;
+      }
+      if (nota) nota.textContent = 'Solo órdenes de la sucursal (Y normal y X reparación). Facturado y órdenes son del periodo; «Abierto hoy» y «más de 60 días» son las abiertas al día de hoy.';
+      if (lectura) {
+        const frases = [];
+        if (servicio.ingresadas || servicio.facturado) {
+          frases.push(`En el periodo el taller facturó <strong>${fmt.currency(servicio.facturado)}</strong> (${fmt.number(servicio.facturadas)} ya facturadas de ${fmt.number(servicio.ingresadas)} ingresadas).`);
+        }
+        if (servicio.abiertas) {
+          frases.push(`Hoy hay <strong>${fmt.currency(servicio.abiertoImporte)}</strong> en ${fmt.number(servicio.abiertas)} órdenes abiertas${servicio.mas60 ? ` y ${fmt.number(servicio.mas60)} llevan más de 60 días` : ''}.`);
+        }
+        if (servicio.aTiempo != null) frases.push(`De las entregadas con fecha prometida, el <strong>${pct(servicio.aTiempo)}</strong> salió a tiempo.`);
+        lectura.innerHTML = frases.map((f) => `<li>${f}</li>`).join('');
+        lectura.hidden = !frases.length;
+      }
+      body.querySelectorAll('[data-ps-home-section]').forEach((tr) => {
+        const ir = () => setPostVentaArea(tr.getAttribute('data-ps-home-section'));
+        tr.addEventListener('click', ir);
+        tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ir(); } });
       });
+      return;
     }
 
-    const dash = PostSalesAnalytics.computeDashboard(allRecords, { ...getFilters(), area: 'posventa' }, openSnapshot, ytdRecords);
-    const s = dash.summary || { ...dash.executive, ...dash.finance };
-    if (homeKpi) {
-      homeKpi.innerHTML = [
-        executiveCard('Órdenes ingresadas', fmt.number(s.totalOrdenes), 'todas las nomenclaturas', 'blue', 'assignment', null),
-        executiveCard('Facturadas', fmt.number(s.facturadas), `${s.pctFacturado}% del total`, 'green', 'payments', null),
-        executiveCard('Importe facturado', fmt.currency(s.importeFacturado), 'periodo consultado', 'violet', 'attach_money', null),
-        executiveCard('Backlog abierto', fmt.currency(s.importeAbierto), `${fmt.number(s.abiertas)} en taller`, 'amber', 'pending_actions', null),
-      ].join('');
+    body.innerHTML = [
+      fila('servicio', 'Servicio', servicio),
+      fila('hyp', 'HyP', hyp),
+      `<tr class="ps-areas__fila" data-ps-home-section="refacciones" tabindex="0" title="Ver Refacciones">
+        <td><strong>Refacciones</strong><span class="cc-sub ps-sub">venta según contabilidad</span></td>
+        <td class="cell-num">${refLoaded ? fmt.currency(refVentas) : '—'}</td>
+        <td class="cell-num" colspan="5"><span class="cell-muted">${refLoaded ? `No trabaja con órdenes de taller${refMargen != null ? ` · margen bruto ${fmt.number(refMargen)}%` : ''}` : 'Sin datos de Refacciones en el periodo'}</span></td>
+      </tr>`,
+    ].join('');
+
+    const total = {
+      facturado: servicio.facturado + hyp.facturado,
+      ingresadas: servicio.ingresadas + hyp.ingresadas,
+      facturadas: servicio.facturadas + hyp.facturadas,
+      abiertoImporte: servicio.abiertoImporte + hyp.abiertoImporte,
+      abiertas: servicio.abiertas + hyp.abiertas,
+      mas60: servicio.mas60 + hyp.mas60,
+    };
+    const baseTiempo = servicio.baseTiempo + hyp.baseTiempo;
+    const aTiempoTotal = baseTiempo
+      ? Math.round((((servicio.aTiempo || 0) * servicio.baseTiempo + (hyp.aTiempo || 0) * hyp.baseTiempo) / baseTiempo) * 10) / 10
+      : null;
+    if (foot) {
+      foot.innerHTML = `<tr class="cv-total">
+        <td>Servicio + HyP</td>
+        <td class="cell-num">${fmt.currency(total.facturado)}</td>
+        <td class="cell-num">${fmt.number(total.ingresadas)}</td>
+        <td class="cell-num">${fmt.number(total.facturadas)} <span class="cv-de">${pct(total.ingresadas ? Math.round((total.facturadas / total.ingresadas) * 1000) / 10 : null)}</span></td>
+        <td class="cell-num">${fmt.currency(total.abiertoImporte)} <span class="cv-de">${fmt.number(total.abiertas)} órdenes</span></td>
+        <td class="cell-num">${pct(aTiempoTotal)}</td>
+        <td class="cell-num">${fmt.number(total.mas60)}</td>
+      </tr>`;
     }
+    if (nota) {
+      nota.textContent = 'Facturado y órdenes son del periodo consultado; «Abierto hoy» y «más de 60 días» son las órdenes abiertas al día de hoy. '
+        + 'Refacciones viene de la contabilidad y no entra al total de órdenes.';
+    }
+
+    if (lectura) {
+      const frases = [];
+      if (total.facturado > 0) {
+        const pServ = Math.round((servicio.facturado / total.facturado) * 100);
+        frases.push(`Servicio aportó el <strong>${pServ}%</strong> de lo facturado en órdenes (${fmt.currency(servicio.facturado)}) y HyP el <strong>${100 - pServ}%</strong> (${fmt.currency(hyp.facturado)}).`);
+      }
+      if (total.abiertoImporte > 0) {
+        const mayor = hyp.abiertoImporte >= servicio.abiertoImporte ? ['HyP', hyp] : ['Servicio', servicio];
+        frases.push(`Hoy hay <strong>${fmt.currency(total.abiertoImporte)}</strong> en órdenes abiertas; ${mayor[0]} concentra ${fmt.currency(mayor[1].abiertoImporte)}${total.mas60 ? ` y ${fmt.number(total.mas60)} ${total.mas60 === 1 ? 'orden lleva' : 'órdenes llevan'} más de 60 días` : ''}.`);
+      }
+      if (servicio.aTiempo != null || hyp.aTiempo != null) {
+        frases.push(`Entregadas en la fecha prometida: Servicio <strong>${pct(servicio.aTiempo)}</strong>, HyP <strong>${pct(hyp.aTiempo)}</strong>.`);
+      }
+      lectura.innerHTML = frases.map((f) => `<li>${f}</li>`).join('');
+      lectura.hidden = !frases.length;
+    }
+
+    body.querySelectorAll('[data-ps-home-section]').forEach((tr) => {
+      const ir = () => setPostVentaArea(tr.getAttribute('data-ps-home-section'));
+      tr.addEventListener('click', ir);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ir(); } });
+    });
   }
 
   function formatPedidoFecha(v) {
@@ -2577,20 +2669,20 @@
     const canalesBody = document.getElementById('tblRefaccionesVentasCanales');
     if (canalesMeta) {
       canalesMeta.textContent = fin.available === false
-        ? 'Sin CON_CTAS en el periodo'
+        ? 'Sin ventas de refacciones en la contabilidad del periodo'
         : `${fmt.money(finS.ventas || 0)} ventas · margen ${fmt.number(finS.margenBrutoPct || 0)}%`;
     }
     if (finKpi) {
       finKpi.innerHTML = `
         <div class="kpi-group">
-          <h4 class="kpi-group-title">Financiero (0481–0484)</h4>
+          <h4 class="kpi-group-title">Resultado de la venta</h4>
           <div class="kpi-grid">
-            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Ventas</span><div class="kpi-value">${fmt.money(finS.ventas || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--rose"><span class="kpi-title">Costo</span><div class="kpi-value">${fmt.money(finS.costo || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--green"><span class="kpi-title">Utilidad bruta</span><div class="kpi-value">${fmt.money(finS.utilidadBruta || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Margen bruto</span><div class="kpi-value">${fmt.number(finS.margenBrutoPct || 0)}%</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Utilidad operación</span><div class="kpi-value">${fmt.money(finS.utilidadOperacion || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Margen operación</span><div class="kpi-value">${fmt.number(finS.margenOperacionPct || 0)}%</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Ventas</span><div class="kpi-value">${fmt.money(finS.ventas || 0)}</div><p class="kpi-subtitle">venta de refacciones del periodo</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Costo de venta</span><div class="kpi-value">${fmt.money(finS.costo || 0)}</div><p class="kpi-subtitle">lo que costaron las piezas vendidas</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Utilidad bruta</span><div class="kpi-value">${fmt.money(finS.utilidadBruta || 0)}</div><p class="kpi-subtitle">ventas menos costo de venta</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Margen bruto</span><div class="kpi-value">${fmt.number(finS.margenBrutoPct || 0)}%</div><p class="kpi-subtitle">utilidad bruta sobre ventas</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Utilidad de operación</span><div class="kpi-value">${fmt.money(finS.utilidadOperacion || 0)}</div><p class="kpi-subtitle">después de los gastos del área</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Margen de operación</span><div class="kpi-value">${fmt.number(finS.margenOperacionPct || 0)}%</div><p class="kpi-subtitle">utilidad de operación sobre ventas</p><div class="kpi-accent"></div></div>
           </div>
         </div>`;
     }
@@ -2614,13 +2706,13 @@
     if (mostKpi) {
       mostKpi.innerHTML = `
         <div class="kpi-group">
-          <h4 class="kpi-group-title">Mostrador (PAR_PEDMOST)</h4>
+          <h4 class="kpi-group-title">Mostrador</h4>
           <div class="kpi-grid">
-            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Pedidos</span><div class="kpi-value">${fmt.number(mostS.pedidos || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--green"><span class="kpi-title">Importe</span><div class="kpi-value">${fmt.money(mostS.importe || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Pendientes</span><div class="kpi-value">${fmt.number(mostS.pendientes || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Cerrados</span><div class="kpi-value">${fmt.number(mostS.cerrados || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Imp. cerrados</span><div class="kpi-value">${fmt.money(mostS.importeCerrados || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Pedidos</span><div class="kpi-value">${fmt.number(mostS.pedidos || 0)}</div><p class="kpi-subtitle">pedidos de mostrador del periodo</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Importe de pedidos</span><div class="kpi-value">${fmt.money(mostS.importe || 0)}</div><p class="kpi-subtitle">de todos los pedidos de mostrador</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Pendientes</span><div class="kpi-value">${fmt.number(mostS.pendientes || 0)}</div><p class="kpi-subtitle">pedidos sin cerrar</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Cerrados</span><div class="kpi-value">${fmt.number(mostS.cerrados || 0)}</div><p class="kpi-subtitle">pedidos entregados</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Importe cerrado</span><div class="kpi-value">${fmt.money(mostS.importeCerrados || 0)}</div><p class="kpi-subtitle">de los pedidos entregados</p><div class="kpi-accent"></div></div>
           </div>
         </div>`;
     }
@@ -2651,10 +2743,10 @@
         <div class="kpi-group">
           <h4 class="kpi-group-title">Inventario</h4>
           <div class="kpi-grid">
-            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Líneas c/stock</span><div class="kpi-value">${fmt.number(invS.lineas || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--green"><span class="kpi-title">Existencia</span><div class="kpi-value">${fmt.number(invS.existencia || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Costo</span><div class="kpi-value">${fmt.money(invS.costo || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Almacenes</span><div class="kpi-value">${fmt.number(invS.almacenes || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Números de parte</span><div class="kpi-value">${fmt.number(invS.lineas || 0)}</div><p class="kpi-subtitle">con existencia hoy</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Piezas en existencia</span><div class="kpi-value">${fmt.number(invS.existencia || 0)}</div><p class="kpi-subtitle">suma de todas las piezas</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Valor del inventario</span><div class="kpi-value">${fmt.money(invS.costo || 0)}</div><p class="kpi-subtitle">a costo</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Almacenes</span><div class="kpi-value">${fmt.number(invS.almacenes || 0)}</div><p class="kpi-subtitle">con existencia</p><div class="kpi-accent"></div></div>
           </div>
         </div>`;
     }
@@ -2674,10 +2766,10 @@
         <div class="kpi-group">
           <h4 class="kpi-group-title">Traspasos</h4>
           <div class="kpi-grid">
-            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Piezas movidas</span><div class="kpi-value">${fmt.number(trS.piezas || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Partes</span><div class="kpi-value">${fmt.number(trS.partes || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--green"><span class="kpi-title">Documentos</span><div class="kpi-value">${fmt.number(trS.documentos || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Costo</span><div class="kpi-value">${fmt.money(trS.costo || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Piezas movidas</span><div class="kpi-value">${fmt.number(trS.piezas || 0)}</div><p class="kpi-subtitle">entre almacenes en el periodo</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Números de parte</span><div class="kpi-value">${fmt.number(trS.partes || 0)}</div><p class="kpi-subtitle">distintos traspasados</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Traspasos</span><div class="kpi-value">${fmt.number(trS.documentos || 0)}</div><p class="kpi-subtitle">documentos de traspaso</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Costo de lo traspasado</span><div class="kpi-value">${fmt.money(trS.costo || 0)}</div><p class="kpi-subtitle">a costo</p><div class="kpi-accent"></div></div>
           </div>
         </div>`;
     }
@@ -2813,11 +2905,11 @@
         <div class="kpi-group">
           <h4 class="kpi-group-title">Pedidos</h4>
           <div class="kpi-grid">
-            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Pedidos</span><div class="kpi-value">${fmt.number(pedS.totalPedidos || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--green"><span class="kpi-title">Abiertos</span><div class="kpi-value">${fmt.number(pedS.abiertos || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Pend. surtir</span><div class="kpi-value">${fmt.number(pedS.pendientesSurtir || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Importe</span><div class="kpi-value">${fmt.money(pedS.importeTotal || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Cancelados</span><div class="kpi-value">${fmt.number(pedS.cancelados || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--blue"><span class="kpi-title">Pedidos</span><div class="kpi-value">${fmt.number(pedS.totalPedidos || 0)}</div><p class="kpi-subtitle">compras a planta y proveedores</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--green"><span class="kpi-title">Vigentes</span><div class="kpi-value">${fmt.number(pedS.abiertos || 0)}</div><p class="kpi-subtitle">pedidos no cancelados</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Por surtir</span><div class="kpi-value">${fmt.number(pedS.pendientesSurtir || 0)}</div><p class="kpi-subtitle">pedidos con piezas por llegar</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Importe pedido</span><div class="kpi-value">${fmt.money(pedS.importeTotal || 0)}</div><p class="kpi-subtitle">de todos los pedidos</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--slate"><span class="kpi-title">Cancelados</span><div class="kpi-value">${fmt.number(pedS.cancelados || 0)}</div><p class="kpi-subtitle">pedidos cancelados</p><div class="kpi-accent"></div></div>
           </div>
         </div>`;
     }
@@ -2850,9 +2942,9 @@
         <div class="kpi-group">
           <h4 class="kpi-group-title">Pendientes</h4>
           <div class="kpi-grid">
-            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Pedidos pend.</span><div class="kpi-value">${fmt.number(pendS.total || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--rose"><span class="kpi-title">Líneas pend.</span><div class="kpi-value">${fmt.number(pendS.lineasPendientes || 0)}</div><div class="kpi-accent"></div></div>
-            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Importe</span><div class="kpi-value">${fmt.money(pendS.importe || 0)}</div><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Pedidos pendientes</span><div class="kpi-value">${fmt.number(pendS.total || 0)}</div><p class="kpi-subtitle">por surtir o por llegar</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--amber"><span class="kpi-title">Partidas pendientes</span><div class="kpi-value">${fmt.number(pendS.lineasPendientes || 0)}</div><p class="kpi-subtitle">renglones de esos pedidos</p><div class="kpi-accent"></div></div>
+            <div class="kpi-card kpi-card--violet"><span class="kpi-title">Importe pendiente</span><div class="kpi-value">${fmt.money(pendS.importe || 0)}</div><p class="kpi-subtitle">de lo que falta surtir</p><div class="kpi-accent"></div></div>
           </div>
         </div>`;
     }
@@ -3293,8 +3385,9 @@
   }
 
   async function setPostVentaArea(area) {
-    const next = String(area || 'posventa').toLowerCase();
+    let next = String(area || 'posventa').toLowerCase();
     if (!['posventa', 'servicio', 'refacciones', 'hyp'].includes(next)) return;
+    if (esAlcanceSucursal() && (next === 'hyp' || next === 'refacciones')) next = 'servicio';
     currentArea = next;
     updateAreaUI();
 
@@ -3310,7 +3403,7 @@
     if (currentArea === 'posventa') {
       const fi = document.getElementById('fechaInicio')?.value;
       const ff = document.getElementById('fechaFin')?.value;
-      if (fi && ff && !refaccionesData) {
+      if (!esAlcanceSucursal() && fi && ff && !refaccionesData) {
         try {
           await loadRefaccionesPedidos(fi, ff);
         } catch (err) {
@@ -3443,6 +3536,7 @@
 
   function getSectionFromUrl() {
     const h = String(window.location.hash || '').replace(/^#/, '').toLowerCase();
+    if (esAlcanceSucursal() && (h === 'hyp' || h === 'refacciones')) return 'servicio';
     if (['posventa', 'servicio', 'refacciones', 'hyp'].includes(h)) return h;
     return 'posventa';
   }

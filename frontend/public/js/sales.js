@@ -3303,7 +3303,7 @@
 
   const TAB_SRC = {
     financiamiento: '/js/financiamiento.js?v=64',
-    leads: '/js/leads.js?v=37',
+    leads: '/js/leads.js?v=38',
     afluencia: '/js/afluencia.js?v=19',
     comisiones: '/js/comisiones.js?v=2',
     vendedores: '/js/monitoreo-cholula.js?v=13',

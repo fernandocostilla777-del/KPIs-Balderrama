@@ -127,14 +127,16 @@ function sanitizePages(pages, { forceAdmin = false } = {}) {
   return next;
 }
 
-function sanitizeActions(actions, { pages = [], forceAdmin = false } = {}) {
+function sanitizeActions(actions, { pages = [], forceAdmin = false, explicit = false } = {}) {
   const raw = actions && typeof actions === 'object' ? actions : {};
-  const legacyPagesOnly = Object.keys(raw).length === 0;
+  const legacyPagesOnly = !explicit && Object.keys(raw).length === 0;
   const next = {};
   for (const page of PAGE_CATALOG) {
+    // Con acciones explícitas, un módulo ausente o vacío queda sin acceso.
+    // El relleno con «leer» solo aplica a guardados antiguos que traían solo páginas.
     const source = Array.isArray(raw[page.id])
       ? raw[page.id]
-      : (pages.includes(page.id)
+      : (!explicit && pages.includes(page.id)
         ? (forceAdmin && legacyPagesOnly ? ACTION_CATALOG.map((action) => action.id) : ['leer'])
         : []);
     const seen = new Set();
@@ -160,7 +162,8 @@ function pagesFromActions(actions) {
 function normalizeRoleEntry(entry, { forceAdmin = false } = {}) {
   if (!entry || typeof entry !== 'object') return null;
   const pages = sanitizePages(entry.pages || [], { forceAdmin });
-  const actions = sanitizeActions(entry.actions, { pages, forceAdmin });
+  const explicit = entry.actions && typeof entry.actions === 'object' && Object.keys(entry.actions).length > 0;
+  const actions = sanitizeActions(entry.actions, { pages, forceAdmin, explicit });
   const derivedPages = pagesFromActions(actions);
   return {
     pages: derivedPages.length ? derivedPages : pages,
@@ -232,8 +235,17 @@ function updateRolePermissions(byRoleInput, roleDefaults = {}) {
     const incoming = byRoleInput?.[roleId];
     if (!incoming) continue;
     const forceAdmin = roleId === 'administracion';
-    const fallbackPages = sanitizePages(incoming.pages || roleDefaults[roleId], { forceAdmin });
-    const actions = sanitizeActions(incoming.actions, { pages: fallbackPages, forceAdmin });
+    const explicit = incoming.actions && typeof incoming.actions === 'object';
+    const hintedPages = explicit
+      ? Object.entries(incoming.actions)
+        .filter(([, list]) => Array.isArray(list) && list.length > 0)
+        .map(([pageId]) => pageId)
+      : (incoming.pages || roleDefaults[roleId]);
+    const fallbackPages = sanitizePages(
+      hintedPages.length ? hintedPages : (incoming.pages || roleDefaults[roleId]),
+      { forceAdmin },
+    );
+    const actions = sanitizeActions(incoming.actions, { pages: fallbackPages, forceAdmin, explicit });
     const pages = sanitizePages(pagesFromActions(actions), { forceAdmin });
     nextByRole[roleId] = {
       pages,

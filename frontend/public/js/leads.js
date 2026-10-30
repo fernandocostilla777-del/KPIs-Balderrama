@@ -695,8 +695,8 @@
     const cards = todos.filter((item) => item.disponible && item.valor != null && !repetidos.has(item.id));
     if (nota) {
       nota.textContent = pack.cartera?.ultimoEstatus
-        ? `Cómo se atiende al lead: intento de contacto, citas y cartera (último movimiento de cartera: ${formatDate(pack.cartera.ultimoEstatus)})`
-        : 'Cómo se atiende al lead: intento de contacto, citas y cartera';
+        ? `Último movimiento registrado en la cartera: ${formatDate(pack.cartera.ultimoEstatus)}.`
+        : '';
     }
     // P-PRO-1A cuenta cualquier resultado capturado (incluye "no contesta"); con el nombre del
     // catálogo parecía contradecir a Contactados del bloque 1, que solo cuenta contacto = SI.
@@ -738,6 +738,160 @@
       : '<tr class="empty-row"><td colspan="5">Sin cartera activa en el CRM.</td></tr>';
   }
 
+  const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+  /** «2026-11-30» → «30 nov». */
+  function fechaCorta(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return '';
+    return `${Number(m[3])} ${MESES_CORTOS[Number(m[2]) - 1]}`;
+  }
+
+  function sumarDiasIso(iso, dias) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return '';
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + dias));
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** Periodo legible: «sep 2026» si es un mes completo; si no, «1 sep – 15 sep 2026». */
+  function etiquetaPeriodo(fi, ff) {
+    const a = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fi || ''));
+    const b = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ff || ''));
+    if (!a || !b) return '';
+    const finMes = new Date(Number(b[1]), Number(b[2]), 0).getDate();
+    if (Number(a[3]) === 1 && Number(b[3]) === finMes) {
+      return a[1] === b[1] && a[2] === b[2]
+        ? `${MESES_CORTOS[Number(a[2]) - 1]} ${a[1]}`
+        : `${MESES_CORTOS[Number(a[2]) - 1]} ${a[1]} – ${MESES_CORTOS[Number(b[2]) - 1]} ${b[1]}`;
+    }
+    return `${fechaCorta(fi)} – ${fechaCorta(ff)} ${b[1]}`;
+  }
+
+  /**
+   * Paso del embudo donde se quedan más leads (en número): es el que más conviene atacar.
+   * Regresa { desde, hasta, perdidos, pctPerdido } o null.
+   */
+  function pasoConMasPerdida(s) {
+    const leads = Number(s.leadsUnicos ?? s.leads ?? 0);
+    const pasos = [
+      { desde: 'lead', hasta: 'contacto', a: leads, b: Number(s.contactados || 0), key: 'contactados' },
+      { desde: 'contacto', hasta: 'cita', a: Number(s.contactados || 0), b: Number(s.citas || 0), key: 'citas' },
+      { desde: 'cita', hasta: 'cotización', a: Number(s.citas || 0), b: Number(s.cotizados || 0), key: 'cotizados' },
+      { desde: 'cotización', hasta: 'compra', a: Number(s.cotizados || 0), b: Number(s.compras || 0), key: 'compras' },
+    ].filter((p) => p.a > 0 && p.b <= p.a);
+    if (!pasos.length) return null;
+    const peor = pasos.reduce((x, y) => ((y.a - y.b) > (x.a - x.b) ? y : x));
+    return { ...peor, perdidos: peor.a - peor.b, pctPerdido: pctDe(peor.a - peor.b, peor.a) };
+  }
+
+  /** Fuentes con al menos este número de leads entran a la comparación de la lectura. */
+  const MIN_LEADS_LECTURA = 20;
+
+  function enlaceBloque(n, id) {
+    return `<a class="ld-lectura__ir" href="#${id}" data-ld-ir="${id}">bloque ${n}</a>`;
+  }
+
+  /**
+   * Lectura del periodo: cinco frases que resumen lo que dicen los bloques, con su número,
+   * para que la pestaña se entienda sin conocer el CRM.
+   */
+  function renderLectura() {
+    const caja = document.getElementById('ldLectura');
+    const lista = document.getElementById('ldLecturaLista');
+    if (!caja || !lista) return;
+    const s = summary();
+    const leads = Number(s.leadsUnicos ?? s.leads ?? 0);
+    if (!state.data || leads === 0) {
+      caja.hidden = true;
+      return;
+    }
+    const frases = [];
+    const periodo = etiquetaPeriodo(state.fechaInicio, state.fechaFin);
+    const vida = Number(s.vidaDias || 90);
+
+    // 1. Resultado y plazo.
+    let resultado = `De los <strong>${num(leads)}</strong> leads que entraron en ${escapeHtml(periodo)}, <strong>${num(s.compras)}</strong> ya compraron (<strong>${pct(s.conversionCompraPct)}</strong>).`;
+    if (Number(s.aunPuedenConvertir) > 0) {
+      const vence1 = sumarDiasIso(state.fechaInicio, vida);
+      const vence2 = sumarDiasIso(state.fechaFin, vida);
+      resultado += ` Otros <strong>${num(s.aunPuedenConvertir)}</strong> siguen dentro de sus ${num(vida)} días y todavía pueden comprar; su plazo vence entre el ${fechaCorta(vence1)} y el ${fechaCorta(vence2)}.`;
+    }
+    const ref = (state.supervivencia?.curvaGeneral || []).filter((p) => Number(p.dia) <= vida).pop();
+    if (ref && Number.isFinite(Number(ref.f))) {
+      resultado += ` Como referencia, en los últimos 12 meses compró el ${pct(Number(ref.f) * 100)} de los leads dentro de ${num(vida)} días.`;
+    }
+    frases.push({ texto: resultado, ir: enlaceBloque(1, 'ldAct1') });
+
+    // 2. Dónde se quedan.
+    const peor = pasoConMasPerdida(s);
+    if (peor && peor.perdidos > 0) {
+      frases.push({
+        texto: `Donde más leads se quedan es entre <strong>${peor.desde}</strong> y <strong>${peor.hasta}</strong>: ${num(peor.perdidos)} de ${num(peor.a)} (${pct(peor.pctPerdido)}) no pasaron al siguiente paso.`,
+        ir: enlaceBloque(1, 'ldAct1'),
+      });
+    }
+
+    // 3. Fuentes.
+    const fuentes = (state.data.porFuente || [])
+      .filter((r) => Number(r.leads || 0) >= MIN_LEADS_LECTURA)
+      .map((r) => ({ ...r, grupo: fuenteLabel(r.grupo) }));
+    if (fuentes.length >= 2) {
+      const mejor = fuentes.reduce((x, y) => (Number(y.conversionPct) > Number(x.conversionPct) ? y : x));
+      const mayor = fuentes.reduce((x, y) => (Number(y.leads) > Number(x.leads) ? y : x));
+      const total = fuentes.reduce((a, r) => a + Number(r.leads || 0), 0);
+      let txt = `<strong>${escapeHtml(mejor.grupo)}</strong> es la fuente que mejor convierte (${pct(mejor.conversionPct)}).`;
+      if (mayor.grupo !== mejor.grupo) {
+        txt += ` <strong>${escapeHtml(mayor.grupo)}</strong> trae ${pct(pctDe(mayor.leads, total))} de los leads y convierte ${pct(mayor.conversionPct)}.`;
+      }
+      frases.push({ texto: txt, ir: enlaceBloque(2, 'ldAct2') });
+    }
+
+    // 4. Tiempo a compra.
+    const sup = state.supervivencia;
+    if (sup && !sup.loading && !sup.error && sup.tiempo?.t50 != null) {
+      let txt = `La mitad de las compras ocurre en los primeros <strong>${num(sup.tiempo.t50)} días</strong> desde que entra el lead.`;
+      const filas = sup.hitos?.filas || [];
+      const base = filas.find((f) => f.clave === 'referencia' && f.suficiente);
+      const cita = filas.find((f) => f.clave === 'cita' && f.suficiente);
+      if (base && cita) {
+        txt += ` Con cita asistida compra el ${pct(cita.pct)} en los ${num(sup.hitos.horizonteDias || 90)} días siguientes; sin cita, prueba ni solicitud al día 14, solo el ${pct(base.pct)}.`;
+      }
+      frases.push({ texto: txt, ir: enlaceBloque(3, 'ldActTiempo') });
+    }
+
+    // 5. Atención contra meta.
+    const ind = (state.prospeccion?.indicadores || []).find((i) => i.id === 'P-PRO-5' && i.disponible && i.valor != null);
+    if (ind) {
+      const cumple = ind.meta != null && Number(ind.valor) >= Number(ind.meta);
+      frases.push({
+        texto: `De las citas programadas se cumplió el <strong>${pct(ind.valor)}</strong>${ind.meta != null ? `, ${cumple ? 'arriba' : 'debajo'} de la meta de ${pct(ind.meta)}` : ''}.`,
+        ir: enlaceBloque(4, 'ldAct5'),
+        alerta: ind.meta != null && !cumple,
+      });
+    }
+
+    lista.innerHTML = frases.map((f) => `<li class="${f.alerta ? 'is-alerta' : ''}">${f.texto} <span class="ld-lectura__ver">Ver ${f.ir}</span></li>`).join('');
+    caja.hidden = !frases.length;
+  }
+
+  /** Cada bloque dice qué fechas usa: el periodo consultado, los últimos 12 meses o el año de la planta. */
+  function renderVentanas() {
+    const periodo = etiquetaPeriodo(state.fechaInicio, state.fechaFin);
+    document.querySelectorAll('[data-ld-ventana="periodo"]').forEach((el) => {
+      el.textContent = periodo ? `Entraron en ${periodo}` : '';
+      el.title = 'Sigue el periodo consultado arriba';
+    });
+    const anio = state.data?.conversionPorMesMeta?.etiqueta || 'oct – sep';
+    document.querySelectorAll('[data-ld-ventana="anio"]').forEach((el) => {
+      el.textContent = `Año de la planta: ${anio}`;
+      el.title = 'Octubre a septiembre. No cambia con el periodo consultado';
+    });
+    const v = state.supervivencia?.ventana;
+    const chip = document.getElementById('ldVentanaSuper');
+    if (chip) chip.textContent = v?.desde ? `Últimos 12 meses: ${fechaCorta(v.desde)} ${v.desde.slice(0, 4)} – ${fechaCorta(v.hasta)} ${v.hasta.slice(0, 4)}` : 'Últimos 12 meses';
+  }
+
   function pctDe(a, b) {
     const x = Number(a || 0);
     const y = Number(b || 0);
@@ -776,16 +930,19 @@
       { key: 'compras', label: 'Compras', value: s.compras, prev: s.cotizados, de: 'de cotizados' },
     ];
     const max = Math.max(leads, 1);
+    const peor = pasoConMasPerdida(s);
     const paso = (p) => {
       const ratio = p.prev == null ? null : pctDe(p.value, p.prev);
       const width = Math.max(4, (Number(p.value || 0) / max) * 100);
       const active = state.openKpi === p.key ? ' is-active' : '';
+      const esPeor = peor && peor.key === p.key && peor.perdidos > 0;
       return `
-        <button type="button" class="ld-embudo__paso${active}" data-ld-kpi="${p.key}" title="Ver los leads de este paso">
+        <button type="button" class="ld-embudo__paso${active}${esPeor ? ' is-perdida' : ''}" data-ld-kpi="${p.key}" title="Ver los leads de este paso">
           <span class="ld-embudo__label">${escapeHtml(p.label)}</span>
           <strong class="ld-embudo__valor">${num(p.value)}</strong>
           <span class="ld-embudo__barra" aria-hidden="true"><span style="width:${width}%"></span></span>
           <span class="ld-embudo__tasa">${ratio == null ? `${pct(100)} del periodo` : `${pct(ratio)} ${p.de}`}</span>
+          ${esPeor ? `<span class="ld-embudo__perdida">Aquí se quedan más: ${num(peor.perdidos)} no pasan</span>` : ''}
         </button>`;
     };
     const vida = num(s.seguimientoVidaDias || 90);
@@ -810,19 +967,23 @@
         </div>
         <div class="ld-resultado__embudo">
           <div class="ld-embudo">${pasos.map(paso).join('')}</div>
-          <div class="ld-chips">
-            ${chip('seguimientoSinCompra', 'en seguimiento', num(s.seguimientoSinCompra), `vivos sin compra · entraron del ${ventana}`)}
-            ${chip('sinCompra', 'perdidos', num(s.sinCompra), `${pct(pctDe(s.sinCompra, leads))} de los leads del periodo`)}
-          </div>
           <div class="ld-vida">
-            <p class="ld-vida__nota">Vida de 90 días, al ${escapeHtml(formatDate(s.vidaRefFecha || new Date().toISOString().slice(0, 10)))}. Del periodo, quién todavía puede comprar y quién ya no entra al One Pager.</p>
+            <p class="ld-vida__nota"><strong>¿Qué pasó con los ${num(leads)} leads?</strong> Al ${escapeHtml(fechaCorta(s.vidaRefFecha || new Date().toISOString().slice(0, 10)))}, contando sus ${num(s.vidaDias || 90)} días de vida.</p>
             <div class="ld-chips">
+              ${chip('compras', 'compraron', num(s.compras), `${pct(s.conversionCompraPct)} de los leads`)}
               <button type="button" class="ld-chip ld-chip--abierta${state.openKpi === 'aunPuedenConvertir' ? ' is-active' : ''}" data-ld-kpi="aunPuedenConvertir" title="Ver los leads que todavía pueden convertir">
-                <strong>${num(s.aunPuedenConvertir)}</strong><span>aún pueden convertir</span><small>les quedan 90 días o menos</small>
+                <strong>${num(s.aunPuedenConvertir)}</strong><span>aún pueden comprar</span><small>siguen dentro de sus 90 días</small>
               </button>
               <button type="button" class="ld-chip ld-chip--cerrada${state.openKpi === 'yaNoCuentan' ? ' is-active' : ''}" data-ld-kpi="yaNoCuentan" title="Ver los leads que ya no cuentan como conversión">
-                <strong>${num(s.yaNoCuentan)}</strong><span>ya no cuentan</span><small>pasaron 90 días sin compra</small>
+                <strong>${num(s.yaNoCuentan)}</strong><span>se les acabó el plazo</span><small>90 días sin compra; ya no cuentan</small>
               </button>
+              ${chip('sinCompra', 'descartados', num(s.sinCompra), 'el equipo los marcó perdidos o desistidos')}
+            </div>
+          </div>
+          <div class="ld-vida ld-vida--otra">
+            <p class="ld-vida__nota"><strong>Para trabajar hoy</strong>, con otra ventana: leads que entraron del ${escapeHtml(ventana)}, sin compra ni descarte.</p>
+            <div class="ld-chips">
+              ${chip('seguimientoSinCompra', 'en seguimiento', num(s.seguimientoSinCompra), `entraron en los últimos ${vida} días`)}
             </div>
           </div>
         </div>
@@ -1051,6 +1212,22 @@
     const foot = document.getElementById('ldGroupsFoot');
     const total = rows.reduce((acc, r) => acc + Number(r.leads || 0), 0);
     const cell = (v) => (v == null ? '<span class="cell-muted">—</span>' : num(v));
+    const comprasTot = rows.reduce((acc, r) => acc + Number(r.compras || 0), 0);
+    const convTot = pctDe(comprasTot, total);
+    // Arriba (azul) o abajo (ámbar) de la conversión total por 3 puntos o más, con volumen suficiente.
+    const marca = (r) => {
+      if (convTot == null || Number(r.leads || 0) < MIN_LEADS_LECTURA || r.conversionPct == null) return '';
+      const dif = Number(r.conversionPct) - convTot;
+      if (dif >= 3) return 'ld-conv--arriba';
+      if (dif <= -3) return 'ld-conv--abajo';
+      return '';
+    };
+    const leyenda = document.getElementById('ldGroupLeyenda');
+    if (leyenda) {
+      leyenda.innerHTML = rows.length && convTot != null
+        ? `Conversión total: <strong>${pct(convTot)}</strong>. <span class="ld-conv ld-conv--arriba">azul</span> 3 puntos o más arriba, <span class="ld-conv ld-conv--abajo">ámbar</span> 3 o más abajo; solo grupos con ${MIN_LEADS_LECTURA} leads o más.`
+        : '';
+    }
     els.groupsBody.innerHTML = rows.length
       ? rows.map((r) => `
         <tr>
@@ -1061,7 +1238,7 @@
           <td class="cell-num">${cell(r.citas)}</td>
           <td class="cell-num">${cell(r.cotizados)}</td>
           <td class="cell-num">${num(r.compras)}</td>
-          <td class="cell-num">${pct(r.conversionPct)}</td>
+          <td class="cell-num"><span class="ld-conv ${marca(r)}">${pct(r.conversionPct)}</span></td>
         </tr>`).join('')
       : `<tr class="empty-row"><td colspan="8">${
         periodLeads === 0
@@ -1151,7 +1328,10 @@
   function renderCampanaTipoTable(bodyEl, footEl, rows, tot) {
     if (!bodyEl) return;
     const periodLeads = Number(summary().leads || 0);
-    const visible = (rows || []).filter((r) => Number(r.total || 0) > 0);
+    const esSinCampana = (r) => /^\(?sin campa/i.test(String(r.campana || '').trim()) || !String(r.campana || '').trim();
+    const visible = (rows || []).filter((r) => Number(r.total || 0) > 0)
+      .map((r) => (esSinCampana(r) ? { ...r, campana: 'Sin campaña registrada', sinCampana: true } : r))
+      .sort((a, b) => Number(!!a.sinCampana) - Number(!!b.sinCampana));
     if (!visible.length) {
       bodyEl.innerHTML = `<tr class="empty-row"><td colspan="5">${
         periodLeads === 0 ? 'Sin campañas en el año de la planta (octubre a septiembre).' : 'Sin campañas con volumen en el año de la planta.'
@@ -1160,8 +1340,8 @@
       return;
     }
     bodyEl.innerHTML = visible.map((r) => `
-      <tr>
-        <td><strong>${escapeHtml(r.campana)}</strong></td>
+      <tr class="${r.sinCampana ? 'ld-sin-campana' : ''}">
+        <td>${r.sinCampana ? escapeHtml(r.campana) : `<strong>${escapeHtml(r.campana)}</strong>`}</td>
         <td class="cell-num">${num(r.total)}</td>
         <td class="cell-num">${num(r.vendidos)}</td>
         <td class="cell-num">${pct(r.conversionPct)}</td>
@@ -1212,7 +1392,8 @@
     destroyConvMesChart();
     if (typeof Chart === 'undefined') return;
 
-    const labels = rows.map((r) => mesLabelCorto(r.mes));
+    const abiertos = rows.map((r) => mesAunPuedeConvertir(r.mes));
+    const labels = rows.map((r, i) => (abiertos[i] ? [mesLabelCorto(r.mes), 'abierto'] : mesLabelCorto(r.mes)));
     const leads = rows.map((r) => Number(r.total || 0));
     const convertidos = rows.map((r) => Number(r.convertidos || 0));
     const convPct = rows.map((r) => Number(r.conversionPct || 0));
@@ -1227,16 +1408,17 @@
           {
             label: 'Leads de campañas reactivas',
             data: leads,
-            backgroundColor: 'rgba(107, 140, 255, 0.35)',
+            backgroundColor: abiertos.map((a) => (a ? 'rgba(107, 140, 255, 0.14)' : 'rgba(107, 140, 255, 0.35)')),
             borderColor: '#6b8cff',
             borderWidth: 1,
+            borderDash: [4, 3],
             borderRadius: 5,
             maxBarThickness: 28,
           },
           {
             label: 'Compras',
             data: convertidos,
-            backgroundColor: '#1e3fd8',
+            backgroundColor: abiertos.map((a) => (a ? 'rgba(30, 63, 216, 0.45)' : '#1e3fd8')),
             borderRadius: 5,
             maxBarThickness: 28,
           },
@@ -1256,7 +1438,8 @@
               },
               afterBody(items) {
                 const i = items?.[0]?.dataIndex;
-                return i == null ? '' : `Conversión: ${convPct[i].toFixed(1)} %`;
+                if (i == null) return '';
+                return [`Conversión: ${convPct[i].toFixed(1)} %`, ...(abiertos[i] ? ['Mes abierto: aún puede sumar compras'] : [])];
               },
             },
           },
@@ -1299,19 +1482,25 @@
     document.getElementById('ldCampGrid')?.classList.toggle('ld-leads-pair-grid--una', !hayProactivas);
     renderCampanaTipoTable(els.reactivaCampBody, els.reactivaCampFoot, reactivas, totR);
     renderCampanaTipoTable(els.proactivaCampBody, els.proactivaCampFoot, proactivas, totP);
+    const campNota = document.getElementById('ldCampNota');
+    if (campNota) {
+      const hayParcial = [...reactivas, ...proactivas, totR, totP].some((r) => r && r.conversion180Pct != null && Number(r.pctMaduros180 ?? 100) < 100);
+      campNota.textContent = 'Conv. 90 d es la que cuenta para el One Pager. Conv. 180 d es solo referencia de cuánto compran con el doble de plazo'
+        + (hayParcial ? '; el asterisco (*) indica que parte de esos leads aún no cumple 180 días y la cifra puede subir.' : '.');
+    }
 
     const ventana = state.data?.conversionPorMesMeta || {};
     const etiqueta = ventana.etiqueta || 'octubre a septiembre';
     if (els.onePagerResumen) {
       const nCamp = reactivas.filter((r) => Number(r.total || 0) > 0).length + proactivas.filter((r) => Number(r.total || 0) > 0).length;
       els.onePagerResumen.textContent = nCamp
-        ? `${num(nCamp)} campañas en ${etiqueta} · compra dentro de 90 días desde la entrada · 180 d solo como referencia · no sigue el mes consultado`
+        ? `${num(nCamp)} campañas con leads en el año. La compra cuenta si ocurre dentro de 90 días desde la entrada.`
         : `Sin campañas en ${etiqueta}`;
     }
 
     if (els.convMesBody) {
       const meta = els.convMesMeta || document.getElementById('ldConvMesMeta');
-      if (meta) meta.textContent = `Reactivas y proactivas · ${etiqueta} · un mes sigue abierto 90 días después de cerrar, así que los últimos meses aún pueden sumar compras`;
+      if (meta) meta.textContent = 'Cada mes cuenta las compras de sus leads dentro de 90 días, así que un mes sigue abierto hasta 90 días después de cerrar.';
       const chipAnio = document.getElementById('ldVentanaAnio');
       if (chipAnio) chipAnio.textContent = etiqueta;
 
@@ -1331,6 +1520,22 @@
           </tr>`).join('')
         : `<tr class="empty-row"><td colspan="7">Sin datos mensuales.</td></tr>`;
       renderConvMesChart(rows);
+      const lectura = document.getElementById('ldConvMesLectura');
+      if (lectura) {
+        const cerrados = rows.filter((r) => !mesAunPuedeConvertir(r.mes) && Number(r.total || 0) > 0);
+        const abiertos = rows.filter((r) => mesAunPuedeConvertir(r.mes));
+        if (cerrados.length) {
+          const tl = cerrados.reduce((a, r) => a + Number(r.total || 0), 0);
+          const tc = cerrados.reduce((a, r) => a + Number(r.convertidos || 0), 0);
+          const mejor = cerrados.reduce((x, y) => (Number(y.conversionPct) > Number(x.conversionPct) ? y : x));
+          const peor = cerrados.reduce((x, y) => (Number(y.conversionPct) < Number(x.conversionPct) ? y : x));
+          lectura.innerHTML = `En los meses ya cerrados convirtió <strong>${pct(pctDe(tc, tl))}</strong> (${num(tc)} compras de ${num(tl)} leads de campañas reactivas). `
+            + `Mejor mes: ${escapeHtml(mesLabelCorto(mejor.mes))} (${pct(mejor.conversionPct)}); más bajo: ${escapeHtml(mesLabelCorto(peor.mes))} (${pct(peor.conversionPct)}).`
+            + (abiertos.length ? ` ${abiertos.map((r) => escapeHtml(mesLabelCorto(r.mes))).join(', ')} siguen abiertos (barras claras): sus leads aún tienen plazo para comprar.` : '');
+        } else {
+          lectura.textContent = '';
+        }
+      }
     } else {
       destroyConvMesChart();
     }
@@ -2079,7 +2284,7 @@
     const cuerpo = filas.map((f) => {
       const ref = f.clave === 'referencia';
       if (f.sinDatos) {
-        return `<tr class="ld-hito--vacio"><td>${escapeHtml(f.etiqueta)}</td><td colspan="4">Sin tabla de ${escapeHtml(nombreTabla[f.clave] || 'este hito')} cargada</td></tr>`;
+        return `<tr class="ld-hito--vacio"><td>${escapeHtml(f.etiqueta)}</td><td colspan="4">Todavía no hay ${escapeHtml(nombreTabla[f.clave] || 'registros de este hito')} en el CRM para medirlo</td></tr>`;
       }
       const flag = !ref && f.pctMismoDia != null && f.pctMismoDia >= 30
         ? `<small class="ld-hito__flag" title="Puede ser registro del mismo trámite de compra">${num(f.pctMismoDia)} % de sus compras, el mismo día${f.pctProspectivo != null ? ` · sin ellas: ${pct(f.pctProspectivo)}` : ''}</small>`
@@ -2108,9 +2313,18 @@
     cruce(cob.solicitudes, 'Solicitudes de crédito');
     if (cob.citas?.sinFecha) notas.push(`${num(cob.citas.sinFecha)} citas asistidas sin fecha de cita no entran`);
 
+    const base = filas.find((f) => f.clave === 'referencia' && f.suficiente);
+    const mejores = filas.filter((f) => f.clave !== 'referencia' && f.suficiente && f.pct != null);
+    let lectura = '';
+    if (base && mejores.length) {
+      const top = mejores.reduce((x, y) => (Number(y.pct) > Number(x.pct) ? y : x));
+      const veces = Number(base.pct) > 0 ? Number(top.pct) / Number(base.pct) : null;
+      lectura = `<p class="ld-super-lectura">Después de <strong>${escapeHtml(top.etiqueta.toLowerCase())}</strong> compra el <strong>${pct(top.pct)}</strong> en ${num(H)} días${veces && veces >= 1.5 ? `, ${veces.toFixed(0)} veces más que un lead que al día 14 no tiene cita, prueba ni solicitud (${pct(base.pct)})` : ''}. Llevar al lead a ese paso es lo que más mueve la compra.</p>`;
+    }
     return `
       <div class="ld-hitos">
-        <p class="ld-super-cap">Qué tanto compran los leads después de cada paso, contando desde el día del hito.</p>
+        <p class="ld-super-cap">Qué tanto compran los leads después de cada paso, contando desde el día del hito. La fila gris es la referencia.</p>
+        ${lectura}
         <div class="table-scroll">
           <table class="data-table ld-hitos__tabla">
             <thead><tr>
@@ -2227,11 +2441,10 @@
     }
     const t = data.tiempo || {};
     const m = data.muestra || {};
-    const v = data.ventana || {};
+    renderVentanas();
+    renderLectura();
     if (nota) {
-      nota.textContent = v.desde
-        ? `Del ${formatDate(v.desde)} al ${formatDate(v.hasta)} · ${num(m.leads)} leads · ${num(m.compras)} compras`
-        : `${num(m.leads)} leads · ${num(m.compras)} compras`;
+      nota.textContent = `${num(m.leads)} leads y ${num(m.compras)} compras en la muestra. No cambia con el periodo consultado.`;
     }
     const curvas = data.curvas || [];
     const disponibles = {
@@ -2247,9 +2460,9 @@
 
     root.innerHTML = `
       <div class="ld-super-kpis">
-        <div class="ld-super-kpi"><strong>${t.t50 == null ? '—' : `Día ${num(t.t50)}`}</strong><span>Ya ocurrió la mitad de las compras</span></div>
-        <div class="ld-super-kpi"><strong>${t.t80 == null ? '—' : `Día ${num(t.t80)}`}</strong><span>Ya ocurrieron 8 de cada 10 compras</span></div>
-        <div class="ld-super-kpi"><strong>${t.pctDespues90 == null ? '—' : `${pct(t.pctDespues90)}`}</strong><span>De las compras llegan después del día 90 y quedan fuera de la conversión de arriba</span></div>
+        <div class="ld-super-kpi"><strong>${t.t50 == null ? '—' : `Día ${num(t.t50)}`}</strong><span>Para este día ya ocurrió la mitad de las compras, contando desde que entra el lead</span></div>
+        <div class="ld-super-kpi"><strong>${t.t80 == null ? '—' : `Día ${num(t.t80)}`}</strong><span>Para este día ya ocurrieron 8 de cada 10 compras</span></div>
+        <div class="ld-super-kpi"><strong>${t.pctDespues90 == null ? '—' : `${pct(t.pctDespues90)}`}</strong><span>De las compras llegan después del día 90: existen, pero no suman a la conversión del bloque 1</span></div>
       </div>
       <nav class="eeff-tabs ld-super-tabs" role="tablist" aria-label="Detalle de tiempo a compra">
         ${SUPER_TABS.filter((x) => disponibles[x.k]).map((x) => `<button type="button" role="tab" class="eeff-tab" data-ld-super-tab="${x.k}">${x.t}</button>`).join('')}
@@ -2270,6 +2483,8 @@
 
   function renderAll() {
     updateSubtitle();
+    renderVentanas();
+    renderLectura();
     renderPeriodoVacio();
     renderProspeccion();
     renderKpis();
@@ -2288,6 +2503,13 @@
   }
 
   function bind() {
+    // Los enlaces de la lectura bajan al bloque sin tocar la dirección (la pestaña vive en el #).
+    document.getElementById('ldLectura')?.addEventListener('click', (e) => {
+      const ir = e.target.closest('[data-ld-ir]');
+      if (!ir) return;
+      e.preventDefault();
+      document.getElementById(ir.getAttribute('data-ld-ir'))?.closest('.ventas-act')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
     els.kpiRoot = document.getElementById('ldKpiOperational');
     els.kpiDetail = document.getElementById('ldKpiDetail');
     els.detailTitle = document.getElementById('ldDetailTitle');

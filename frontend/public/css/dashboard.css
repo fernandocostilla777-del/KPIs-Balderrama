@@ -19148,3 +19148,49 @@ button.cc-pill .material-symbols-outlined { font-size: 16px; margin-right: -4px;
   .cv-cal-dia, .cv-cal-vacio { min-height: 40px; }
   .cv-cal-dia { font-size: 12px; }
 }
+
+/* ── Ventas · Leads: que la pestaña se lea sola ──────────────────────────── */
+.ld-lectura {
+  margin: 14px 0 6px;
+  padding: 16px 20px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #dfe5ee;
+  border-left: 4px solid #2d5bff;
+}
+.ld-lectura__titulo { margin: 0 0 8px; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #1e3fd8; }
+.ld-lectura__lista { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ld-lectura__lista li { position: relative; padding-left: 18px; font-size: 14px; line-height: 1.5; color: #1e293b; max-width: 980px; }
+.ld-lectura__lista li::before { content: ''; position: absolute; left: 2px; top: 0.55em; width: 7px; height: 7px; border-radius: 50%; background: #2d5bff; }
+.ld-lectura__lista li.is-alerta::before { background: #f59e0b; }
+.ld-lectura__lista strong { color: #0f172a; }
+.ld-lectura__ver { white-space: nowrap; font-size: 12px; color: #64748b; }
+.ld-lectura__ir { color: #1e3fd8; font-weight: 600; text-decoration: none; border-bottom: 1px dotted #93a4d8; }
+.ld-glosario { margin: 0 0 14px; font-size: 13px; color: #475569; }
+.ld-glosario > summary { cursor: pointer; font-weight: 600; color: #1e3fd8; width: fit-content; }
+.ld-glosario__lista { margin: 10px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px 20px; }
+.ld-glosario__lista div { padding: 10px 12px; border-radius: 12px; background: #ffffff; border: 1px solid #e6ebf3; }
+.ld-glosario__lista dt { font-weight: 700; color: #0f172a; margin-bottom: 2px; }
+.ld-glosario__lista dd { margin: 0; line-height: 1.45; }
+.ld-pregunta { color: #334155 !important; font-weight: 500; }
+.ld-meta { margin: 2px 0 0; font-size: 12px; color: #64748b; }
+.ld-ventana:empty { display: none; }
+.ld-ventana--otra { background: #f5f3ff !important; color: #5b21b6 !important; border-color: #ddd6fe !important; }
+.ld-embudo__paso.is-perdida { border-color: #f59e0b !important; background: #fffbeb !important; }
+.ld-embudo__perdida { display: block; margin-top: 4px; font-size: 11.5px; font-weight: 700; color: #92400e; }
+.ld-vida--otra { padding-top: 10px; border-top: 1px dashed #dfe5ee; }
+.ld-conv { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.ld-conv--arriba, .ld-conv--abajo { font-weight: 700; }
+.ld-conv--arriba { color: #1e3fd8; }
+.ld-conv--abajo { color: #92400e; }
+.ld-conv--arriba::before, .ld-conv--abajo::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+.ld-conv--arriba::before { background: #2d5bff; }
+.ld-conv--abajo::before { background: #f59e0b; }
+.ld-super-lectura { margin: 6px 0 10px; padding: 10px 12px; border-radius: 10px; background: #f5f8ff; font-size: 13.5px; line-height: 1.5; color: #1e293b; }
+.ld-sin-campana td { color: #64748b; font-style: italic; }
+.ld-camp-nota { margin-top: 10px; }
+@media (max-width: 639px) {
+  .ld-lectura { padding: 14px; }
+  .ld-lectura__lista li { font-size: 13.5px; }
+  .ld-glosario__lista { grid-template-columns: 1fr; }
+}

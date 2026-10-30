@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { getOverview } = require('../services/overviewService');
 const { loadSalesExecutiveAnalytics } = require('../services/salesExecutiveAnalytics');
 const { getVentas } = require('../services/ventas');
@@ -687,8 +687,8 @@ router.get('/inventory/seminuevos', async (req, res, next) => {
     const alcance = alcanceDe(req);
     res.json(await getInventorySeminuevos({
       mesesRotacion,
-      ubicacion: alcance?.inventarioUbicacion || null,
-      sucursal: alcance?.label || null,
+      ubicacion: req.query.ubicacion || alcance?.inventarioUbicacion || null,
+      sucursal: req.query.sucursal || alcance?.label || null,
     }));
   } catch (err) {
     next(err);
@@ -702,15 +702,28 @@ router.get('/post-sales', async (req, res, next) => {
       return res.status(400).json({ error: 'Parametros requeridos: fechaInicio y fechaFin (YYYY-MM-DD).' });
     }
     const alcance = alcanceDe(req);
-    res.json(await getPostSales({
+    const data = await getPostSales({
       fechaInicio,
       fechaFin,
       letras: alcance?.tallerLetras || null,
-    }));
+    });
+    if (alcance) data.alcance = { ...data.alcance, sucursal: alcance.label, id: alcance.id };
+    res.json(data);
   } catch (err) {
     next(err);
   }
 });
+
+function soloAgencia(req, res, next) {
+  const alcance = alcanceDe(req);
+  if (alcance) {
+    return res.status(403).json({ error: 'Este perfil solo ve el Servicio de su sucursal.' });
+  }
+  next();
+}
+router.use('/post-sales/hyp', soloAgencia);
+router.use('/post-sales/refacciones', soloAgencia);
+router.use('/post-sales/refacciones-pedidos', soloAgencia);
 
 router.get('/post-sales/hyp/aseguradoras-cobranza', async (req, res, next) => {
   try {
@@ -801,7 +814,7 @@ router.get('/post-sales/orden/:orden', async (req, res, next) => {
     const folio = String(req.params.orden || '');
     const letra = folio.trim().charAt(0).toUpperCase();
     if (alcance?.tallerLetras?.length && !alcance.tallerLetras.includes(letra)) {
-      return res.status(403).json({ error: 'Esta orden no es de la sucursal.' });
+      return res.status(403).json({ error: 'La orden no es del taller de esta sucursal.' });
     }
     const data = await getPostSalesOrderDetail(folio);
     res.json(data);

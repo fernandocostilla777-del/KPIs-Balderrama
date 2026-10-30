@@ -19368,3 +19368,53 @@ button.cc-pill .material-symbols-outlined { font-size: 16px; margin-right: -4px;
   #kpiOperational .kpi-subtitle { font-size: 11.5px; }
   .ps-areas td, .ps-areas th { padding-left: 8px; padding-right: 8px; }
 }
+
+
+/* PostVenta · Servicio: cuadre del periodo, antigüedad en una barra y totales que verifican */
+.ps-cuadre { margin: 4px 0 18px; padding: 14px 16px; border-radius: 14px; background: #ffffff; border: 1px solid #dfe5ee; border-left: 4px solid #2d5bff; }
+.ps-cuadre__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-bottom: 10px; }
+.ps-cuadre__titulo { margin: 0; font-size: 14.5px; color: #1e293b; }
+.ps-cuadre__barra { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: #eef2f7; gap: 2px; }
+.ps-cuadre__seg { display: block; height: 100%; min-width: 4px; }
+.ps-cuadre__seg--fact { background: #2563eb; }
+.ps-cuadre__seg--abierta { background: #93c5fd; }
+.ps-cuadre__seg--cerrada { background: #f59e0b; }
+.ps-cuadre__seg--cancelada { background: #cbd5e1; }
+.ps-cuadre__seg--otra { background: #e2e8f0; }
+.ps-cuadre__seg--vacia { background: #eef2f7; }
+.ps-cuadre__items, .ps-tramos__items { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.ps-cuadre__item { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: #f5f8ff; font-size: 13px; color: #334155; }
+.ps-cuadre__item strong { color: #0f172a; }
+.ps-cuadre__pct { color: #64748b; font-size: 12px; }
+.ps-cuadre__dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.ps-cuadre__item.is-clic, .ps-tramo.is-clic { cursor: pointer; }
+.ps-cuadre__item.is-clic:hover, .ps-tramo.is-clic:hover { background: #e8efff; }
+.ps-cuadre__item:focus-visible, .ps-tramo:focus-visible { outline: 2px solid #2d5bff; outline-offset: 2px; }
+.ps-check { display: inline-block; font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.ps-check--ok { color: #15803d; }
+.ps-check--aviso { color: #92400e; }
+p.ps-check { margin: 8px 2px 0; }
+.kpi-group-title .ps-check { margin-left: 8px; }
+.ps-tramos { margin-bottom: 18px; padding: 12px 14px; border-radius: 14px; background: #ffffff; border: 1px solid #dfe5ee; }
+.ps-tramos__items { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.ps-tramo { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: #f8fafc; }
+.ps-tramo__label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #475569; }
+.ps-tramo__n { font-size: 1.35rem; color: #0f172a; line-height: 1.2; }
+.ps-tramo__extra { font-size: 11.5px; color: #64748b; }
+.ps-tramo.is-cero .ps-tramo__n { color: #94a3b8; }
+.ps-tramo--t1 { background: #2563eb; }
+.ps-tramo--t2 { background: #60a5fa; }
+.ps-tramo--t3 { background: #fbbf24; }
+.ps-tramo--t4 { background: #f59e0b; }
+.ps-tramo--t5 { background: #dc2626; }
+#psAging120:not(.is-cero) .ps-tramo__n { color: #b91c1c; }
+.ps-tabla-num tfoot .ps-total td { font-weight: 700; background: #f1f5ff; border-top: 2px solid #c7d2fe; }
+.ps-duo { align-items: stretch; }
+.ps-duo > .section-panel { min-width: 0; }
+@media (max-width: 900px) { .ps-tramos__items { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 639px) {
+  .ps-cuadre { padding: 12px; }
+  .ps-cuadre__titulo { font-size: 13.5px; }
+  .ps-tramos__items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ps-tramo__n { font-size: 1.15rem; }
+}

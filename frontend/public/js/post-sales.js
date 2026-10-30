@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   'use strict';
 
   let allRecords = [];
@@ -13,6 +13,51 @@
 
   function esAlcanceSucursal() {
     return Boolean(document.documentElement.dataset.alcanceSucursal);
+  }
+  /**
+   * Perfil de sucursal (Cholula): el backend ya manda solo sus órdenes (folios Y y X).
+   * Aquí solo se ajusta la vista: una sola área (Servicio) y columnas de su taller.
+   */
+  let alcanceSucursal = null;
+
+  function esSucursal() {
+    return Boolean(alcanceSucursal?.sucursal) || esAlcanceSucursal();
+  }
+
+  /** Letras del acumulado diario: las seis del taller o solo las de la sucursal. */
+  function letrasMesCurso() {
+    const propias = alcanceSucursal?.letras || [];
+    if (propias.length) return propias.filter((L) => MES_CURSO_LETRAS.includes(L));
+    if (esAlcanceSucursal()) return ['Y', 'X'];
+    return MES_CURSO_LETRAS.slice();
+  }
+
+  /** Oculta el inicio, Refacciones y HyP: no son de la sucursal. */
+  function aplicarAlcanceSucursal() {
+    const suc = alcanceSucursal?.sucursal || (esAlcanceSucursal() ? 'Cholula' : '');
+    document.body.classList.toggle('ps-sucursal', Boolean(suc));
+    if (!suc) return;
+    document.querySelectorAll('#postVentaMainTabs [data-ps-section]').forEach((btn) => {
+      const propia = btn.getAttribute('data-ps-section') === 'servicio';
+      btn.hidden = !propia;
+      if (propia && !btn.dataset.sucursal) {
+        btn.dataset.sucursal = suc;
+        const icono = btn.querySelector('.material-symbols-outlined');
+        btn.textContent = '';
+        if (icono) btn.appendChild(icono);
+        btn.append(` Servicio · ${suc}`);
+      }
+    });
+    const titulo = document.getElementById('psTopTitulo');
+    if (titulo) titulo.textContent = `PostVenta · ${suc}`;
+    const sub = document.getElementById('psOpsSubtitulo');
+    if (sub) {
+      const letras = (alcanceSucursal?.letras || ['Y', 'X'])
+        .map((L) => `${L} · ${MES_CURSO_LABELS[L] || L}`)
+        .join(', ');
+      sub.textContent = `Solo órdenes del taller de ${suc} (${letras}). `
+        + 'Primero el cuadre del periodo; después qué se facturó, qué sigue abierto y cómo opera el taller.';
+    }
   }
   let refaccionesData = null;
   let refaccionesLoadedKey = '';
@@ -89,16 +134,17 @@
     const fechaInicio = toIsoLocal(new Date(year, month, 1));
     const fechaFin = toIsoLocal(new Date(year, month, now.getDate()));
     const byDate = new Map();
+    const LETRAS = letrasMesCurso();
 
     for (const r of records || []) {
       if (String(r.status || '').toUpperCase() === 'C') continue;
       const letra = String(r.letraOrden || (r.orden || '').trim().charAt(0) || '').toUpperCase();
-      if (!MES_CURSO_LETRAS.includes(letra)) continue;
+      if (!LETRAS.includes(letra)) continue;
       const fecha = parseIngresoToIso(r);
       if (!fecha || fecha < fechaInicio || fecha > fechaFin) continue;
       if (!byDate.has(fecha)) {
         const row = { fecha, fechaLabel: formatIsoDisplay(fecha), total: 0 };
-        MES_CURSO_LETRAS.forEach((L) => { row[L] = 0; });
+        LETRAS.forEach((L) => { row[L] = 0; });
         byDate.set(fecha, row);
       }
       const day = byDate.get(fecha);
@@ -112,7 +158,7 @@
       const iso = toIsoLocal(new Date(year, month, d));
       const row = byDate.get(iso) || (() => {
         const empty = { fecha: iso, fechaLabel: formatIsoDisplay(iso), total: 0 };
-        MES_CURSO_LETRAS.forEach((L) => { empty[L] = 0; });
+        LETRAS.forEach((L) => { empty[L] = 0; });
         return empty;
       })();
       acum += row.total;
@@ -120,15 +166,15 @@
     }
 
     const totals = { fechaLabel: 'Total', acumulado: acum, total: 0 };
-    MES_CURSO_LETRAS.forEach((L) => {
+    LETRAS.forEach((L) => {
       totals[L] = days.reduce((s, r) => s + (r[L] || 0), 0);
     });
     totals.total = days.reduce((s, r) => s + (r.total || 0), 0);
 
     return {
       periodo: { fechaInicio, fechaFin, label: `${formatIsoDisplay(fechaInicio)} — ${formatIsoDisplay(fechaFin)}` },
-      letras: MES_CURSO_LETRAS.slice(),
-      labels: { ...MES_CURSO_LABELS },
+      letras: LETRAS.slice(),
+      labels: Object.fromEntries(LETRAS.map((L) => [L, MES_CURSO_LABELS[L]])),
       days,
       totals,
     };
@@ -2071,6 +2117,100 @@
     });
   }
 
+  /** «del 1 al 31 oct 2026» / «del 15 sep al 14 oct 2026». */
+  function periodoCorto(fi, ff) {
+    if (!fi || !ff) return 'el periodo';
+    const f = (iso, opts) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', opts).replace('.', '');
+    const mismoMes = fi.slice(0, 7) === ff.slice(0, 7);
+    const mismoAnio = fi.slice(0, 4) === ff.slice(0, 4);
+    const ini = mismoMes ? f(fi, { day: 'numeric' }) : f(fi, mismoAnio ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+    return `del ${ini} al ${f(ff, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  }
+
+  /**
+   * Cuadre del periodo: cada orden que entró está en uno solo de estos estatus,
+   * así que las partes deben sumar el total. Si no suman, se dice cuántas faltan.
+   */
+  function cuadreIngresadas(s) {
+    const { fmt } = Dashboard;
+    const n = (v) => fmt.number(v || 0);
+    const total = Number(s.totalOrdenes || 0);
+    const partes = [
+      { key: 'facturadas', n: Number(s.facturadas || 0), label: 'facturadas', cls: 'fact' },
+      { key: 'abiertasPeriodo', n: Number(s.abiertasPeriodo || 0), label: 'siguen abiertas', cls: 'abierta' },
+      { key: 'cerradas', n: Number(s.cerradas || 0), label: 'cerradas sin facturar', cls: 'cerrada' },
+      { key: 'canceladas', n: Number(s.canceladas || 0), label: 'canceladas', cls: 'cancelada' },
+    ];
+    const suma = partes.reduce((t, p) => t + p.n, 0);
+    const otras = total - suma;
+    if (otras > 0) partes.push({ key: null, n: otras, label: 'con otro estatus', cls: 'otra' });
+    const fi = document.getElementById('fechaInicio')?.value;
+    const ff = document.getElementById('fechaFin')?.value;
+    const periodo = periodoCorto(fi, ff);
+    if (!total) {
+      return `<div class="ps-cuadre"><p class="ps-cuadre__titulo">No entraron órdenes ${periodo}.</p></div>`;
+    }
+    const pct = (v) => Math.round((v / total) * 1000) / 10;
+    const barra = partes.filter((p) => p.n > 0)
+      .map((p) => `<span class="ps-cuadre__seg ps-cuadre__seg--${p.cls}" style="width:${Math.max(pct(p.n), 0.8)}%" title="${n(p.n)} ${p.label} · ${pct(p.n)}%"></span>`)
+      .join('');
+    const items = partes.map((p) => {
+      const attrs = p.key ? ` data-ops-kpi="${p.key}" role="button" tabindex="0" title="Ver estas órdenes"` : '';
+      return `<li class="ps-cuadre__item${p.key ? ' is-clic' : ''}"${attrs}>
+        <i class="ps-cuadre__dot ps-cuadre__seg--${p.cls}"></i>
+        <strong>${n(p.n)}</strong> ${p.label} <span class="ps-cuadre__pct">${pct(p.n)}%</span>
+      </li>`;
+    }).join('');
+    const ecuacion = `${partes.map((p) => n(p.n)).join(' + ')} = ${n(total)}`;
+    const ok = otras === 0;
+    const verif = ok
+      ? `<span class="ps-check ps-check--ok">✓ Cuadra · ${ecuacion}</span>`
+      : `<span class="ps-check ps-check--aviso">${otras < 0 ? `Los estatus suman ${n(suma)}, ${n(-otras)} más que las ${n(total)} ingresadas` : `${n(otras)} ${otras === 1 ? 'orden tiene' : 'órdenes tienen'} otro estatus · ${ecuacion}`}</span>`;
+    return `<div class="ps-cuadre" aria-label="Cuadre de las órdenes del periodo">
+      <div class="ps-cuadre__head">
+        <p class="ps-cuadre__titulo"><strong>${n(total)} órdenes</strong> entraron ${periodo}. Hoy están así:</p>
+        ${verif}
+      </div>
+      <div class="ps-cuadre__barra" aria-hidden="true">${barra}</div>
+      <ul class="ps-cuadre__items">${items}</ul>
+    </div>`;
+  }
+
+  /** Antigüedad de las abiertas de hoy en una sola barra; cada tramo abre sus órdenes. */
+  function barraAntiguedad(a, s) {
+    const { fmt } = Dashboard;
+    const n = (v) => fmt.number(v || 0);
+    const tramos = [
+      { key: 'aging0_30', n: a.b0_30, label: '0-30 días', cls: 't1' },
+      { key: 'aging31_60', n: a.b31_60, label: '31-60 días', cls: 't2' },
+      { key: 'aging61_90', n: a.b61_90, label: '61-90 días', cls: 't3' },
+      { key: 'aging91_120', n: a.b91_120, label: '91-120 días', cls: 't4' },
+      {
+        key: 'aging120p',
+        n: a.b120p,
+        label: 'Más de 120 días',
+        cls: 't5',
+        id: 'psAging120',
+        extra: `<span id="psRiesgo120" class="ps-tramo__extra">${fmt.currency(s.riesgo120 || 0)} sin facturar</span>`,
+      },
+    ].map((t) => ({ ...t, n: Number(t.n || 0) }));
+    const total = tramos.reduce((x, t) => x + t.n, 0);
+    const abiertas = Number(s.abiertas || 0);
+    const barra = total
+      ? tramos.filter((t) => t.n > 0).map((t) => `<span class="ps-cuadre__seg ps-tramo--${t.cls}" style="width:${Math.max((t.n / total) * 100, 0.8)}%"></span>`).join('')
+      : '<span class="ps-cuadre__seg ps-cuadre__seg--vacia" style="width:100%"></span>';
+    const items = tramos.map((t) => `<li class="ps-tramo is-clic${t.n ? '' : ' is-cero'}" data-ops-kpi="${t.key}" role="button" tabindex="0" title="Ver estas órdenes"${t.id ? ` id="${t.id}"` : ''}>
+        <span class="ps-tramo__label"><i class="ps-cuadre__dot ps-tramo--${t.cls}"></i>${t.label}</span>
+        <strong class="ps-tramo__n">${n(t.n)}</strong>
+        ${t.extra || ''}
+      </li>`).join('');
+    const check = total === abiertas
+      ? `<span class="ps-check ps-check--ok">✓ Suman las ${n(abiertas)} abiertas de hoy</span>`
+      : `<span class="ps-check ps-check--aviso">Los tramos suman ${n(total)} de ${n(abiertas)} abiertas de hoy</span>`;
+    return `<div class="kpi-group"><h4 class="kpi-group-title">¿Cuánto tiempo llevan abiertas? ${check}</h4>
+      <div class="ps-tramos"><div class="ps-cuadre__barra" aria-hidden="true">${barra}</div><ul class="ps-tramos__items">${items}</ul></div></div>`;
+  }
+
   function renderKpis(d) {
     const { fmt } = Dashboard;
     const s = d.summary || { ...d.executive, ...d.finance };
@@ -2267,6 +2407,44 @@
     body.innerHTML = dayRows + totalRow;
   }
 
+  /**
+   * Fila Total de una tabla y la verificación contra las tarjetas: si la tabla suma
+   * las mismas órdenes del periodo se dice; si no, cuántas quedan fuera y por qué.
+   */
+  function pieTabla(footId, notaId, filas, celdas, totalPeriodo, que) {
+    const { fmt } = Dashboard;
+    const foot = document.getElementById(footId);
+    const nota = document.getElementById(notaId);
+    if (!foot) return;
+    if (!filas.length) {
+      foot.innerHTML = '';
+      if (nota) nota.hidden = true;
+      return;
+    }
+    const suma = {
+      ordenes: filas.reduce((t, x) => t + Number(x.ordenes || 0), 0),
+      facturadas: filas.reduce((t, x) => t + Number(x.facturadas || 0), 0),
+      abiertas: filas.reduce((t, x) => t + Number(x.abiertas || 0), 0),
+      importe: filas.reduce((t, x) => t + Number(x.importe || 0), 0),
+      importeFacturado: filas.reduce((t, x) => t + Number(x.importeFacturado || 0), 0),
+      importeAbierto: filas.reduce((t, x) => t + Number(x.importeAbierto || 0), 0),
+    };
+    foot.innerHTML = `<tr class="ps-total"><td>Total</td>${celdas(suma).map((v) => `<td class="cell-num">${v}</td>`).join('')}</tr>`;
+    if (!nota) return;
+    nota.hidden = false;
+    const n = (v) => fmt.number(v || 0);
+    if (suma.ordenes === totalPeriodo) {
+      nota.className = 'ps-check ps-check--ok';
+      nota.textContent = `✓ Suma las ${n(totalPeriodo)} órdenes de las tarjetas.`;
+    } else {
+      const faltan = totalPeriodo - suma.ordenes;
+      nota.className = 'ps-check ps-check--aviso';
+      nota.textContent = que === 'tipos'
+        ? `Suma ${n(suma.ordenes)} de ${n(totalPeriodo)} órdenes: ${n(faltan)} con aseguradora van en Control por aseguradora.`
+        : `Suma ${n(suma.ordenes)} de ${n(totalPeriodo)} órdenes: se muestran los ${filas.length} asesores con más órdenes.`;
+    }
+  }
+
   function renderTables(d) {
     const { fmt } = Dashboard;
     const t = d.tables;
@@ -2274,12 +2452,16 @@
     renderMesCursoNomenclatura();
 
     document.getElementById('tblCriticas').innerHTML = t.criticas.length
-      ? t.criticas.map((r) => `<tr><td><strong>${r.orden}</strong></td><td>${r.nombre}</td><td>${r.asesor}</td><td>${r.dias}</td><td>${fmt.money(r.importe)}</td><td>${r.promesa || '—'}</td></tr>`).join('')
+      ? t.criticas.map((r) => `<tr><td><strong>${escHtml(r.orden)}</strong></td><td>${escHtml(r.nombre)}</td><td>${escHtml(r.asesor)}</td><td class="cell-num">${r.dias}</td><td class="cell-num">${fmt.money(r.importe)}</td><td>${r.promesa || '—'}</td></tr>`).join('')
       : '<tr class="empty-row"><td colspan="6">Sin órdenes críticas en el filtro actual.</td></tr>';
 
     document.getElementById('tblAsesor').innerHTML = t.productividadAsesor.length
-      ? t.productividadAsesor.map((r) => `<tr><td>${r.asesor}</td><td>${r.ordenes}</td><td>${r.facturadas}</td><td>${r.abiertas}</td><td>${fmt.money(r.importe)}</td></tr>`).join('')
+      ? t.productividadAsesor.map((r) => `<tr><td>${escHtml(r.asesor)}</td><td class="cell-num">${r.ordenes}</td><td class="cell-num">${r.facturadas}</td><td class="cell-num">${r.abiertas}</td><td class="cell-num">${fmt.money(r.importe)}</td></tr>`).join('')
       : '<tr class="empty-row"><td colspan="5">Sin datos.</td></tr>';
+    const totalPeriodo = Number(d.summary?.totalOrdenes ?? (d.filtered || []).length);
+    pieTabla('tblAsesorFoot', 'tblAsesorNota', t.productividadAsesor, (x) => [
+      x.ordenes, x.facturadas, x.abiertas, fmt.money(x.importe),
+    ], totalPeriodo, 'asesores');
 
     document.getElementById('tblAseg').innerHTML = t.controlAseguradora.length
       ? t.controlAseguradora.map((r) => `
@@ -2298,8 +2480,11 @@
       : '<tr class="empty-row"><td colspan="6">Sin órdenes con aseguradora en el filtro actual.</td></tr>';
 
     document.getElementById('tblControlOrdenes').innerHTML = t.controlOrdenes.length
-      ? t.controlOrdenes.map((r) => `<tr><td>${r.tipoOrden}</td><td>${r.ordenes}</td><td>${r.facturadas}</td><td>${fmt.money(r.importeFacturado)}</td><td>${r.abiertas}</td><td>${fmt.money(r.importeAbierto)}</td></tr>`).join('')
+      ? t.controlOrdenes.map((r) => `<tr><td>${escHtml(r.tipoOrden)}</td><td class="cell-num">${r.ordenes}</td><td class="cell-num">${r.facturadas}</td><td class="cell-num">${fmt.money(r.importeFacturado)}</td><td class="cell-num">${r.abiertas}</td><td class="cell-num">${fmt.money(r.importeAbierto)}</td></tr>`).join('')
       : '<tr class="empty-row"><td colspan="6">Sin órdenes sin aseguradora en el filtro actual.</td></tr>';
+    pieTabla('tblControlOrdenesFoot', 'tblControlNota', t.controlOrdenes, (x) => [
+      x.ordenes, x.facturadas, fmt.money(x.importeFacturado), x.abiertas, fmt.money(x.importeAbierto),
+    ], totalPeriodo, 'tipos');
 
     if (openAseguradoraKey) {
       const keep = openAseguradoraKey;
@@ -2348,8 +2533,8 @@
         data: {
           labels: c.weeklyFlow.map((x) => x.label),
           datasets: [
-            { label: 'Ingresadas', data: c.weeklyFlow.map((x) => x.ingresadas), borderColor: chartColors.primary, tension: 0.3 },
-            { label: 'Facturadas', data: c.weeklyFlow.map((x) => x.facturadas), borderColor: chartColors.rose, tension: 0.3 },
+            { label: 'Ingresadas', data: c.weeklyFlow.map((x) => x.ingresadas), borderColor: '#94a3b8', backgroundColor: '#94a3b8', borderDash: [6, 4], tension: 0.3 },
+            { label: 'Facturadas', data: c.weeklyFlow.map((x) => x.facturadas), borderColor: '#2563eb', backgroundColor: '#2563eb', tension: 0.3 },
           ],
         },
         options: chartOptions({ plugins: { legend: { position: 'bottom' } } }),
@@ -2359,7 +2544,12 @@
     destroyChart('cStatusWeek');
     if (statusWeekEl && c.statusByWeek) {
       const weekLabels = c.statusByWeek.map((x) => x.label);
-      const weekGroups = [...new Set(c.statusByWeek.flatMap((x) => Object.keys(x.groups)))];
+      // Mismos colores que el cuadre del periodo: facturada, abierta, cerrada sin facturar, cancelada.
+      const COLOR_ESTATUS = { facturada: '#2563eb', abierta: '#93c5fd', cerrada: '#f59e0b', cancelada: '#cbd5e1' };
+      const ORDEN_ESTATUS = ['facturada', 'abierta', 'cerrada', 'cancelada'];
+      const claveEstatus = (g) => ORDEN_ESTATUS.find((k) => String(g).toLowerCase().startsWith(k)) || null;
+      const weekGroups = [...new Set(c.statusByWeek.flatMap((x) => Object.keys(x.groups)))]
+        .sort((a, b) => (ORDEN_ESTATUS.indexOf(claveEstatus(a)) + 1 || 9) - (ORDEN_ESTATUS.indexOf(claveEstatus(b)) + 1 || 9));
       charts.cStatusWeek = new Chart(statusWeekEl, {
         type: 'bar',
         data: {
@@ -2367,7 +2557,7 @@
           datasets: weekGroups.map((g, i) => ({
             label: g,
             data: c.statusByWeek.map((w) => w.groups[g] || 0),
-            backgroundColor: chartPalette[i % chartPalette.length],
+            backgroundColor: COLOR_ESTATUS[claveEstatus(g)] || chartPalette[i % chartPalette.length],
             borderRadius: 4,
           })),
         },

@@ -18,7 +18,7 @@
 <main class="main-shell">
 <header class="top-bar">
 <div class="top-bar-actions">
-<span class="top-bar-title">PostVenta</span>
+<span class="top-bar-title" id="psTopTitulo">PostVenta</span>
 </div>
 </header>
 <div class="main-content custom-scrollbar">
@@ -161,7 +161,7 @@ HyP
 
 <section class="section-panel dashboard-section">
 <h3 class="section-title">Indicadores operativos</h3>
-<p class="section-subtitle">Tres preguntas: qué se facturó, qué sigue abierto y cómo opera el taller. Clic en una tarjeta para ver sus órdenes.</p>
+<p class="section-subtitle" id="psOpsSubtitulo">Primero el cuadre del periodo; después tres preguntas: qué se facturó, qué sigue abierto y cómo opera el taller. Clic en una tarjeta o en un tramo para ver sus órdenes.</p>
 <div id="kpiOperational"></div>
 <div id="opsKpiDetail" class="kpi-detail-panel hidden" style="margin-top:14px"></div>
 </section>
@@ -239,18 +239,18 @@ HyP
 
 <section class="chart-grid">
 <div class="section-panel table-panel" id="panelControlAseg"><h3 class="section-title">Control por aseguradora</h3><p class="section-subtitle">Solo órdenes con aseguradora registrada · clic en una fila para ver el resumen</p><div class="table-scroll"><table class="data-table data-table--selectable"><thead><tr><th>Aseguradora</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblAseg"></tbody></table></div></div>
-<div class="section-panel table-panel"><h3 class="section-title">Control de órdenes</h3><p class="section-subtitle">Sin aseguradora · tipo por letra del folio</p><div class="table-scroll"><table class="data-table"><thead><tr><th>Tipo de orden</th><th>Órdenes</th><th>Facturadas</th><th>Importe facturado</th><th>Abiertas</th><th>Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody></table></div></div>
+<div class="section-panel table-panel"><h3 class="section-title">Órdenes por tipo</h3><p class="section-subtitle" id="tblControlSubtitulo">Las mismas órdenes de las tarjetas, separadas por la letra del folio · la fila Total debe coincidir con ellas</p><div class="table-scroll"><table class="data-table ps-tabla-num"><thead><tr><th>Tipo de orden</th><th class="cell-num">Órdenes</th><th class="cell-num">Facturadas</th><th class="cell-num">Importe facturado</th><th class="cell-num">Abiertas</th><th class="cell-num">Importe abierto</th></tr></thead><tbody id="tblControlOrdenes"></tbody><tfoot id="tblControlOrdenesFoot"></tfoot></table></div><p class="ps-check" id="tblControlNota" hidden></p></div>
 </section>
 
 <section id="panelMesCursoNomenclatura" class="section-panel table-panel dashboard-section">
 <div class="table-header-row">
-<h3 class="section-title" style="margin-bottom:0">Acumulado de órdenes de reparación</h3>
-<span id="mesCursoNomenLabel" class="top-bar-meta">N · D · Q · C · X · Y</span>
+<h3 class="section-title" style="margin-bottom:0">Mes en curso, día por día</h3>
+<span id="mesCursoNomenLabel" class="top-bar-meta">Mes en curso</span>
 </div>
-<p class="section-subtitle">Órdenes tipo 1 · razón de visita 1, 2, 3, 4</p>
+<p class="section-subtitle" id="mesCursoNomenSub">Órdenes de reparación que entraron cada día, del 1 a hoy, sin canceladas. No depende del periodo elegido arriba.</p>
 <div class="table-scroll postventa-mes-curso-wrap">
 <table class="data-table data-table--mes-curso">
-<thead>
+<thead id="theadMesCursoNomen">
 <tr>
 <th>Fecha</th>
 <th class="cell-num" title="N · Normal">Normal</th>
@@ -269,23 +269,31 @@ HyP
 <p id="mesCursoNomenLegend" class="section-subtitle postventa-mes-curso-legend"></p>
 </section>
 
-<section class="section-panel dashboard-section" data-hyp-hide>
-<h3 class="section-title">Flujo semanal</h3>
+<section class="chart-grid ps-duo" data-hyp-hide>
+<div class="section-panel">
+<h3 class="section-title">Entradas contra facturas, por semana</h3>
+<p class="section-subtitle">Si la línea de facturadas queda abajo varias semanas, se está acumulando trabajo abierto.</p>
 <div class="chart-card"><div class="chart-wrap"><canvas id="cWeekly"></canvas></div></div>
-</section>
-
-<section class="section-panel dashboard-section" data-hyp-hide>
-<h3 class="section-title">Estatus por semana de ingreso</h3>
+</div>
+<div class="section-panel">
+<h3 class="section-title">¿En qué quedó cada semana?</h3>
+<p class="section-subtitle">Órdenes por semana de ingreso y su estatus de hoy.</p>
 <div class="chart-card"><div class="chart-wrap"><canvas id="cStatusWeek"></canvas></div></div>
+</div>
 </section>
 
-<section class="section-panel table-panel dashboard-section" data-hyp-hide>
+<section class="chart-grid ps-duo" data-hyp-hide>
+<div class="section-panel table-panel">
 <h3 class="section-title">Órdenes críticas</h3>
-<div class="table-scroll"><table class="data-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Asesor</th><th>Días</th><th>Importe</th><th>Promesa</th></tr></thead><tbody id="tblCriticas"></tbody></table></div>
-</section>
-
-<section class="chart-grid" data-hyp-hide>
-<div class="section-panel table-panel"><h3 class="section-title">Productividad por asesor</h3><div class="table-scroll"><table class="data-table"><thead><tr><th>Asesor</th><th>Órdenes</th><th>Facturadas</th><th>Abiertas</th><th>Importe</th></tr></thead><tbody id="tblAsesor"></tbody></table></div></div>
+<p class="section-subtitle">Abiertas que ya requieren atención, de la más vieja a la más nueva.</p>
+<div class="table-scroll"><table class="data-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Asesor</th><th class="cell-num">Días</th><th class="cell-num">Importe</th><th>Promesa</th></tr></thead><tbody id="tblCriticas"></tbody></table></div>
+</div>
+<div class="section-panel table-panel">
+<h3 class="section-title">Órdenes por asesor</h3>
+<p class="section-subtitle">Cuántas recibió cada asesor en el periodo y en qué van.</p>
+<div class="table-scroll"><table class="data-table ps-tabla-num"><thead><tr><th>Asesor</th><th class="cell-num">Órdenes</th><th class="cell-num">Facturadas</th><th class="cell-num">Abiertas</th><th class="cell-num">Importe ingresado</th></tr></thead><tbody id="tblAsesor"></tbody><tfoot id="tblAsesorFoot"></tfoot></table></div>
+<p class="ps-check" id="tblAsesorNota" hidden></p>
+</div>
 </section>
 
 </section>

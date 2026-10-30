@@ -182,51 +182,48 @@ function summarizePostSales(raw, { area = 'posventa', estatus = 'todas', tipo = 
   };
 }
 
-function letraDeOrden(row) {
-  return String(row?.letraOrden || String(row?.orden || '').charAt(0) || '').trim().toUpperCase();
-}
+const letraDe = (r) => String(r?.letraOrden || String(r?.orden || '').trim().charAt(0) || '').toUpperCase();
 
-function filtrarOrdenesPorLetras(rows, letras) {
-  if (!letras?.length) return rows || [];
-  const allow = new Set(letras.map((l) => String(l || '').trim().toUpperCase()).filter(Boolean));
-  if (!allow.size) return rows || [];
-  return (rows || []).filter((row) => allow.has(letraDeOrden(row)));
-}
-
-/** El mes en curso trae matriz, Zacatelco y Cholula. Una sucursal se queda con sus letras. */
-function recortarMesCurso(mes, letras) {
-  if (!mes || !letras?.length) return mes;
-  const conocidas = new Set(mes.letras || []);
-  const allow = letras.map((l) => String(l || '').trim().toUpperCase()).filter((l) => conocidas.has(l));
-  if (!allow.length) return mes;
-  let acum = 0;
-  const days = (mes.days || []).map((row) => {
-    const total = allow.reduce((sum, l) => sum + Number(row[l] || 0), 0);
-    acum += total;
-    return { ...row, total, acumulado: acum };
+/** Acumulado del mes en curso solo con las letras de la sucursal (total y acumulado recalculados). */
+function acotarMesCurso(mes, letras) {
+  if (!mes || !Array.isArray(mes.days)) return mes || null;
+  const propias = letras.filter((L) => (mes.letras || []).includes(L));
+  let acumulado = 0;
+  const days = mes.days.map((d) => {
+    const fila = { fecha: d.fecha, fechaLabel: d.fechaLabel };
+    propias.forEach((L) => { fila[L] = d[L] || 0; });
+    fila.total = propias.reduce((t, L) => t + fila[L], 0);
+    acumulado += fila.total;
+    return { ...fila, acumulado };
   });
-  const totals = { ...(mes.totals || {}), fechaLabel: mes.totals?.fechaLabel || 'Total', total: 0, acumulado: acum };
-  for (const l of mes.letras || []) totals[l] = allow.includes(l) ? days.reduce((sum, row) => sum + Number(row[l] || 0), 0) : 0;
-  totals.total = days.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const totals = { fecha: null, fechaLabel: 'Total', acumulado };
+  propias.forEach((L) => { totals[L] = days.reduce((t, d) => t + d[L], 0); });
+  totals.total = acumulado;
   const labels = {};
-  for (const l of allow) labels[l] = mes.labels?.[l] || l;
-  return { ...mes, letras: allow, labels, days, totals };
+  propias.forEach((L) => { labels[L] = mes.labels?.[L] || L; });
+  return { ...mes, letras: propias, labels, days, totals };
 }
 
-function aplicarAlcanceLetras(raw, letras) {
-  if (!raw || !letras?.length) return raw;
-  const records = filtrarOrdenesPorLetras(raw.records, letras);
-  const recordsYtd = filtrarOrdenesPorLetras(raw.recordsYtd, letras);
-  const openSnapshot = filtrarOrdenesPorLetras(raw.openSnapshot, letras);
+/**
+ * Perfil de sucursal (Cholula): solo las órdenes cuyo folio empieza con sus letras
+ * (Y normal, X reparación). Se filtra el periodo, el año, las abiertas de hoy y el
+ * acumulado del mes, para que todas las tarjetas salgan de las mismas órdenes.
+ */
+function acotarPorLetras(raw, letras) {
+  const lista = (letras || []).map((L) => String(L).toUpperCase()).filter(Boolean);
+  if (!raw || !lista.length) return raw;
+  const propia = (r) => lista.includes(letraDe(r));
+  const records = (raw.records || []).filter(propia);
+  const openSnapshot = (raw.openSnapshot || []).filter(propia);
   return {
     ...raw,
     records,
-    recordsYtd,
+    recordsYtd: raw.recordsYtd === raw.records ? records : (raw.recordsYtd || []).filter(propia),
     openSnapshot,
-    mesCursoNomenclatura: recortarMesCurso(raw.mesCursoNomenclatura, letras),
+    mesCursoNomenclatura: acotarMesCurso(raw.mesCursoNomenclatura, lista),
     total: records.length,
     openTotal: openSnapshot.length,
-    alcanceLetras: letras.map((l) => String(l).toUpperCase()),
+    alcance: { letras: lista },
   };
 }
 
@@ -247,7 +244,7 @@ async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo, letras
       total: 0,
       openTotal: openSnapshot.length,
     };
-    return summarizePostSales(aplicarAlcanceLetras(raw, letras), { area: areaKey, estatus: 'abiertas', tipo });
+    return summarizePostSales(acotarPorLetras(raw, letras), { area: areaKey, estatus: 'abiertas', tipo });
   }
 
   if (!fechaInicio || !fechaFin) {
@@ -289,7 +286,7 @@ async function getPostSales({ fechaInicio, fechaFin, area, estatus, tipo, letras
     openTotal: openSnapshot.length,
   };
 
-  const conAlcance = aplicarAlcanceLetras(raw, letras);
+  const conAlcance = acotarPorLetras(raw, letras);
 
   // Asistente IA: siempre devolver resumen compacto filtrable por área/estatus/tipo.
   if (area || estatus || tipo) {
@@ -303,4 +300,4 @@ async function getPostSalesOrderDetail(ordenId) {
   return loadOrderDetail(ordenId);
 }
 
-module.exports = { getPostSales, getPostSalesOrderDetail, summarizePostSales };
+module.exports = { getPostSales, getPostSalesOrderDetail, summarizePostSales, acotarPorLetras, acotarMesCurso };

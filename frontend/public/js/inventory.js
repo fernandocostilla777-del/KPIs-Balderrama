@@ -1,4 +1,4 @@
-let ageingChart;
+﻿let ageingChart;
 let ageingCarlineChart;
 let ageingDaysChart;
 let ageingPisoChart;
@@ -4331,6 +4331,8 @@ function aplicarInventarioCholula() {
     el.hidden = true;
     el.classList.add('hidden');
   });
+  const semiBtn = document.querySelector('[data-inventory-scope="seminuevos"]');
+  if (semiBtn) semiBtn.textContent = 'Seminuevos · Cholula';
   [
     'kpiPlanPisoWrap',
     'kCostoInventario',

@@ -1364,6 +1364,10 @@ async function executeTool(name, args = {}, context = {}) {
       result = await getInventory({ planPisoPeriod: args.planPisoPeriod || 'all' });
       break;
     case 'consultar_inventario_postventa': {
+      if (alcance) {
+        result = { error: `El inventario de postventa es de toda la agencia; no está disponible para el perfil ${alcance.label}.` };
+        break;
+      }
       const raw = await getInventoryPostventa();
       const area = String(args.area || 'todas').toLowerCase();
       if (area === 'todas' || !raw.areas?.[area]) {
@@ -1440,7 +1444,9 @@ async function executeTool(name, args = {}, context = {}) {
       const range = (args.fechaInicio && args.fechaFin)
         ? { fechaInicio: args.fechaInicio, fechaFin: args.fechaFin }
         : currentMonthRangeYmd();
-      result = await getRefaccionesDashboard(range);
+      result = alcance
+        ? { error: `Refacciones es de toda la agencia; el perfil ${alcance.label} solo consulta el Servicio de su sucursal.` }
+        : await getRefaccionesDashboard(range);
       break;
     }
     case 'consultar_roles_acceso':
@@ -1453,6 +1459,7 @@ async function executeTool(name, args = {}, context = {}) {
         area: args.area || 'posventa',
         estatus: args.estatus || 'todas',
         tipo: args.tipo || null,
+        letras: alcance?.tallerLetras || null,
       });
       break;
     case 'consultar_lista_precios':
